@@ -37,7 +37,11 @@ pub struct GenoaCar {
 
 /// Where the genoa track runs, in the hull's frame: inboard of the rail on the side
 /// deck, from abreast the mast back to the forward end of the cockpit.
-pub const TRACK_X: f32 = 0.38;
+/// Where the headsail tracks lie, as a fraction of beam.
+///
+/// Out near the rail. This is an open boat with no side deck to speak of, so a track
+/// set well inboard leaves the cars hanging over the bilge with nothing under them.
+pub const TRACK_X: f32 = 0.43;
 pub const TRACK_FORWARD: f32 = -0.80;
 pub const TRACK_AFT: f32 = 2.20;
 
@@ -80,6 +84,9 @@ const SCAN_LOA: f32 = 5.396;
 const HULL_SINKAGE: f32 = -1.294;
 
 const MAST_FOOT_Z: f32 = -1.8;
+/// Height of the boom above the waterline — the mainsail's tack, and the one number
+/// three separate places were each spelling out as `DECK + 1.25`.
+const BOOM_HEIGHT: f32 = DECK + 1.95;
 /// How high a headsail's clew floats when nothing is pulling it down, metres above
 /// the tack. The sail hangs from the stay and the wind holds the foot up; only the
 /// sheet brings it down.
@@ -97,7 +104,13 @@ const CLEW_MIN_RISE: f32 = 0.35;
 const SHEET_SHORT: f32 = 0.25;
 /// Longest, which is slack enough for the sail to fly off the stay and flog.
 const SHEET_LONG: f32 = 7.4;
-const DECK: f32 = 0.95;
+/// Height of the gunwale above the waterline, metres.
+///
+/// Measured off the scan station by station, not taken from the bounding box: the top
+/// of that box is the stem head, 1.45 m up, while the rail you would actually put a
+/// winch on runs at 0.79 m amidships. Getting this from the box puts every fitting
+/// half a metre above the boat.
+const DECK: f32 = 0.82;
 
 pub fn setup(
     mut commands: Commands,
@@ -160,7 +173,12 @@ pub fn setup(
                     assets.load(GltfAssetLabel::Scene(0).from_asset("venus.glb")),
                 ),
                 Transform::from_xyz(0.0, HULL_SINKAGE, 0.0)
-                    .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2))
+                    // Minus a quarter turn, not plus. Which end of a double-ender is
+                    // the bow is not obvious from a bounding box — both are pointed —
+                    // so it was settled from the hull's own shape: her greatest beam
+                    // is a little abaft amidships and the longer run from there is
+                    // towards -X, which is where the bow of a hull like this is.
+                    .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2))
                     .with_scale(Vec3::splat(cfg.loa as f32 / SCAN_LOA)),
             ));
             // Keel fin.
@@ -190,7 +208,7 @@ pub fn setup(
             // Boom, pivoting at the mast. Its own transform carries the sheet angle.
             b.spawn((
                 Boom,
-                Transform::from_xyz(0.0, DECK + 1.25, MAST_FOOT_Z),
+                Transform::from_xyz(0.0, BOOM_HEIGHT, MAST_FOOT_Z),
                 Visibility::default(),
             ))
             .with_children(|boom| {
@@ -380,7 +398,7 @@ pub fn update_sails(
                 let reef = sim.controls.reef as f32;
                 let foot = 4.2 * (1.0 - 0.35 * reef);
                 let boom = side * t_.main.chord_angle as f32;
-                let tack = Vec3::new(0.0, DECK + 1.25, MAST_FOOT_Z);
+                let tack = Vec3::new(0.0, BOOM_HEIGHT, MAST_FOOT_Z);
                 (
                     t_.main,
                     SailGeometry {
@@ -388,7 +406,7 @@ pub fn update_sails(
                         // Reefing pulls the head down the mast, not the foot up.
                         head: Vec3::new(
                             0.0,
-                            DECK + 1.25 + (14.6 - 1.25) * (1.0 - 0.45 * reef),
+                            BOOM_HEIGHT + (15.4 - BOOM_HEIGHT) * (1.0 - 0.45 * reef),
                             MAST_FOOT_Z,
                         ),
                         // The clew is the boom end: level with the tack, because the

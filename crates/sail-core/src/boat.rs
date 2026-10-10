@@ -264,8 +264,10 @@ impl BoatConfig {
         // is the difference between a hull that floats where it is drawn and one that
         // does not.
         let lwl = 9.50;
-        // Straight off the scan: 1.573 m of beam at 5.396 m overall, scaled to length.
-        let beam = 3.21;
+        // Straight off the scan's vertices: greatest beam 3.40 m once scaled to
+        // length. An earlier 3.21 came from the corners of the bounding box, which is
+        // not the same thing and is always too small for a hull with any curve in it.
+        let beam = 3.40;
         let loa = 11.00;
         let draft = 1.95;
 
@@ -294,7 +296,10 @@ impl BoatConfig {
                 lwl,
                 waterline_beam: 2.60,
                 canoe_draft: 1.00,
-                freeboard: 1.45,
+                // The rail amidships, 0.79 m up — not the 1.45 m top of the bounding
+                // box, which is the stem head. Freeboard sets reserve buoyancy, so
+                // taking the stem for the deck gives her twice the reserve she has.
+                freeboard: 0.79,
                 // Calibrated so she floats at the waterline the scan says she floats
                 // at, and asserted by `the_boat_floats_at_its_design_waterline`. Far
                 // finer than the charter boat's 0.452, because the hull is: a deep,

@@ -28,7 +28,12 @@ const SEGMENTS: usize = 14;
 const DECK: f32 = 0.95;
 const MAST_FOOT_Z: f32 = -1.8;
 const MAST_HEAD: f32 = DECK + 15.2;
-const BOOM_HEIGHT: f32 = DECK + 1.25;
+/// The boom, high enough to stand under.
+///
+/// It was a quarter of a metre *below* the helmsman's eye, which put it across the
+/// view like a handrail — and would have taken his head off in a gybe. A cruising boom
+/// clears a standing helmsman, barely, and you duck anyway.
+const BOOM_HEIGHT: f32 = DECK + 1.95;
 const BOOM_LENGTH: f32 = 4.2;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
