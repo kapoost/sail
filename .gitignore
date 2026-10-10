@@ -1,0 +1,12 @@
+# Rust build artefacts
+/target/
+
+# The lockfile IS committed: this workspace will grow a binary (the presentation
+# layer), and a reproducible build matters more than dependency freshness.
+
+# macOS
+.DS_Store
+
+# Editors
+.idea/
+*.swp

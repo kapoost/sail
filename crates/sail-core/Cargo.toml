@@ -1,0 +1,12 @@
+[package]
+name = "sail-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Engine-agnostic sailing yacht dynamics: 4-DOF rigid body, sail aerodynamics, hull hydrodynamics."
+
+# Deliberately engine-free. `glam` is a math library, not an engine; keeping it as the
+# sole dependency is what makes the presentation layer (Bevy / Fyrox / Godot) swappable.
+[dependencies]
+glam.workspace = true
