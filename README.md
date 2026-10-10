@@ -10,7 +10,12 @@ wall, rudder stall, weather helm. Not a wind arrow and a speed multiplier.
 ## Where things stand
 
 `crates/sail-core` — the dynamics, and nothing else. No renderer, no input handling,
-no dependency on any game engine. Two reasons:
+no dependency on any game engine.
+
+`crates/sail-app` — the presentation layer, and the only crate that knows a game
+engine exists. Bevy 0.20, pinned.
+
+Keeping those two apart is the load-bearing structural decision. Two reasons:
 
 1. **The engine stays a reversible decision.** Bevy, Fyrox and Godot-via-gdext are all
    still on the table; the presentation layer is a few days of work on top of this
@@ -76,7 +81,62 @@ all.
   but that is a decision for after the proof of concept.
 * **Synthetic but physical wind.** Gust statistics rather than a forecast download, so
   week one has no network dependency. The interface is already the right shape.
-* **No engine chosen.** Deliberately. Week one did not need one.
+* **Bevy, used thin.** Chosen in week two, with working physics already in hand.
+
+## Why Bevy
+
+The question is not which engine has more features, it is what the presentation layer
+has to do in the next three months. That list is: flat water, one boat, two cameras, a
+gamepad, telltales, a developer panel, sound. No level design, no terrain, no harbours,
+no save system, no menus.
+
+Against that list Godot offers an editor we do not need yet and charges for it now —
+an FFI boundary to debug across, two toolchains, `gdext` pinned to Godot's minor
+releases, and a custom double-precision build once the water gets big. Bevy gives one
+language, one build, one debugger, and shaders in WGSL, which is the same mental model
+as the rest of the stack.
+
+The decisive point: **the hardest visual, the ocean, is built into neither.** The water
+shader is ours to write either way. That removes the strongest argument for a
+batteries-included engine, because the batteries do not cover the expensive part.
+
+What Bevy genuinely costs, recorded honestly rather than argued away:
+
+* Breaking releases roughly quarterly, and it chases the newest rustc hard — 0.20
+  requires 1.97.1, which forced a toolchain upgrade the day it was adopted.
+* No editor. Fine now; a real nuisance once harbours need authoring.
+* Coastline, terrain LOD and scene authoring are all weaker than Godot or Unreal. That
+  bill arrives at production, which is past the gate this proof of concept exists to
+  decide.
+
+Both versions are pinned with `=` on purpose. An engine upgrade is scheduled work with
+its own budget, not a side effect of `cargo update`.
+
+**The condition for revisiting**: if coastline and harbour authoring becomes the
+bottleneck rather than the sailing, Godot wins and we move. The move costs `sail-app`
+and nothing else — which is exactly why the split is worth maintaining even when it
+feels like extra structure.
+
+## Controls
+
+Gamepad is the intended input; keyboard works. The design rule is that you map
+*intentions*, not lines, and you match each control's nature to the gear it stands
+for — the helm and mainsheet are positions your hand holds, the genoa sheet is a winch
+you grind, and a reef is a job you do.
+
+| | gamepad | keyboard |
+|---|---|---|
+| helm | left stick X | A / D |
+| mainsheet | right stick Y | W / S |
+| genoa winch | triggers | Q / E |
+| reef | D-pad up/down | R / F |
+| engine | D-pad left/right | Z / X |
+| snap to good trim | Y | T |
+| camera | Select | C |
+| developer panel | | Tab |
+
+The cockpit camera heels with the boat. That is deliberate: heel is the primary
+feedback channel, and a view that stays level throws it away.
 
 ## Current polar
 

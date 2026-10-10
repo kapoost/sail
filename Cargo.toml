@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/sail-core"]
+members = ["crates/sail-core", "crates/sail-app"]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.97.1"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]

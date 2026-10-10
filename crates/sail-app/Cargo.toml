@@ -1,0 +1,15 @@
+[package]
+name = "sail-app"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Presentation layer: window, rendering, input, HUD. The only crate that knows about a game engine."
+
+[dependencies]
+sail-core = { path = "../sail-core" }
+# Pinned on purpose. Bevy ships breaking changes roughly every quarter; an engine
+# upgrade is scheduled work with its own budget, not a side effect of `cargo update`.
+bevy = "=0.20.0"
+bevy_egui = "=0.43.1"
+glam.workspace = true
