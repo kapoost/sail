@@ -72,6 +72,12 @@ impl Line {
         }
     }
 
+    /// Set directly, for the console's drag handles. The keys go through the winch
+    /// rate; a mouse on the lever does not, because the hand is the rate.
+    pub fn set_from_ui(self, c: &mut Controls, v: f64) {
+        self.set(c, v);
+    }
+
     fn set(self, c: &mut Controls, v: f64) {
         let v = v.clamp(0.0, 1.0);
         match self {

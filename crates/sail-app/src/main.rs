@@ -13,7 +13,7 @@ mod course;
 mod frame;
 mod hud;
 mod input;
-mod instruments;
+mod panel;
 mod rig;
 mod sea_texture;
 mod sim;
@@ -44,7 +44,9 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .add_plugins(sound::plugin)
         .insert_resource(sim::Sim::new(WIND_KNOTS, WIND_FROM_DEG, START_TWA_DEG))
-        .insert_resource(hud::HudVisible(true))
+        // The console is the interface now; the diagnostic panel is the microscope and
+        // starts put away. Tab brings it back, or the switch on the console does.
+        .insert_resource(hud::HudVisible(false))
         .init_resource::<hud::Polar>()
         .init_resource::<input::HelmSource>()
         .init_resource::<clutch::Bank>()
@@ -60,8 +62,7 @@ fn main() {
                 course::setup,
                 wake::setup,
                 rig::setup,
-                // After boat::setup, which is what creates the hull they hang on.
-                instruments::setup,
+                panel::setup,
             )
                 // Chained because several of these depend on each other's entities,
                 // and at startup the cost of ordering them is nothing at all.
@@ -86,7 +87,6 @@ fn main() {
                     course::float_marks,
                     wake::update,
                     rig::update,
-                    instruments::update,
                     camera::follow,
                     sound::update,
                 ),
@@ -94,6 +94,6 @@ fn main() {
             )
                 .chain(),
         )
-        .add_systems(EguiPrimaryContextPass, hud::draw)
+        .add_systems(EguiPrimaryContextPass, (panel::draw, hud::draw).chain())
         .run();
 }
