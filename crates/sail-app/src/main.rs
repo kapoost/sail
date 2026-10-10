@@ -10,6 +10,7 @@ mod boat;
 mod camera;
 mod clutch;
 mod course;
+mod deck;
 mod frame;
 mod hud;
 mod input;

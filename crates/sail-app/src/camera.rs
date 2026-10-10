@@ -185,7 +185,11 @@ pub fn follow(
                 // Standing at the helm. The eye sits where the hull puts it, but it
                 // does not take the hull's full attitude — see HeadMotion.
                 let eye = head.attitude(st.heading as f32);
-                let eye_local = Vec3::new(0.0, 2.35, 3.6);
+                // Standing in the cockpit well, which is a real place now: the sole
+                // is below the sheer, so the eye is lower than it was when the deck
+                // was a number. Far enough aft to be at the helm and to see the whole
+                // sail plan rather than the back of the coachroof.
+                let eye_local = Vec3::new(0.0, crate::deck::cockpit_sole() + 1.62, 3.3);
                 // The eye's own height is filtered too, so a sharp heave moves the
                 // boat under you rather than throwing the view.
                 let base = Vec3::new(hull.x, head.heave, hull.z);

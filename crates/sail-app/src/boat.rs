@@ -181,6 +181,20 @@ pub fn setup(
                     .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2))
                     .with_scale(Vec3::splat(cfg.loa as f32 / SCAN_LOA)),
             ));
+            // Deck, coachroof and cockpit, built over the open hull — see `deck.rs`.
+            // Painted rather than varnished: a working boat's deck is painted, and the
+            // scan's own weathered planking is the thing worth looking at.
+            b.spawn((
+                Mesh3d(meshes.add(crate::deck::structure_mesh())),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.80, 0.78, 0.72),
+                    perceptual_roughness: 0.75,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                })),
+                Transform::default(),
+            ));
             // Keel fin.
             b.spawn((
                 Mesh3d(meshes.add(Cuboid::new(0.16, cfg.draft as f32 - 0.5, 1.25))),
@@ -255,17 +269,23 @@ pub fn setup(
             let car_mesh = meshes.add(Cuboid::new(0.085, 0.07, 0.17));
             let sheave_mesh = meshes.add(Cylinder::new(0.055, 0.03));
             for starboard in [false, true] {
-                let x = if starboard { 1.0 } else { -1.0 } * cfg.beam as f32 * TRACK_X;
+                let side = if starboard { 1.0 } else { -1.0 };
+                let mid = (TRACK_FORWARD + TRACK_AFT) * 0.5;
+                let x = side * crate::deck::deck_half_beam(mid) * TRACK_X;
                 b.spawn((
                     Mesh3d(track_mesh.clone()),
                     MeshMaterial3d(spar_mat.clone()),
-                    Transform::from_xyz(x, DECK + 0.015, (TRACK_FORWARD + TRACK_AFT) * 0.5),
+                    Transform::from_xyz(x, crate::deck::deck_height(mid) + 0.02, mid),
                 ));
                 b.spawn((
                     GenoaCar { starboard },
                     Mesh3d(car_mesh.clone()),
                     MeshMaterial3d(underwater_mat.clone()),
-                    Transform::from_xyz(x, DECK + 0.055, car_position(0.4)),
+                    Transform::from_xyz(
+                        x,
+                        crate::deck::deck_height(car_position(0.4)) + 0.06,
+                        car_position(0.4),
+                    ),
                 ))
                 .with_children(|car| {
                     // The sheave. The sheet does not end at the car, it turns through
@@ -329,11 +349,14 @@ pub fn update_boom(sim: Res<Sim>, mut q: Query<&mut Transform, With<Boom>>) {
 
 /// Slide the cars to wherever the control says they are.
 pub fn update_genoa_cars(sim: Res<Sim>, mut q: Query<(&GenoaCar, &mut Transform)>) {
-    let cfg = sim.config();
     let z = car_position(sim.controls.genoa_car as f32);
+    // The side deck curves, so the car rides up and inboard as it goes forward. That
+    // is a real track on a real sheer rather than a straight rail in mid-air.
+    let x = crate::deck::deck_half_beam(z) * TRACK_X;
+    let y = crate::deck::deck_height(z) + 0.06;
     for (car, mut transform) in &mut q {
         let side = if car.starboard { 1.0 } else { -1.0 };
-        transform.translation = Vec3::new(side * cfg.beam as f32 * TRACK_X, DECK + 0.055, z);
+        transform.translation = Vec3::new(side * x, y, z);
     }
 }
 
