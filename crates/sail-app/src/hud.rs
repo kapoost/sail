@@ -182,6 +182,21 @@ pub fn draw(
                     "mid track"
                 }
             ));
+            // The traveller is the other half of the vang's sentence: both of them set
+            // leech tension, and which one is doing it depends on the boom angle.
+            let lee = if t.awa == 0.0 { 0.0 } else { -t.awa.signum() };
+            ui.label(format!(
+                "traveller {:+.2}   boom {:.1}   {}",
+                c.traveller,
+                deg(t.main.chord_angle),
+                if c.traveller.abs() < 0.08 {
+                    "amidships"
+                } else if c.traveller * lee > 0.0 {
+                    "down to leeward — open, leech still held"
+                } else {
+                    "up to windward — closed, leech spilling"
+                }
+            ));
             ui.label(format!(
                 "vang {:.2}   twist {:.1}{}",
                 c.vang,
@@ -309,6 +324,7 @@ pub fn draw(
                  Shift   fine, on both helm and sheets\n\
                  1 / 2   choose a line on the clutch bank\n\
                  A / D   ease / haul in the chosen line (Shift for fine)\n\
+                 F / G   traveller: walk the mainsheet car to port / starboard\n\
                  P       pilot on / off      O  course or wind angle\n\
                  , / .   nudge the pilot's target (Shift for five)\n\
                  Z / X   engine astern / ahead\n\

@@ -12,8 +12,8 @@ use crate::boat::BoatConfig;
 use crate::hull::{frictional_resistance, induced_resistance, residuary_resistance, righting_arm};
 use crate::hydrostatics;
 use crate::sail::{
-    camber_for_lead, camber_for_outhaul, headsail_blanketing, sail_forces, twist_for_lead,
-    twist_for_vang,
+    camber_for_lead, camber_for_outhaul, headsail_blanketing, sail_forces, sheet_leech_pull,
+    traveller_opening, twist_for_lead, twist_for_leech,
 };
 use crate::state::{BoatState, Controls, Telemetry};
 use crate::units::{rad, wrap_pi, wrap_tau, GRAVITY, RHO_SEA};
@@ -166,17 +166,30 @@ impl Simulation {
             apparent_wind(&st, wind_ref, jib_upper_z * heel_cos, velocity);
 
         let main_camber = camber_for_outhaul(controls.outhaul);
-        let boom_angle = cfg.main.profile.chord_angle(controls.main_sheet);
-        let twist = twist_for_vang(controls.vang, boom_angle);
-        // The upper section is eased by the twist, expressed back through the sheet
-        // mapping so both sections go through the same force model.
+        // The sheet sets how far the boom *can* come in; the traveller sets where it
+        // is pulled towards, so the angle is the two of them together.
+        let lee = if lower_awa == 0.0 {
+            0.0
+        } else {
+            -lower_awa.signum()
+        };
+        let boom_angle = cfg.main.profile.chord_angle(controls.main_sheet)
+            + traveller_opening(controls.traveller, lee, cfg.beam);
+        let leech_pull = sheet_leech_pull(boom_angle, controls.traveller, lee, cfg.beam);
+        let twist = twist_for_leech(controls.vang, leech_pull);
+        // Both sections are expressed back through the sheet mapping, so the traveller's
+        // opening and the leech's twist reach the force model the same way the sheet
+        // does and there is only one path into it. Forgetting this for the lower section
+        // is how the traveller ends up visibly moving the boom without changing a single
+        // force.
+        let main_sheet = cfg.main.profile.sheet_for_chord_angle(boom_angle);
         let upper_sheet = cfg.main.profile.sheet_for_chord_angle(boom_angle + twist);
 
         let main = sail_forces(
             &cfg.main.profile,
             lower_awa,
             lower_aws,
-            controls.main_sheet,
+            main_sheet,
             lower_area,
             st.heel,
             0.0,

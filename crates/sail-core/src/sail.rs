@@ -49,17 +49,87 @@ pub const MAX_TWIST: f64 = 20.0 * std::f64::consts::PI / 180.0;
 /// tensions the leech all by itself and the vang has nothing left to do — which is why
 /// nobody thinks about the vang upwind. Let the boom out and the sheet pulls sideways
 /// instead of down; the leech falls off, the top of the sail spills, and the vang is
-/// suddenly the only thing holding the shape. Hence: the sheet's own downward
-/// component is `cos(boom angle)`, and the vang competes with it.
+/// suddenly the only thing holding the shape.
 ///
 /// Twist is not a defect to be eliminated. The apparent wind aloft is **freer** than
 /// on deck, because the true wind is stronger up there while the boat's speed is the
 /// same — so some twist is exactly right, and the amount depends on the gradient.
 /// That optimum is what gives the vang something to be set correctly or incorrectly.
+///
+/// This is the traveller-amidships case. Use [`twist_for_leech`] when the traveller
+/// has been moved, because moving it is precisely a change to this geometry.
 pub fn twist_for_vang(vang: f64, chord_angle: f64) -> f64 {
-    let sheet_pull = chord_angle.cos().clamp(0.0, 1.0);
-    let leech_tension = vang.clamp(0.0, 1.0).max(sheet_pull);
+    twist_for_leech(vang, chord_angle.cos().clamp(0.0, 1.0))
+}
+
+/// Twist from the vang competing with whatever downward pull the sheet already has.
+pub fn twist_for_leech(vang: f64, sheet_pull: f64) -> f64 {
+    let leech_tension = vang.clamp(0.0, 1.0).max(sheet_pull.clamp(0.0, 1.0));
     MAX_TWIST * (1.0 - leech_tension)
+}
+
+/// Half the mainsheet traveller's track, as a fraction of beam.
+///
+/// About 0.6 m each way on a 34-footer, which is a real cockpit-bridge track.
+pub const TRAVELLER_HALF: f64 = 0.17;
+
+/// Height of the boom above the traveller track, as a fraction of beam.
+const SHEET_RISE: f64 = 0.62;
+
+/// Boom length as a fraction of beam.
+///
+/// Both hulls in the yard scale the same way — 4.2 m on the 3.5 m-beam thirty-four,
+/// 5.9 m on the 4.8 m-beam fifty-three — so one ratio serves rather than another field
+/// in every config. If a boat ever breaks the pattern this becomes a `SailPlan` field.
+const BOOM_PER_BEAM: f64 = 1.2;
+
+/// Where the mainsheet car sits, in metres to leeward of the centreline.
+///
+/// `traveller` is signed in boat terms: −1 is the port end of the track, +1 the
+/// starboard end — because that is what the hardware does, and the player can see
+/// which way the car has gone. `lee` is +1 when the leeward side is starboard.
+fn car_to_leeward(traveller: f64, lee: f64, beam: f64) -> f64 {
+    traveller.clamp(-1.0, 1.0) * lee * TRAVELLER_HALF * beam
+}
+
+/// Extra boom angle from easing the traveller down to leeward, radians.
+///
+/// The mainsheet is not made fast to the centreline. It is made fast to a car that
+/// runs *across* the boat, and that car decides which way the sheet pulls the boom
+/// end. Slide the car to leeward with the sheet untouched and the boom end follows it,
+/// because the sheet is nearly vertical and the boom end hangs under wherever the car
+/// is. The angle opens; the leech stays exactly as tight as it was.
+///
+/// That is the whole reason the fitting exists, and it is the gust response a sailor
+/// reaches for first: ease the sheet and you open the sail but spill the top third
+/// with it; drop the traveller and you open the same angle with the sail still working
+/// all the way up. Hauling the car to windward of amidships cannot push the boom past
+/// the centreline, so it adds no angle — it only changes where the sheet pulls from,
+/// which is the next function.
+pub fn traveller_opening(traveller: f64, lee: f64, beam: f64) -> f64 {
+    let lee_travel = car_to_leeward(traveller, lee, beam).max(0.0);
+    (lee_travel / (BOOM_PER_BEAM * beam).max(0.1))
+        .clamp(0.0, 1.0)
+        .asin()
+}
+
+/// How much of the mainsheet's pull goes *down* the leech rather than sideways.
+///
+/// The sheet runs from the boom end down to the car, so its downward fraction is set
+/// by how far the car is offset from under the boom end. Directly underneath and the
+/// sheet is vertical: all of its pull is leech tension. Car amidships with the boom
+/// well out and the sheet lies over at an angle, pulling the boom inboard rather than
+/// down, and the leech goes slack no matter how hard you grind.
+///
+/// With the traveller centred this reduces to the `cos(boom angle)` that the old model
+/// asserted — so the whole sail-shape calibration is unchanged — except that now it is
+/// a consequence of the geometry instead of a guess, and the traveller moves it.
+pub fn sheet_leech_pull(chord_angle: f64, traveller: f64, lee: f64, beam: f64) -> f64 {
+    let car = car_to_leeward(traveller, lee, beam);
+    let boom_end = chord_angle.abs().sin() * BOOM_PER_BEAM * beam;
+    let across = boom_end - car;
+    let rise = SHEET_RISE * beam;
+    rise / (rise * rise + across * across).sqrt()
 }
 
 /// Largest twist a headsail's leech will fall off to with the car right aft, radians.

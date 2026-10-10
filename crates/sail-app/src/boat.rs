@@ -30,6 +30,10 @@ pub struct Windex;
 
 /// The genoa sheet car, which slides fore and aft along a track on the side deck.
 /// `starboard` picks which of the two it is.
+/// The mainsheet car. Unlike the genoa cars it runs *across* the boat.
+#[derive(Component)]
+pub struct TravellerCar;
+
 #[derive(Component)]
 pub struct GenoaCar {
     pub starboard: bool,
@@ -42,6 +46,21 @@ pub const TRACK_FORWARD: f32 = -0.80;
 pub const TRACK_AFT: f32 = 2.20;
 
 /// Fore-and-aft position of the car for a given control setting.
+/// Where the mainsheet traveller's track lies, fore and aft.
+///
+/// On the cockpit bridge, under the aft third of the boom, which is where a thirty-four
+/// footer puts it.
+pub const TRAVELLER_Z: f32 = 1.7;
+
+/// Where the mainsheet car sits on its track, in metres from the centreline.
+///
+/// Signed exactly like the control: negative is the port end. The car is the point the
+/// sheet pulls the boom end towards, so this is not decoration — it is the geometry the
+/// force model is using, and seeing it move is how the control teaches itself.
+pub fn traveller_position(traveller: f32, beam: f32) -> f32 {
+    traveller.clamp(-1.0, 1.0) * sail_core::sail::TRAVELLER_HALF as f32 * beam
+}
+
 pub fn car_position(car: f32) -> f32 {
     TRACK_FORWARD + car.clamp(0.0, 1.0) * (TRACK_AFT - TRACK_FORWARD)
 }
@@ -194,6 +213,23 @@ pub fn setup(
                     Transform::default(),
                 ));
             }
+            // The mainsheet traveller: a track athwartships, and the car on it that
+            // decides which way the sheet pulls the boom end. It is the one trim
+            // control whose whole point is the direction of a pull rather than the
+            // length of a line, so it has to be visible from the helm.
+            let beam = cfg.beam as f32;
+            let traveller_span = 2.0 * sail_core::sail::TRAVELLER_HALF as f32 * beam;
+            b.spawn((
+                Mesh3d(meshes.add(Cuboid::new(traveller_span, 0.035, 0.055))),
+                MeshMaterial3d(spar_mat.clone()),
+                Transform::from_xyz(0.0, DECK + 0.018, TRAVELLER_Z),
+            ));
+            b.spawn((
+                TravellerCar,
+                Mesh3d(meshes.add(Cuboid::new(0.18, 0.08, 0.1))),
+                MeshMaterial3d(underwater_mat.clone()),
+                Transform::from_xyz(0.0, DECK + 0.062, TRAVELLER_Z),
+            ));
             // Genoa tracks and their cars, one each side. The car is the headsail's
             // only shape control, so it has to be something you can watch move —
             // a number on a panel is not a trim you can learn by eye.
@@ -264,6 +300,14 @@ pub fn update_genoa_cars(sim: Res<Sim>, mut q: Query<(&GenoaCar, &mut Transform)
     for (car, mut transform) in &mut q {
         let side = if car.starboard { 1.0 } else { -1.0 };
         transform.translation = Vec3::new(side * cfg.beam as f32 * TRACK_X, DECK + 0.055, z);
+    }
+}
+
+/// Slide the mainsheet car across to wherever the control says it is.
+pub fn update_traveller_car(sim: Res<Sim>, mut q: Query<&mut Transform, With<TravellerCar>>) {
+    let x = traveller_position(sim.controls.traveller as f32, sim.config().beam as f32);
+    for mut transform in &mut q {
+        transform.translation = Vec3::new(x, DECK + 0.062, TRAVELLER_Z);
     }
 }
 
@@ -400,38 +444,60 @@ pub fn sheet_length(jib_sheet: f32) -> f32 {
 
 /// Where a headsail's clew actually ends up.
 ///
-/// Not at a fixed height. The clew hangs from the stay with the wind under the foot,
-/// and *nothing pulls it down* until the sheet from the car comes taut — which is
-/// exactly what you watch happen when you grind one on. So: the horizontal bearing
-/// comes from the trim, the foot cannot stretch, and the height is whatever satisfies
-/// the sheet's length between the clew and the car.
+/// Two constraints and a push, which between them are the whole of headsail shape:
 ///
-/// Solved by bisection on the height, because the distance from the car falls
-/// monotonically as the clew comes down and a dozen halvings land well inside a
-/// millimetre. If even the free-floating clew is closer to the car than the sheet is
-/// long, the sheet is slack and the clew simply floats — which is the state the sail
-/// is in when it is flogging, and it should look like it.
+/// * the foot cannot stretch, so the clew lies on a sphere about the tack;
+/// * the sheet cannot stretch either, so once taut the clew lies on a sphere about
+///   the car;
+/// * and the wind pushes the sail to leeward, which picks which point on the circle
+///   where those two spheres meet.
 ///
-/// It also makes the car's effect visible, which was the point of drawing the track
-/// at all: run the car aft and the clew is dragged down and aft, flattening the foot
-/// and opening the leech; run it forward and the pull comes down and inboard,
-/// closing the leech. That is the whole of headsail trim, and now you can see it.
+/// The first attempt solved only the *height* and kept the bearing from the force
+/// model. That left the clew hanging near the centreline while the car sat out on the
+/// side deck, so the sheet ran diagonally across instead of pulling the corner to
+/// where it was led — and from the cockpit the sheets looked as though they were made
+/// fast to the boom rather than to the headsail. The sheet pulls in every direction
+/// it is led, not just downwards.
+///
+/// If the sheet is longer than it needs to be, nothing is taut and the clew floats:
+/// out to leeward and well clear of the deck, which is the state the sail is in while
+/// it is flogging and is exactly what it should look like.
 pub fn genoa_clew(tack: Vec3, angle: f32, foot: f32, car: Vec3, sheet: f32) -> Vec3 {
-    let horizontal = Vec3::new(angle.sin() * foot, 0.0, angle.cos() * foot);
-    let at = |rise: f32| tack + horizontal + Vec3::Y * rise;
-    if (at(CLEW_FREE_RISE) - car).length() <= sheet {
-        return at(CLEW_FREE_RISE);
+    let leeward = Vec3::new(angle.signum(), 0.28, 0.0).normalize();
+    // Freely hanging: on the sphere about the tack, blown to leeward and aft.
+    let free_dir = Vec3::new(angle.sin(), 0.0, angle.cos()).normalize_or_zero();
+    let free = tack + free_dir * foot + Vec3::Y * CLEW_FREE_RISE;
+    let free = tack + (free - tack).normalize_or_zero() * foot;
+
+    let to_car = car - tack;
+    let span = to_car.length();
+    if span < 1e-4 {
+        return free;
     }
-    let (mut low, mut high) = (CLEW_MIN_RISE, CLEW_FREE_RISE);
-    for _ in 0..12 {
-        let mid = 0.5 * (low + high);
-        if (at(mid) - car).length() > sheet {
-            high = mid;
-        } else {
-            low = mid;
-        }
+    if sheet >= span + foot {
+        // Slack: nothing is pulling.
+        return free;
     }
-    at(0.5 * (low + high))
+    if sheet + foot <= span {
+        // Bar taut and still short: the clew is dragged straight at the car.
+        return tack + to_car / span * foot;
+    }
+
+    // The two spheres meet in a circle. Find it, then take the point on it that the
+    // wind would push the sail towards.
+    let axis = to_car / span;
+    let along = (foot * foot - sheet * sheet + span * span) / (2.0 * span);
+    let radius = (foot * foot - along * along).max(0.0).sqrt();
+    let centre = tack + axis * along;
+
+    // Project the leeward push into the circle's plane to choose the point.
+    let mut out = leeward - axis * leeward.dot(axis);
+    if out.length_squared() < 1e-8 {
+        out = Vec3::Y - axis * axis.y;
+    }
+    let clew = centre + out.normalize_or_zero() * radius;
+    // Never below the deck, whatever the geometry says.
+    Vec3::new(clew.x, clew.y.max(DECK + CLEW_MIN_RISE), clew.z)
 }
 
 /// A sail is three corners and the surface between them.

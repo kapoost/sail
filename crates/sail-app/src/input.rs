@@ -83,6 +83,13 @@ const SHEET_RATE: f64 = 0.45;
 /// Fine sheet rate while Shift is held. Upwind the whole useful trim band is about a
 /// third of the travel, and placing it to a degree is the entire point of the game.
 const SHEET_FINE: f64 = 0.11;
+/// How fast the traveller car walks across its track, track fractions per second.
+///
+/// Slower than a sheet: it is a purchase you haul against the full load of the mainsail,
+/// and in a gust the few seconds it takes are part of the decision.
+const TRAVELLER_RATE: f64 = 0.33;
+/// Fine rate, for setting the car to a hand's width.
+const TRAVELLER_FINE: f64 = 0.09;
 /// How fast the keyboard helm swings, radians per second. Full lock in about half a
 /// second, which is roughly how fast you can actually throw a tiller over.
 const KEY_HELM_RATE: f64 = 1.3;
@@ -166,8 +173,7 @@ pub fn gather(
     let mut key_rate = 0.0;
     let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let rate = if fine { KEY_HELM_FINE } else { KEY_HELM_RATE };
-    // Arrows only. A and D are the genoa car now, which is a better home for it than
-    // a number row: it is a trim control your left hand reaches for constantly.
+    // Arrows only. A and D work the clutch bank's chosen line.
     if keys.pressed(KeyCode::ArrowLeft) {
         key_rate -= rate;
     }
@@ -179,6 +185,10 @@ pub fn gather(
         *helm_source = HelmSource::Keyboard;
     }
 
+    // A pilot that has been on the stops for six seconds is braking, not steering.
+    if pilot.engaged() && pilot.struggling() {
+        pilot.drop_out("it could not hold the course — rudder was hard over");
+    }
     // Touching the helm throws the pilot out, and says so.
     if pilot.engaged() {
         if key_rate != 0.0 {
@@ -261,6 +271,33 @@ pub fn gather(
             (sim.controls.jib_sheet + winch.clamp(-1.0, 1.0) * sheet_rate * dt).clamp(0.0, 1.0);
     }
 
+    // --- Mainsheet traveller: a car on a track, so a rate across the boat ---------
+    //
+    // F and G, next to the genoa car's A and D, because they are the same kind of thing:
+    // trim controls your left hand reaches for while the right hand stays on the helm.
+    // Signed in the hardware's terms — F walks the car to port, G to starboard — so that
+    // after a tack the car is on the wrong side until you move it, which is true and is
+    // one of the things that make a tack a piece of work rather than a key press.
+    let mut car = 0.0;
+    if keys.pressed(KeyCode::KeyF) {
+        car -= 1.0;
+    }
+    if keys.pressed(KeyCode::KeyG) {
+        car += 1.0;
+    }
+    if let Some(p) = pad {
+        if p.pressed(GamepadButton::DPadDown) {
+            car -= 1.0;
+        }
+        if p.pressed(GamepadButton::DPadUp) {
+            car += 1.0;
+        }
+    }
+    if car != 0.0 {
+        let rate = if fine { TRAVELLER_FINE } else { TRAVELLER_RATE };
+        sim.controls.traveller = (sim.controls.traveller + car * rate * dt).clamp(-1.0, 1.0);
+    }
+
     // --- Auxiliary engine ------------------------------------------------------
     let mut throttle_step = 0.0;
     if keys.just_pressed(KeyCode::KeyX) {
@@ -293,5 +330,10 @@ pub fn gather(
         let (m, j) = optimal_sheets(&cfg, awa, sim.controls.outhaul);
         sim.controls.main_sheet = m;
         sim.controls.jib_sheet = j;
+        // Car amidships. Dropping the traveller is a gust response, and in the steady
+        // wind this assist assumes it only ever costs speed — measured in
+        // `sail-core/examples/traveller.rs`. Snapping to trim should not leave a control
+        // where the player happened to put it three gusts ago.
+        sim.controls.traveller = 0.0;
     }
 }

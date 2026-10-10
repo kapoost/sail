@@ -47,6 +47,13 @@ pub fn heading_rudder(cfg: &BoatConfig, st: &BoatState, target_heading: f64) -> 
 #[derive(Clone, Debug, Default)]
 pub struct TillerPilot {
     integral: f64,
+    /// How long the output has been hard against the stops.
+    ///
+    /// A rudder on the stops is not steering, it is braking — a stalled foil with
+    /// enormous drag, holding the boat too slow to answer it, which is a state that
+    /// sustains itself. Every real pilot has an off-course alarm for exactly this,
+    /// and the right response is to hand the helm back rather than keep pulling.
+    saturated_for: f64,
 }
 
 impl TillerPilot {
@@ -78,14 +85,23 @@ impl TillerPilot {
         if (raw - clamped).abs() < 1e-9 {
             self.integral += error * dt;
             self.integral = self.integral.clamp(-6.0, 6.0);
+            self.saturated_for = 0.0;
+        } else {
+            self.saturated_for += dt;
         }
         clamped
+    }
+
+    /// Seconds the rudder has been hard over without the boat answering.
+    pub fn saturated_for(&self) -> f64 {
+        self.saturated_for
     }
 
     /// Forget the accumulated correction. Call on engaging, or the pilot starts by
     /// applying whatever helm the last course needed.
     pub fn reset(&mut self) {
         self.integral = 0.0;
+        self.saturated_for = 0.0;
     }
 
     /// Current standing rudder angle the pilot is holding, radians. On a well balanced
@@ -256,6 +272,18 @@ impl Autopilot {
 
     pub fn engaged(&self) -> bool {
         self.mode != PilotMode::Standby
+    }
+
+    /// True once the pilot has held the rudder on the stops long enough that it is
+    /// plainly not going to make the course.
+    ///
+    /// Six seconds, because a tack or a wave knock legitimately needs full helm for a
+    /// second or two and alarming on that would be useless. Past that it is no longer
+    /// steering: the rudder is stalled, it is dragging hard enough to keep the boat
+    /// too slow to answer, and the state feeds itself. Handing the helm back is both
+    /// what a real pilot does and the only way out.
+    pub fn struggling(&self) -> bool {
+        self.loop_.saturated_for() > 6.0
     }
 
     /// Hold the course the boat is on right now.

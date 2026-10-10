@@ -158,6 +158,10 @@ pub fn update(
         if moved(now.main_sheet, was.main_sheet) {
             light(Kind::MainSheet);
         }
+        // Moving the car moves the sheet's lower end, so the sheet is what changed.
+        if moved(now.traveller, was.traveller) {
+            light(Kind::MainSheet);
+        }
         if moved(now.jib_sheet, was.jib_sheet)
             || moved(now.furl, was.furl)
             || moved(now.genoa_car, was.genoa_car)
@@ -262,7 +266,14 @@ pub fn update(
             }
             Kind::MainSheet => Span {
                 from: boom_end,
-                to: Vec3::new(0.0, DECK, 1.7),
+                // Not the centreline. The sheet is made fast to a car that runs across
+                // the boat, and where that car is standing is the whole difference
+                // between easing the sheet and dropping the traveller.
+                to: Vec3::new(
+                    crate::boat::traveller_position(sim.controls.traveller as f32, cfg.beam as f32),
+                    DECK,
+                    crate::boat::TRAVELLER_Z,
+                ),
                 // A luffing main pulls on nothing, and the sheet says so before the
                 // telltales have finished.
                 tension: main_load * (1.0 - t.main.coeffs.luffing as f32),
