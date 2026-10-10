@@ -5,7 +5,11 @@
 //! keyboard affords. You map *intentions*, and you match the control's nature to the
 //! gear it stands for.
 //!
-//! * Helm is **absolute**, because a tiller has a position your hand is holding.
+//! * Helm is **absolute and held**, because a tiller has a position your hand is
+//!   holding. On a keyboard that means A and D *move* the helm and letting go leaves
+//!   it where it was; Space centres it. A self-centring keyboard helm is unusable —
+//!   if it springs back faster than you can push it over, you cannot hold any angle
+//!   at all, and steering becomes a drum solo.
 //! * The mainsheet is **absolute**, because it is a tackle you pull and hold.
 //! * The genoa sheet is a **rate**, because it is a winch you grind — and grinding
 //!   takes time you do not always have, which is the whole drama of a tack.
@@ -18,12 +22,28 @@ use crate::sim::Sim;
 
 /// Dead zone on the sticks. Analog hardware drifts, and a drifting helm is maddening.
 const STICK_DEADZONE: f32 = 0.12;
+
+/// Which device last touched the helm.
+///
+/// Without this, a connected but idle gamepad fights the keyboard: the stick reads
+/// centred, so it zeroes the rudder every frame and the keys can never hold an angle.
+/// Whoever moved the helm last owns it until the other device moves.
+#[derive(Resource, Default, PartialEq, Eq, Clone, Copy)]
+pub enum HelmSource {
+    #[default]
+    Keyboard,
+    Stick,
+}
 /// How fast the genoa winch takes up sheet, in sheet fraction per second.
 const WINCH_RATE: f64 = 0.55;
-/// How fast the keyboard helm swings, radians per second.
-const KEY_HELM_RATE: f64 = 0.9;
-/// How fast an unattended keyboard helm returns amidships.
-const KEY_HELM_CENTRE: f64 = 1.6;
+/// How fast the keyboard helm swings, radians per second. Full lock in about half a
+/// second, which is roughly how fast you can actually throw a tiller over.
+const KEY_HELM_RATE: f64 = 1.3;
+/// Fine rate while a modifier is held, for trimming out weather helm a degree at a
+/// time instead of overshooting it.
+const KEY_HELM_FINE: f64 = 0.28;
+/// How fast Space brings the helm back amidships.
+const KEY_HELM_CENTRE: f64 = 2.2;
 
 fn deadzone(v: f32) -> f32 {
     if v.abs() < STICK_DEADZONE {
@@ -38,6 +58,7 @@ pub fn gather(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
+    mut helm_source: ResMut<HelmSource>,
 ) {
     let dt = time.delta_secs_f64();
     let cfg = sim.config();
@@ -46,35 +67,48 @@ pub fn gather(
     let pad = pads.iter().next();
 
     // --- Helm -----------------------------------------------------------------
-    let mut helm_set = false;
-    if let Some(pad) = pad {
-        let x = deadzone(pad.get(GamepadAxis::LeftStickX).unwrap_or(0.0));
-        if x != 0.0 {
-            sim.controls.rudder = x as f64 * max_rudder;
-            helm_set = true;
-        }
+    // A gamepad stick is an absolute position, so when it owns the helm its centre
+    // means amidships. The keyboard holds its angle instead, because a key has no
+    // position of its own to read.
+    let stick = pad
+        .map(|p| deadzone(p.get(GamepadAxis::LeftStickX).unwrap_or(0.0)))
+        .unwrap_or(0.0);
+    if stick != 0.0 {
+        *helm_source = HelmSource::Stick;
     }
-    if !helm_set {
-        let mut rate = 0.0;
-        if keys.pressed(KeyCode::KeyA) {
-            rate -= KEY_HELM_RATE;
-        }
-        if keys.pressed(KeyCode::KeyD) {
-            rate += KEY_HELM_RATE;
-        }
-        if rate != 0.0 {
-            sim.controls.rudder = (sim.controls.rudder + rate * dt).clamp(-max_rudder, max_rudder);
-        } else if pad.is_none() {
-            // Let go of the tiller and it drifts back amidships.
-            let r = sim.controls.rudder;
-            let step = KEY_HELM_CENTRE * dt;
-            sim.controls.rudder = if r.abs() <= step {
-                0.0
-            } else {
-                r - step * r.signum()
-            };
-        } else {
-            sim.controls.rudder = 0.0;
+
+    let mut key_rate = 0.0;
+    let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    let rate = if fine { KEY_HELM_FINE } else { KEY_HELM_RATE };
+    if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
+        key_rate -= rate;
+    }
+    if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
+        key_rate += rate;
+    }
+    let centring = keys.pressed(KeyCode::Space);
+    if key_rate != 0.0 || centring {
+        *helm_source = HelmSource::Keyboard;
+    }
+
+    match *helm_source {
+        HelmSource::Stick => sim.controls.rudder = stick as f64 * max_rudder,
+        HelmSource::Keyboard => {
+            if key_rate != 0.0 {
+                sim.controls.rudder =
+                    (sim.controls.rudder + key_rate * dt).clamp(-max_rudder, max_rudder);
+            } else if centring {
+                // Explicit, because an automatic one would undo every correction you
+                // make the moment you let go of the key.
+                let r = sim.controls.rudder;
+                let step = KEY_HELM_CENTRE * dt;
+                sim.controls.rudder = if r.abs() <= step {
+                    0.0
+                } else {
+                    r - step * r.signum()
+                };
+            }
+            // Otherwise: left exactly where you put it.
         }
     }
 

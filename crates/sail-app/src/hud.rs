@@ -100,7 +100,21 @@ pub fn draw(
                 row(ui, "leeway", &format!("{:.1}", deg(t.leeway)));
                 ui.end_row();
                 row(ui, "VMG", &format!("{:.2} kn", ms_to_kn(t.vmg)));
-                row(ui, "helm", &format!("{:.1}", deg(c.rudder)));
+                row(
+                    ui,
+                    "helm",
+                    &format!(
+                        "{:+.1}  {}",
+                        deg(c.rudder),
+                        if c.rudder.abs() < 1e-3 {
+                            "amidships"
+                        } else if c.rudder > 0.0 {
+                            "to stbd"
+                        } else {
+                            "to port"
+                        }
+                    ),
+                );
                 ui.end_row();
             });
 
@@ -144,7 +158,9 @@ pub fn draw(
 
             ui.separator();
             ui.small(
-                "A/D helm   W/S mainsheet   Q/E genoa winch   R/F reef   Z/X engine\n\
+                "A/D or arrows  helm (held where you leave it; Shift for fine)\n\
+                 Space  centre the helm\n\
+                 W/S mainsheet   Q/E genoa winch   R/F reef   Z/X engine\n\
                  T snap to good trim   C camera   Tab hide this panel",
             );
         });

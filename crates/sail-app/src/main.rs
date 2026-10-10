@@ -37,6 +37,7 @@ fn main() {
         .insert_resource(sim::Sim::new(WIND_KNOTS, WIND_FROM_DEG, START_TWA_DEG))
         .insert_resource(hud::HudVisible(true))
         .init_resource::<hud::Polar>()
+        .init_resource::<input::HelmSource>()
         .add_systems(
             Startup,
             (world::setup, boat::setup, camera::setup, hud::build_polar),
