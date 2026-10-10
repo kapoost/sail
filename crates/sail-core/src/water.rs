@@ -43,6 +43,19 @@ pub trait WaterSurface: Send + Sync {
         self.velocity(pos, t)
     }
 
+    /// Horizontal displacement of a surface parcel from its mean position, metres.
+    ///
+    /// The integral of the orbital velocity, and therefore bounded: in deep water a
+    /// surface particle travels a circle of radius equal to the wave amplitude. This
+    /// is what the fine surface detail rides on — and the reason it matters is that
+    /// multiplying the instantaneous orbital *velocity* by elapsed time instead gives
+    /// an oscillating quantity scaled by an ever-growing one, so the detail slides
+    /// about in every direction with amplitude increasing without bound. Which reads,
+    /// from the deck, exactly like the boat periodically going backwards.
+    fn horizontal_displacement(&self, _pos: DVec2, _t: f64) -> DVec2 {
+        DVec2::ZERO
+    }
+
     /// How much of the surface pressure gradient a hull of this draft actually feels,
     /// averaged over its immersed depth.
     ///
@@ -75,6 +88,9 @@ impl WaterSurface for FlatWater {
     }
     fn velocity_at_depth(&self, _pos: DVec2, _depth: f64, _t: f64) -> DVec3 {
         DVec3::ZERO
+    }
+    fn horizontal_displacement(&self, _pos: DVec2, _t: f64) -> DVec2 {
+        DVec2::ZERO
     }
 }
 
@@ -225,6 +241,19 @@ impl WaterSurface for WindSea {
             v.z += orbital * theta.sin();
         }
         v
+    }
+
+    fn horizontal_displacement(&self, pos: DVec2, t: f64) -> DVec2 {
+        let mut d = DVec2::ZERO;
+        for c in &self.components {
+            // Velocity is A omega cos(theta) and dtheta/dt is -omega, so the integral
+            // is *minus* A sin(theta). The plus sign was caught immediately by
+            // differentiating this numerically and comparing against the velocity —
+            // which is the only defence that works, since wave maths is thick with
+            // sign conventions and this is the fourth such error this session.
+            d -= c.direction * (c.amplitude * c.theta(pos, t).sin());
+        }
+        d
     }
 
     fn depth_attenuation(&self, draft: f64) -> f64 {

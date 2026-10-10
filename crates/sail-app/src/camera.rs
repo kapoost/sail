@@ -103,7 +103,13 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             ..default()
         },
         Projection::Perspective(PerspectiveProjection {
-            fov: 1.15,
+            // Vertical, and 1.15 rad was 66 degrees — about 100 across at 16:9, which
+            // is a GoPro. Everything sweeps through the frame faster at that angle and
+            // reads smaller with it, and the deck and bow shrink to marks instead of
+            // being the thing you are standing on. A longer lens is also how you make
+            // something feel heavy: 0.72 rad is 41 degrees, slightly tighter than the
+            // 45 Bevy defaults to.
+            fov: 0.72,
             near: 0.08,
             far: 8000.0,
             ..default()

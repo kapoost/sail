@@ -1569,3 +1569,50 @@ fn a_resonant_sea_slows_the_boat_without_stopping_her() {
         ms_to_kn(slowest)
     );
 }
+
+#[test]
+fn orbital_displacement_is_bounded_and_is_the_integral_of_the_velocity() {
+    let sea = WindSea::new(kn_to_ms(14.0), 120_000.0, 0.0, 9);
+    let at = glam::DVec2::new(13.0, -7.0);
+    let ceiling: f64 = sea.components().iter().map(|c| c.amplitude).sum();
+
+    // Bounded. This is the property that was violated, and the symptom was not subtle:
+    // the surface detail was offset by the instantaneous orbital velocity times the
+    // elapsed time, so it slid in every direction with an amplitude that grew without
+    // limit. From the deck that reads as the boat periodically going backwards.
+    let mut worst = 0.0_f64;
+    for i in 0..4000 {
+        let t = i as f64 * 0.05;
+        let d = sea.horizontal_displacement(at, t);
+        worst = worst.max(d.length());
+    }
+    assert!(
+        worst <= ceiling * 1.001,
+        "displacement reached {worst:.3} m against a ceiling of {ceiling:.3}"
+    );
+    assert!(
+        worst > 0.2 * ceiling,
+        "and it should actually move: {worst:.3} m"
+    );
+
+    // And it is the integral of the horizontal orbital velocity, which is what makes
+    // the detail travel with the water rather than across it.
+    let dt = 1e-4;
+    for i in 0..40 {
+        let t = 3.0 + i as f64 * 0.17;
+        let rate = (sea.horizontal_displacement(at, t + dt)
+            - sea.horizontal_displacement(at, t - dt))
+            / (2.0 * dt);
+        let v = sea.velocity(at, t);
+        let expected = glam::DVec2::new(v.x, v.y);
+        assert!(
+            (rate - expected).length() < 1e-3,
+            "at t = {t:.2} the displacement changes at {rate:?} but the water moves at {expected:?}"
+        );
+    }
+
+    assert_eq!(
+        FlatWater.horizontal_displacement(at, 5.0),
+        glam::DVec2::ZERO
+    );
+}

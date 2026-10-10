@@ -158,11 +158,21 @@ pub fn update_sea(
         let mut colours = Vec::with_capacity(count);
 
         let hs = (sim.sim.telemetry.significant_height as f32).max(0.05);
-        // Ripples drift downwind. Without this the fine detail is frozen while the
-        // swell moves through it, which reads as a photograph of water.
-        let drift = sim.sim.water.velocity(st.pos, t);
-        let drift_u = (drift.x as f32 * 0.25 * t as f32) / sea_texture::TILE_METRES;
-        let drift_v = (-drift.y as f32 * 0.25 * t as f32) / sea_texture::TILE_METRES;
+        // Steady surface drift: about two and a half percent of the wind speed,
+        // downwind, which is the usual rule of thumb. This is a real current and it
+        // accumulates honestly with time.
+        //
+        // What it replaces was a bug worth remembering: the instantaneous orbital
+        // velocity multiplied by elapsed time. The velocity oscillates with the wave
+        // period and the elapsed time only grows, so the detail slid back and forth in
+        // every direction with an amplitude that increased without bound — which from
+        // the deck reads exactly like the boat periodically going backwards.
+        let tm = &sim.sim.telemetry;
+        let downwind = glam::DVec2::new(
+            (tm.twd + std::f64::consts::PI).sin(),
+            (tm.twd + std::f64::consts::PI).cos(),
+        );
+        let current = downwind * tm.tws * 0.025 * t;
 
         for offset in &sea.offsets {
             // Sample at the true world position. Bevy's -Z is sim north, so the
@@ -176,10 +186,14 @@ pub fn update_sea(
             normals.push(Vec3::new(-sx, 1.0, -sz).normalize());
 
             // World-locked UVs, so the detail stays with the sea rather than with the
-            // boat. The grid recentres every frame; the texture must not.
+            // boat: the grid recentres every frame and the texture must not. On top of
+            // that the detail rides the water's own orbital displacement, which is
+            // bounded — a surface parcel travels a circle of the wave's amplitude — so
+            // the ripples go round with the wave instead of being dragged across it.
+            let parcel = world - sim.sim.water.horizontal_displacement(world, t) - current;
             uvs.push(Vec2::new(
-                world.x as f32 / sea_texture::TILE_METRES + drift_u,
-                -world.y as f32 / sea_texture::TILE_METRES + drift_v,
+                parcel.x as f32 / sea_texture::TILE_METRES,
+                -parcel.y as f32 / sea_texture::TILE_METRES,
             ));
 
             // Tangent along +U, which is world +X, lying in the surface. Handedness is

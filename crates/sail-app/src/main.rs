@@ -16,6 +16,7 @@ mod sea_texture;
 mod sim;
 mod sky;
 mod sound;
+mod wake;
 mod world;
 
 use bevy::prelude::*;
@@ -53,6 +54,7 @@ fn main() {
                 hud::build_polar,
                 sound::setup,
                 course::setup,
+                wake::setup,
             ),
         )
         .add_systems(
@@ -71,6 +73,7 @@ fn main() {
                     course::update,
                     world::update_sea,
                     course::float_marks,
+                    wake::update,
                     camera::follow,
                     sound::update,
                 ),
