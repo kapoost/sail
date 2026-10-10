@@ -15,10 +15,14 @@ use glam::DVec2;
 
 /// Sheet positions that put both sails at their best angle of attack for the given
 /// apparent wind angle.
-pub fn optimal_sheets(cfg: &BoatConfig, awa: f64) -> (f64, f64) {
+pub fn optimal_sheets(cfg: &BoatConfig, awa: f64, outhaul: f64) -> (f64, f64) {
     (
-        cfg.main.profile.optimal_sheet(awa),
-        cfg.genoa.profile.optimal_sheet(awa),
+        cfg.main
+            .profile
+            .optimal_sheet(awa, crate::sail::camber_for_outhaul(outhaul)),
+        cfg.genoa
+            .profile
+            .optimal_sheet(awa, crate::sail::CAMBER_REFERENCE),
     )
 }
 
@@ -56,8 +60,16 @@ impl TillerPilot {
         target_heading: f64,
         dt: f64,
     ) -> f64 {
-        let error = wrap_pi(target_heading - st.heading);
-        let raw = 2.2 * error + 0.9 * self.integral - 4.0 * st.yaw_rate;
+        self.correct(cfg, wrap_pi(target_heading - st.heading), st.yaw_rate, dt)
+    }
+
+    /// The PID itself, against whatever error you hand it. Separate from
+    /// [`rudder`](Self::rudder) so a wind-angle pilot can drive the same loop — the
+    /// control problem is identical, only the thing being measured differs.
+    ///
+    /// `error` is positive when the bow needs to come to starboard.
+    pub fn correct(&mut self, cfg: &BoatConfig, error: f64, yaw_rate: f64, dt: f64) -> f64 {
+        let raw = 2.2 * error + 0.9 * self.integral - 4.0 * yaw_rate;
         let clamped = raw.clamp(-cfg.max_rudder_angle, cfg.max_rudder_angle);
         // Anti-windup: stop integrating once the rudder is on the stops, otherwise the
         // integral runs away while the boat is overpowered and cannot answer anyway.
@@ -66,6 +78,12 @@ impl TillerPilot {
             self.integral = self.integral.clamp(-6.0, 6.0);
         }
         clamped
+    }
+
+    /// Forget the accumulated correction. Call on engaging, or the pilot starts by
+    /// applying whatever helm the last course needed.
+    pub fn reset(&mut self) {
+        self.integral = 0.0;
     }
 
     /// Current standing rudder angle the pilot is holding, radians. On a well balanced
@@ -97,7 +115,9 @@ where
     F: Fn() -> Box<dyn WindField>,
 {
     let wind = make_wind();
-    let wind_direction = direction_of(wind.sample(DVec2::ZERO, 0.0));
+    let sample = wind.sample(DVec2::ZERO, 0.0);
+    let wind_direction = direction_of(sample);
+    let wind_speed_hint = sample.length();
     let heading = wrap_tau(wind_direction - twa);
 
     // Start with way on. A real boat close-hauled from a standstill has to bear away
@@ -108,7 +128,10 @@ where
     initial.surge = 0.6 * cfg.hull_speed();
     let mut sim = Simulation::new(cfg, initial, wind);
 
+    // Flatten the main as the breeze builds, the way a trimmer would.
+    let tws = wind_speed_hint;
     let mut controls = Controls {
+        outhaul: crate::sail::optimal_outhaul(tws),
         reef,
         furl: (reef * 0.85).clamp(0.0, 1.0),
         ..Default::default()
@@ -120,7 +143,7 @@ where
     let mut speed_before = 0.0;
 
     for i in 0..steps {
-        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa);
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
         controls.main_sheet = m;
         controls.jib_sheet = j;
         controls.rudder = pilot.rudder(&cfg, &sim.state, heading, SUBSTEP);
@@ -171,4 +194,122 @@ where
         }
     }
     (chosen, best)
+}
+
+/// What the autopilot is holding.
+///
+/// Two modes because there are two pieces of real gear, and they are not
+/// interchangeable. An electric tiller pilot holds a compass course: good for motoring
+/// and for a passage leg, useless upwind, because a wind shift leaves the sails wrong.
+/// A wind vane holds an angle to the apparent wind: it keeps the sails at a constant
+/// angle of attack and follows every shift, which is what you want on a beat and what
+/// makes it the right way to sleep on a long passage.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PilotMode {
+    /// Hand steering.
+    Standby,
+    /// Hold a compass heading, radians from north.
+    Heading(f64),
+    /// Hold a signed apparent wind angle, radians, positive with the wind to
+    /// starboard. The sign carries the tack.
+    ApparentWind(f64),
+}
+
+/// A tiller pilot with a wind vane in the same box.
+#[derive(Clone, Debug)]
+pub struct Autopilot {
+    pub mode: PilotMode,
+    loop_: TillerPilot,
+}
+
+impl Default for Autopilot {
+    fn default() -> Self {
+        Self {
+            mode: PilotMode::Standby,
+            loop_: TillerPilot::new(),
+        }
+    }
+}
+
+impl Autopilot {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn engaged(&self) -> bool {
+        self.mode != PilotMode::Standby
+    }
+
+    /// Hold the course the boat is on right now.
+    pub fn hold_heading(&mut self, st: &BoatState) {
+        self.mode = PilotMode::Heading(st.heading);
+        self.loop_.reset();
+    }
+
+    /// Hold the wind angle the boat is on right now.
+    pub fn hold_wind(&mut self, tm: &Telemetry) {
+        self.mode = PilotMode::ApparentWind(tm.awa);
+        self.loop_.reset();
+    }
+
+    pub fn disengage(&mut self) {
+        self.mode = PilotMode::Standby;
+        self.loop_.reset();
+    }
+
+    /// Nudge the target. Positive luffs in wind mode and turns to starboard in heading
+    /// mode — the two are not the same thing, so the pilot does the thinking.
+    pub fn adjust(&mut self, delta: f64) {
+        match &mut self.mode {
+            PilotMode::Standby => {}
+            PilotMode::Heading(h) => *h = wrap_tau(*h + delta),
+            PilotMode::ApparentWind(a) => {
+                // Luffing means a smaller angle, on either tack.
+                let sign = if *a >= 0.0 { 1.0 } else { -1.0 };
+                let magnitude = (a.abs() - delta).clamp(rad(20.0), rad(178.0));
+                *a = sign * magnitude;
+            }
+        }
+    }
+
+    /// Rudder angle, or `None` in standby.
+    pub fn rudder(
+        &mut self,
+        cfg: &BoatConfig,
+        st: &BoatState,
+        tm: &Telemetry,
+        dt: f64,
+    ) -> Option<f64> {
+        let error = match self.mode {
+            PilotMode::Standby => return None,
+            PilotMode::Heading(target) => wrap_pi(target - st.heading),
+            PilotMode::ApparentWind(target) => {
+                // Bearing away opens the apparent wind angle, so when the measured
+                // angle exceeds the target the boat must luff — which is a turn
+                // towards the wind, and therefore towards whichever side it is on.
+                // Both tacks reduce to the same expression.
+                if tm.awa.signum() != target.signum() && tm.awa.abs() > rad(12.0) {
+                    // Wrong tack entirely. Steer back across rather than fight it, by
+                    // asking for the biggest turn the loop will act on.
+                    target.signum() * rad(30.0)
+                } else if tm.awa.abs() < rad(8.0) {
+                    // Head to wind, where the sign of the measurement is meaningless.
+                    // Bear away onto the intended tack.
+                    -target.signum() * rad(20.0)
+                } else {
+                    tm.awa - target
+                }
+            }
+        };
+        Some(self.loop_.correct(cfg, error, st.yaw_rate, dt))
+    }
+
+    /// What it is holding, for a gauge.
+    pub fn target_label(&self) -> Option<(&'static str, f64)> {
+        match self.mode {
+            PilotMode::Standby => None,
+            PilotMode::Heading(h) => Some(("heading", h)),
+            PilotMode::ApparentWind(a) => Some(("apparent wind", a)),
+        }
+    }
 }

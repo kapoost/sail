@@ -9,7 +9,9 @@
 //! knot or more, and cannot be driven much past its hull speed.
 
 use sail_core::prelude::*;
-use sail_core::sail::{sail_forces, SailProfile};
+use sail_core::sail::{
+    camber_for_outhaul, optimal_outhaul, sail_forces, SailProfile, CAMBER_REFERENCE,
+};
 use sail_core::wind::{SteadyWind, WindField};
 
 fn wind(kn: f64) -> impl Fn() -> Box<dyn WindField> {
@@ -143,11 +145,20 @@ fn oversheeting_stalls_the_sail() {
     let profile = SailProfile::mainsail(32.0, 12.5);
     let awa = rad(28.0);
     let aws = kn_to_ms(16.0);
-    let optimal = profile.optimal_sheet(awa);
+    let optimal = profile.optimal_sheet(awa, CAMBER_REFERENCE);
 
-    let good = sail_forces(&profile, awa, aws, optimal, 32.0, 0.0, 0.0);
+    let good = sail_forces(
+        &profile,
+        awa,
+        aws,
+        optimal,
+        32.0,
+        0.0,
+        0.0,
+        CAMBER_REFERENCE,
+    );
     // Sheeted right in, so the angle of attack is the full apparent wind angle.
-    let tight = sail_forces(&profile, awa, aws, 0.0, 32.0, 0.0, 0.0);
+    let tight = sail_forces(&profile, awa, aws, 0.0, 32.0, 0.0, 0.0, CAMBER_REFERENCE);
 
     assert!(
         tight.drive < good.drive,
@@ -166,11 +177,20 @@ fn easing_past_the_apparent_wind_makes_the_sail_luff() {
     let profile = SailProfile::mainsail(32.0, 12.5);
     let awa = rad(40.0);
     let aws = kn_to_ms(14.0);
-    let optimal = profile.optimal_sheet(awa);
+    let optimal = profile.optimal_sheet(awa, CAMBER_REFERENCE);
 
-    let drawing = sail_forces(&profile, awa, aws, optimal, 32.0, 0.0, 0.0);
+    let drawing = sail_forces(
+        &profile,
+        awa,
+        aws,
+        optimal,
+        32.0,
+        0.0,
+        0.0,
+        CAMBER_REFERENCE,
+    );
     // Eased well past the apparent wind: the sail is now flogging.
-    let flogging = sail_forces(&profile, awa, aws, 0.95, 32.0, 0.0, 0.0);
+    let flogging = sail_forces(&profile, awa, aws, 0.95, 32.0, 0.0, 0.0, CAMBER_REFERENCE);
 
     assert!(
         flogging.coeffs.luffing > 0.9,
@@ -195,13 +215,13 @@ fn drive_peaks_near_the_optimal_angle_of_attack() {
     let mut best_drive = f64::NEG_INFINITY;
     for i in 0..=100 {
         let sheet = i as f64 / 100.0;
-        let f = sail_forces(&profile, awa, aws, sheet, 32.0, 0.0, 0.0);
+        let f = sail_forces(&profile, awa, aws, sheet, 32.0, 0.0, 0.0, CAMBER_REFERENCE);
         if f.drive > best_drive {
             best_drive = f.drive;
             best_sheet = sheet;
         }
     }
-    let predicted = profile.optimal_sheet(awa);
+    let predicted = profile.optimal_sheet(awa, CAMBER_REFERENCE);
     assert!(
         (best_sheet - predicted).abs() < 0.06,
         "the trim reference should find the real optimum: swept {best_sheet:.2}, predicted {predicted:.2}"
@@ -213,9 +233,18 @@ fn heel_costs_drive() {
     let profile = SailProfile::mainsail(32.0, 12.5);
     let awa = rad(30.0);
     let aws = kn_to_ms(18.0);
-    let sheet = profile.optimal_sheet(awa);
-    let upright = sail_forces(&profile, awa, aws, sheet, 32.0, 0.0, 0.0);
-    let heeled = sail_forces(&profile, awa, aws, sheet, 32.0, rad(-30.0), 0.0);
+    let sheet = profile.optimal_sheet(awa, CAMBER_REFERENCE);
+    let upright = sail_forces(&profile, awa, aws, sheet, 32.0, 0.0, 0.0, CAMBER_REFERENCE);
+    let heeled = sail_forces(
+        &profile,
+        awa,
+        aws,
+        sheet,
+        32.0,
+        rad(-30.0),
+        0.0,
+        CAMBER_REFERENCE,
+    );
     assert!(heeled.drive < upright.drive);
     assert!(heeled.side.abs() < upright.side.abs());
 }
@@ -312,7 +341,7 @@ fn tacking_costs_speed_and_the_boat_recovers() {
     // Put the helm over and sheet across.
     let steps = (90.0 / SUBSTEP) as u64;
     for _ in 0..steps {
-        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa);
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
         controls.main_sheet = m;
         controls.jib_sheet = j;
         controls.rudder = pilot.rudder(&cfg, &sim.state, new_heading, SUBSTEP);
@@ -404,7 +433,7 @@ fn main_alone_sails_but_gives_up_pointing() {
         ..Default::default()
     };
     for _ in 0..(SETTLE / SUBSTEP) as u64 {
-        let (m, _) = optimal_sheets(&cfg, sim.telemetry.awa);
+        let (m, _) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
         controls.main_sheet = m;
         controls.rudder = pilot.rudder(&cfg, &sim.state, heading, SUBSTEP);
         sim.run(SUBSTEP, &controls);
@@ -574,7 +603,7 @@ fn a_sail_in_the_eye_of_the_wind_is_pure_drag() {
     // Head to wind, sheeted in: nothing to fill the sail, so it flogs and the only
     // force left is drag, pointing aft. This is why a boat caught in irons gathers
     // sternway rather than sitting still.
-    let flogging = sail_forces(&profile, 0.0, aws, 0.0, 32.0, 0.0, 0.0);
+    let flogging = sail_forces(&profile, 0.0, aws, 0.0, 32.0, 0.0, 0.0, CAMBER_REFERENCE);
     assert!(
         flogging.drive < 0.0,
         "a sail head to wind must push the boat backwards, drive {:.0} N",
@@ -603,7 +632,7 @@ fn bearing_away_with_way_on_gets_the_boat_sailing() {
     let target = rad(60.0);
     let mut controls = Controls::default();
     for _ in 0..(180.0 / SUBSTEP) as u64 {
-        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa);
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
         controls.main_sheet = m;
         controls.jib_sheet = j;
         controls.rudder = pilot.rudder(&cfg, &sim.state, target, SUBSTEP);
@@ -658,4 +687,284 @@ fn the_engine_gets_you_out_of_the_marina() {
         sim.telemetry.stw < 0.0 || sim.state.surge < 0.0,
         "should make sternway"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Outhaul: mainsail depth, and the trade it buys
+// ---------------------------------------------------------------------------
+
+#[test]
+fn easing_the_outhaul_deepens_the_sail_and_hardening_it_flattens() {
+    assert!(camber_for_outhaul(0.0) > camber_for_outhaul(1.0));
+    assert!((camber_for_outhaul(0.5) - CAMBER_REFERENCE).abs() < 0.005);
+    // A cruising main lives between about seven and fifteen percent draft.
+    assert!((0.06..=0.16).contains(&camber_for_outhaul(0.0)));
+    assert!((0.06..=0.16).contains(&camber_for_outhaul(1.0)));
+}
+
+#[test]
+fn a_deeper_sail_makes_more_force_and_peaks_earlier() {
+    let profile = SailProfile::mainsail(32.0, 12.5);
+    let deep = profile.coefficients(rad(14.0), camber_for_outhaul(0.0));
+    let flat = profile.coefficients(rad(14.0), camber_for_outhaul(1.0));
+
+    // Depth is power.
+    assert!(
+        deep.cl > flat.cl,
+        "deep {:.2} should out-lift flat {:.2}",
+        deep.cl,
+        flat.cl
+    );
+    // And depth costs drag.
+    assert!(deep.cd > flat.cd);
+
+    // A deep sail reaches its best angle of attack sooner, because the camber is
+    // already doing part of the work.
+    let awa = rad(30.0);
+    assert!(
+        profile.optimal_chord_angle(awa, camber_for_outhaul(0.0))
+            > profile.optimal_chord_angle(awa, camber_for_outhaul(1.0)),
+        "a deep sail wants the boom further out for the same apparent wind"
+    );
+}
+
+#[test]
+fn flattening_the_main_takes_the_heel_out_in_a_breeze() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let make = wind(20.0);
+    let deep = at_outhaul(cfg, &make, rad(45.0), 0.0);
+    let flat = at_outhaul(cfg, &make, rad(45.0), 1.0);
+
+    assert!(
+        flat.1.abs() < deep.1.abs() - rad(1.0),
+        "flattening must stand the boat up: {:.1} deg flat against {:.1} deg deep",
+        deg(flat.1).abs(),
+        deg(deep.1).abs()
+    );
+    // And it should carry less helm, since there is less force up high to luff you.
+    assert!(flat.3.abs() <= deep.3.abs() + rad(0.3));
+}
+
+#[test]
+fn depth_pays_in_light_air_and_flat_pays_in_a_breeze() {
+    let cfg = BoatConfig::charter_sloop_34();
+
+    let light = wind(6.0);
+    let deep_light = at_outhaul(cfg, &light, rad(45.0), 0.0);
+    let flat_light = at_outhaul(cfg, &light, rad(45.0), 1.0);
+    assert!(
+        deep_light.2 > flat_light.2,
+        "in six knots depth should win: deep {:.3} kn VMG against flat {:.3}",
+        ms_to_kn(deep_light.2),
+        ms_to_kn(flat_light.2)
+    );
+
+    // The recommendation should follow the same shape it asserts.
+    assert!(
+        optimal_outhaul(kn_to_ms(6.0)) < 0.25,
+        "ease it off in light air"
+    );
+    assert!(
+        optimal_outhaul(kn_to_ms(22.0)) > 0.75,
+        "flatten it in a breeze"
+    );
+    assert!(optimal_outhaul(kn_to_ms(6.0)) < optimal_outhaul(kn_to_ms(22.0)));
+}
+
+/// Hold a close-hauled course at a fixed outhaul with the sheet trimmed to suit.
+/// Returns speed, heel, VMG and the standing helm.
+fn at_outhaul<F>(cfg: BoatConfig, make: &F, twa: f64, outhaul: f64) -> (f64, f64, f64, f64)
+where
+    F: Fn() -> Box<dyn WindField>,
+{
+    let heading = wrap_tau(0.0 - twa);
+    let mut state = BoatState::at_rest(heading);
+    state.surge = kn_to_ms(3.0);
+    let mut sim = Simulation::new(cfg, state, make());
+    let mut pilot = TillerPilot::new();
+    let mut controls = Controls {
+        outhaul,
+        ..Default::default()
+    };
+    for _ in 0..(SETTLE / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        controls.rudder = pilot.rudder(&cfg, &sim.state, heading, SUBSTEP);
+        sim.run(SUBSTEP, &controls);
+    }
+    (
+        sim.telemetry.stw,
+        sim.state.heel,
+        sim.telemetry.vmg,
+        controls.rudder,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Autopilot: compass course, and a wind vane
+// ---------------------------------------------------------------------------
+
+/// Run the pilot for a while with the sails trimmed, and report how far it drifted.
+fn pilot_run(
+    cfg: BoatConfig,
+    mode: PilotMode,
+    seconds: f64,
+    tws_knots: f64,
+    seed: Option<u64>,
+) -> (Simulation, f64) {
+    let twa = rad(45.0);
+    let heading = wrap_tau(0.0 - twa);
+    let mut state = BoatState::at_rest(heading);
+    state.surge = kn_to_ms(4.0);
+    let field: Box<dyn WindField> = match seed {
+        Some(s) => Box::new(SyntheticWind::new(0.0, kn_to_ms(tws_knots), s)),
+        None => Box::new(SteadyWind::new(0.0, kn_to_ms(tws_knots))),
+    };
+    let mut sim = Simulation::new(cfg, state, field);
+    let mut pilot = Autopilot::new();
+    let mut controls = Controls {
+        outhaul: 0.5,
+        ..Default::default()
+    };
+
+    // Let it settle on the hand-set course first, then engage.
+    let mut hand = TillerPilot::new();
+    for _ in 0..(90.0 / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        controls.rudder = hand.rudder(&cfg, &sim.state, heading, SUBSTEP);
+        sim.run(SUBSTEP, &controls);
+    }
+    pilot.mode = match mode {
+        PilotMode::Heading(_) => PilotMode::Heading(sim.state.heading),
+        PilotMode::ApparentWind(_) => PilotMode::ApparentWind(sim.telemetry.awa),
+        PilotMode::Standby => PilotMode::Standby,
+    };
+    let reference = match pilot.mode {
+        PilotMode::Heading(h) => h,
+        PilotMode::ApparentWind(a) => a,
+        PilotMode::Standby => 0.0,
+    };
+
+    let mut worst = 0.0_f64;
+    for _ in 0..(seconds / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        if let Some(r) = pilot.rudder(&cfg, &sim.state, &sim.telemetry, SUBSTEP) {
+            controls.rudder = r;
+        }
+        sim.run(SUBSTEP, &controls);
+        let drift = match pilot.mode {
+            PilotMode::Heading(_) => wrap_pi(sim.state.heading - reference).abs(),
+            PilotMode::ApparentWind(_) => (sim.telemetry.awa - reference).abs(),
+            PilotMode::Standby => 0.0,
+        };
+        worst = worst.max(drift);
+    }
+    (sim, worst)
+}
+
+#[test]
+fn the_pilot_holds_a_compass_course() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let (sim, worst) = pilot_run(cfg, PilotMode::Heading(0.0), 300.0, 12.0, None);
+    assert!(
+        deg(worst) < 2.0,
+        "compass pilot wandered {:.1} deg off course",
+        deg(worst)
+    );
+    assert!(
+        ms_to_kn(sim.telemetry.stw) > 5.0,
+        "and it should still be sailing"
+    );
+}
+
+#[test]
+fn the_vane_holds_a_wind_angle_through_the_shifts() {
+    let cfg = BoatConfig::charter_sloop_34();
+    // Gusty, shifting wind — the case a compass pilot cannot handle and a vane can.
+    let (sim, worst) = pilot_run(cfg, PilotMode::ApparentWind(0.0), 420.0, 12.0, Some(11));
+    assert!(
+        deg(worst) < 5.0,
+        "wind vane let the apparent wind angle move {:.1} deg",
+        deg(worst)
+    );
+    assert!(ms_to_kn(sim.telemetry.stw) > 4.5);
+    assert!(
+        !sim.telemetry.luffing(),
+        "and it should not have pinched into a luff"
+    );
+}
+
+#[test]
+fn a_vane_follows_a_shift_where_a_compass_pilot_would_not() {
+    let cfg = BoatConfig::charter_sloop_34();
+    // Same shifting wind, same length of run: the compass pilot keeps the course and
+    // therefore lets the wind angle wander; the vane keeps the angle and lets the
+    // course wander. That difference is the whole reason both exist.
+    let (_, compass_wind_drift) = {
+        let (sim, _) = pilot_run(cfg, PilotMode::Heading(0.0), 420.0, 12.0, Some(11));
+        let _ = &sim;
+        // Measure wind-angle wander under the compass pilot.
+        let (s2, _) = pilot_run(cfg, PilotMode::Heading(0.0), 420.0, 12.0, Some(11));
+        (
+            s2.state.heading,
+            wind_angle_spread(cfg, PilotMode::Heading(0.0)),
+        )
+    };
+    let vane_wind_drift = wind_angle_spread(cfg, PilotMode::ApparentWind(0.0));
+    assert!(
+        vane_wind_drift < compass_wind_drift,
+        "the vane should hold the wind angle tighter than the compass pilot: \
+         {:.2} deg against {:.2} deg",
+        deg(vane_wind_drift),
+        deg(compass_wind_drift)
+    );
+}
+
+/// Peak apparent-wind-angle wander over a run in shifting wind.
+fn wind_angle_spread(cfg: BoatConfig, mode: PilotMode) -> f64 {
+    let twa = rad(45.0);
+    let heading = wrap_tau(0.0 - twa);
+    let mut state = BoatState::at_rest(heading);
+    state.surge = kn_to_ms(4.0);
+    let mut sim = Simulation::new(
+        cfg,
+        state,
+        Box::new(SyntheticWind::new(0.0, kn_to_ms(12.0), 11)),
+    );
+    let mut pilot = Autopilot::new();
+    let mut controls = Controls {
+        outhaul: 0.5,
+        ..Default::default()
+    };
+    let mut hand = TillerPilot::new();
+    for _ in 0..(90.0 / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        controls.rudder = hand.rudder(&cfg, &sim.state, heading, SUBSTEP);
+        sim.run(SUBSTEP, &controls);
+    }
+    pilot.mode = match mode {
+        PilotMode::Heading(_) => PilotMode::Heading(sim.state.heading),
+        PilotMode::ApparentWind(_) => PilotMode::ApparentWind(sim.telemetry.awa),
+        PilotMode::Standby => PilotMode::Standby,
+    };
+    let reference = sim.telemetry.awa;
+    let mut worst = 0.0_f64;
+    for _ in 0..(420.0 / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        if let Some(r) = pilot.rudder(&cfg, &sim.state, &sim.telemetry, SUBSTEP) {
+            controls.rudder = r;
+        }
+        sim.run(SUBSTEP, &controls);
+        worst = worst.max((sim.telemetry.awa - reference).abs());
+    }
+    worst
 }

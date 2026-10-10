@@ -297,6 +297,7 @@ pub fn update_sails(
                 &geometry,
                 side * forces.chord_angle as f32,
                 forces.coeffs.luffing as f32,
+                forces.camber as f32,
                 now,
             );
         }
@@ -339,14 +340,21 @@ fn sail_indices() -> Vec<u32> {
     idx
 }
 
-fn build_sail(mesh: &mut Mesh, g: &SailGeometry, chord_angle: f32, luffing: f32, now: f32) {
+fn build_sail(
+    mesh: &mut Mesh,
+    g: &SailGeometry,
+    chord_angle: f32,
+    luffing: f32,
+    draft: f32,
+    now: f32,
+) {
     let mut positions = Vec::with_capacity(SAIL_U * SAIL_V);
     let mut uvs = Vec::with_capacity(SAIL_U * SAIL_V);
 
     let leeward = chord_angle.signum();
-    // A drawing sail carries roughly a tenth of its chord in camber; a luffing one
-    // carries none, because there is nothing holding the shape.
-    let camber = 0.11 * (1.0 - luffing);
+    // Draft as trimmed. Wiring this to the real camber rather than a constant is what
+    // makes the outhaul visible: haul it out and you watch the sail go flat.
+    let camber = draft * (1.0 - luffing);
 
     for ui in 0..SAIL_U {
         let u = ui as f32 / (SAIL_U - 1) as f32;

@@ -33,12 +33,14 @@ impl Sim {
         // it — it just bears away. A crew eases for speed first and trims on as the
         // boat builds, so begin where they would.
         sim.run(SUBSTEP, &Controls::default());
-        let (main_sheet, jib_sheet) = optimal_sheets(&cfg, sim.telemetry.awa);
+        let outhaul = optimal_outhaul(sim.telemetry.tws);
+        let (main_sheet, jib_sheet) = optimal_sheets(&cfg, sim.telemetry.awa, outhaul);
         Self {
             sim,
             controls: Controls {
                 main_sheet,
                 jib_sheet,
+                outhaul,
                 // Genoa rolled away: main alone, to isolate what the mainsail does.
                 furl: 1.0,
                 ..Default::default()

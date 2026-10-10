@@ -103,6 +103,10 @@ pub struct Controls {
     pub main_sheet: f64,
     /// Genoa sheet: 0 hard in, 1 fully eased.
     pub jib_sheet: f64,
+    /// Outhaul: 0 eased right off for a deep, powerful main, 1 hard out for a flat
+    /// one. Depth is power; flat is less heeling force and less drag. The call changes
+    /// with the breeze, which is why it is a control and not a constant.
+    pub outhaul: f64,
     /// Mainsail reef, 0 to 1 of the available reduction. Slab or in-mast reefing.
     pub reef: f64,
     /// Headsail furl, 0 fully unrolled to 1 rolled completely away. A roller-furling
@@ -114,9 +118,12 @@ pub struct Controls {
 }
 
 impl Controls {
-    /// Both sheets hard in, rudder centred.
+    /// Both sheets hard in, rudder centred, outhaul at a working upwind setting.
     pub fn close_hauled() -> Self {
-        Self::default()
+        Self {
+            outhaul: 0.5,
+            ..Default::default()
+        }
     }
 }
 

@@ -10,7 +10,7 @@
 
 use crate::boat::BoatConfig;
 use crate::hull::{frictional_resistance, induced_resistance, residuary_resistance, righting_arm};
-use crate::sail::{headsail_blanketing, sail_forces};
+use crate::sail::{camber_for_outhaul, headsail_blanketing, sail_forces, CAMBER_REFERENCE};
 use crate::state::{BoatState, Controls, Telemetry};
 use crate::units::{rad, wrap_pi, wrap_tau, GRAVITY, RHO_SEA};
 use crate::wind::{direction_of, shear_factor, WindField};
@@ -87,6 +87,7 @@ impl Simulation {
         let (main_awa, main_aws) = apparent_wind(&st, wind_ref, main_z_ce * heel_cos, velocity);
         let (jib_awa, jib_aws) = apparent_wind(&st, wind_ref, jib_z_ce * heel_cos, velocity);
 
+        let main_camber = camber_for_outhaul(controls.outhaul);
         let main = sail_forces(
             &cfg.main.profile,
             main_awa,
@@ -95,6 +96,7 @@ impl Simulation {
             main_area,
             st.heel,
             0.0,
+            main_camber,
         );
         let jib = sail_forces(
             &cfg.genoa.profile,
@@ -104,6 +106,9 @@ impl Simulation {
             jib_area,
             st.heel,
             headsail_blanketing(jib_awa),
+            // A headsail's depth is set by its sheet lead, not by an outhaul. Not yet
+            // a control, so it sits at a working shape.
+            CAMBER_REFERENCE,
         );
 
         let drive = main.drive + jib.drive;

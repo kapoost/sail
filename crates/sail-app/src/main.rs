@@ -39,6 +39,7 @@ fn main() {
         .insert_resource(hud::HudVisible(true))
         .init_resource::<hud::Polar>()
         .init_resource::<input::HelmSource>()
+        .init_resource::<input::Pilot>()
         .add_systems(
             Startup,
             (

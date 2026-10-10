@@ -14,6 +14,11 @@
 //! * The genoa sheet is a **rate**, because it is a winch you grind — and grinding
 //!   takes time you do not always have, which is the whole drama of a tack.
 //! * Reefing is **discrete**, because it is a job you do, not a dial you turn.
+//! * The outhaul is a **slow rate**, because it is a line you haul and cleat and then
+//!   leave alone for an hour.
+//!
+//! The autopilot disengages the moment you touch the helm. Real pilots have a clutch
+//! you have to throw, but a boat that fights your hand is worse than one that lets go.
 
 use bevy::prelude::*;
 use sail_core::prelude::*;
@@ -22,6 +27,13 @@ use crate::sim::Sim;
 
 /// Dead zone on the sticks. Analog hardware drifts, and a drifting helm is maddening.
 const STICK_DEADZONE: f32 = 0.12;
+
+/// The autopilot, as a Bevy resource.
+///
+/// A newtype only because `Resource` cannot be derived on a type from another crate —
+/// which is the small, honest tax for keeping `sail-core` free of engine types.
+#[derive(Resource, Default, Deref, DerefMut)]
+pub struct Pilot(pub Autopilot);
 
 /// Which device last touched the helm.
 ///
@@ -36,6 +48,9 @@ pub enum HelmSource {
 }
 /// How fast a sheet runs, in sheet fraction per second.
 const SHEET_RATE: f64 = 0.45;
+/// How fast the outhaul hauls, in fraction per second. Slow: it is a cleated line
+/// you adjust when the breeze changes, not something you play with.
+const OUTHAUL_RATE: f64 = 0.30;
 /// Fine sheet rate while Shift is held. Upwind the whole useful trim band is about a
 /// third of the travel, and placing it to a degree is the entire point of the game.
 const SHEET_FINE: f64 = 0.11;
@@ -62,12 +77,38 @@ pub fn gather(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
     mut helm_source: ResMut<HelmSource>,
+    mut pilot: ResMut<Pilot>,
 ) {
     let dt = time.delta_secs_f64();
     let cfg = sim.config();
     let max_rudder = cfg.max_rudder_angle;
 
     let pad = pads.iter().next();
+
+    // --- Autopilot -------------------------------------------------------------
+    let cycle = keys.just_pressed(KeyCode::KeyP)
+        || pad.is_some_and(|p| p.just_pressed(GamepadButton::Start));
+    if cycle {
+        match pilot.mode {
+            PilotMode::Standby => pilot.hold_heading(&sim.sim.state),
+            PilotMode::Heading(_) => {
+                let tm = sim.sim.telemetry;
+                pilot.hold_wind(&tm);
+            }
+            PilotMode::ApparentWind(_) => pilot.disengage(),
+        }
+    }
+    let nudge = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+        rad(5.0)
+    } else {
+        rad(1.0)
+    };
+    if keys.just_pressed(KeyCode::Period) {
+        pilot.adjust(nudge);
+    }
+    if keys.just_pressed(KeyCode::Comma) {
+        pilot.adjust(-nudge);
+    }
 
     // --- Helm -----------------------------------------------------------------
     // A gamepad stick is an absolute position, so when it owns the helm its centre
@@ -94,24 +135,36 @@ pub fn gather(
         *helm_source = HelmSource::Keyboard;
     }
 
-    match *helm_source {
-        HelmSource::Stick => sim.controls.rudder = stick as f64 * max_rudder,
-        HelmSource::Keyboard => {
-            if key_rate != 0.0 {
-                sim.controls.rudder =
-                    (sim.controls.rudder + key_rate * dt).clamp(-max_rudder, max_rudder);
-            } else if centring {
-                // Explicit, because an automatic one would undo every correction you
-                // make the moment you let go of the key.
-                let r = sim.controls.rudder;
-                let step = KEY_HELM_CENTRE * dt;
-                sim.controls.rudder = if r.abs() <= step {
-                    0.0
-                } else {
-                    r - step * r.signum()
-                };
+    // Touching the helm throws the pilot out.
+    if pilot.engaged() && (key_rate != 0.0 || centring || stick != 0.0) {
+        pilot.disengage();
+    }
+    if pilot.engaged() {
+        let state = sim.sim.state;
+        let tm = sim.sim.telemetry;
+        if let Some(r) = pilot.rudder(&cfg, &state, &tm, dt.max(1e-6)) {
+            sim.controls.rudder = r;
+        }
+    } else {
+        match *helm_source {
+            HelmSource::Stick => sim.controls.rudder = stick as f64 * max_rudder,
+            HelmSource::Keyboard => {
+                if key_rate != 0.0 {
+                    sim.controls.rudder =
+                        (sim.controls.rudder + key_rate * dt).clamp(-max_rudder, max_rudder);
+                } else if centring {
+                    // Explicit, because an automatic one would undo every correction you
+                    // make the moment you let go of the key.
+                    let r = sim.controls.rudder;
+                    let step = KEY_HELM_CENTRE * dt;
+                    sim.controls.rudder = if r.abs() <= step {
+                        0.0
+                    } else {
+                        r - step * r.signum()
+                    };
+                }
+                // Otherwise: left exactly where you put it.
             }
-            // Otherwise: left exactly where you put it.
         }
     }
 
@@ -156,6 +209,20 @@ pub fn gather(
     if winch != 0.0 {
         sim.controls.jib_sheet =
             (sim.controls.jib_sheet + winch.clamp(-1.0, 1.0) * sheet_rate * dt).clamp(0.0, 1.0);
+    }
+
+    // --- Outhaul: mainsail depth ----------------------------------------------
+    // Eased is deep and powerful, hauled out is flat with less heeling force. The
+    // right setting changes with the breeze, which is what makes it a control.
+    let mut outhaul_rate = 0.0;
+    if keys.pressed(KeyCode::Digit1) {
+        outhaul_rate -= OUTHAUL_RATE; // ease: deeper
+    }
+    if keys.pressed(KeyCode::Digit2) {
+        outhaul_rate += OUTHAUL_RATE; // haul out: flatter
+    }
+    if outhaul_rate != 0.0 {
+        sim.controls.outhaul = (sim.controls.outhaul + outhaul_rate * dt).clamp(0.0, 1.0);
     }
 
     // --- Headsail furl: a drum you roll, so a toggle plus a rate ---------------
@@ -214,7 +281,9 @@ pub fn gather(
         || pad.is_some_and(|p| p.just_pressed(GamepadButton::North));
     if assist {
         let awa = sim.sim.telemetry.awa;
-        let (m, j) = optimal_sheets(&cfg, awa);
+        let tws = sim.sim.telemetry.tws;
+        sim.controls.outhaul = optimal_outhaul(tws);
+        let (m, j) = optimal_sheets(&cfg, awa, sim.controls.outhaul);
         sim.controls.main_sheet = m;
         sim.controls.jib_sheet = j;
     }

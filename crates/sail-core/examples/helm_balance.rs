@@ -38,7 +38,7 @@ fn main() {
             let secs = 10.0;
             for _ in 0..(secs / SUBSTEP) as u64 {
                 if main < 0.0 {
-                    let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa);
+                    let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
                     controls.main_sheet = m;
                     controls.jib_sheet = j;
                 } else {

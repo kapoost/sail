@@ -16,6 +16,7 @@ use sail_core::prelude::*;
 use sail_core::wind::{SteadyWind, WindField};
 
 use crate::course::{clock, Course, Leg};
+use crate::input::Pilot;
 use crate::sim::Sim;
 
 #[derive(Resource, Default)]
@@ -68,6 +69,7 @@ pub fn draw(
     polar: Res<Polar>,
     visible: Res<HudVisible>,
     course: Res<Course>,
+    pilot: Res<Pilot>,
 ) -> Result {
     if !visible.0 {
         return Ok(());
@@ -131,7 +133,7 @@ pub fn draw(
                     ui,
                     "main",
                     c.main_sheet,
-                    cfg.main.profile.optimal_chord_angle(t.awa),
+                    cfg.main.profile.optimal_chord_angle(t.awa, t.main.camber),
                     &t.main,
                 );
                 ui.end_row();
@@ -139,15 +141,34 @@ pub fn draw(
                     ui,
                     "genoa",
                     c.jib_sheet,
-                    cfg.genoa.profile.optimal_chord_angle(t.awa),
+                    cfg.genoa.profile.optimal_chord_angle(t.awa, t.jib.camber),
                     &t.jib,
                 );
                 ui.end_row();
             });
 
+            // The outhaul is a shape control, not a sheet: depth is power, flat is
+            // less heeling force. Showing the draft as a percentage is how a sailmaker
+            // talks about it, and it is the number the player is actually changing.
+            let want_outhaul = optimal_outhaul(t.tws);
             ui.label(format!(
-                "reef {:.2}    engine {:+.2}    rudder {}",
+                "outhaul {:.2} ({:.0}% draft)   for this breeze {:.2} — {}",
+                c.outhaul,
+                t.main.camber * 100.0,
+                want_outhaul,
+                if (c.outhaul - want_outhaul).abs() < 0.12 {
+                    "about right"
+                } else if c.outhaul < want_outhaul {
+                    "too full, haul it out"
+                } else {
+                    "too flat, ease it off"
+                }
+            ));
+            ui.label(format!(
+                "main reef {:.2}    genoa furl {:.2}{}    engine {:+.2}    rudder {}",
                 c.reef,
+                c.furl,
+                if c.furl > 0.985 { " (rolled away)" } else { "" },
                 c.throttle,
                 if t.rudder_stalled > 0.4 {
                     "STALLED"
@@ -155,6 +176,37 @@ pub fn draw(
                     "biting"
                 }
             ));
+
+            ui.separator();
+            match pilot.target_label() {
+                None => {
+                    ui.label(egui::RichText::new("pilot  standby — hand steering").weak());
+                }
+                Some(("apparent wind", target)) => {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "vane   holding {:.0} apparent   (now {:.0})",
+                            deg(target).abs(),
+                            deg(t.awa).abs()
+                        ))
+                        .color(egui::Color32::from_rgb(140, 210, 150))
+                        .strong(),
+                    );
+                    ui.small("'.' closer to the wind    ',' further off");
+                }
+                Some((_, target)) => {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "pilot  holding {:03.0}   (now {:03.0})",
+                            deg(target),
+                            deg(sim.sim.state.heading)
+                        ))
+                        .color(egui::Color32::from_rgb(120, 190, 240))
+                        .strong(),
+                    );
+                    ui.small("'.' to starboard    ',' to port");
+                }
+            }
 
             ui.separator();
             ui.label(egui::RichText::new("forces").strong());
@@ -177,7 +229,10 @@ pub fn draw(
                  W / S   mainsheet: haul in / ease\n\
                  E / Q   genoa: grind in / ease\n\
                  Shift   fine, on both helm and sheets\n\
-                 G       roll the genoa away / back out   [ ]  part furl\n\
+                 1 / 2   outhaul: ease for depth / haul out for flat\n\
+                 G       roll the genoa away / back out    [ ]  part furl\n\
+                 P       pilot: standby / hold course / hold wind angle\n\
+                 , / .   nudge the pilot's target (Shift for five)\n\
                  R / F   reef in / shake out      Z / X  engine astern / ahead\n\
                  T  snap to good trim    C  camera    L  new lap    Tab  hide panel",
             );
