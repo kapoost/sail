@@ -287,10 +287,21 @@ pub fn update(
                 let working = side * lee > 0.0;
                 // Only the working sheet is drawn taut from the clew; a furled genoa
                 // has no clew to pull on at all.
-                let clew = Vec3::new(
-                    jib_angle.sin() * 4.9 * (1.0 - furled),
-                    DECK + 0.25,
-                    -(cfg.loa as f32) * 0.46 + jib_angle.cos() * 4.9 * (1.0 - furled),
+                // The same solve the sail uses, so the rope ends where the sail's
+                // corner is rather than near it.
+                let out = 1.0 - furled;
+                let tack = Vec3::new(0.0, DECK + 0.25, -(cfg.loa as f32) * 0.46);
+                let car_at = Vec3::new(
+                    side * cfg.beam as f32 * crate::boat::TRACK_X,
+                    DECK + 0.09,
+                    crate::boat::car_position(sim.controls.genoa_car as f32),
+                );
+                let clew = crate::boat::genoa_clew(
+                    tack,
+                    jib_angle,
+                    4.9 * out,
+                    car_at,
+                    crate::boat::sheet_length(sim.controls.jib_sheet as f32),
                 );
                 Span {
                     // The lazy sheet runs from the same clew but is not pulling, so it
@@ -298,11 +309,7 @@ pub fn update(
                     from: clew,
                     // Led through the car itself, so the rope and the fitting cannot
                     // disagree about where the sheet is being turned.
-                    to: Vec3::new(
-                        side * cfg.beam as f32 * crate::boat::TRACK_X,
-                        DECK + 0.09,
-                        crate::boat::car_position(sim.controls.genoa_car as f32),
-                    ),
+                    to: car_at,
                     tension: if working {
                         jib_load * (1.0 - t.jib.coeffs.luffing as f32) * (1.0 - furled)
                     } else {

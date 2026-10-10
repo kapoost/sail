@@ -66,6 +66,15 @@ pub struct Telltale {
 }
 
 const MAST_FOOT_Z: f32 = -1.8;
+/// How high a headsail's clew floats when nothing is pulling it down, metres above
+/// the tack. The sail hangs from the stay and the wind holds the foot up; only the
+/// sheet brings it down.
+const CLEW_FREE_RISE: f32 = 2.6;
+/// And how low the sheet can drag it before the foot is on the deck.
+const CLEW_MIN_RISE: f32 = 0.35;
+/// Sheet length from the clew to the car, hauled right in and eased right out.
+const SHEET_SHORT: f32 = 2.9;
+const SHEET_LONG: f32 = 7.4;
 const DECK: f32 = 0.95;
 
 pub fn setup(
@@ -315,27 +324,53 @@ pub fn update_sails(
             Visibility::Inherited
         };
         let (forces, geometry) = match surface.which {
-            Sail::Main => (
-                t_.main,
-                SailGeometry {
-                    // Luff up the mast, foot along the boom.
-                    tack: Vec3::new(0.0, DECK + 1.25, MAST_FOOT_Z),
-                    head: Vec3::new(0.0, DECK + 14.6, MAST_FOOT_Z),
-                    foot_length: 4.2 * (1.0 - 0.35 * sim.controls.reef as f32),
-                    luff_fraction: 1.0 - 0.45 * sim.controls.reef as f32,
-                },
-            ),
+            Sail::Main => {
+                let reef = sim.controls.reef as f32;
+                let foot = 4.2 * (1.0 - 0.35 * reef);
+                let boom = side * t_.main.chord_angle as f32;
+                let tack = Vec3::new(0.0, DECK + 1.25, MAST_FOOT_Z);
+                (
+                    t_.main,
+                    SailGeometry {
+                        tack,
+                        // Reefing pulls the head down the mast, not the foot up.
+                        head: Vec3::new(
+                            0.0,
+                            DECK + 1.25 + (14.6 - 1.25) * (1.0 - 0.45 * reef),
+                            MAST_FOOT_Z,
+                        ),
+                        // The clew is the boom end: level with the tack, because the
+                        // boom is level. That is what made the horizontal-chord
+                        // shortcut look right until a headsail turned up.
+                        clew: tack + Vec3::new(boom.sin() * foot, 0.0, boom.cos() * foot),
+                    },
+                )
+            }
             Sail::Genoa => {
                 // A rolling genoa loses area from its foot and leech as the drum
                 // turns, so it visibly shrinks on the stay rather than vanishing.
                 let out = 1.0 - sim.controls.furl as f32;
+                let foot = 4.9 * out;
+                let angle = side * t_.jib.chord_angle as f32;
+                let tack = Vec3::new(0.0, DECK + 0.25, -(cfg.loa as f32) * 0.46);
+                let head = Vec3::new(0.0, DECK + 13.4, MAST_FOOT_Z);
+                let car = Vec3::new(
+                    side * cfg.beam as f32 * TRACK_X,
+                    DECK + 0.09,
+                    car_position(sim.controls.genoa_car as f32),
+                );
                 (
                     t_.jib,
                     SailGeometry {
-                        tack: Vec3::new(0.0, DECK + 0.25, -(cfg.loa as f32) * 0.46),
-                        head: Vec3::new(0.0, DECK + 13.4, MAST_FOOT_Z),
-                        foot_length: 4.9 * out,
-                        luff_fraction: 0.35 + 0.65 * out,
+                        tack,
+                        head: tack.lerp(head, 0.35 + 0.65 * out),
+                        clew: genoa_clew(
+                            tack,
+                            angle,
+                            foot,
+                            car,
+                            sheet_length(sim.controls.jib_sheet as f32),
+                        ),
                     },
                 )
             }
@@ -349,7 +384,6 @@ pub fn update_sails(
             build_sail(
                 &mut mesh,
                 &geometry,
-                side * forces.chord_angle as f32,
                 twist,
                 forces.coeffs.luffing as f32,
                 forces.camber as f32,
@@ -359,11 +393,58 @@ pub fn update_sails(
     }
 }
 
+/// Sheet length from the clew to the car for a given sheet setting.
+pub fn sheet_length(jib_sheet: f32) -> f32 {
+    SHEET_SHORT + (SHEET_LONG - SHEET_SHORT) * jib_sheet.clamp(0.0, 1.0)
+}
+
+/// Where a headsail's clew actually ends up.
+///
+/// Not at a fixed height. The clew hangs from the stay with the wind under the foot,
+/// and *nothing pulls it down* until the sheet from the car comes taut — which is
+/// exactly what you watch happen when you grind one on. So: the horizontal bearing
+/// comes from the trim, the foot cannot stretch, and the height is whatever satisfies
+/// the sheet's length between the clew and the car.
+///
+/// Solved by bisection on the height, because the distance from the car falls
+/// monotonically as the clew comes down and a dozen halvings land well inside a
+/// millimetre. If even the free-floating clew is closer to the car than the sheet is
+/// long, the sheet is slack and the clew simply floats — which is the state the sail
+/// is in when it is flogging, and it should look like it.
+///
+/// It also makes the car's effect visible, which was the point of drawing the track
+/// at all: run the car aft and the clew is dragged down and aft, flattening the foot
+/// and opening the leech; run it forward and the pull comes down and inboard,
+/// closing the leech. That is the whole of headsail trim, and now you can see it.
+pub fn genoa_clew(tack: Vec3, angle: f32, foot: f32, car: Vec3, sheet: f32) -> Vec3 {
+    let horizontal = Vec3::new(angle.sin() * foot, 0.0, angle.cos() * foot);
+    let at = |rise: f32| tack + horizontal + Vec3::Y * rise;
+    if (at(CLEW_FREE_RISE) - car).length() <= sheet {
+        return at(CLEW_FREE_RISE);
+    }
+    let (mut low, mut high) = (CLEW_MIN_RISE, CLEW_FREE_RISE);
+    for _ in 0..12 {
+        let mid = 0.5 * (low + high);
+        if (at(mid) - car).length() > sheet {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    at(0.5 * (low + high))
+}
+
+/// A sail is three corners and the surface between them.
+///
+/// The first version described it as a luff plus a *horizontal* chord, which is fine
+/// for a mainsail — its foot lies along a level boom — and simply wrong for a
+/// headsail, whose foot is a free curve rising from the tack to a clew well above the
+/// deck. The result was a genoa with its clew glued to the deck, dragging along it.
+/// Three corners is both more correct and less code.
 struct SailGeometry {
     tack: Vec3,
     head: Vec3,
-    foot_length: f32,
-    luff_fraction: f32,
+    clew: Vec3,
 }
 
 const SAIL_U: usize = 9;
@@ -395,63 +476,56 @@ fn sail_indices() -> Vec<u32> {
     idx
 }
 
-fn build_sail(
-    mesh: &mut Mesh,
-    g: &SailGeometry,
-    chord_angle: f32,
-    twist: f32,
-    luffing: f32,
-    draft: f32,
-    now: f32,
-) {
+fn build_sail(mesh: &mut Mesh, g: &SailGeometry, twist: f32, luffing: f32, draft: f32, now: f32) {
     let mut positions = Vec::with_capacity(SAIL_U * SAIL_V);
     let mut uvs = Vec::with_capacity(SAIL_U * SAIL_V);
 
-    let leeward = chord_angle.signum();
-    // Draft as trimmed. Wiring this to the real camber rather than a constant is what
-    // makes the outhaul visible: haul it out and you watch the sail go flat.
-    let camber = draft * (1.0 - luffing);
-    // The outhaul tensions the *foot*. It flattens the bottom of the sail hard and the
-    // top barely at all, so showing one uniform depth hid most of what the control
-    // does — the change was there but spread so thinly it was invisible. The reference
-    // depth is the shape the coefficients are tuned at; the deviation from it is
-    // concentrated low down, where the outhaul actually pulls.
-    let reference = sail_core::sail::CAMBER_REFERENCE as f32;
-    let deviation = camber - reference;
+    // Which side the sail bellies towards: away from the chord, on the leeward hand.
+    let chord = g.clew - g.tack;
+    let leeward = if chord.x >= 0.0 { 1.0 } else { -1.0 };
 
-    for ui in 0..SAIL_U {
-        let u = ui as f32 / (SAIL_U - 1) as f32;
-        let luff_point = g.tack.lerp(g.head, u * g.luff_fraction);
-        // Chord tapers to nothing at the head.
-        let chord = g.foot_length * (1.0 - u).powf(0.85);
-        // Twist: the leech falls off aloft, so the upper sail is eased relative to the
-        // boom. Zero at the foot, full at the head — which is what makes the vang a
-        // visible control rather than a number in a panel.
-        let local_angle = chord_angle + twist * u.powf(1.15);
+    let reference = sail_core::sail::CAMBER_REFERENCE as f32;
+    let deviation = draft * (1.0 - luffing) - reference;
+
+    for ui_ in 0..SAIL_U {
+        let u = ui_ as f32 / (SAIL_U - 1) as f32;
+        // Luff and leech both run to the head, so the chord closes to nothing there
+        // on its own — no taper fudge required.
+        let luff = g.tack.lerp(g.head, u);
+        let mut leech = g.clew.lerp(g.head, u);
+
+        // Twist: the leech falls off aloft, swinging about the luff at that height.
+        // Zero at the foot, full at the head, which is what makes the vang visible.
+        if twist.abs() > 1e-5 {
+            let a = twist * u.powf(1.15);
+            let arm = leech - luff;
+            let (sin, cos) = (a.sin(), a.cos());
+            leech = luff + Vec3::new(arm.x * cos + arm.z * sin, arm.y, -arm.x * sin + arm.z * cos);
+        }
+
+        let span = leech - luff;
+        let chord_length = span.length().max(1e-4);
+        // Camber acts normal to the chord and across the sail, which for a surface
+        // this upright means the horizontal perpendicular.
+        let normal = span.normalize().cross(Vec3::Y).normalize_or_zero() * leeward;
+        // The outhaul tensions the foot, so its share of the depth sits low down.
+        let foot_weight = (1.0 - u).powf(1.6);
+        let local_camber = reference + deviation * (0.35 + 1.65 * foot_weight);
+
         for vi in 0..SAIL_V {
             let v = vi as f32 / (SAIL_V - 1) as f32;
-            // Along the boom, rotated by the sheet.
-            let along = Vec3::new(
-                chord_angle.sin() * v * chord,
-                0.0,
-                chord_angle.cos() * v * chord,
-            );
-            // Bulge normal to the chord, towards leeward. The outhaul's share of the
-            // depth is weighted towards the foot, which is where it pulls.
-            let foot_weight = (1.0 - u).powf(1.6);
-            let local_camber = reference + deviation * (0.35 + 1.65 * foot_weight);
-            let belly = (std::f32::consts::PI * v).sin() * local_camber * chord;
-            let normal = Vec3::new(local_angle.cos(), 0.0, -local_angle.sin()) * leeward;
-            // A luffing sail shakes along its free edge and nowhere else. It is bolted
-            // to the mast up the luff and to the boom along the foot, and the clew is
-            // pinned to the boom end by the outhaul — so the shaking has to vanish at
-            // v = 0 (the luff), at u = 0 (the foot), and therefore at the clew, which
-            // is the corner of the two. Scaling it by v alone let the clew fly about
-            // on a line that cannot move at all.
+            let belly = (std::f32::consts::PI * v).sin() * local_camber * chord_length;
+            // A luffing sail shakes along its free edge only: it is bolted to the mast
+            // up the luff and to the boom along the foot, and the clew is pinned by
+            // the outhaul, so the shaking vanishes at v = 0, at u = 0, and therefore
+            // at the corner where the two meet.
             let free_edge = v * u.powf(0.65);
-            let flap =
-                (now * 9.0 + u * 5.0 + v * 3.0).sin() * luffing * 0.42 * free_edge * chord.max(0.4);
-            positions.push(luff_point + along + normal * (belly + flap));
+            let flap = (now * 9.0 + u * 5.0 + v * 3.0).sin()
+                * luffing
+                * 0.42
+                * free_edge
+                * chord_length.max(0.4);
+            positions.push(luff.lerp(leech, v) + normal * (belly + flap));
             uvs.push(Vec2::new(v, u));
         }
     }

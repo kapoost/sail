@@ -293,15 +293,6 @@ pub fn draw(
                                 .monospace()
                                 .size(10.0),
                         );
-                        // Setting a roller genoa *is* easing the furling line, which is
-                        // correct and gives the console no obvious handle for "put the
-                        // headsail up". These say it in the words a crew would use.
-                        let furled = sim.controls.furl > 0.5;
-                        if small_button(ui, if furled { "SET GENOA" } else { "FURL GENOA" })
-                            .clicked()
-                        {
-                            sim.controls.furl = if furled { 0.0 } else { 1.0 };
-                        }
                         if small_button(ui, "TRIM TO BEST").clicked() {
                             let (m, j) = optimal_sheets(&cfg, telemetry.awa, sim.controls.outhaul);
                             sim.controls.main_sheet = m;
