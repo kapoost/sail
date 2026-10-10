@@ -81,7 +81,6 @@ fn main() {
                     boat::update_boom,
                     boat::update_windex,
                     boat::update_genoa_cars,
-                    boat::update_traveller_car,
                     boat::update_telltales,
                     boat::update_sails,
                     course::update,

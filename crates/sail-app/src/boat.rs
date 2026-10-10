@@ -30,10 +30,6 @@ pub struct Windex;
 
 /// The genoa sheet car, which slides fore and aft along a track on the side deck.
 /// `starboard` picks which of the two it is.
-/// The mainsheet car. Unlike the genoa cars it runs *across* the boat.
-#[derive(Component)]
-pub struct TravellerCar;
-
 #[derive(Component)]
 pub struct GenoaCar {
     pub starboard: bool,
@@ -46,21 +42,6 @@ pub const TRACK_FORWARD: f32 = -0.80;
 pub const TRACK_AFT: f32 = 2.20;
 
 /// Fore-and-aft position of the car for a given control setting.
-/// Where the mainsheet traveller's track lies, fore and aft.
-///
-/// On the cockpit bridge, under the aft third of the boom, which is where a thirty-four
-/// footer puts it.
-pub const TRAVELLER_Z: f32 = 1.7;
-
-/// Where the mainsheet car sits on its track, in metres from the centreline.
-///
-/// Signed exactly like the control: negative is the port end. The car is the point the
-/// sheet pulls the boom end towards, so this is not decoration — it is the geometry the
-/// force model is using, and seeing it move is how the control teaches itself.
-pub fn traveller_position(traveller: f32, beam: f32) -> f32 {
-    traveller.clamp(-1.0, 1.0) * sail_core::sail::TRAVELLER_HALF as f32 * beam
-}
-
 pub fn car_position(car: f32) -> f32 {
     TRACK_FORWARD + car.clamp(0.0, 1.0) * (TRACK_AFT - TRACK_FORWARD)
 }
@@ -221,23 +202,6 @@ pub fn setup(
                     Transform::default(),
                 ));
             }
-            // The mainsheet traveller: a track athwartships, and the car on it that
-            // decides which way the sheet pulls the boom end. It is the one trim
-            // control whose whole point is the direction of a pull rather than the
-            // length of a line, so it has to be visible from the helm.
-            let beam = cfg.beam as f32;
-            let traveller_span = 2.0 * sail_core::sail::TRAVELLER_HALF as f32 * beam;
-            b.spawn((
-                Mesh3d(meshes.add(Cuboid::new(traveller_span, 0.035, 0.055))),
-                MeshMaterial3d(spar_mat.clone()),
-                Transform::from_xyz(0.0, DECK + 0.018, TRAVELLER_Z),
-            ));
-            b.spawn((
-                TravellerCar,
-                Mesh3d(meshes.add(Cuboid::new(0.18, 0.08, 0.1))),
-                MeshMaterial3d(underwater_mat.clone()),
-                Transform::from_xyz(0.0, DECK + 0.062, TRAVELLER_Z),
-            ));
             // Genoa tracks and their cars, one each side. The car is the headsail's
             // only shape control, so it has to be something you can watch move —
             // a number on a panel is not a trim you can learn by eye.
@@ -320,14 +284,6 @@ pub fn update_genoa_cars(sim: Res<Sim>, mut q: Query<(&GenoaCar, &mut Transform)
     for (car, mut transform) in &mut q {
         let side = if car.starboard { 1.0 } else { -1.0 };
         transform.translation = Vec3::new(side * cfg.beam as f32 * TRACK_X, DECK + 0.055, z);
-    }
-}
-
-/// Slide the mainsheet car across to wherever the control says it is.
-pub fn update_traveller_car(sim: Res<Sim>, mut q: Query<&mut Transform, With<TravellerCar>>) {
-    let x = traveller_position(sim.controls.traveller as f32, sim.config().beam as f32);
-    for mut transform in &mut q {
-        transform.translation = Vec3::new(x, DECK + 0.062, TRAVELLER_Z);
     }
 }
 

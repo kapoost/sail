@@ -193,18 +193,6 @@ pub fn draw(
                     separator(ui);
                     ui.add_space(10.0);
 
-                    // The traveller, laid out across because that is how it moves. A
-                    // vertical lever would be a lie about a fitting whose entire meaning
-                    // is which side of the boat it is standing on.
-                    let mut traveller = sim.controls.traveller;
-                    if traveller_track(ui, &mut traveller, -telemetry.awa.signum()) {
-                        sim.controls.traveller = traveller;
-                    }
-
-                    ui.add_space(10.0);
-                    separator(ui);
-                    ui.add_space(10.0);
-
                     // The clutch bank: one winch, one line at a time.
                     ui.vertical(|ui| {
                         ui.label(
@@ -609,79 +597,6 @@ fn lever(
                 .color(state.1)
                 .monospace()
                 .size(9.0),
-        );
-        changed
-    })
-    .inner
-}
-
-/// The mainsheet traveller: a car on an athwartships track, dragged with the mouse.
-///
-/// Drawn across rather than up and down, because that is the direction the fitting
-/// moves and the direction that matters: a car at the port end means something
-/// completely different on one tack than the other. The leeward half of the track is
-/// marked, so you can see at a glance which way is "down" right now — that is the
-/// orientation a sailor has from the heel of the boat and a player does not.
-fn traveller_track(ui: &mut egui::Ui, value: &mut f64, lee: f64) -> bool {
-    ui.vertical(|ui| {
-        ui.label(
-            egui::RichText::new("TRAVELLER")
-                .color(paint::LABEL)
-                .monospace()
-                .size(10.0),
-        );
-        let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(124.0, 26.0), egui::Sense::click_and_drag());
-        let p = ui.painter();
-        p.rect_filled(rect, 3.0, paint::TRACK);
-
-        let span = rect.width() - 16.0;
-        let x_of = |v: f64| rect.center().x + v as f32 * span * 0.5;
-
-        // Shade the leeward half, so "drop the traveller" has a direction on screen.
-        if lee != 0.0 {
-            let (a, b) = if lee > 0.0 {
-                (rect.center().x, rect.right() - 2.0)
-            } else {
-                (rect.left() + 2.0, rect.center().x)
-            };
-            p.rect_filled(
-                egui::Rect::from_min_max(
-                    egui::pos2(a, rect.top() + 2.0),
-                    egui::pos2(b, rect.bottom() - 2.0),
-                ),
-                2.0,
-                paint::BEZEL,
-            );
-        }
-        // Centreline mark: amidships is a setting you come back to.
-        p.line_segment(
-            [
-                egui::pos2(rect.center().x, rect.top() + 3.0),
-                egui::pos2(rect.center().x, rect.bottom() - 3.0),
-            ],
-            egui::Stroke::new(1.0, paint::LABEL),
-        );
-
-        let changed = if response.dragged() {
-            if let Some(pos) = response.interact_pointer_pos() {
-                *value = (((pos.x - rect.center().x) / (span * 0.5)) as f64).clamp(-1.0, 1.0);
-            }
-            true
-        } else {
-            false
-        };
-
-        let car = egui::Rect::from_center_size(
-            egui::pos2(x_of(*value), rect.center().y),
-            egui::vec2(16.0, rect.height() - 8.0),
-        );
-        p.rect_filled(car, 2.0, paint::FACE);
-        p.rect_stroke(
-            car,
-            2.0,
-            egui::Stroke::new(1.0, paint::LIVE),
-            egui::StrokeKind::Inside,
         );
         changed
     })

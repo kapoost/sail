@@ -1787,60 +1787,6 @@ where
     (sim.telemetry.stw, sim.state.heel)
 }
 
-/// The mainsheet traveller has to be a different control from the mainsheet, or it is
-/// decoration on the panel.
-///
-/// Both routes open the boom to the same angle. The one that holds the sheet and slides
-/// the car to leeward must keep the leech tighter, because the sheet stays nearly
-/// vertical under the boom end instead of lying over at an angle — and a tighter leech
-/// is a sail that is still working at the head. Measured in `examples/traveller.rs`,
-/// where the difference is worth about a knot of VMG at the widest angle.
-#[test]
-fn traveller_opens_the_boom_without_losing_the_leech() {
-    use sail_core::sail::{sheet_leech_pull, traveller_opening, twist_for_leech};
-
-    let cfg = BoatConfig::charter_sloop_34();
-    let lee = -1.0;
-    let base = cfg.main.profile.chord_angle(0.0);
-
-    // Hauling the car up to windward cannot push the boom past the centreline.
-    assert_eq!(traveller_opening(1.0, lee, cfg.beam), 0.0);
-
-    // Dropping it to leeward opens the boom, by more the further it goes.
-    let half = traveller_opening(-0.5, lee, cfg.beam);
-    let full = traveller_opening(-1.0, lee, cfg.beam);
-    assert!(
-        half > rad(0.5) && full > half,
-        "traveller must open the boom: half {:.2} deg, full {:.2} deg",
-        deg(half),
-        deg(full)
-    );
-
-    // Same boom angle, two ways of getting there. It has to be a boom angle wide
-    // enough for the sheet's geometry to matter at all: with the boom near the
-    // centreline the sheet is already vertical and there is nothing for the car to
-    // improve, which is exactly why nobody touches the traveller close-hauled.
-    let boom = rad(35.0);
-    let by_car = twist_for_leech(0.0, sheet_leech_pull(boom, -1.0, lee, cfg.beam));
-    let by_sheet = twist_for_leech(0.0, sheet_leech_pull(boom, 0.0, lee, cfg.beam));
-    assert!(
-        by_car < by_sheet - rad(1.0),
-        "the car must hold the leech better than easing the sheet: \
-         car {:.2} deg of twist, sheet {:.2} deg",
-        deg(by_car),
-        deg(by_sheet)
-    );
-
-    // And with the car amidships the geometry must reproduce the cosine the old model
-    // asserted, or the whole sail calibration has quietly moved.
-    let centred = sheet_leech_pull(base, 0.0, lee, cfg.beam);
-    assert!(
-        (centred - base.cos()).abs() < 0.05,
-        "centred traveller should still be close to cos(boom): {centred:.3} vs {:.3}",
-        base.cos()
-    );
-}
-
 /// A headsail cannot be sheeted to the centreline, because its sheet is led to a block
 /// on a track bolted to the side deck.
 ///
@@ -1848,7 +1794,7 @@ fn traveller_opens_the_boom_without_losing_the_leech() {
 /// which upwind is an angle of attack equal to the entire apparent wind angle — past
 /// the optimum and into soft stall. The boat was then fastest with the genoa *eased*,
 /// which is the opposite of how anyone sails, and it made the winch feel backwards.
-/// The mainsail's floor really is zero: the traveller can bring the boom amidships.
+/// The mainsail's floor really is zero: its sheet leads to the centreline.
 #[test]
 fn a_headsail_cannot_be_sheeted_past_its_lead() {
     let cfg = BoatConfig::charter_sloop_34();
@@ -1862,7 +1808,7 @@ fn a_headsail_cannot_be_sheeted_past_its_lead() {
     assert_eq!(
         cfg.main.profile.chord_angle(0.0),
         0.0,
-        "the traveller can bring the boom to the centreline"
+        "the mainsheet leads to the centreline, so the boom can come right in"
     );
 
     // Round-tripping through the sheet mapping must still land where it started, or

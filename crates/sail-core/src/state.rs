@@ -121,14 +121,6 @@ pub struct Controls {
     /// Boom vang, 0 eased right off to 1 hard on. Holds the leech down, and therefore
     /// controls twist — but only once the boom is out far enough that the mainsheet
     /// has stopped doing the job itself.
-    /// Mainsheet traveller, signed: −1 is the port end of the track, +1 starboard.
-    ///
-    /// The car runs *across* the boat and decides which way the sheet pulls the boom
-    /// end, so it sets the angle and the leech tension together — see
-    /// [`crate::sail::traveller_opening`]. Signed rather than windward/leeward because
-    /// that is what the track is: a piece of hardware with two ends, and in a tack it
-    /// is on the wrong side until somebody moves it.
-    pub traveller: f64,
     pub vang: f64,
     /// Mainsail reef, 0 to 1 of the available reduction. Slab or in-mast reefing.
     pub reef: f64,
@@ -156,7 +148,6 @@ impl Default for Controls {
             jib_sheet: 0.0,
             outhaul: 0.5,
             vang: 0.6,
-            traveller: 0.0,
             genoa_car: 0.4,
             reef: 0.0,
             furl: 0.0,
