@@ -31,6 +31,23 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 /// The conditions are drawn, not chosen: see `weather.rs`. `SAIL_SEED` in the
 /// environment pins the draw, so a day worth sailing again, or one that broke
 /// something, can be had back exactly.
+/// Where to look for `assets/`.
+///
+/// Bevy defaults to a directory beside the executable, which is right for something
+/// shipped and wrong for `./target/release/sail-app`, where it finds nothing and the
+/// hull silently fails to appear. So: beside the binary if it is there, otherwise the
+/// workspace, whose path is known at compile time.
+fn asset_root() -> String {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(beside) = exe.parent().map(|d| d.join("assets")) {
+            if beside.is_dir() {
+                return beside.to_string_lossy().into_owned();
+            }
+        }
+    }
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").to_string()
+}
+
 fn main() {
     let seed = std::env::var("SAIL_SEED")
         .ok()
@@ -47,14 +64,21 @@ fn main() {
     println!("forecast: {}", weather.report());
 
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "sail".into(),
-                resolution: (1440u32, 880u32).into(),
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(AssetPlugin {
+                    file_path: asset_root(),
+                    ..default()
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "sail".into(),
+                        resolution: (1440u32, 880u32).into(),
+                        ..default()
+                    }),
+                    ..default()
+                }),
+        )
         .add_plugins(EguiPlugin::default())
         .add_plugins(sound::plugin)
         .insert_resource(sim::Sim::new(weather))
