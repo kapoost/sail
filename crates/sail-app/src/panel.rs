@@ -101,6 +101,11 @@ pub fn draw(
                     ui.vertical(|ui| {
                         gauge(ui, "LOG", ms_to_kn(telemetry.stw), 0.0, 10.0, "kn");
                         gauge(ui, "WIND", ms_to_kn(telemetry.aws), 0.0, 30.0, "kn");
+                        // The sea you were handed. Not an instrument a boat carries,
+                        // but the forecast is, and knowing whether the slamming is a
+                        // metre or two is the difference between carrying on and
+                        // bearing away.
+                        gauge(ui, "SEA", sim.weather.hs, 0.0, 4.0, "m");
                     });
                 });
 

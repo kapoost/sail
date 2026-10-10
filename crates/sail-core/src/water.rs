@@ -30,6 +30,30 @@ pub trait WaterSurface: Send + Sync {
     /// surface normal, so this is what tilts it in a seaway.
     fn slope(&self, pos: DVec2, t: f64) -> DVec2;
 
+    /// Surface elevation with everything shorter than `min_wavelength` taken out.
+    ///
+    /// For *drawing*, never for physics. A surface mesh can only carry wavelengths
+    /// longer than twice its vertex spacing; anything shorter does not disappear, it
+    /// aliases, and the aliases crawl as the mesh slides along under the boat. On a
+    /// grid that is deliberately coarse in the distance — which is the right way to
+    /// spend vertices — that crawl is the whole far field shimmering, and no amount of
+    /// smoothing downstream recovers it, because the information was destroyed at the
+    /// sample. The fix has to be at the sample: do not ask for detail the mesh cannot
+    /// hold.
+    ///
+    /// The default ignores the limit, which is correct for a flat sea and for any
+    /// surface whose content is already long.
+    fn height_resolved(&self, pos: DVec2, t: f64, min_wavelength: f64) -> f64 {
+        let _ = min_wavelength;
+        self.height(pos, t)
+    }
+
+    /// Slope with the same band limit, so the shading matches the geometry.
+    fn slope_resolved(&self, pos: DVec2, t: f64, min_wavelength: f64) -> DVec2 {
+        let _ = min_wavelength;
+        self.slope(pos, t)
+    }
+
     /// Water velocity at a depth below the surface, metres per second.
     ///
     /// Orbital motion decays as `exp(-k z)`, and steeply: each component dies off on
@@ -120,6 +144,22 @@ pub struct WaveComponent {
 }
 
 impl WaveComponent {
+    /// How much of this component a mesh of the given resolution can actually carry.
+    ///
+    /// One at twice the limit and above, rolled smoothly to nothing as the wavelength
+    /// approaches it. Smooth rather than a hard cut because a component switching off
+    /// between one vertex ring and the next would draw a visible seam in the water —
+    /// trading a shimmer for a scar.
+    fn resolved(&self, min_wavelength: f64) -> f64 {
+        if min_wavelength <= 0.0 {
+            return 1.0;
+        }
+        let wavelength = std::f64::consts::TAU / self.k.max(1e-9);
+        let t = ((wavelength / min_wavelength) - 1.0).clamp(0.0, 1.0);
+        // Smoothstep, so the roll-off has no corner in it.
+        t * t * (3.0 - 2.0 * t)
+    }
+
     /// Build from a period and a direction, letting dispersion fix the wavelength.
     pub fn from_period(amplitude: f64, period: f64, direction: f64, phase: f64) -> Self {
         let omega = std::f64::consts::TAU / period.max(0.3);
@@ -214,6 +254,22 @@ impl WaterSurface for WindSea {
             .iter()
             .map(|c| c.amplitude * c.theta(pos, t).cos())
             .sum()
+    }
+
+    fn height_resolved(&self, pos: DVec2, t: f64, min_wavelength: f64) -> f64 {
+        self.components
+            .iter()
+            .map(|c| c.amplitude * c.resolved(min_wavelength) * c.theta(pos, t).cos())
+            .sum()
+    }
+
+    fn slope_resolved(&self, pos: DVec2, t: f64, min_wavelength: f64) -> DVec2 {
+        let mut s = DVec2::ZERO;
+        for c in &self.components {
+            let d = -c.amplitude * c.resolved(min_wavelength) * c.k * c.theta(pos, t).sin();
+            s += c.direction * d;
+        }
+        s
     }
 
     fn velocity(&self, pos: DVec2, t: f64) -> DVec3 {

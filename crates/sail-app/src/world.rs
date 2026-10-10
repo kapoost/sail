@@ -34,6 +34,16 @@ pub struct SeaSurface {
     mesh: Handle<Mesh>,
     /// Grid offsets in the Bevy horizontal plane, metres, precomputed once.
     offsets: Vec<Vec2>,
+    /// Shortest wavelength this vertex can carry: twice its spacing from its
+    /// neighbours, by Nyquist. Precomputed, because the grid never changes shape.
+    ///
+    /// The grid is graded — a vertex every 0.7 m under the boat, every 25 m at the
+    /// rim — which is the right way to spend a hundred and sixty squared vertices.
+    /// But a 4.5 second sea has a 32 metre wavelength, and 32 metres sampled every 25
+    /// is not a wave, it is noise that crawls as the grid slides along underneath the
+    /// boat. That crawl was the shimmer in the distance. Asking the water only for
+    /// what each vertex can actually hold removes it at the source.
+    resolutions: Vec<f64>,
 }
 
 pub fn setup(
@@ -95,9 +105,20 @@ pub fn setup(
     };
 
     let mut offsets = Vec::with_capacity(GRID * GRID);
+    // Spacing to the wider neighbour, per axis; the coarser axis decides.
+    let spacing = |i: usize| -> f32 {
+        let lo = grade(i.saturating_sub(1));
+        let hi = grade((i + 1).min(GRID - 1));
+        let span = hi - lo;
+        let steps = ((i + 1).min(GRID - 1) - i.saturating_sub(1)).max(1) as f32;
+        span / steps
+    };
+    let mut resolutions = Vec::with_capacity(GRID * GRID);
     for ix in 0..GRID {
         for iz in 0..GRID {
             offsets.push(Vec2::new(grade(ix), grade(iz)));
+            let coarsest = spacing(ix).max(spacing(iz));
+            resolutions.push(2.0 * coarsest as f64);
         }
     }
 
@@ -129,6 +150,7 @@ pub fn setup(
         SeaSurface {
             mesh: handle.clone(),
             offsets,
+            resolutions,
         },
         Mesh3d(handle),
         MeshMaterial3d(water),
@@ -177,12 +199,13 @@ pub fn update_sea(
         );
         let current = downwind * tm.tws * 0.025 * t;
 
-        for offset in &sea.offsets {
+        for (offset, &min_wavelength) in sea.offsets.iter().zip(&sea.resolutions) {
             // Sample at the true world position. Bevy's -Z is sim north, so the
             // horizontal offset flips sign on the way across.
             let world = st.pos + glam::DVec2::new(offset.x as f64, -offset.y as f64);
-            let height = sim.sim.water.height(world, t) as f32;
-            let slope = sim.sim.water.slope(world, t);
+            // Band-limited to what this vertex can carry — see `resolutions`.
+            let height = sim.sim.water.height_resolved(world, t, min_wavelength) as f32;
+            let slope = sim.sim.water.slope_resolved(world, t, min_wavelength);
             let (sx, sz) = (slope.x as f32, -slope.y as f32);
 
             positions.push(Vec3::new(offset.x, height, offset.y));

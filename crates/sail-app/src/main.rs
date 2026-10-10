@@ -20,18 +20,32 @@ mod sim;
 mod sky;
 mod sound;
 mod wake;
+mod weather;
 mod world;
 
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
-/// Conditions for the proof of concept: a steady moderate breeze, close-hauled on
-/// starboard tack with way on. No time compression — the clock runs at one to one.
-const WIND_KNOTS: f64 = 12.0;
-const WIND_FROM_DEG: f64 = 0.0;
-const START_TWA_DEG: f64 = 45.0;
-
+/// No time compression — the clock runs at one to one.
+///
+/// The conditions are drawn, not chosen: see `weather.rs`. `SAIL_SEED` in the
+/// environment pins the draw, so a day worth sailing again, or one that broke
+/// something, can be had back exactly.
 fn main() {
+    let seed = std::env::var("SAIL_SEED")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0x5A1Fu64)
+        });
+    let weather = weather::Weather::draw(seed);
+    // Printed rather than logged: the draw happens before Bevy's log plugin exists,
+    // so `info!` here goes nowhere at all.
+    println!("forecast: {}", weather.report());
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -43,7 +57,8 @@ fn main() {
         }))
         .add_plugins(EguiPlugin::default())
         .add_plugins(sound::plugin)
-        .insert_resource(sim::Sim::new(WIND_KNOTS, WIND_FROM_DEG, START_TWA_DEG))
+        .insert_resource(sim::Sim::new(weather))
+        .insert_resource(weather)
         // The console is the interface now; the diagnostic panel is the microscope and
         // starts put away. Tab brings it back, or the switch on the console does.
         .insert_resource(hud::HudVisible(false))

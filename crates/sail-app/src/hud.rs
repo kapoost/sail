@@ -84,6 +84,10 @@ pub fn draw(
         .default_pos([12.0, 12.0])
         .resizable(false)
         .show(ctx, |ui| {
+            ui.small(
+                egui::RichText::new(sim.weather.report()).color(egui::Color32::from_gray(150)),
+            );
+            ui.separator();
             egui::Grid::new("nums").num_columns(4).show(ui, |ui| {
                 row(ui, "speed", &format!("{:.2} kn", ms_to_kn(t.stw)));
                 row(

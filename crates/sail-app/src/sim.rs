@@ -9,16 +9,7 @@ use sail_core::prelude::*;
 use sail_core::water::WindSea;
 use sail_core::wind::SyntheticWind;
 
-/// Fetch for the scenario's sea, metres.
-///
-/// Eighty kilometres, and the obvious-looking change to twenty was tried and reverted.
-/// A short fetch does not mean an easy sea: twelve knots over twenty kilometres builds
-/// only half a metre, but at a 2.9 s period — which sits on this hull's pitch
-/// resonance of 2.8 s. She hobby-horses, and the model's added resistance stops her
-/// dead. The nearly-one-metre sea over a long fetch has a 4.5 s period, well clear of
-/// resonance, and she shoulders through it. Steepness and period matter more than
-/// height, which is the whole reason the Baltic has its reputation.
-pub const FETCH_METRES: f64 = 80_000.0;
+use crate::weather::Weather;
 
 #[derive(Resource)]
 pub struct Sim {
@@ -26,13 +17,15 @@ pub struct Sim {
     pub controls: Controls,
     /// True wind speed the world was set up with, for the polar overlay.
     pub nominal_tws: f64,
+    /// The day that was drawn, kept so the forecast can be shown.
+    pub weather: Weather,
 }
 
 impl Sim {
-    pub fn new(tws_knots: f64, wind_direction_deg: f64, start_twa_deg: f64) -> Self {
+    pub fn new(weather: Weather) -> Self {
         let cfg = BoatConfig::charter_sloop_34();
-        let wind = SyntheticWind::new(rad(wind_direction_deg), kn_to_ms(tws_knots), 0x5A11_u64);
-        let heading = wrap_tau(rad(wind_direction_deg) - rad(start_twa_deg));
+        let wind = SyntheticWind::new(weather.wind_from, weather.tws, weather.seed ^ 0x5A11);
+        let heading = wrap_tau(weather.wind_from - weather.start_twa);
         let mut state = BoatState::at_rest(heading);
         // Start with way on, close-hauled. Dead in the water head to wind is realistic
         // and also a miserable first ten seconds of a play session.
@@ -41,10 +34,10 @@ impl Sim {
         // that would dwarf a thirty-four footer. At twelve knots this is about 0.9 m
         // at four and a half seconds.
         let sea = WindSea::new(
-            kn_to_ms(tws_knots),
-            FETCH_METRES,
-            rad(wind_direction_deg),
-            0xC0FFEE,
+            weather.tws,
+            weather.fetch,
+            weather.wind_from,
+            weather.seed ^ 0xC0FFEE,
         );
         let mut sim = Simulation::new(cfg, state, Box::new(wind)).with_water(Box::new(sea));
 
@@ -66,9 +59,12 @@ impl Sim {
                 outhaul,
                 // Genoa rolled away: main alone, to isolate what the mainsail does.
                 furl: 1.0,
+                // Whatever the forecast said to tie in before casting off.
+                reef: weather.start_reef,
                 ..Default::default()
             },
-            nominal_tws: kn_to_ms(tws_knots),
+            nominal_tws: weather.tws,
+            weather,
         }
     }
 
