@@ -12,6 +12,7 @@ mod course;
 mod frame;
 mod hud;
 mod input;
+mod sea_texture;
 mod sim;
 mod sound;
 mod world;

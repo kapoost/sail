@@ -18,6 +18,7 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
 use crate::frame;
+use crate::sea_texture;
 use crate::sim::Sim;
 
 /// Vertices across the grid. Odd, so one sits under the boat.
@@ -39,6 +40,7 @@ pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     // Sun, low enough to put some glitter on the water.
     commands.spawn((
@@ -56,10 +58,17 @@ pub fn setup(
     });
     commands.insert_resource(ClearColor(Color::srgb(0.58, 0.70, 0.82)));
 
+    // White base colour, because the water's colour is carried per vertex: that is
+    // what lets a crest go to foam without having to overdrive a dark base past one.
     let water = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.06, 0.14, 0.21),
-        perceptual_roughness: 0.22,
-        metallic: 0.10,
+        base_color: Color::WHITE,
+        normal_map_texture: Some(images.add(sea_texture::normal_map())),
+        metallic_roughness_texture: Some(images.add(sea_texture::roughness_map())),
+        perceptual_roughness: 1.0,
+        metallic: 1.0,
+        reflectance: 0.35,
+        double_sided: true,
+        cull_mode: None,
         ..default()
     });
 
@@ -93,8 +102,12 @@ pub fn setup(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![Vec3::ZERO; offsets.len()]);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![Vec3::Y; offsets.len()]);
+    let count = offsets.len();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![Vec3::ZERO; count]);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![Vec3::Y; count]);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![Vec2::ZERO; count]);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, vec![Vec4::X; count]);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0_f32, 1.0, 1.0, 1.0]; count]);
     mesh.insert_indices(Indices::U32(indices));
     let handle = meshes.add(mesh);
 
@@ -125,20 +138,65 @@ pub fn update_sea(
             continue;
         };
 
-        let mut positions = Vec::with_capacity(sea.offsets.len());
-        let mut normals = Vec::with_capacity(sea.offsets.len());
+        let count = sea.offsets.len();
+        let mut positions = Vec::with_capacity(count);
+        let mut normals = Vec::with_capacity(count);
+        let mut uvs = Vec::with_capacity(count);
+        let mut tangents = Vec::with_capacity(count);
+        let mut colours = Vec::with_capacity(count);
+
+        let hs = (sim.sim.telemetry.significant_height as f32).max(0.05);
+        // Ripples drift downwind. Without this the fine detail is frozen while the
+        // swell moves through it, which reads as a photograph of water.
+        let drift = sim.sim.water.velocity(st.pos, t);
+        let drift_u = (drift.x as f32 * 0.25 * t as f32) / sea_texture::TILE_METRES;
+        let drift_v = (-drift.y as f32 * 0.25 * t as f32) / sea_texture::TILE_METRES;
+
         for offset in &sea.offsets {
             // Sample at the true world position. Bevy's -Z is sim north, so the
             // horizontal offset flips sign on the way across.
             let world = st.pos + glam::DVec2::new(offset.x as f64, -offset.y as f64);
-            let height = sim.sim.water.height(world, t);
+            let height = sim.sim.water.height(world, t) as f32;
             let slope = sim.sim.water.slope(world, t);
-            positions.push(Vec3::new(offset.x, height as f32, offset.y));
-            // Surface normal from the gradient. The sign on the second component
-            // follows the same axis flip as the sample position.
-            normals.push(Vec3::new(-slope.x as f32, 1.0, slope.y as f32).normalize());
+            let (sx, sz) = (slope.x as f32, -slope.y as f32);
+
+            positions.push(Vec3::new(offset.x, height, offset.y));
+            normals.push(Vec3::new(-sx, 1.0, -sz).normalize());
+
+            // World-locked UVs, so the detail stays with the sea rather than with the
+            // boat. The grid recentres every frame; the texture must not.
+            uvs.push(Vec2::new(
+                world.x as f32 / sea_texture::TILE_METRES + drift_u,
+                -world.y as f32 / sea_texture::TILE_METRES + drift_v,
+            ));
+
+            // Tangent along +U, which is world +X, lying in the surface. Handedness is
+            // negative because cross(normal, tangent) points at -Z while V runs to +Z.
+            let tangent = Vec3::new(1.0, sx, 0.0).normalize();
+            tangents.push(Vec4::new(tangent.x, tangent.y, tangent.z, -1.0));
+
+            // Colour per vertex: troughs darker, crests lighter, and foam where the
+            // surface is steep enough to be breaking. That is the depth shading and
+            // the whitecaps, without a shader having to be written for either.
+            let lift = (height / hs).clamp(-1.0, 1.0);
+            let deep = Vec3::new(0.035, 0.095, 0.150);
+            let shallow = Vec3::new(0.090, 0.210, 0.260);
+            let base = deep.lerp(shallow, (lift * 0.5 + 0.5).clamp(0.0, 1.0));
+            let steepness = (sx * sx + sz * sz).sqrt();
+            let foam = ((steepness - 0.16) / 0.14).clamp(0.0, 1.0) * crest_weight(lift);
+            let colour = base.lerp(Vec3::new(0.82, 0.88, 0.92), foam);
+            colours.push([colour.x, colour.y, colour.z, 1.0]);
         }
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     }
+}
+
+/// Foam only belongs near a crest. A steep trough is still green water.
+#[inline]
+fn crest_weight(lift: f32) -> f32 {
+    ((lift + 0.15) / 0.6).clamp(0.0, 1.0)
 }

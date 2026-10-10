@@ -37,6 +37,19 @@ pub fn setup(mut commands: Commands) {
             ..default()
         }),
         Transform::from_xyz(0.0, 3.0, 12.0).looking_at(Vec3::new(0.0, 2.0, 0.0), Vec3::Y),
+        // Haze. Without it the sea patch ends in a hard line against the sky at seven
+        // hundred metres, which is the single most obvious tell that you are looking
+        // at a finite piece of geometry. Real visibility at sea is rarely better than
+        // this anyway.
+        DistanceFog {
+            color: Color::srgb(0.70, 0.79, 0.88),
+            falloff: FogFalloff::from_visibility_colors(
+                2600.0,
+                Color::srgb(0.68, 0.77, 0.86),
+                Color::srgb(0.82, 0.88, 0.94),
+            ),
+            ..default()
+        },
     ));
     commands.init_resource::<View>();
     commands.init_resource::<ChaseState>();
