@@ -71,6 +71,7 @@ pub fn draw(
     visible: Res<HudVisible>,
     course: Res<Course>,
     pilot: Res<Pilot>,
+    bank: Res<crate::clutch::Bank>,
 ) -> Result {
     if !visible.0 {
         return Ok(());
@@ -205,6 +206,27 @@ pub fn draw(
             ));
 
             ui.separator();
+            // One winch, one line at a time. The bank is the interface, so it has to be
+            // legible at a glance rather than inferred from five loose numbers.
+            ui.label(egui::RichText::new("clutches  (1/2 select, A ease, D haul in)").strong());
+            for (i, line) in crate::clutch::BANK.iter().enumerate() {
+                let on = i == bank.selected;
+                let row = format!(
+                    "{} {:<13} {:.2}  {}",
+                    if on { "\u{25b6}" } else { " " },
+                    line.name(),
+                    line.get(c),
+                    if on { line.hauled() } else { "" }
+                );
+                let text = egui::RichText::new(row).monospace();
+                ui.label(if on {
+                    text.color(egui::Color32::from_rgb(240, 210, 90)).strong()
+                } else {
+                    text.weak()
+                });
+            }
+
+            ui.separator();
             // Matched on the mode itself, which makes a new mode a compile error here
             // rather than a silent fall-through. An earlier version keyed off a label
             // string from sail-core: renaming it would have dropped the vane into the
@@ -275,13 +297,11 @@ pub fn draw(
                  W / S   mainsheet: haul in / ease\n\
                  E / Q   genoa: grind in / ease\n\
                  Shift   fine, on both helm and sheets\n\
-                 A / D   genoa car: forward for depth / aft for a flat, open leech\n\
-                 1 / 2   outhaul: ease for depth / haul out for flat\n\
-                 3 / 4   vang: ease for twist / haul on to flatten the leech\n\
-                 G       roll the genoa away / back out    [ ]  part furl\n\
+                 1 / 2   choose a line on the clutch bank\n\
+                 A / D   ease / haul in the chosen line (Shift for fine)\n\
                  P       pilot: standby / hold course / hold wind angle\n\
                  , / .   nudge the pilot's target (Shift for five)\n\
-                 R / F   reef in / shake out      Z / X  engine astern / ahead\n\
+                 Z / X   engine astern / ahead\n\
                  T  snap to trim   C  camera   L  new lap   M  mute   Tab  hide panel",
             );
         });

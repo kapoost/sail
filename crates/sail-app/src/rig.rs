@@ -129,6 +129,7 @@ struct Span {
 
 pub fn update(
     sim: Res<Sim>,
+    bank: Res<crate::clutch::Bank>,
     time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut rigging: ResMut<Rigging>,
@@ -325,8 +326,19 @@ pub fn update(
     let mut colours = Vec::with_capacity(LINES.len() * SEGMENTS * 2);
 
     for (index, span) in spans.iter().enumerate() {
-        // Highlight decays, so a line brightens when touched and settles back.
-        let lit = (rigging.flash[index] / FLASH).clamp(0.0, 1.0);
+        // Two kinds of highlight. A flash says "this answered your key"; a steady
+        // glow says "this is the one on the winch", which is the thing you most need
+        // to know before pulling anything.
+        let flash = (rigging.flash[index] / FLASH).clamp(0.0, 1.0);
+        let on_the_winch = matches!(
+            (bank.line(), LINES[index]),
+            (crate::clutch::Line::Outhaul, Kind::Outhaul)
+                | (crate::clutch::Line::Vang, Kind::Vang)
+                | (crate::clutch::Line::GenoaCar, Kind::JibSheet(_))
+                | (crate::clutch::Line::Furl, Kind::JibSheet(_))
+                | (crate::clutch::Line::Reef, Kind::MainSheet)
+        );
+        let lit = flash.max(if on_the_winch { 0.34 } else { 0.0 });
         let from = hull + attitude * span.from;
         let to = hull + attitude * span.to;
         let length = (to - from).length().max(0.01);

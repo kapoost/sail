@@ -13,9 +13,9 @@
 //! * The mainsheet is **absolute**, because it is a tackle you pull and hold.
 //! * The genoa sheet is a **rate**, because it is a winch you grind — and grinding
 //!   takes time you do not always have, which is the whole drama of a tack.
-//! * Reefing is **discrete**, because it is a job you do, not a dial you turn.
-//! * The outhaul is a **slow rate**, because it is a line you haul and cleat and then
-//!   leave alone for an hour.
+//! * The slow control lines are not here at all. They live on a clutch bank — see
+//!   `clutch.rs` — because one winch serves all of them and a crew works one at a
+//!   time.
 //!
 //! The autopilot disengages the moment you touch the helm. Real pilots have a clutch
 //! you have to throw, but a boat that fights your hand is worse than one that lets go.
@@ -48,9 +48,6 @@ pub enum HelmSource {
 }
 /// How fast a sheet runs, in sheet fraction per second.
 const SHEET_RATE: f64 = 0.45;
-/// How fast the outhaul hauls, in fraction per second. Slow: it is a cleated line
-/// you adjust when the breeze changes, not something you play with.
-const OUTHAUL_RATE: f64 = 0.30;
 /// Fine sheet rate while Shift is held. Upwind the whole useful trim band is about a
 /// third of the travel, and placing it to a degree is the entire point of the game.
 const SHEET_FINE: f64 = 0.11;
@@ -211,82 +208,6 @@ pub fn gather(
     if winch != 0.0 {
         sim.controls.jib_sheet =
             (sim.controls.jib_sheet + winch.clamp(-1.0, 1.0) * sheet_rate * dt).clamp(0.0, 1.0);
-    }
-
-    // --- Outhaul: mainsail depth ----------------------------------------------
-    // Eased is deep and powerful, hauled out is flat with less heeling force. The
-    // right setting changes with the breeze, which is what makes it a control.
-    let mut outhaul_rate = 0.0;
-    if keys.pressed(KeyCode::Digit1) {
-        outhaul_rate -= OUTHAUL_RATE; // ease: deeper
-    }
-    if keys.pressed(KeyCode::Digit2) {
-        outhaul_rate += OUTHAUL_RATE; // haul out: flatter
-    }
-    if outhaul_rate != 0.0 {
-        sim.controls.outhaul = (sim.controls.outhaul + outhaul_rate * dt).clamp(0.0, 1.0);
-    }
-
-    // --- Genoa lead car: the headsail's outhaul and vang in one fitting -------
-    // Forward for depth and a closed leech, aft for a flat foot and a head that
-    // spills. It is the only shape control a genoa has, which is why it earns a
-    // hand-level key rather than a number.
-    let mut car_rate = 0.0;
-    if keys.pressed(KeyCode::KeyA) {
-        car_rate -= OUTHAUL_RATE; // forward: fuller, leech closed
-    }
-    if keys.pressed(KeyCode::KeyD) {
-        car_rate += OUTHAUL_RATE; // aft: flatter, leech open
-    }
-    if car_rate != 0.0 {
-        sim.controls.genoa_car = (sim.controls.genoa_car + car_rate * dt).clamp(0.0, 1.0);
-    }
-
-    // --- Vang: holds the leech down, and so controls twist --------------------
-    // Grouped with the outhaul because both are shape controls rather than sheets:
-    // you set them and leave them. Note that it will feel inert upwind, and that is
-    // correct — with the boom near the centreline the mainsheet is already tensioning
-    // the leech and there is nothing left for the vang to do.
-    let mut vang_rate = 0.0;
-    if keys.pressed(KeyCode::Digit3) {
-        vang_rate -= OUTHAUL_RATE; // ease: more twist
-    }
-    if keys.pressed(KeyCode::Digit4) {
-        vang_rate += OUTHAUL_RATE; // haul on: take the twist out
-    }
-    if vang_rate != 0.0 {
-        sim.controls.vang = (sim.controls.vang + vang_rate * dt).clamp(0.0, 1.0);
-    }
-
-    // --- Headsail furl: a drum you roll, so a toggle plus a rate ---------------
-    // Separate gear from the main's reef, and the first thing anyone touches when it
-    // blows up. G rolls it fully away or fully out; the rate keys give part furls.
-    let furl_toggle = keys.just_pressed(KeyCode::KeyG)
-        || pad.is_some_and(|p| p.just_pressed(GamepadButton::West));
-    if furl_toggle {
-        sim.controls.furl = if sim.controls.furl > 0.5 { 0.0 } else { 1.0 };
-    }
-    let mut furl_rate = 0.0;
-    if keys.pressed(KeyCode::BracketRight) {
-        furl_rate += 0.35;
-    }
-    if keys.pressed(KeyCode::BracketLeft) {
-        furl_rate -= 0.35;
-    }
-    if furl_rate != 0.0 {
-        sim.controls.furl = (sim.controls.furl + furl_rate * dt).clamp(0.0, 1.0);
-    }
-
-    // --- Reef: a job, so discrete ---------------------------------------------
-    let reef_in = keys.just_pressed(KeyCode::KeyR)
-        || pad.is_some_and(|p| p.just_pressed(GamepadButton::DPadDown));
-    let reef_out = keys.just_pressed(KeyCode::KeyF)
-        || pad.is_some_and(|p| p.just_pressed(GamepadButton::DPadUp));
-    if reef_in {
-        sim.controls.reef = (sim.controls.reef + 0.25).min(1.0);
-    }
-    if reef_out {
-        sim.controls.reef = (sim.controls.reef - 0.25).max(0.0);
     }
 
     // --- Auxiliary engine ------------------------------------------------------

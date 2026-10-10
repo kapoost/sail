@@ -8,6 +8,7 @@
 
 mod boat;
 mod camera;
+mod clutch;
 mod course;
 mod frame;
 mod hud;
@@ -45,6 +46,7 @@ fn main() {
         .insert_resource(hud::HudVisible(true))
         .init_resource::<hud::Polar>()
         .init_resource::<input::HelmSource>()
+        .init_resource::<clutch::Bank>()
         .init_resource::<input::Pilot>()
         .add_systems(
             Startup,
@@ -64,6 +66,7 @@ fn main() {
             (
                 // Intent, then physics, then everything that reads the result.
                 input::gather,
+                clutch::handle,
                 sim::advance,
                 (
                     boat::update_hull,
