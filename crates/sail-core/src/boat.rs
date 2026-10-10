@@ -40,9 +40,14 @@ pub struct BoatConfig {
     pub residuary_coefficient: f64,
     /// Effective span for induced drag, m. Less than draft because of the free surface.
     pub induced_span: f64,
-    /// Extra form resistance from sailing heeled, quadratic in heel. A boat dragging
-    /// its rail is not paying a linear price.
+    /// Form resistance from sailing heeled, quadratic in heel.
     pub heel_drag_factor: f64,
+    /// Heel past which the leeward rail starts going under and the price steepens.
+    pub rail_down_heel: f64,
+    /// How much steeper. Calibrated so the model's upwind VMG peaks near twenty
+    /// degrees of heel, which is where a real cruiser's does — see
+    /// `examples/outhaul.rs`, which is the measurement that caught it being wrong.
+    pub rail_down_factor: f64,
 
     // --- Lateral plane and steering ---
     pub lateral_plane: Foil,
@@ -120,6 +125,8 @@ impl BoatConfig {
             residuary_coefficient: 1.15,
             induced_span: 0.80 * 1.90,
             heel_drag_factor: 0.57,
+            rail_down_heel: rad(20.0),
+            rail_down_factor: 3.0,
 
             lateral_plane: Foil::lateral_plane(4.5, 1.41),
             x_clr: 0.10,

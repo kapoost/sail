@@ -12,6 +12,7 @@
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
+use sail_core::autopilot::OVERPOWERED_HEEL;
 use sail_core::prelude::*;
 use sail_core::wind::{SteadyWind, WindField};
 
@@ -150,18 +151,18 @@ pub fn draw(
             // The outhaul is a shape control, not a sheet: depth is power, flat is
             // less heeling force. Showing the draft as a percentage is how a sailmaker
             // talks about it, and it is the number the player is actually changing.
-            let want_outhaul = optimal_outhaul(t.tws);
+            let want_outhaul = outhaul_for_heel(t.heel, OVERPOWERED_HEEL);
             ui.label(format!(
-                "outhaul {:.2} ({:.0}% draft)   for this breeze {:.2} — {}",
+                "outhaul {:.2} ({:.0}% draft)   for this heel {:.2} — {}",
                 c.outhaul,
                 t.main.camber * 100.0,
                 want_outhaul,
                 if (c.outhaul - want_outhaul).abs() < 0.12 {
                     "about right"
                 } else if c.outhaul < want_outhaul {
-                    "too full, haul it out"
+                    "overpowered, haul it out"
                 } else {
-                    "too flat, ease it off"
+                    "too flat for this heel, ease it off"
                 }
             ));
             ui.label(format!(
@@ -178,11 +179,14 @@ pub fn draw(
             ));
 
             ui.separator();
-            match pilot.target_label() {
-                None => {
+            // Matched on the mode itself. Keying this off `target_label`'s string meant
+            // a rename in sail-core would silently fall through to the heading arm and
+            // print a signed wind angle as a compass course, with no compile error.
+            match pilot.mode {
+                PilotMode::Standby => {
                     ui.label(egui::RichText::new("pilot  standby — hand steering").weak());
                 }
-                Some(("apparent wind", target)) => {
+                PilotMode::ApparentWind(target) => {
                     ui.label(
                         egui::RichText::new(format!(
                             "vane   holding {:.0} apparent   (now {:.0})",
@@ -194,7 +198,7 @@ pub fn draw(
                     );
                     ui.small("'.' closer to the wind    ',' further off");
                 }
-                Some((_, target)) => {
+                PilotMode::Heading(target) => {
                     ui.label(
                         egui::RichText::new(format!(
                             "pilot  holding {:03.0}   (now {:03.0})",

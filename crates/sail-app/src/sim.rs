@@ -33,7 +33,9 @@ impl Sim {
         // it — it just bears away. A crew eases for speed first and trims on as the
         // boat builds, so begin where they would.
         sim.run(SUBSTEP, &Controls::default());
-        let outhaul = optimal_outhaul(sim.telemetry.tws);
+        // Full depth to start: the boat is upright and underpowered, so there is no
+        // reason to take anything out of the sail yet.
+        let outhaul = 0.0;
         let (main_sheet, jib_sheet) = optimal_sheets(&cfg, sim.telemetry.awa, outhaul);
         Self {
             sim,

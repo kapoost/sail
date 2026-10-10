@@ -281,8 +281,10 @@ pub fn gather(
         || pad.is_some_and(|p| p.just_pressed(GamepadButton::North));
     if assist {
         let awa = sim.sim.telemetry.awa;
-        let tws = sim.sim.telemetry.tws;
-        sim.controls.outhaul = optimal_outhaul(tws);
+        sim.controls.outhaul = outhaul_for_heel(
+            sim.sim.telemetry.heel,
+            sail_core::autopilot::OVERPOWERED_HEEL,
+        );
         let (m, j) = optimal_sheets(&cfg, awa, sim.controls.outhaul);
         sim.controls.main_sheet = m;
         sim.controls.jib_sheet = j;

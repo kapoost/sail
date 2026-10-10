@@ -158,7 +158,16 @@ impl Simulation {
         let r_friction = frictional_resistance(speed, cfg.lwl, cfg.wetted_surface);
         let r_residuary =
             residuary_resistance(speed, cfg.lwl, cfg.displacement, cfg.residuary_coefficient);
-        let r_heel = (r_friction + r_residuary) * cfg.heel_drag_factor * st.heel * st.heel;
+        // Two regimes. Up to about twenty degrees a boat just pays a quadratic form-drag
+        // penalty. Past that it starts burying its leeward rail: the waterplane goes
+        // badly asymmetric, the quarter wave climbs the deck, and the price rises much
+        // faster. Without the second term the model thinks thirty degrees of heel is
+        // the fastest place to be, which is a full nine degrees past where a real
+        // cruiser's VMG peaks — and it makes sail depth look free.
+        let heel = st.heel.abs();
+        let excess = (heel - cfg.rail_down_heel).max(0.0);
+        let r_heel = (r_friction + r_residuary)
+            * (cfg.heel_drag_factor * heel * heel + cfg.rail_down_factor * excess * excess);
         let (hull_fx, hull_fy) = resolve(0.0, r_friction + r_residuary + r_heel, flow_angle);
 
         let resistance = r_friction + r_residuary + r_heel + lp.drag + lp_induced + rud.drag;

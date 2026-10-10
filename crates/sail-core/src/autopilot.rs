@@ -117,7 +117,6 @@ where
     let wind = make_wind();
     let sample = wind.sample(DVec2::ZERO, 0.0);
     let wind_direction = direction_of(sample);
-    let wind_speed_hint = sample.length();
     let heading = wrap_tau(wind_direction - twa);
 
     // Start with way on. A real boat close-hauled from a standstill has to bear away
@@ -128,10 +127,9 @@ where
     initial.surge = 0.6 * cfg.hull_speed();
     let mut sim = Simulation::new(cfg, initial, wind);
 
-    // Flatten the main as the breeze builds, the way a trimmer would.
-    let tws = wind_speed_hint;
     let mut controls = Controls {
-        outhaul: crate::sail::optimal_outhaul(tws),
+        // Start full and let the heel decide, below.
+        outhaul: 0.0,
         reef,
         furl: (reef * 0.85).clamp(0.0, 1.0),
         ..Default::default()
@@ -143,6 +141,13 @@ where
     let mut speed_before = 0.0;
 
     for i in 0..steps {
+        // Flatten only once the boat is overpowered — a slow outer loop, because the
+        // outhaul is a cleated line and not something anyone plays with. Rate limited
+        // so it settles rather than chasing the heel it is itself changing.
+        let want = crate::sail::outhaul_for_heel(sim.state.heel, OVERPOWERED_HEEL);
+        let step = (want - controls.outhaul).clamp(-0.25 * SUBSTEP, 0.25 * SUBSTEP);
+        controls.outhaul = (controls.outhaul + step).clamp(0.0, 1.0);
+
         let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
         controls.main_sheet = m;
         controls.jib_sheet = j;
@@ -196,6 +201,17 @@ where
     (chosen, best)
 }
 
+/// Heel past which a cruising crew considers itself overpowered and starts taking
+/// power out of the sail.
+pub const OVERPOWERED_HEEL: f64 = 20.0 * std::f64::consts::PI / 180.0;
+
+/// Closest to the wind a vane will be asked to hold. Below this the boat is pinching
+/// and the sails cannot be kept drawing.
+pub const VANE_MIN_ANGLE: f64 = 20.0 * std::f64::consts::PI / 180.0;
+/// Furthest off the wind a vane will hold, short of dead downwind where the angle's
+/// sign — and therefore the tack — stops meaning anything.
+pub const VANE_MAX_ANGLE: f64 = 178.0 * std::f64::consts::PI / 180.0;
+
 /// What the autopilot is holding.
 ///
 /// Two modes because there are two pieces of real gear, and they are not
@@ -247,8 +263,15 @@ impl Autopilot {
     }
 
     /// Hold the wind angle the boat is on right now.
+    ///
+    /// Clamped to the same band [`adjust`](Self::adjust) works in. Engaging while
+    /// pinching at fifteen degrees would otherwise store a target below the floor,
+    /// and the next "closer to the wind" press would push it *up* to the floor —
+    /// moving the target away from the wind, which is the opposite of what was asked.
     pub fn hold_wind(&mut self, tm: &Telemetry) {
-        self.mode = PilotMode::ApparentWind(tm.awa);
+        let sign = if tm.awa >= 0.0 { 1.0 } else { -1.0 };
+        let magnitude = tm.awa.abs().clamp(VANE_MIN_ANGLE, VANE_MAX_ANGLE);
+        self.mode = PilotMode::ApparentWind(sign * magnitude);
         self.loop_.reset();
     }
 
@@ -266,7 +289,7 @@ impl Autopilot {
             PilotMode::ApparentWind(a) => {
                 // Luffing means a smaller angle, on either tack.
                 let sign = if *a >= 0.0 { 1.0 } else { -1.0 };
-                let magnitude = (a.abs() - delta).clamp(rad(20.0), rad(178.0));
+                let magnitude = (a.abs() - delta).clamp(VANE_MIN_ANGLE, VANE_MAX_ANGLE);
                 *a = sign * magnitude;
             }
         }
@@ -285,17 +308,22 @@ impl Autopilot {
             PilotMode::Heading(target) => wrap_pi(target - st.heading),
             PilotMode::ApparentWind(target) => {
                 // Bearing away opens the apparent wind angle, so when the measured
-                // angle exceeds the target the boat must luff — which is a turn
-                // towards the wind, and therefore towards whichever side it is on.
-                // Both tacks reduce to the same expression.
-                if tm.awa.signum() != target.signum() && tm.awa.abs() > rad(12.0) {
-                    // Wrong tack entirely. Steer back across rather than fight it, by
-                    // asking for the biggest turn the loop will act on.
-                    target.signum() * rad(30.0)
-                } else if tm.awa.abs() < rad(8.0) {
+                // angle exceeds the target the boat must luff — a turn towards the
+                // wind, and therefore towards whichever side the wind is on. On the
+                // intended tack both tacks reduce to the same expression.
+                let upwind_target = target.abs() < std::f64::consts::FRAC_PI_2;
+                if tm.awa.abs() < rad(8.0) {
                     // Head to wind, where the sign of the measurement is meaningless.
                     // Bear away onto the intended tack.
                     -target.signum() * rad(20.0)
+                } else if tm.awa.signum() != target.signum() {
+                    // Knocked onto the wrong tack. Which way round matters enormously:
+                    // for an upwind target the short way back is a tack, so luff up and
+                    // through the wind; for a downwind target it is a gybe, so bear
+                    // away. Getting this backwards sends the boat the long way round
+                    // and, upwind, straight through an uncontrolled gybe.
+                    let through_the_wind = if upwind_target { -1.0 } else { 1.0 };
+                    through_the_wind * target.signum() * rad(30.0)
                 } else {
                     tm.awa - target
                 }

@@ -22,6 +22,10 @@ pub const CAMBER_DEEP: f64 = 0.15;
 /// Draft with the outhaul hard out. Flat, less power, less heeling force.
 pub const CAMBER_FLAT: f64 = 0.07;
 
+/// How far the best angle of attack moves per unit of relative camber. A deeper sail
+/// peaks earlier because the camber is already doing part of the work.
+pub const ALPHA_SHIFT_PER_DEPTH: f64 = 3.0 * std::f64::consts::PI / 180.0;
+
 /// Mainsail draft for an outhaul setting: 0 eased and deep, 1 hard out and flat.
 ///
 /// What the outhaul actually does is pull the clew aft along the boom, tensioning the
@@ -36,16 +40,20 @@ pub fn camber_for_outhaul(outhaul: f64) -> f64 {
     CAMBER_DEEP + (CAMBER_FLAT - CAMBER_DEEP) * o
 }
 
-/// Outhaul a good trimmer would carry for a given true wind speed.
+/// Outhaul a trimmer would carry, given how hard the boat is already heeling.
 ///
-/// Light air wants depth for power; a breeze wants the sail flat so the boat stays on
-/// its feet. The crossover sits around twelve to fourteen knots for a cruising main.
-pub fn optimal_outhaul(tws: f64) -> f64 {
-    smoothstep(
-        crate::units::kn_to_ms(7.0),
-        crate::units::kn_to_ms(20.0),
-        tws,
-    )
+/// Keyed on heel rather than wind speed, which is both what a trimmer actually reacts
+/// to and what a velocity prediction program does: full sail is fastest until the boat
+/// becomes limited by its righting moment, and only then does reducing force start to
+/// *increase* VMG. An earlier version of this crossed over around fourteen knots on the
+/// strength of received wisdom; sweeping the model (see `examples/outhaul.rs`) showed
+/// depth winning at every wind speed the boat could still hold a course at, which is
+/// the same answer an ORC VPP gives. The function was wrong, not the physics.
+///
+/// `target_heel` is the angle past which the boat is judged overpowered — around
+/// twenty degrees for a cruising crew.
+pub fn outhaul_for_heel(heel: f64, target_heel: f64) -> f64 {
+    smoothstep(target_heel, target_heel + rad(9.0), heel.abs())
 }
 
 /// Aerodynamic character of one sail.
@@ -114,11 +122,15 @@ impl SailProfile {
     pub fn coefficients(&self, alpha: f64, camber: f64) -> SailCoeffs {
         // Camber scales three things at once. Values are relative to the shape the
         // profile was tuned at, so a reference-camber sail reproduces it exactly.
-        let depth = (camber / CAMBER_REFERENCE).clamp(0.4, 1.6);
+        let depth = self.depth_ratio(camber);
         let cl_max = self.cl_max * (0.60 + 0.40 * depth);
-        let alpha_opt = self.alpha_opt + rad(3.0) * (1.0 - depth);
-        let alpha_stall = self.alpha_stall + rad(3.0) * (1.0 - depth);
-        let cd0 = self.cd0 * (0.80 + 0.20 * depth);
+        let alpha_opt = self.alpha_opt_for(camber);
+        let alpha_stall = self.alpha_stall + ALPHA_SHIFT_PER_DEPTH * (1.0 - depth);
+        // Profile drag rises steeply with camber — roughly with its square, since the
+        // pressure recovery over a deeper section is that much harder. The earlier
+        // linear law moved parasitic drag by ten percent across the whole outhaul
+        // range, which is not defensible and left depth free of any real cost.
+        let cd0 = self.cd0 * (0.60 + 0.40 * depth * depth);
 
         // Eased past the wind: the sail flogs. No useful lift, and real flogging drag.
         if alpha <= 0.0 {
@@ -166,9 +178,25 @@ impl SailProfile {
     /// apparent wind angle. Used by the validation suite, and by the in-game trim
     /// reference: this is the line a good trimmer is chasing.
     pub fn optimal_chord_angle(&self, awa: f64, camber: f64) -> f64 {
-        let depth = (camber / CAMBER_REFERENCE).clamp(0.4, 1.6);
-        let alpha_opt = self.alpha_opt + rad(3.0) * (1.0 - depth);
-        (awa.abs() - alpha_opt).clamp(0.0, self.max_chord_angle)
+        (awa.abs() - self.alpha_opt_for(camber)).clamp(0.0, self.max_chord_angle)
+    }
+
+    /// Camber relative to the shape the coefficients were tuned at.
+    #[inline]
+    pub fn depth_ratio(&self, camber: f64) -> f64 {
+        let _ = self;
+        (camber / CAMBER_REFERENCE).clamp(0.4, 1.6)
+    }
+
+    /// Best angle of attack at a given camber.
+    ///
+    /// Deliberately the single definition. The trim reference and the force curve both
+    /// need it, and if they ever disagree then the HUD, the T assist, `optimal_sheets`
+    /// and the polar all point at a sheet position where the sail does not actually
+    /// peak — a silent, hard-to-see wrongness. One function, two callers.
+    #[inline]
+    pub fn alpha_opt_for(&self, camber: f64) -> f64 {
+        self.alpha_opt + ALPHA_SHIFT_PER_DEPTH * (1.0 - self.depth_ratio(camber))
     }
 
     /// Boom angle for a sheet position, where 0 is hard in and 1 fully eased.

@@ -73,6 +73,33 @@ Not modelled yet, and known to be absent: waves and the boat's motion in them, t
 and current, sail-to-sail interaction beyond headsail blanketing, and any sea state at
 all.
 
+### One measured calibration gap, with its cause
+
+The model's upwind VMG peaks around **29 degrees of heel**, about eight degrees past
+where a real cruiser's does. `examples/outhaul.rs` is the measurement; it was written
+to check whether the outhaul recommendation agreed with the model and found this
+instead.
+
+The consequence is that sail depth looks nearly free: flattening the main never pays
+on pure speed until the boat physically cannot be held on course. A real boat gains
+from flattening well before that. The `rail_down_*` terms in `BoatConfig` push back on
+this with a steeper drag regime above 20 degrees — physically justified, since a
+cruiser past that angle is burying its leeward rail and the waterplane goes badly
+asymmetric — and that closed roughly half the gap. It does not close all of it, and a
+harsher penalty than the rail-down term would not be defensible.
+
+The missing mechanism is **twist**. Flattening a real mainsail takes power out of the
+*top* of the sail, where the heeling arm is longest; a sail with one section and one
+centre of effort can only remove force evenly. Sections, and therefore twist, are the
+real fix — and the same limitation is why the outhaul here stands in for the whole
+shape rather than just the lower third, and why cunningham, vang and backstay are not
+separate controls.
+
+Because the outhaul rule flattens at 20 degrees of heel — the cruising call, not the
+model's fastest — it gives away up to about 0.8 percent of VMG in a breeze. That is
+asserted and bounded by `the_outhaul_rule_costs_little_against_the_measured_best`
+rather than left to drift.
+
 ## Deliberate decisions
 
 * **Real time, 1:1.** No time compression yet. It will have to come back — forty miles
@@ -126,13 +153,21 @@ you grind, and a reef is a job you do.
 
 | | gamepad | keyboard |
 |---|---|---|
-| helm | left stick X | A / D |
-| mainsheet | right stick Y | W / S |
-| genoa winch | triggers | Q / E |
+| helm (held where you leave it) | left stick X | A / D |
+| centre the helm | | Space |
+| mainsheet: haul in / ease | right stick Y | W / S |
+| genoa winch: grind / ease | triggers | E / Q |
+| outhaul: ease / haul out | | 1 / 2 |
+| roll the genoa away or out | X | G |
+| part furl | | [ ] |
 | reef | D-pad up/down | R / F |
 | engine | D-pad left/right | Z / X |
+| autopilot: standby / course / wind angle | Start | P |
+| nudge the pilot's target | | , / . |
+| fine, on helm and sheets | | Shift |
 | snap to good trim | Y | T |
 | camera | Select | C |
+| new lap | | L |
 | developer panel | | Tab |
 
 The cockpit camera heels with the boat. That is deliberate: heel is the primary

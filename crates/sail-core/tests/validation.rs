@@ -10,7 +10,7 @@
 
 use sail_core::prelude::*;
 use sail_core::sail::{
-    camber_for_outhaul, optimal_outhaul, sail_forces, SailProfile, CAMBER_REFERENCE,
+    camber_for_outhaul, outhaul_for_heel, sail_forces, SailProfile, CAMBER_REFERENCE,
 };
 use sail_core::wind::{SteadyWind, WindField};
 
@@ -746,29 +746,117 @@ fn flattening_the_main_takes_the_heel_out_in_a_breeze() {
 }
 
 #[test]
-fn depth_pays_in_light_air_and_flat_pays_in_a_breeze() {
+fn depth_is_fastest_until_the_boat_runs_out_of_righting_moment() {
     let cfg = BoatConfig::charter_sloop_34();
 
-    let light = wind(6.0);
-    let deep_light = at_outhaul(cfg, &light, rad(45.0), 0.0);
-    let flat_light = at_outhaul(cfg, &light, rad(45.0), 1.0);
-    assert!(
-        deep_light.2 > flat_light.2,
-        "in six knots depth should win: deep {:.3} kn VMG against flat {:.3}",
-        ms_to_kn(deep_light.2),
-        ms_to_kn(flat_light.2)
-    );
+    // Below the power limit a fuller sail is simply faster, which is also what a
+    // velocity prediction program says: reducing force only helps once righting moment
+    // is the binding constraint. Asserting this stops the recommendation drifting back
+    // towards folklore.
+    for tws in [5.0, 8.0, 12.0, 16.0] {
+        let make = wind(tws);
+        let deep = at_outhaul(cfg, &make, rad(45.0), 0.0);
+        let flat = at_outhaul(cfg, &make, rad(45.0), 1.0);
+        assert!(
+            deep.2 > flat.2,
+            "at {tws} kn depth should win: deep {:.3} kn VMG against flat {:.3}",
+            ms_to_kn(deep.2),
+            ms_to_kn(flat.2)
+        );
+    }
+}
 
-    // The recommendation should follow the same shape it asserts.
+#[test]
+fn the_outhaul_rule_costs_little_against_the_measured_best() {
+    let cfg = BoatConfig::charter_sloop_34();
+    // What the game tells the player to do has to be close to the fastest thing the
+    // model can do, or the reference polar is beatable by ignoring the advice — which
+    // is how a sim loses a sailor's trust.
+    //
+    // It is not exactly zero, and the reason is a known gap rather than a tuning
+    // failure. The model's upwind VMG peaks around twenty-nine degrees of heel, about
+    // eight degrees past where a real cruiser's does, so flattening at twenty costs a
+    // little speed here that it would gain on the water. The missing mechanism is
+    // twist: flattening a real mainsail takes power out of the *top* of the sail,
+    // where the heeling arm is longest, while a one-section sail can only remove it
+    // evenly. Sections and twist are the fix; a harsher heel penalty than the
+    // rail-down term already in `sim.rs` would not be defensible.
+    for tws in [5.0, 8.0, 12.0, 16.0] {
+        let make = wind(tws);
+        let settled = steady_state(cfg, &make, rad(45.0), SETTLE, 0.0);
+        let mut best = f64::NEG_INFINITY;
+        for step in 0..=5 {
+            let vmg = at_outhaul(cfg, &make, rad(45.0), step as f64 / 5.0).2;
+            best = best.max(vmg);
+        }
+        let cost = best - settled.telemetry.vmg;
+        let relative = cost / best;
+        assert!(
+            relative < 0.012,
+            "at {tws} kn the rule settles on outhaul {:.2} and gives away {:.3} kn VMG \
+             ({:.1} percent) against a best of {:.3}",
+            settled.controls.outhaul,
+            ms_to_kn(cost),
+            relative * 100.0,
+            ms_to_kn(best)
+        );
+    }
+}
+
+#[test]
+fn heel_past_the_rail_going_under_costs_real_speed() {
+    let cfg = BoatConfig::charter_sloop_34();
+    // The steep second regime exists because without it the model thinks thirty
+    // degrees of heel is the fastest place to be. It must bite hard above the
+    // threshold and barely at all below it, or it would move the whole polar.
+    assert!(cfg.rail_down_factor > 0.0);
+    let gentle = heel_resistance_factor(&cfg, rad(15.0));
+    let at_limit = heel_resistance_factor(&cfg, rad(20.0));
+    let rail_down = heel_resistance_factor(&cfg, rad(32.0));
     assert!(
-        optimal_outhaul(kn_to_ms(6.0)) < 0.25,
-        "ease it off in light air"
+        (at_limit - cfg.heel_drag_factor * rad(20.0) * rad(20.0)).abs() < 1e-12,
+        "the steep term must contribute nothing at or below the threshold"
+    );
+    assert!(gentle < at_limit && at_limit < rail_down);
+    assert!(
+        rail_down > 3.0 * at_limit,
+        "burying the rail should cost several times what sailing at the limit does: \
+         {rail_down:.3} against {at_limit:.3}"
+    );
+}
+
+fn heel_resistance_factor(cfg: &BoatConfig, heel: f64) -> f64 {
+    let excess = (heel.abs() - cfg.rail_down_heel).max(0.0);
+    cfg.heel_drag_factor * heel * heel + cfg.rail_down_factor * excess * excess
+}
+
+#[test]
+fn the_outhaul_rule_only_flattens_once_the_boat_is_overpowered() {
+    // Keyed on heel, not on wind speed, because heel is what tells you the righting
+    // moment has run out.
+    assert_eq!(
+        outhaul_for_heel(rad(12.0), rad(20.0)),
+        0.0,
+        "upright: stay full"
+    );
+    assert_eq!(
+        outhaul_for_heel(rad(20.0), rad(20.0)),
+        0.0,
+        "at the limit: still full"
     );
     assert!(
-        optimal_outhaul(kn_to_ms(22.0)) > 0.75,
-        "flatten it in a breeze"
+        outhaul_for_heel(rad(25.0), rad(20.0)) > 0.2,
+        "overpowered: flatten"
     );
-    assert!(optimal_outhaul(kn_to_ms(6.0)) < optimal_outhaul(kn_to_ms(22.0)));
+    assert!(
+        outhaul_for_heel(rad(32.0), rad(20.0)) > 0.95,
+        "badly overpressed: flat"
+    );
+    // Symmetric in tack.
+    assert_eq!(
+        outhaul_for_heel(rad(-25.0), rad(20.0)),
+        outhaul_for_heel(rad(25.0), rad(20.0))
+    );
 }
 
 /// Hold a close-hauled course at a fixed outhaul with the sheet trimmed to suit.
@@ -902,26 +990,17 @@ fn the_vane_holds_a_wind_angle_through_the_shifts() {
 #[test]
 fn a_vane_follows_a_shift_where_a_compass_pilot_would_not() {
     let cfg = BoatConfig::charter_sloop_34();
-    // Same shifting wind, same length of run: the compass pilot keeps the course and
+    // Same shifting wind, same length of run. The compass pilot keeps the course and
     // therefore lets the wind angle wander; the vane keeps the angle and lets the
-    // course wander. That difference is the whole reason both exist.
-    let (_, compass_wind_drift) = {
-        let (sim, _) = pilot_run(cfg, PilotMode::Heading(0.0), 420.0, 12.0, Some(11));
-        let _ = &sim;
-        // Measure wind-angle wander under the compass pilot.
-        let (s2, _) = pilot_run(cfg, PilotMode::Heading(0.0), 420.0, 12.0, Some(11));
-        (
-            s2.state.heading,
-            wind_angle_spread(cfg, PilotMode::Heading(0.0)),
-        )
-    };
-    let vane_wind_drift = wind_angle_spread(cfg, PilotMode::ApparentWind(0.0));
+    // course wander. That difference is the whole reason both pieces of gear exist.
+    let compass = wind_angle_spread(cfg, PilotMode::Heading(0.0));
+    let vane = wind_angle_spread(cfg, PilotMode::ApparentWind(0.0));
     assert!(
-        vane_wind_drift < compass_wind_drift,
+        vane < compass,
         "the vane should hold the wind angle tighter than the compass pilot: \
          {:.2} deg against {:.2} deg",
-        deg(vane_wind_drift),
-        deg(compass_wind_drift)
+        deg(vane),
+        deg(compass)
     );
 }
 
@@ -967,4 +1046,75 @@ fn wind_angle_spread(cfg: BoatConfig, mode: PilotMode) -> f64 {
         worst = worst.max((sim.telemetry.awa - reference).abs());
     }
     worst
+}
+
+#[test]
+fn a_vane_knocked_onto_the_wrong_tack_tacks_back_instead_of_gybing() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let make = wind(12.0);
+    let twa = rad(45.0);
+    let starboard_heading = wrap_tau(0.0 - twa);
+    let port_heading = wrap_tau(twa);
+
+    // Settle on starboard tack and arm the vane on that angle.
+    let mut state = BoatState::at_rest(starboard_heading);
+    state.surge = kn_to_ms(4.0);
+    let mut sim = Simulation::new(cfg, state, make());
+    let mut hand = TillerPilot::new();
+    let mut controls = Controls::default();
+    for _ in 0..(120.0 / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        controls.rudder = hand.rudder(&cfg, &sim.state, starboard_heading, SUBSTEP);
+        sim.run(SUBSTEP, &controls);
+    }
+    let mut pilot = Autopilot::new();
+    pilot.hold_wind(&sim.telemetry);
+    let target = match pilot.mode {
+        PilotMode::ApparentWind(a) => a,
+        _ => unreachable!(),
+    };
+    assert!(target > 0.0, "armed on starboard tack");
+
+    // Now hand-steer across onto port tack and give it back to the pilot.
+    let mut hand = TillerPilot::new();
+    for _ in 0..(90.0 / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        controls.rudder = hand.rudder(&cfg, &sim.state, port_heading, SUBSTEP);
+        sim.run(SUBSTEP, &controls);
+    }
+    assert!(
+        sim.telemetry.awa < 0.0,
+        "should be on port tack before the pilot takes over, awa {:.1}",
+        deg(sim.telemetry.awa)
+    );
+
+    // The pilot must tack back — the short way, through the wind. Going the other way
+    // means an uncontrolled gybe through dead downwind, which is how you break a boom.
+    let mut deepest = 0.0_f64;
+    for _ in 0..(120.0 / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        if let Some(r) = pilot.rudder(&cfg, &sim.state, &sim.telemetry, SUBSTEP) {
+            controls.rudder = r;
+        }
+        sim.run(SUBSTEP, &controls);
+        deepest = deepest.max(sim.telemetry.twa.abs());
+    }
+    assert!(
+        deg(deepest) < 110.0,
+        "the vane bore away to {:.0} deg true — that is a gybe, not a tack",
+        deg(deepest)
+    );
+    assert!(
+        (sim.telemetry.awa - target).abs() < rad(6.0),
+        "and it should have recovered the target: holding {:.1} against {:.1}",
+        deg(sim.telemetry.awa),
+        deg(target)
+    );
+    assert!(ms_to_kn(sim.telemetry.stw) > 4.5, "and still be sailing");
 }

@@ -95,7 +95,7 @@ impl BoatState {
 }
 
 /// What the player is doing with their hands.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Controls {
     /// Rudder angle, radians, positive turns the bow to starboard.
     pub rudder: f64,
@@ -117,13 +117,28 @@ pub struct Controls {
     pub throttle: f64,
 }
 
+/// Hand-written rather than derived, because a derived default would put the outhaul
+/// fully eased — the deepest possible main, not the shape the sail coefficients were
+/// calibrated at. Every test and warm-up step that reaches for `Controls::default()`
+/// would quietly be measuring a different sail.
+impl Default for Controls {
+    fn default() -> Self {
+        Self {
+            rudder: 0.0,
+            main_sheet: 0.0,
+            jib_sheet: 0.0,
+            outhaul: 0.5,
+            reef: 0.0,
+            furl: 0.0,
+            throttle: 0.0,
+        }
+    }
+}
+
 impl Controls {
     /// Both sheets hard in, rudder centred, outhaul at a working upwind setting.
     pub fn close_hauled() -> Self {
-        Self {
-            outhaul: 0.5,
-            ..Default::default()
-        }
+        Self::default()
     }
 }
 
