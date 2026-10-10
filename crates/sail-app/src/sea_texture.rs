@@ -273,19 +273,27 @@ pub fn encode_normal(component: f32) -> u8 {
 
 /// How fast the ripple pattern itself travels over the water, metres per second.
 ///
-/// Not the surface drift. The normal map stands for short wind waves of a few metres,
-/// and a wave of length L in deep water moves at `sqrt(gL / 2pi)` — about 2.8 m/s for
-/// the scales in this tile. The texture used to be advected at the surface *current*
-/// instead, a tenth of that, which is why the water read as a photograph of a sea
-/// rather than a sea: the right shape, carried along, but not going anywhere of its
-/// own accord.
+/// Not the surface drift, and not what the first attempt at this computed either.
 ///
-/// This is on top of riding the wave, not instead of it. The texture coordinate is
-/// the position of the water *parcel*, so the pattern already orbits with the swell
-/// and crowds at the crests, which is what a Lagrangian coordinate gives for free.
-/// What this adds is the ripples travelling through the water that carries them.
+/// Two things were wrong with that. It took its wavelength from the size of the
+/// texture tile, so enlarging the tile from eleven metres to twenty-four raised the
+/// speed from 2.8 m/s to 4.1 — eight knots, faster than the boat, and with the whole
+/// map sliding coherently downwind it read exactly as what it was: the sea flowing
+/// sideways past a boat on a reach. The scale should come from the detail the eye
+/// actually follows, which is around a metre, not from however big the tile happens
+/// to be.
+///
+/// And it used the phase speed. What a observer sees travelling across water is the
+/// **group**, not the phase, and in deep water the group moves at half the phase
+/// speed. Phase velocity is the right number for where a single crest will be; group
+/// velocity is the right number for where the *pattern* will be, and a texture is a
+/// pattern.
+///
+/// A one-metre wave gives 1.25 m/s of phase and 0.63 m/s of group, which is a surface
+/// that is alive without being a conveyor belt.
 pub fn ripple_phase_speed() -> f32 {
-    // Amplitude-weighted mean of the ripple wavelengths in the tile, near enough.
-    let wavelength = TILE_METRES / 2.2;
-    (9.80665 * wavelength / std::f32::consts::TAU).sqrt()
+    /// The scale of ripple the eye follows, metres. Independent of the tile.
+    const VISIBLE_RIPPLE: f32 = 1.0;
+    let phase = (9.80665 * VISIBLE_RIPPLE / std::f32::consts::TAU).sqrt();
+    phase * 0.5
 }
