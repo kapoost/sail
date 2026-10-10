@@ -177,6 +177,7 @@ pub fn draw(
                  W / S   mainsheet: haul in / ease\n\
                  E / Q   genoa: grind in / ease\n\
                  Shift   fine, on both helm and sheets\n\
+                 G       roll the genoa away / back out   [ ]  part furl\n\
                  R / F   reef in / shake out      Z / X  engine astern / ahead\n\
                  T  snap to good trim    C  camera    L  new lap    Tab  hide panel",
             );

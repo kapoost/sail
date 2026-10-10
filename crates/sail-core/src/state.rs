@@ -103,8 +103,12 @@ pub struct Controls {
     pub main_sheet: f64,
     /// Genoa sheet: 0 hard in, 1 fully eased.
     pub jib_sheet: f64,
-    /// Reef, 0 to 1 of the available reduction.
+    /// Mainsail reef, 0 to 1 of the available reduction. Slab or in-mast reefing.
     pub reef: f64,
+    /// Headsail furl, 0 fully unrolled to 1 rolled completely away. A roller-furling
+    /// genoa is a separate piece of gear from the main's reef, and rolling it is
+    /// usually the first thing anyone does — so it gets its own control.
+    pub furl: f64,
     /// Engine, -1 astern to 1 ahead.
     pub throttle: f64,
 }

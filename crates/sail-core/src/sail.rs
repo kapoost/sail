@@ -21,7 +21,8 @@ pub struct SailProfile {
     pub cl_max: f64,
     /// Angle of attack at peak lift, radians.
     pub alpha_opt: f64,
-    /// Angle of attack at which separation is complete, radians.
+    /// Angle of attack at which separation is substantially complete, radians. Well
+    /// past the best angle, because a sail stalls softly.
     pub alpha_stall: f64,
     /// Parasitic drag: cloth, rig, mast interference.
     pub cd0: f64,
@@ -43,7 +44,7 @@ impl SailProfile {
         Self {
             cl_max: 1.45,
             alpha_opt: rad(18.0),
-            alpha_stall: rad(28.0),
+            alpha_stall: rad(34.0),
             cd0: 0.055,
             aspect_ratio: luff_height * luff_height / area,
             luff_margin: rad(4.0),
@@ -58,7 +59,7 @@ impl SailProfile {
         Self {
             cl_max: 1.55,
             alpha_opt: rad(16.0),
-            alpha_stall: rad(26.0),
+            alpha_stall: rad(30.0),
             cd0: 0.045,
             aspect_ratio: luff_height * luff_height / area,
             luff_margin: rad(3.5),
@@ -95,7 +96,7 @@ impl SailProfile {
         let separation = if alpha > self.alpha_opt {
             let t =
                 ((alpha - self.alpha_opt) / (self.alpha_stall - self.alpha_opt)).clamp(0.0, 1.0);
-            0.6 * t * t
+            0.35 * t * t
         } else {
             0.0
         };

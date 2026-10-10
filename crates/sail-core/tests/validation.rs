@@ -344,25 +344,90 @@ fn tacking_costs_speed_and_the_boat_recovers() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn reefing_stands_the_boat_up_at_a_modest_cost_in_speed() {
+fn reefing_appropriately_is_nearly_free_upwind() {
     let cfg = BoatConfig::charter_sloop_34();
     let make = wind(22.0);
     let full = steady_state(cfg, &make, rad(45.0), SETTLE, 0.0);
-    let reefed = steady_state(cfg, &make, rad(45.0), SETTLE, 1.0);
+    // Half reef: rolled headsail and a slab in the main, which is what a crew would
+    // actually be carrying in twenty-two knots.
+    let sensible = steady_state(cfg, &make, rad(45.0), SETTLE, 0.5);
 
     assert!(
-        reefed.state.heel.abs() < full.state.heel.abs() - rad(5.0),
-        "a full reef must take at least 5 deg off the heel: {:.1} vs {:.1}",
-        deg(reefed.state.heel).abs(),
+        sensible.state.heel.abs() < full.state.heel.abs() - rad(4.0),
+        "shortening down must take at least 4 deg off the heel: {:.1} vs {:.1}",
+        deg(sensible.state.heel).abs(),
         deg(full.state.heel).abs()
     );
-    // And in this much wind standing the boat up is close to free upwind, which is
-    // exactly why reefing early is the right call.
+    // Standing the boat up costs almost nothing upwind, which is exactly why reefing
+    // early is the right call and why nobody who knows this ever regrets it.
     assert!(
-        reefed.telemetry.vmg > 0.85 * full.telemetry.vmg,
-        "reefed VMG {:.2} kn against {:.2} kn at full sail",
-        ms_to_kn(reefed.telemetry.vmg),
+        sensible.telemetry.vmg > 0.92 * full.telemetry.vmg,
+        "sensibly reefed VMG {:.2} kn against {:.2} kn at full sail",
+        ms_to_kn(sensible.telemetry.vmg),
         ms_to_kn(full.telemetry.vmg)
+    );
+}
+
+#[test]
+fn storm_canvas_does_cost_real_speed() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let make = wind(22.0);
+    let full = steady_state(cfg, &make, rad(45.0), SETTLE, 0.0);
+    let storm = steady_state(cfg, &make, rad(45.0), SETTLE, 1.0);
+    // The far end of the range is a deep reef plus a nearly rolled genoa. It should
+    // stand the boat right up and it should be visibly slower — otherwise the reef
+    // control carries no trade-off and the player has no decision to make.
+    assert!(deg(storm.state.heel).abs() < 16.0);
+    assert!(
+        storm.telemetry.vmg < 0.92 * full.telemetry.vmg,
+        "storm canvas VMG {:.2} kn is not meaningfully slower than {:.2} kn",
+        ms_to_kn(storm.telemetry.vmg),
+        ms_to_kn(full.telemetry.vmg)
+    );
+}
+
+#[test]
+fn main_alone_sails_but_gives_up_pointing() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let make = wind(12.0);
+    let sloop = steady_state(cfg, &make, rad(45.0), SETTLE, 0.0);
+
+    // Genoa rolled completely away. This is a real way to sail — shortening down in a
+    // blow, or isolating the main to learn what it is doing — so it has to work.
+    let heading = wrap_tau(0.0 - rad(45.0));
+    let mut state = BoatState::at_rest(heading);
+    state.surge = kn_to_ms(3.0);
+    let mut sim = Simulation::new(cfg, state, make());
+    let mut pilot = TillerPilot::new();
+    let mut controls = Controls {
+        furl: 1.0,
+        ..Default::default()
+    };
+    for _ in 0..(SETTLE / SUBSTEP) as u64 {
+        let (m, _) = optimal_sheets(&cfg, sim.telemetry.awa);
+        controls.main_sheet = m;
+        controls.rudder = pilot.rudder(&cfg, &sim.state, heading, SUBSTEP);
+        sim.run(SUBSTEP, &controls);
+    }
+    assert!(
+        wrap_pi(sim.state.heading - heading).abs() < rad(3.0),
+        "main alone must still hold a close-hauled course, off by {:.1} deg",
+        deg(wrap_pi(sim.state.heading - heading))
+    );
+    assert!(
+        ms_to_kn(sim.telemetry.stw) > 3.5,
+        "main alone should still sail, got {:.2} kn",
+        ms_to_kn(sim.telemetry.stw)
+    );
+    // Slower than the full rig, because half the sail area is gone.
+    assert!(sim.telemetry.stw < sloop.telemetry.stw);
+    // And the balance shifts towards weather helm, since the headsail was the thing
+    // pulling the centre of effort forward.
+    assert!(
+        controls.rudder < sloop.controls.rudder + rad(0.5),
+        "main alone should not be less weather-helmed: {:.1} vs {:.1} deg",
+        deg(controls.rudder),
+        deg(sloop.controls.rudder)
     );
 }
 

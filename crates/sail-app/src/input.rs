@@ -158,6 +158,25 @@ pub fn gather(
             (sim.controls.jib_sheet + winch.clamp(-1.0, 1.0) * sheet_rate * dt).clamp(0.0, 1.0);
     }
 
+    // --- Headsail furl: a drum you roll, so a toggle plus a rate ---------------
+    // Separate gear from the main's reef, and the first thing anyone touches when it
+    // blows up. G rolls it fully away or fully out; the rate keys give part furls.
+    let furl_toggle = keys.just_pressed(KeyCode::KeyG)
+        || pad.is_some_and(|p| p.just_pressed(GamepadButton::West));
+    if furl_toggle {
+        sim.controls.furl = if sim.controls.furl > 0.5 { 0.0 } else { 1.0 };
+    }
+    let mut furl_rate = 0.0;
+    if keys.pressed(KeyCode::BracketRight) {
+        furl_rate += 0.35;
+    }
+    if keys.pressed(KeyCode::BracketLeft) {
+        furl_rate -= 0.35;
+    }
+    if furl_rate != 0.0 {
+        sim.controls.furl = (sim.controls.furl + furl_rate * dt).clamp(0.0, 1.0);
+    }
+
     // --- Reef: a job, so discrete ---------------------------------------------
     let reef_in = keys.just_pressed(KeyCode::KeyR)
         || pad.is_some_and(|p| p.just_pressed(GamepadButton::DPadDown));

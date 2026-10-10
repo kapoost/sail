@@ -83,7 +83,7 @@ impl Simulation {
 
         // --- Apparent wind, sampled at each sail's centre of effort ---------------
         let (main_area, main_z_ce) = cfg.reefed_main(controls.reef);
-        let (jib_area, jib_z_ce) = cfg.furled_genoa(controls.reef);
+        let (jib_area, jib_z_ce) = cfg.furled_genoa(controls.furl);
         let (main_awa, main_aws) = apparent_wind(&st, wind_ref, main_z_ce * heel_cos, velocity);
         let (jib_awa, jib_aws) = apparent_wind(&st, wind_ref, jib_z_ce * heel_cos, velocity);
 

@@ -252,14 +252,19 @@ pub fn update_sails(
     sim: Res<Sim>,
     time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
-    q: Query<&SailSurface>,
+    mut q: Query<(&SailSurface, &mut Visibility)>,
 ) {
     let t_ = &sim.sim.telemetry;
     let cfg = sim.config();
     let side = -t_.awa.signum() as f32;
     let now = time.elapsed_secs();
 
-    for surface in &q {
+    for (surface, mut visibility) in &mut q {
+        *visibility = if surface.which == Sail::Genoa && sim.controls.furl > 0.985 {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
         let (forces, geometry) = match surface.which {
             Sail::Main => (
                 t_.main,
@@ -271,15 +276,20 @@ pub fn update_sails(
                     luff_fraction: 1.0 - 0.45 * sim.controls.reef as f32,
                 },
             ),
-            Sail::Genoa => (
-                t_.jib,
-                SailGeometry {
-                    tack: Vec3::new(0.0, DECK + 0.25, -(cfg.loa as f32) * 0.46),
-                    head: Vec3::new(0.0, DECK + 13.4, MAST_FOOT_Z),
-                    foot_length: 4.9,
-                    luff_fraction: 1.0,
-                },
-            ),
+            Sail::Genoa => {
+                // A rolling genoa loses area from its foot and leech as the drum
+                // turns, so it visibly shrinks on the stay rather than vanishing.
+                let out = 1.0 - sim.controls.furl as f32;
+                (
+                    t_.jib,
+                    SailGeometry {
+                        tack: Vec3::new(0.0, DECK + 0.25, -(cfg.loa as f32) * 0.46),
+                        head: Vec3::new(0.0, DECK + 13.4, MAST_FOOT_Z),
+                        foot_length: 4.9 * out,
+                        luff_fraction: 0.35 + 0.65 * out,
+                    },
+                )
+            }
         };
         if let Some(mut mesh) = meshes.get_mut(&surface.mesh) {
             build_sail(

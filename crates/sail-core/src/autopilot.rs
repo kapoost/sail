@@ -110,6 +110,7 @@ where
 
     let mut controls = Controls {
         reef,
+        furl: (reef * 0.85).clamp(0.0, 1.0),
         ..Default::default()
     };
     let mut pilot = TillerPilot::new();

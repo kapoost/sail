@@ -80,9 +80,8 @@ pub struct BoatConfig {
     // --- Rig ---
     pub main: RiggedSail,
     pub genoa: RiggedSail,
-    /// Maximum sail reduction, as the fraction of mainsail area that can be rolled
-    /// away. The headsail furls alongside it — on a cruiser the two happen together,
-    /// and rolling genoa is usually the first thing anyone does.
+    /// Largest mainsail reduction available, as a fraction of its area. The headsail
+    /// has no equivalent limit: a roller genoa rolls all the way away.
     pub max_reef: f64,
 
     // --- Auxiliary engine ---
@@ -170,13 +169,16 @@ impl BoatConfig {
         )
     }
 
-    /// Headsail area and centre of effort after furling. A rolled genoa loses area from
-    /// its foot and leech, so its centre of effort rises slightly even as it shrinks.
-    pub fn furled_genoa(&self, reef: f64) -> (f64, f64) {
-        let r = reef.clamp(0.0, 1.0) * self.max_reef * 0.85;
+    /// Headsail area and centre of effort after furling. A rolled genoa loses area
+    /// from its foot and leech, so its centre of effort rises slightly even as it
+    /// shrinks. At `furl` of 1 it is gone entirely, which is a real and often correct
+    /// way to sail: main alone is how you shorten down in a blow, and how you isolate
+    /// the mainsail when you want to learn what it is doing.
+    pub fn furled_genoa(&self, furl: f64) -> (f64, f64) {
+        let f = furl.clamp(0.0, 1.0);
         (
-            self.genoa.area * (1.0 - r),
-            self.genoa.z_ce * (1.0 - 0.25 * r),
+            self.genoa.area * (1.0 - f),
+            self.genoa.z_ce * (1.0 - 0.25 * f),
         )
     }
 
