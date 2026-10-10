@@ -10,6 +10,14 @@ use sail_core::water::WindSea;
 use sail_core::wind::SyntheticWind;
 
 /// Fetch for the scenario's sea, metres.
+///
+/// Eighty kilometres, and the obvious-looking change to twenty was tried and reverted.
+/// A short fetch does not mean an easy sea: twelve knots over twenty kilometres builds
+/// only half a metre, but at a 2.9 s period — which sits on this hull's pitch
+/// resonance of 2.8 s. She hobby-horses, and the model's added resistance stops her
+/// dead. The nearly-one-metre sea over a long fetch has a 4.5 s period, well clear of
+/// resonance, and she shoulders through it. Steepness and period matter more than
+/// height, which is the whole reason the Baltic has its reputation.
 pub const FETCH_METRES: f64 = 80_000.0;
 
 #[derive(Resource)]

@@ -21,6 +21,63 @@ pub enum View {
     Chase,
 }
 
+/// A head and neck, in effect.
+///
+/// The cockpit view used to ride the full rigid-body attitude, which was a decision I
+/// made deliberately and got wrong. Nobody aboard experiences that: the
+/// vestibulo-ocular reflex holds your gaze on the horizon, your neck absorbs the
+/// jolts, and your legs take the vertical. A camera welded to the hull is far more
+/// violent than standing on the boat, and the result is a screen that throws you
+/// about while the boat itself is behaving perfectly well.
+///
+/// So each axis is filtered on its own terms, and the point is to keep the
+/// *information* while dropping the violence:
+///
+/// * **Heading** passes through untouched. You look where the bow points.
+/// * **Heel** is mostly kept, because it is the primary feedback channel — but a
+///   person leans into it, so some of it is absorbed rather than all of it shown.
+/// * **Pitch** is nearly all removed. You look at the horizon, not along the deck.
+/// * **Heave** keeps its low frequencies, so you still rise over a swell, and loses
+///   the high ones, which are what actually make people ill.
+#[derive(Resource, Default)]
+pub struct HeadMotion {
+    heel: f32,
+    pitch: f32,
+    heave: f32,
+    primed: bool,
+}
+
+/// How much of each axis reaches the eye at all.
+const HEEL_FOLLOW: f32 = 0.70;
+const PITCH_FOLLOW: f32 = 0.22;
+/// Time constants, seconds. Longer means more absorbed.
+const HEEL_LAG: f32 = 0.22;
+const PITCH_LAG: f32 = 0.55;
+const HEAVE_LAG: f32 = 0.70;
+
+impl HeadMotion {
+    fn follow(&mut self, heel: f32, pitch: f32, heave: f32, dt: f32) {
+        if !self.primed {
+            self.heel = heel * HEEL_FOLLOW;
+            self.pitch = pitch * PITCH_FOLLOW;
+            self.heave = heave;
+            self.primed = true;
+            return;
+        }
+        let k = |tau: f32| 1.0 - (-dt / tau).exp();
+        self.heel += (heel * HEEL_FOLLOW - self.heel) * k(HEEL_LAG);
+        self.pitch += (pitch * PITCH_FOLLOW - self.pitch) * k(PITCH_LAG);
+        self.heave += (heave - self.heave) * k(HEAVE_LAG);
+    }
+
+    /// Attitude for the eye: the boat's heading, with the rest softened.
+    fn attitude(&self, heading: f32) -> Quat {
+        Quat::from_rotation_y(-heading)
+            * Quat::from_rotation_z(-self.heel)
+            * Quat::from_rotation_x(self.pitch)
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct ChaseState {
     position: Vec3,
@@ -68,6 +125,7 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     ));
     commands.init_resource::<View>();
     commands.init_resource::<ChaseState>();
+    commands.init_resource::<HeadMotion>();
 }
 
 pub fn toggle(keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>, mut view: ResMut<View>) {
@@ -86,26 +144,36 @@ pub fn follow(
     view: Res<View>,
     time: Res<Time>,
     mut chase: ResMut<ChaseState>,
+    mut head: ResMut<HeadMotion>,
     mut q: Query<&mut Transform, With<MainCamera>>,
 ) {
     let st = &sim.sim.state;
     let hull = frame::hull_translation(st);
+    head.follow(
+        st.heel as f32,
+        st.pitch as f32,
+        st.heave as f32,
+        time.delta_secs().max(1e-5),
+    );
 
     for mut cam in &mut q {
         match *view {
             View::Cockpit => {
-                // At the helm, aft of midships, and heeling with the hull.
-                let attitude = frame::attitude(st);
+                // Standing at the helm. The eye sits where the hull puts it, but it
+                // does not take the hull's full attitude — see HeadMotion.
+                let eye = head.attitude(st.heading as f32);
                 let eye_local = Vec3::new(0.0, 2.35, 3.6);
-                cam.translation = hull + attitude * eye_local;
-                // Look forward and slightly down, in the hull's own frame, so the
-                // horizon tilts exactly as much as the boat does.
-                cam.rotation = attitude * Quat::from_rotation_x(-0.10);
+                // The eye's own height is filtered too, so a sharp heave moves the
+                // boat under you rather than throwing the view.
+                let base = Vec3::new(hull.x, head.heave, hull.z);
+                cam.translation = base + frame::attitude(st) * eye_local;
+                cam.rotation = eye * Quat::from_rotation_x(-0.10);
                 chase.initialised = false;
             }
             View::Chase => {
                 let heading = frame::heading_only(st);
-                let target = hull + heading * Vec3::new(0.0, 9.0, 21.0);
+                let target =
+                    Vec3::new(hull.x, head.heave, hull.z) + heading * Vec3::new(0.0, 9.0, 21.0);
                 if !chase.initialised {
                     chase.position = target;
                     chase.initialised = true;
@@ -115,7 +183,9 @@ pub fn follow(
                 let k = 1.0 - (-3.0 * time.delta_secs()).exp();
                 chase.position = chase.position.lerp(target, k);
                 cam.translation = chase.position;
-                cam.look_at(hull + Vec3::Y * 4.5, Vec3::Y);
+                // Aim at the filtered height, or a sharp heave swings the whole
+                // frame about a boat that has barely moved.
+                cam.look_at(Vec3::new(hull.x, head.heave + 4.5, hull.z), Vec3::Y);
             }
         }
     }

@@ -43,6 +43,16 @@ pub trait WaterSurface: Send + Sync {
         self.velocity(pos, t)
     }
 
+    /// How much of the surface pressure gradient a hull of this draft actually feels,
+    /// averaged over its immersed depth.
+    ///
+    /// The gradient decays as `exp(-k z)`, so a hull does not feel the surface value —
+    /// it feels the average over its own draft, which is always less. One for a
+    /// surface particle, and smaller the shorter the waves and the deeper the hull.
+    fn depth_attenuation(&self, _draft: f64) -> f64 {
+        1.0
+    }
+
     /// Significant wave height, metres. Zero for flat water.
     fn significant_height(&self) -> f64 {
         0.0
@@ -215,6 +225,31 @@ impl WaterSurface for WindSea {
             v.z += orbital * theta.sin();
         }
         v
+    }
+
+    fn depth_attenuation(&self, draft: f64) -> f64 {
+        let d = draft.max(0.01);
+        // Amplitude-weighted mean of the exact per-component average,
+        // (1 - exp(-k d)) / (k d). Weighted rather than exact per component, because
+        // the force is assembled from one combined slope; short waves are attenuated
+        // hardest, which is right — they are a surface phenomenon.
+        let mut weight = 0.0;
+        let mut total = 0.0;
+        for c in &self.components {
+            let kd = c.k * d;
+            let mean = if kd < 1e-6 {
+                1.0
+            } else {
+                (1.0 - (-kd).exp()) / kd
+            };
+            total += c.amplitude * mean;
+            weight += c.amplitude;
+        }
+        if weight <= 0.0 {
+            1.0
+        } else {
+            total / weight
+        }
     }
 
     fn significant_height(&self) -> f64 {

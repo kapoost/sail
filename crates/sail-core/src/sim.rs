@@ -290,7 +290,7 @@ impl Simulation {
         // to power-over-speed once she is moving.
         const WAVE_DRAG_KNEE: f64 = 1.2;
         let v = speed.abs();
-        let r_waves =
+        let r_waves_uncapped =
             cfg.wave_drag_fraction * motion_power * v / (v * v + WAVE_DRAG_KNEE * WAVE_DRAG_KNEE);
 
         // --- Bare-hull resistance --------------------------------------------------
@@ -307,6 +307,21 @@ impl Simulation {
         let excess = (heel - cfg.rail_down_heel).max(0.0);
         let r_heel = (r_friction + r_residuary)
             * (cfg.heel_drag_factor * heel * heel + cfg.rail_down_factor * excess * excess);
+
+        // A stated bound on the wave drag, not a silent fudge.
+        //
+        // Charging added resistance from the motion damping's dissipated power is a
+        // reasonable argument off resonance and badly wrong on it. Drive this hull at
+        // its 2.8 s pitch period — which half a metre of short chop over a twenty
+        // kilometre fetch does exactly — and the term grows until it stops the boat
+        // dead and pushes her backwards. Hobby-horsing is real and miserable; it does
+        // not do that. The honest fix is frequency-dependent radiation damping from a
+        // panel solver rather than one lumped coefficient. Until then this is capped
+        // against the bare-hull resistance, so a resonant sea still costs a great deal
+        // without being able to bring her to a stop.
+        let bare_hull = (r_friction + r_residuary + r_heel).abs();
+        let r_waves = r_waves_uncapped.min(1.5 * bare_hull.max(60.0));
+
         let (hull_fx, hull_fy) =
             resolve(0.0, r_friction + r_residuary + r_heel + r_waves, flow_angle);
 
@@ -430,7 +445,12 @@ impl Simulation {
         // under a crest, so water is pushed *down* the slope — and so is a boat. Get
         // it backwards and the wave drives her up its own face, pumping energy in, and
         // the symptom is a boat flung about rather than carried.
-        let water_accel = -self.water.slope(st.pos, st.time) * GRAVITY;
+        // Attenuated over the hull's draft, because the pressure gradient decays with
+        // depth and the hull feels the average over its own immersion rather than the
+        // value at the surface. The length averaging is already exact: for a sinusoid
+        // the bow-to-stern height difference *is* the mean gradient over the hull.
+        let depth_factor = self.water.depth_attenuation(cfg.form.canoe_draft);
+        let water_accel = -self.water.slope(st.pos, st.time) * GRAVITY * depth_factor;
         let accel_body = st.to_body(water_accel);
         let surf = m_x * accel_body.x;
         let sway_wave = m_y * accel_body.y;

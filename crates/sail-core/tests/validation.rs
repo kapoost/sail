@@ -1494,3 +1494,78 @@ fn hull_stations_narrow_towards_the_ends() {
         "an odd count puts a station amidships"
     );
 }
+
+#[test]
+fn a_hull_feels_less_than_the_surface_pressure_gradient() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let long = WindSea::new(kn_to_ms(12.0), 200_000.0, 0.0, 5);
+    let chop = WindSea::new(kn_to_ms(12.0), 15_000.0, 0.0, 5);
+
+    let a_long = long.depth_attenuation(cfg.form.canoe_draft);
+    let a_chop = chop.depth_attenuation(cfg.form.canoe_draft);
+
+    // Always less than the surface value, because the gradient decays with depth and
+    // the hull feels the average over its own immersion.
+    assert!(a_long < 1.0 && a_long > 0.7, "long swell: {a_long:.3}");
+    // And short waves are attenuated hardest — they are a surface phenomenon.
+    assert!(
+        a_chop < a_long,
+        "short chop should reach a hull less than a long swell does: {a_chop:.3} against {a_long:.3}"
+    );
+    // A surface particle feels all of it.
+    assert_eq!(FlatWater.depth_attenuation(1.0), 1.0);
+    assert!(
+        long.depth_attenuation(0.001) > 0.99,
+        "a raft feels the surface value"
+    );
+}
+
+#[test]
+fn a_resonant_sea_slows_the_boat_without_stopping_her() {
+    let cfg = BoatConfig::charter_sloop_34();
+    // Half a metre of short chop over a twenty kilometre fetch arrives at about 2.9 s,
+    // which sits on this hull's 2.8 s pitch period. She hobby-horses, and that is real
+    // — but it does not stop a boat dead or push her backwards, and an unbounded
+    // energy-based wave drag did exactly that.
+    let twa = rad(45.0);
+    let heading = wrap_tau(0.0 - twa);
+    let mut state = BoatState::at_rest(heading);
+    state.surge = kn_to_ms(4.0);
+    let mut sim =
+        Simulation::new(cfg, state, Box::new(SteadyWind::new(0.0, kn_to_ms(12.0)))).with_water(
+            Box::new(WindSea::new(kn_to_ms(12.0), 20_000.0, 0.0, 0xC0FFEE)),
+        );
+    let mut pilot = TillerPilot::new();
+    let mut controls = Controls::default();
+
+    let track = glam::DVec2::new(heading.sin(), heading.cos());
+    let mut previous = sim.state.pos.dot(track);
+    let mut backwards = 0u32;
+    let mut slowest = f64::MAX;
+    for i in 0..(180.0 / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        controls.rudder = pilot.rudder(&cfg, &sim.state, heading, SUBSTEP);
+        sim.run(SUBSTEP, &controls);
+        if i as f64 * SUBSTEP < 60.0 {
+            previous = sim.state.pos.dot(track);
+            continue;
+        }
+        let along = sim.state.pos.dot(track);
+        if along < previous {
+            backwards += 1;
+        }
+        previous = along;
+        slowest = slowest.min(sim.telemetry.stw);
+    }
+    assert_eq!(
+        backwards, 0,
+        "she went backwards along her own track in a half-metre sea"
+    );
+    assert!(
+        ms_to_kn(slowest) > 1.5,
+        "slowest she got was {:.2} kn; hobby-horsing is miserable, not fatal",
+        ms_to_kn(slowest)
+    );
+}
