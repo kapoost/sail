@@ -24,6 +24,9 @@ const SIZE: u32 = 512;
 /// How much world the tile covers, metres. Sets the size of the ripples.
 pub const TILE_METRES: f32 = 6.0;
 
+/// Re-export so the lighting and the sky cannot disagree about where the sun is.
+pub use crate::sky::SUN as SUN_FROM_SKY;
+
 /// One ripple: integer cycles across the tile, so the result tiles seamlessly.
 struct Ripple {
     cycles_u: f32,
@@ -150,7 +153,9 @@ pub fn roughness_map() -> Image {
             let roughness = (0.05 + 0.30 * patch.clamp(0.0, 1.0)).clamp(0.02, 0.6);
             data.push(0);
             data.push((roughness * 255.0) as u8);
-            data.push(26); // a little metallic, which is what gives water its sky
+            // Not metallic at all. Water's sky comes from Fresnel on a dielectric,
+            // not from a metal's tinted specular.
+            data.push(0);
             data.push(255);
         }
     }

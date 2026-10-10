@@ -14,6 +14,7 @@ mod hud;
 mod input;
 mod sea_texture;
 mod sim;
+mod sky;
 mod sound;
 mod world;
 

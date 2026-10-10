@@ -5,6 +5,7 @@
 //! that stays level throws it away. The chase view deliberately does *not* heel, since
 //! a horizon that rolls with the hull from outside the boat just makes people ill.
 
+use bevy::light::{GeneratedEnvironmentMapLight, Skybox};
 use bevy::prelude::*;
 
 use crate::frame;
@@ -26,10 +27,24 @@ pub struct ChaseState {
     initialised: bool,
 }
 
-pub fn setup(mut commands: Commands) {
+pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    // One cubemap, two jobs: drawn as the sky, and filtered on the GPU into the
+    // environment light the water reflects. Sharing the image is what guarantees the
+    // sun you can see and the sun glittering off the wave faces are the same sun.
+    let sky = images.add(crate::sky::cubemap());
     commands.spawn((
         MainCamera,
         Camera3d::default(),
+        Skybox {
+            image: Some(sky.clone()),
+            brightness: 2600.0,
+            ..default()
+        },
+        GeneratedEnvironmentMapLight {
+            environment_map: sky,
+            intensity: 2600.0,
+            ..default()
+        },
         Projection::Perspective(PerspectiveProjection {
             fov: 1.15,
             near: 0.08,
@@ -42,11 +57,11 @@ pub fn setup(mut commands: Commands) {
         // at a finite piece of geometry. Real visibility at sea is rarely better than
         // this anyway.
         DistanceFog {
-            color: Color::srgb(0.70, 0.79, 0.88),
+            color: crate::sky::haze_colour(),
             falloff: FogFalloff::from_visibility_colors(
                 2600.0,
-                Color::srgb(0.68, 0.77, 0.86),
-                Color::srgb(0.82, 0.88, 0.94),
+                crate::sky::haze_near(),
+                crate::sky::haze_colour(),
             ),
             ..default()
         },

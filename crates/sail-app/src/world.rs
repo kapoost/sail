@@ -49,24 +49,36 @@ pub fn setup(
             shadow_maps_enabled: true,
             ..default()
         },
-        Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.9, -0.55, 0.0)),
+        // Pointed from the one definition of where the sun is, so the drawn disc and
+        // the light cannot drift apart.
+        Transform::default().looking_to(-sea_texture::SUN_FROM_SKY, Vec3::Y),
     ));
+    // Much dimmer than before: the environment map now supplies the sky's own
+    // contribution properly, and leaving the old flat ambient term in place on top of
+    // it just washes the whole scene out.
     commands.insert_resource(GlobalAmbientLight {
         color: Color::srgb(0.62, 0.74, 0.88),
-        brightness: 420.0,
+        brightness: 60.0,
         ..default()
     });
-    commands.insert_resource(ClearColor(Color::srgb(0.58, 0.70, 0.82)));
 
-    // White base colour, because the water's colour is carried per vertex: that is
-    // what lets a crest go to foam without having to overdrive a dark base past one.
+    // Water is a dielectric, not a metal. `metallic: 1.0` was simply wrong: it tints
+    // the specular with the base colour and removes the diffuse term entirely, which
+    // is how you render chrome. Water has an F0 of about two percent — Bevy maps
+    // reflectance 0.5 to four percent, so 0.25 — and Fresnel takes that to a near
+    // mirror at grazing angles on its own. That rise towards the horizon is most of
+    // what the eye reads as water, and it only appears once there is an environment
+    // map to reflect.
+    //
+    // White base colour because the water's own colour is carried per vertex, which
+    // is what lets a crest reach foam without overdriving a dark base past one.
     let water = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         normal_map_texture: Some(images.add(sea_texture::normal_map())),
         metallic_roughness_texture: Some(images.add(sea_texture::roughness_map())),
         perceptual_roughness: 1.0,
-        metallic: 1.0,
-        reflectance: 0.35,
+        metallic: 0.0,
+        reflectance: 0.25,
         double_sided: true,
         cull_mode: None,
         ..default()
