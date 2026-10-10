@@ -186,7 +186,7 @@ pub fn setup(
 /// Put the hull where the simulation says it is, at the attitude it says it has.
 pub fn update_hull(sim: Res<Sim>, mut q: Query<&mut Transform, With<BoatRoot>>) {
     for mut t in &mut q {
-        t.translation = frame::to_bevy(sim.sim.state.pos, 0.0);
+        t.translation = frame::hull_translation(&sim.sim.state);
         t.rotation = frame::attitude(&sim.sim.state);
     }
 }

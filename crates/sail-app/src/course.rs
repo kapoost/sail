@@ -24,6 +24,30 @@ const BEAT_LENGTH: f64 = 800.0;
 /// bowsprit to judge by yet.
 const ROUNDING_RADIUS: f64 = 22.0;
 
+/// Anything moored that has to ride the sea rather than hang over it. A mark sitting
+/// at mean water level while a wave passes through it is the single most jarring
+/// thing you can put on a sea surface.
+#[derive(Component)]
+pub struct Floating {
+    /// World position in simulation coordinates.
+    pub at: DVec2,
+    /// Height above the local surface, metres.
+    pub lift: f32,
+}
+
+/// Lift the marks onto the water, and let them lean with the slope.
+pub fn float_marks(sim: Res<Sim>, mut q: Query<(&Floating, &mut Transform)>) {
+    let t = sim.sim.state.time;
+    for (float, mut transform) in &mut q {
+        let height = sim.sim.water.height(float.at, t);
+        let slope = sim.sim.water.slope(float.at, t);
+        transform.translation.y = height as f32 + float.lift;
+        // A buoy stands up to the local normal, which on a steep sea is visible.
+        transform.rotation =
+            Quat::from_rotation_z(-slope.x as f32) * Quat::from_rotation_x(-slope.y as f32);
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Leg {
     /// Beating to the windward mark.
@@ -112,6 +136,10 @@ pub fn setup(
     for (pos, flagged) in [(course.windward, true), (course.start, false)] {
         let at = frame::to_bevy(pos, 0.0);
         commands.spawn((
+            Floating {
+                at: pos,
+                lift: 0.35,
+            },
             Mesh3d(body.clone()),
             MeshMaterial3d(buoy_mat.clone()),
             Transform::from_translation(at + Vec3::Y * 0.35),
@@ -119,12 +147,14 @@ pub fn setup(
         // A bare buoy is invisible at eight hundred metres — a real course uses a pin
         // with a flag for exactly this reason.
         commands.spawn((
+            Floating { at: pos, lift: 1.9 },
             Mesh3d(pole.clone()),
             MeshMaterial3d(pole_mat.clone()),
             Transform::from_translation(at + Vec3::Y * 1.9),
         ));
         if flagged {
             commands.spawn((
+                Floating { at: pos, lift: 3.1 },
                 Mesh3d(flag.clone()),
                 MeshMaterial3d(flag_mat.clone()),
                 Transform::from_translation(at + Vec3::new(0.0, 3.1, 0.4)),

@@ -215,6 +215,20 @@ pub fn draw(
             }
 
             ui.separator();
+            ui.label(egui::RichText::new("sea").strong());
+            ui.label(format!(
+                "Hs {:.2} m    heave {:+.2} m    pitch {:+.1}    immersion {:.2} m",
+                t.significant_height,
+                t.heave,
+                deg(t.pitch),
+                t.immersion
+            ));
+            ui.label(format!(
+                "added resistance in waves {:.0} N    surf {:+.0} N    vertical {:+.1} m/s2",
+                t.resistance_waves, t.surf_force, t.heave_accel
+            ));
+
+            ui.separator();
             ui.label(egui::RichText::new("forces").strong());
             ui.label(format!(
                 "drive {:.0} N    side {:.0} N    resistance {:.0} N",

@@ -61,7 +61,7 @@ pub fn follow(
     mut q: Query<&mut Transform, With<MainCamera>>,
 ) {
     let st = &sim.sim.state;
-    let hull = frame::to_bevy(st.pos, 0.0);
+    let hull = frame::hull_translation(st);
 
     for mut cam in &mut q {
         match *view {
