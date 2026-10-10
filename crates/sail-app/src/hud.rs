@@ -165,6 +165,19 @@ pub fn draw(
                     "too flat for this heel, ease it off"
                 }
             ));
+            // The vang reads inert upwind on purpose: with the boom near the
+            // centreline the mainsheet is already tensioning the leech, so there is
+            // nothing for it to do. Saying so beats letting it look broken.
+            ui.label(format!(
+                "vang {:.2}   twist {:.1}{}",
+                c.vang,
+                deg(t.twist),
+                if deg(cfg.main.profile.chord_angle(c.main_sheet)) < 25.0 {
+                    "   (boom near centreline — the sheet is doing the vang's job)"
+                } else {
+                    ""
+                }
+            ));
             ui.label(format!(
                 "main reef {:.2}    genoa furl {:.2}{}    engine {:+.2}    rudder {}",
                 c.reef,
@@ -250,6 +263,7 @@ pub fn draw(
                  E / Q   genoa: grind in / ease\n\
                  Shift   fine, on both helm and sheets\n\
                  1 / 2   outhaul: ease for depth / haul out for flat\n\
+                 3 / 4   vang: ease for twist / haul on to flatten the leech\n\
                  G       roll the genoa away / back out    [ ]  part furl\n\
                  P       pilot: standby / hold course / hold wind angle\n\
                  , / .   nudge the pilot's target (Shift for five)\n\

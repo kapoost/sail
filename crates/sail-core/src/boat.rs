@@ -233,6 +233,18 @@ impl BoatConfig {
         )
     }
 
+    /// The mainsail split in two for twist: (area, centre of effort height) for the
+    /// lower and upper halves.
+    ///
+    /// Two sections is the smallest split that makes twist mean anything, and twist is
+    /// what the vang is for. The lower carries more area because a mainsail is a
+    /// triangle; the upper sits much higher, which is why spilling it is such an
+    /// effective way to shed heeling moment without reefing.
+    pub fn main_sections(&self, reef: f64) -> ((f64, f64), (f64, f64)) {
+        let (area, z_ce) = self.reefed_main(reef);
+        ((area * 0.62, z_ce * 0.74), (area * 0.38, z_ce * 1.42))
+    }
+
     /// Headsail area and centre of effort after furling. A rolled genoa loses area
     /// from its foot and leech, so its centre of effort rises slightly even as it
     /// shrinks. At `furl` of 1 it is gone entirely, which is a real and often correct

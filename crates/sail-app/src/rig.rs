@@ -33,6 +33,7 @@ const BOOM_LENGTH: f32 = 4.2;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
+    Outhaul,
     Forestay,
     Backstay,
     Shroud(bool),
@@ -42,7 +43,8 @@ enum Kind {
 }
 
 /// All the lines, in the order they are packed into the mesh.
-const LINES: [Kind; 8] = [
+const LINES: [Kind; 9] = [
+    Kind::Outhaul,
     Kind::Forestay,
     Kind::Backstay,
     Kind::Shroud(false),
@@ -55,9 +57,16 @@ const LINES: [Kind; 8] = [
     Kind::JibSheet(true),
 ];
 
+/// How long a line stays lit after the control that moves it is touched.
+const FLASH: f32 = 0.85;
+
 #[derive(Resource)]
 pub struct Rigging {
     mesh: Handle<Mesh>,
+    /// Last frame's controls, so a change can be noticed.
+    previous: Controls,
+    /// Seconds of highlight left on each line.
+    flash: [f32; LINES.len()],
 }
 
 pub fn setup(
@@ -98,7 +107,11 @@ pub fn setup(
         MeshMaterial3d(rope),
         Transform::default(),
     ));
-    commands.insert_resource(Rigging { mesh: handle });
+    commands.insert_resource(Rigging {
+        mesh: handle,
+        previous: Controls::default(),
+        flash: [0.0; LINES.len()],
+    });
 }
 
 /// Where a line is made fast at each end, in the hull's own frame, plus how hard it is
@@ -116,8 +129,9 @@ struct Span {
 
 pub fn update(
     sim: Res<Sim>,
+    time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
-    rigging: Res<Rigging>,
+    mut rigging: ResMut<Rigging>,
     camera: Query<&Transform, With<MainCamera>>,
 ) {
     let Ok(view) = camera.single() else {
@@ -126,6 +140,42 @@ pub fn update(
     let Some(mut mesh) = meshes.get_mut(&rigging.mesh) else {
         return;
     };
+
+    // Light up whichever line the player just moved. Eight ropes on a screen is eight
+    // things nobody has been taught the names of; showing which one answered to the
+    // key is how the rig teaches itself.
+    {
+        let now = &sim.controls;
+        let was = rigging.previous;
+        let dt = time.delta_secs();
+        let moved = |a: f64, b: f64| (a - b).abs() > 1e-4;
+        let mut light = |kind: Kind| {
+            if let Some(i) = LINES.iter().position(|k| *k == kind) {
+                rigging.flash[i] = FLASH;
+            }
+        };
+        if moved(now.main_sheet, was.main_sheet) {
+            light(Kind::MainSheet);
+        }
+        if moved(now.jib_sheet, was.jib_sheet) || moved(now.furl, was.furl) {
+            light(Kind::JibSheet(false));
+            light(Kind::JibSheet(true));
+        }
+        if moved(now.outhaul, was.outhaul) {
+            light(Kind::Outhaul);
+        }
+        if moved(now.vang, was.vang) {
+            light(Kind::Vang);
+        }
+        if moved(now.reef, was.reef) {
+            light(Kind::MainSheet);
+            light(Kind::Outhaul);
+        }
+        for f in &mut rigging.flash {
+            *f = (*f - dt).max(0.0);
+        }
+        rigging.previous = *now;
+    }
 
     let st = &sim.sim.state;
     let cfg = sim.config();
@@ -159,6 +209,20 @@ pub fn update(
     let spans: Vec<Span> = LINES
         .iter()
         .map(|kind| match *kind {
+            Kind::Outhaul => Span {
+                // Along the underside of the boom, from the gooseneck out to the clew.
+                // Drawn mostly so the control has something to show for itself: with
+                // no line on screen, hauling the foot flat was invisible.
+                from: Vec3::new(0.0, BOOM_HEIGHT - 0.07, MAST_FOOT_Z),
+                to: Vec3::new(
+                    boom.sin() * BOOM_LENGTH,
+                    BOOM_HEIGHT - 0.07,
+                    MAST_FOOT_Z + boom.cos() * BOOM_LENGTH,
+                ),
+                tension: 0.35 + 0.65 * sim.controls.outhaul as f32,
+                width: 0.024,
+                colour: rope_colour,
+            },
             Kind::Forestay => Span {
                 from: masthead,
                 to: Vec3::new(0.0, DECK + 0.25, -(cfg.loa as f32) * 0.46),
@@ -208,7 +272,9 @@ pub fn update(
                     MAST_FOOT_Z + boom.cos() * BOOM_LENGTH * 0.42,
                 ),
                 to: Vec3::new(0.0, DECK + 0.1, MAST_FOOT_Z + 0.2),
-                tension: 0.55 + 0.45 * main_load,
+                // Its own setting, not the sail's load. A vang hauled on is bar taut
+                // whether or not the main is pulling, and an eased one hangs.
+                tension: 0.12 + 0.88 * sim.controls.vang as f32,
                 width: 0.028,
                 colour: rope_colour,
             },
@@ -249,7 +315,9 @@ pub fn update(
     let mut normals = Vec::with_capacity(LINES.len() * SEGMENTS * 2);
     let mut colours = Vec::with_capacity(LINES.len() * SEGMENTS * 2);
 
-    for span in &spans {
+    for (index, span) in spans.iter().enumerate() {
+        // Highlight decays, so a line brightens when touched and settles back.
+        let lit = (rigging.flash[index] / FLASH).clamp(0.0, 1.0);
         let from = hull + attitude * span.from;
         let to = hull + attitude * span.to;
         let length = (to - from).length().max(0.01);
@@ -270,13 +338,22 @@ pub fn update(
                 (curve(from, to, sag, ahead) - curve(from, to, sag, behind)).normalize_or_zero();
             // Face the eye: offset perpendicular to both the rope and the view.
             let to_eye = (view.translation - point).normalize_or_zero();
-            let side = along.cross(to_eye).normalize_or_zero() * (span.width * 0.5);
+            // A lit line also thickens a little, which reads at a glance even when
+            // the whole rig is backlit.
+            let side = along.cross(to_eye).normalize_or_zero() * (span.width * (0.5 + lit * 0.45));
             positions.push(point - side);
             positions.push(point + side);
             normals.push(to_eye);
             normals.push(to_eye);
-            colours.push(span.colour);
-            colours.push(span.colour);
+            let mut colour = span.colour;
+            // Brighten towards white and lift the alpha, so even a line that is
+            // fading out because its sail is furled still announces itself.
+            for c in colour.iter_mut().take(3) {
+                *c = (*c + lit * 1.6).min(2.4);
+            }
+            colour[3] = (colour[3] + lit * 0.7).min(1.0);
+            colours.push(colour);
+            colours.push(colour);
         }
     }
 

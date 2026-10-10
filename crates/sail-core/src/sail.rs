@@ -29,15 +29,37 @@ pub const ALPHA_SHIFT_PER_DEPTH: f64 = 3.0 * std::f64::consts::PI / 180.0;
 /// Mainsail draft for an outhaul setting: 0 eased and deep, 1 hard out and flat.
 ///
 /// What the outhaul actually does is pull the clew aft along the boom, tensioning the
-/// foot and flattening the lower third of the sail. This model carries one section per
-/// sail, so a single depth stands in for the whole shape — which overstates the
-/// outhaul's reach and understates the cunningham, vang and backstay, all of which
-/// shape the upper sail. Splitting them properly needs a sail with sections and
-/// therefore twist, which is the next real step in the aerodynamics.
+/// foot and flattening the lower third of the sail. The depth here is still a single
+/// number for the whole sail, so it overstates the outhaul's reach — but the mainsail
+/// now carries two sections for twist, so the *vang* is modelled where it belongs
+/// rather than being lumped in here. The cunningham and backstay remain unmodelled.
 #[inline]
 pub fn camber_for_outhaul(outhaul: f64) -> f64 {
     let o = outhaul.clamp(0.0, 1.0);
     CAMBER_DEEP + (CAMBER_FLAT - CAMBER_DEEP) * o
+}
+
+/// Largest twist the leech will fall off to with the vang eased right off, radians.
+pub const MAX_TWIST: f64 = 20.0 * std::f64::consts::PI / 180.0;
+
+/// Twist in the mainsail's leech, in radians, from the vang and the boom's angle.
+///
+/// The second argument is what makes this a real control rather than a dial. With the
+/// boom near the centreline the mainsheet runs almost vertically, so sheeting in
+/// tensions the leech all by itself and the vang has nothing left to do — which is why
+/// nobody thinks about the vang upwind. Let the boom out and the sheet pulls sideways
+/// instead of down; the leech falls off, the top of the sail spills, and the vang is
+/// suddenly the only thing holding the shape. Hence: the sheet's own downward
+/// component is `cos(boom angle)`, and the vang competes with it.
+///
+/// Twist is not a defect to be eliminated. The apparent wind aloft is **freer** than
+/// on deck, because the true wind is stronger up there while the boat's speed is the
+/// same — so some twist is exactly right, and the amount depends on the gradient.
+/// That optimum is what gives the vang something to be set correctly or incorrectly.
+pub fn twist_for_vang(vang: f64, chord_angle: f64) -> f64 {
+    let sheet_pull = chord_angle.cos().clamp(0.0, 1.0);
+    let leech_tension = vang.clamp(0.0, 1.0).max(sheet_pull);
+    MAX_TWIST * (1.0 - leech_tension)
 }
 
 /// Outhaul a trimmer would carry, given how hard the boat is already heeling.

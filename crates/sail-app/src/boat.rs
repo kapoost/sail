@@ -292,10 +292,16 @@ pub fn update_sails(
             }
         };
         if let Some(mut mesh) = meshes.get_mut(&surface.mesh) {
+            // Only the mainsail twists here; a headsail's shape is set by its lead.
+            let twist = match surface.which {
+                Sail::Main => side * t_.twist as f32,
+                Sail::Genoa => 0.0,
+            };
             build_sail(
                 &mut mesh,
                 &geometry,
                 side * forces.chord_angle as f32,
+                twist,
                 forces.coeffs.luffing as f32,
                 forces.camber as f32,
                 now,
@@ -344,6 +350,7 @@ fn build_sail(
     mesh: &mut Mesh,
     g: &SailGeometry,
     chord_angle: f32,
+    twist: f32,
     luffing: f32,
     draft: f32,
     now: f32,
@@ -355,12 +362,23 @@ fn build_sail(
     // Draft as trimmed. Wiring this to the real camber rather than a constant is what
     // makes the outhaul visible: haul it out and you watch the sail go flat.
     let camber = draft * (1.0 - luffing);
+    // The outhaul tensions the *foot*. It flattens the bottom of the sail hard and the
+    // top barely at all, so showing one uniform depth hid most of what the control
+    // does — the change was there but spread so thinly it was invisible. The reference
+    // depth is the shape the coefficients are tuned at; the deviation from it is
+    // concentrated low down, where the outhaul actually pulls.
+    let reference = sail_core::sail::CAMBER_REFERENCE as f32;
+    let deviation = camber - reference;
 
     for ui in 0..SAIL_U {
         let u = ui as f32 / (SAIL_U - 1) as f32;
         let luff_point = g.tack.lerp(g.head, u * g.luff_fraction);
         // Chord tapers to nothing at the head.
         let chord = g.foot_length * (1.0 - u).powf(0.85);
+        // Twist: the leech falls off aloft, so the upper sail is eased relative to the
+        // boom. Zero at the foot, full at the head — which is what makes the vang a
+        // visible control rather than a number in a panel.
+        let local_angle = chord_angle + twist * u.powf(1.15);
         for vi in 0..SAIL_V {
             let v = vi as f32 / (SAIL_V - 1) as f32;
             // Along the boom, rotated by the sheet.
@@ -369,11 +387,21 @@ fn build_sail(
                 0.0,
                 chord_angle.cos() * v * chord,
             );
-            // Bulge normal to the chord, towards leeward.
-            let belly = (std::f32::consts::PI * v).sin() * camber * chord;
-            let normal = Vec3::new(chord_angle.cos(), 0.0, -chord_angle.sin()) * leeward;
-            // A luffing sail shakes hardest at the leech and barely at the luff.
-            let flap = (now * 9.0 + u * 5.0 + v * 3.0).sin() * luffing * 0.34 * v * chord.max(0.4);
+            // Bulge normal to the chord, towards leeward. The outhaul's share of the
+            // depth is weighted towards the foot, which is where it pulls.
+            let foot_weight = (1.0 - u).powf(1.6);
+            let local_camber = reference + deviation * (0.35 + 1.65 * foot_weight);
+            let belly = (std::f32::consts::PI * v).sin() * local_camber * chord;
+            let normal = Vec3::new(local_angle.cos(), 0.0, -local_angle.sin()) * leeward;
+            // A luffing sail shakes along its free edge and nowhere else. It is bolted
+            // to the mast up the luff and to the boom along the foot, and the clew is
+            // pinned to the boom end by the outhaul — so the shaking has to vanish at
+            // v = 0 (the luff), at u = 0 (the foot), and therefore at the clew, which
+            // is the corner of the two. Scaling it by v alone let the clew fly about
+            // on a line that cannot move at all.
+            let free_edge = v * u.powf(0.65);
+            let flap =
+                (now * 9.0 + u * 5.0 + v * 3.0).sin() * luffing * 0.42 * free_edge * chord.max(0.4);
             positions.push(luff_point + along + normal * (belly + flap));
             uvs.push(Vec2::new(v, u));
         }

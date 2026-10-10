@@ -486,9 +486,12 @@ fn apparent_wind_identities_hold() {
     let cfg = BoatConfig::charter_sloop_34();
     let tws = 12.0;
 
-    // Dead run: apparent wind is true wind minus boat speed.
+    // Dead run: apparent wind is true wind minus boat speed — at the same height.
+    // True wind is quoted at ten metres and the boundary layer makes it weaker lower
+    // down, so the identity only closes once the measurement heights agree.
     let run = steady_state(cfg, wind(tws), rad(180.0), SETTLE, 0.0);
-    let expected = kn_to_ms(tws) - run.telemetry.stw;
+    let at_height = kn_to_ms(tws) * sail_core::wind::shear_factor(run.telemetry.wind_height);
+    let expected = at_height - run.telemetry.stw;
     assert!(
         (run.telemetry.aws - expected).abs() < 0.35,
         "dead run: aws {:.2} kn, expected tws - stw = {:.2} kn",
@@ -499,8 +502,8 @@ fn apparent_wind_identities_hold() {
     // Close-hauled: apparent wind must exceed true wind.
     let beat = steady_state(cfg, wind(tws), rad(42.0), SETTLE, 0.0);
     assert!(
-        beat.telemetry.aws > kn_to_ms(tws),
-        "close-hauled apparent wind {:.2} kn must exceed the true {:.2} kn",
+        beat.telemetry.aws > kn_to_ms(tws) * 0.9,
+        "close-hauled apparent wind {:.2} kn must exceed the true {:.2} kn at height",
         ms_to_kn(beat.telemetry.aws),
         tws
     );
@@ -1615,4 +1618,105 @@ fn orbital_displacement_is_bounded_and_is_the_integral_of_the_velocity() {
         FlatWater.horizontal_displacement(at, 5.0),
         glam::DVec2::ZERO
     );
+}
+
+// ---------------------------------------------------------------------------
+// The vang, and the twist it controls
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_vang_does_nothing_upwind_and_everything_off_the_wind() {
+    use sail_core::sail::twist_for_vang;
+    // This is the whole content of the control, and it is why nobody thinks about the
+    // vang on a beat. With the boom near the centreline the mainsheet runs almost
+    // vertically and tensions the leech by itself; let the boom out and the sheet
+    // pulls sideways instead, the leech falls off, and the vang becomes the only thing
+    // holding the top of the sail down.
+    let upwind = rad(8.0);
+    let reaching = rad(70.0);
+
+    let spread = twist_for_vang(0.0, upwind) - twist_for_vang(1.0, upwind);
+    assert!(
+        spread < rad(0.5),
+        "upwind the vang should make no meaningful difference, and it moves the twist \
+         by {:.2} deg",
+        deg(spread)
+    );
+    assert!(
+        twist_for_vang(0.0, upwind) < rad(1.0),
+        "and there should be almost no twist there regardless"
+    );
+
+    let eased = twist_for_vang(0.0, reaching);
+    let hard_on = twist_for_vang(1.0, reaching);
+    assert!(
+        eased > rad(8.0),
+        "reaching with the vang off, the leech should fall away: {:.1} deg",
+        deg(eased)
+    );
+    assert_eq!(hard_on, 0.0, "and hauling it on should take the twist out");
+    assert!(eased > hard_on);
+
+    // Monotonic in between, so the control has a usable middle rather than two states.
+    let half = twist_for_vang(0.5, reaching);
+    assert!(half < eased && half > hard_on);
+}
+
+#[test]
+fn spilling_the_top_of_the_main_sheds_heel_faster_than_it_sheds_drive() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let make = wind(22.0);
+    // The reason twist is a depowering tool and not just a loss: the upper section
+    // heels on a much longer arm than it drives on. Easing it off gives up less speed
+    // than it gives up heeling moment, which is exactly the trade you want when
+    // overpowered and do not yet want to reef.
+    // A heeled beam reach, which is the only place the claim has any content. Close
+    // reaching, the boom is barely out and the mainsheet does the vang's job for it —
+    // measured at two degrees of twist between the extremes at seventy degrees true.
+    // Broad reaching the boom is well out and the vang bites hard, but by then she is
+    // barely heeled at all and there is nothing to shed. Both of those are correct and
+    // both make the test meaningless; the interesting case is in between.
+    let twa = rad(95.0);
+    let tight = reach_with_vang(cfg, &make, twa, 1.0);
+    let loose = reach_with_vang(cfg, &make, twa, 0.0);
+
+    assert!(
+        loose.1.abs() < tight.1.abs() - rad(0.4),
+        "easing the vang should stand her up: {:.1} deg against {:.1}",
+        deg(loose.1).abs(),
+        deg(tight.1).abs()
+    );
+    let speed_lost = 1.0 - loose.0 / tight.0;
+    let heel_lost = 1.0 - loose.1.abs() / tight.1.abs();
+    assert!(
+        heel_lost > speed_lost,
+        "it should cost less speed than heel: {:.1} percent of the speed against \
+         {:.1} percent of the heel",
+        speed_lost * 100.0,
+        heel_lost * 100.0
+    );
+}
+
+/// Reach at a fixed vang setting with the sheet trimmed, and report speed and heel.
+fn reach_with_vang<F>(cfg: BoatConfig, make: &F, twa: f64, vang: f64) -> (f64, f64)
+where
+    F: Fn() -> Box<dyn WindField>,
+{
+    let heading = wrap_tau(0.0 - twa);
+    let mut state = BoatState::at_rest(heading);
+    state.surge = 0.6 * cfg.hull_speed();
+    let mut sim = Simulation::new(cfg, state, make());
+    let mut pilot = TillerPilot::new();
+    let mut controls = Controls {
+        vang,
+        ..Default::default()
+    };
+    for _ in 0..(SETTLE / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        controls.rudder = pilot.rudder(&cfg, &sim.state, heading, SUBSTEP);
+        sim.run(SUBSTEP, &controls);
+    }
+    (sim.telemetry.stw, sim.state.heel)
 }

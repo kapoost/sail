@@ -118,6 +118,10 @@ pub struct Controls {
     /// one. Depth is power; flat is less heeling force and less drag. The call changes
     /// with the breeze, which is why it is a control and not a constant.
     pub outhaul: f64,
+    /// Boom vang, 0 eased right off to 1 hard on. Holds the leech down, and therefore
+    /// controls twist — but only once the boom is out far enough that the mainsheet
+    /// has stopped doing the job itself.
+    pub vang: f64,
     /// Mainsail reef, 0 to 1 of the available reduction. Slab or in-mast reefing.
     pub reef: f64,
     /// Headsail furl, 0 fully unrolled to 1 rolled completely away. A roller-furling
@@ -139,6 +143,7 @@ impl Default for Controls {
             main_sheet: 0.0,
             jib_sheet: 0.0,
             outhaul: 0.5,
+            vang: 0.6,
             reef: 0.0,
             furl: 0.0,
             throttle: 0.0,
@@ -165,6 +170,13 @@ pub struct Telemetry {
     /// Apparent wind at the rig, speed and angle.
     pub aws: f64,
     pub awa: f64,
+    /// Height above the water the apparent wind was read at, metres.
+    ///
+    /// Not a detail. The true wind is quoted at ten metres and the boundary layer
+    /// means it is weaker lower down, so `aws` and `tws` are not comparable without
+    /// knowing where each was measured. Leaving this implicit is how
+    /// `aws = tws - stw` stops holding for reasons that look like a bug.
+    pub wind_height: f64,
     /// Speed through the water and over ground, m/s.
     pub stw: f64,
     pub sog: f64,
@@ -176,7 +188,12 @@ pub struct Telemetry {
     pub leeway: f64,
     pub yaw_rate: f64,
 
+    /// Lower section of the mainsail — the one whose chord angle is the boom's.
     pub main: SailForces,
+    /// Upper section, eased by the twist in the leech.
+    pub main_upper: SailForces,
+    /// Twist between the two, radians.
+    pub twist: f64,
     pub jib: SailForces,
 
     /// Sea state and the boat's motion in it.

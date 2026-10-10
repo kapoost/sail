@@ -225,6 +225,22 @@ pub fn gather(
         sim.controls.outhaul = (sim.controls.outhaul + outhaul_rate * dt).clamp(0.0, 1.0);
     }
 
+    // --- Vang: holds the leech down, and so controls twist --------------------
+    // Grouped with the outhaul because both are shape controls rather than sheets:
+    // you set them and leave them. Note that it will feel inert upwind, and that is
+    // correct — with the boom near the centreline the mainsheet is already tensioning
+    // the leech and there is nothing left for the vang to do.
+    let mut vang_rate = 0.0;
+    if keys.pressed(KeyCode::Digit3) {
+        vang_rate -= OUTHAUL_RATE; // ease: more twist
+    }
+    if keys.pressed(KeyCode::Digit4) {
+        vang_rate += OUTHAUL_RATE; // haul on: take the twist out
+    }
+    if vang_rate != 0.0 {
+        sim.controls.vang = (sim.controls.vang + vang_rate * dt).clamp(0.0, 1.0);
+    }
+
     // --- Headsail furl: a drum you roll, so a toggle plus a rate ---------------
     // Separate gear from the main's reef, and the first thing anyone touches when it
     // blows up. G rolls it fully away or fully out; the rate keys give part furls.

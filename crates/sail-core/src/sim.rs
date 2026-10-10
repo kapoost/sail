@@ -11,7 +11,9 @@
 use crate::boat::BoatConfig;
 use crate::hull::{frictional_resistance, induced_resistance, residuary_resistance, righting_arm};
 use crate::hydrostatics;
-use crate::sail::{camber_for_outhaul, headsail_blanketing, sail_forces, CAMBER_REFERENCE};
+use crate::sail::{
+    camber_for_outhaul, headsail_blanketing, sail_forces, twist_for_vang, CAMBER_REFERENCE,
+};
 use crate::state::{BoatState, Controls, Telemetry};
 use crate::units::{rad, wrap_pi, wrap_tau, GRAVITY, RHO_SEA};
 use crate::water::{FlatWater, WaterSurface};
@@ -148,18 +150,40 @@ impl Simulation {
         let appendage_factor = heel_cos * appendage_immersion;
 
         // --- Apparent wind, sampled at each sail's centre of effort ---------------
-        let (main_area, main_z_ce) = cfg.reefed_main(controls.reef);
+        // The mainsail is in two sections, because the apparent wind aloft is not the
+        // apparent wind on deck: the true wind is stronger up there while the boat's
+        // speed is the same, so the apparent wind is *freer* higher up. That is why
+        // some twist in the leech is correct rather than sloppy, and it is what gives
+        // the vang a job it can be done well or badly.
+        let ((lower_area, lower_z), (upper_area, upper_z)) = cfg.main_sections(controls.reef);
         let (jib_area, jib_z_ce) = cfg.furled_genoa(controls.furl);
-        let (main_awa, main_aws) = apparent_wind(&st, wind_ref, main_z_ce * heel_cos, velocity);
+        let (lower_awa, lower_aws) = apparent_wind(&st, wind_ref, lower_z * heel_cos, velocity);
+        let (upper_awa, upper_aws) = apparent_wind(&st, wind_ref, upper_z * heel_cos, velocity);
         let (jib_awa, jib_aws) = apparent_wind(&st, wind_ref, jib_z_ce * heel_cos, velocity);
 
         let main_camber = camber_for_outhaul(controls.outhaul);
+        let boom_angle = cfg.main.profile.chord_angle(controls.main_sheet);
+        let twist = twist_for_vang(controls.vang, boom_angle);
+        // The upper section is eased by the twist, expressed back through the sheet
+        // mapping so both sections go through the same force model.
+        let upper_sheet = cfg.main.profile.sheet_for_chord_angle(boom_angle + twist);
+
         let main = sail_forces(
             &cfg.main.profile,
-            main_awa,
-            main_aws,
+            lower_awa,
+            lower_aws,
             controls.main_sheet,
-            main_area,
+            lower_area,
+            st.heel,
+            0.0,
+            main_camber,
+        );
+        let main_upper = sail_forces(
+            &cfg.main.profile,
+            upper_awa,
+            upper_aws,
+            upper_sheet,
+            upper_area,
             st.heel,
             0.0,
             main_camber,
@@ -177,8 +201,8 @@ impl Simulation {
             CAMBER_REFERENCE,
         );
 
-        let drive = main.drive + jib.drive;
-        let sail_side = main.side + jib.side;
+        let drive = main.drive + main_upper.drive + jib.drive;
+        let sail_side = main.side + main_upper.side + jib.side;
 
         // --- Hull velocity direction in the body frame ----------------------------
         // Everything hydrodynamic resolves against this. Getting it wrong means
@@ -339,12 +363,13 @@ impl Simulation {
         // Rig side force acting at its fore-and-aft centre of effort. The lead of the
         // centre of effort ahead of the centre of lateral resistance is a lee-helm
         // term; heel pays it back with interest.
-        let mut mz = cfg.main.x_ce * main.side + cfg.genoa.x_ce * jib.side;
+        let mut mz = cfg.main.x_ce * (main.side + main_upper.side) + cfg.genoa.x_ce * jib.side;
         // Heel swings the centre of effort out to leeward, so the driving force now
         // acts on a lever arm and luffs the boat up. This is weather helm.
-        let y_ce_main = main_z_ce * st.heel.sin();
+        let y_lower = lower_z * st.heel.sin();
+        let y_upper = upper_z * st.heel.sin();
         let y_ce_jib = jib_z_ce * st.heel.sin();
-        mz += -(y_ce_main * main.drive + y_ce_jib * jib.drive);
+        mz += -(y_lower * main.drive + y_upper * main_upper.drive + y_ce_jib * jib.drive);
         // The heeled waterplane is asymmetric, which drives the bow to windward too.
         mz += -cfg.heel_yaw_coefficient
             * st.heel.sin()
@@ -386,7 +411,11 @@ impl Simulation {
         // --- Roll moment ----------------------------------------------------------
         // Heeling arm is the centre of effort above the waterline plus the centre of
         // lateral resistance below it.
-        let mut mx = main.side * (main_z_ce * heel_cos + cfg.z_clr)
+        // Each section heels on its own arm, which is the whole point: spilling the
+        // top of the sail sheds heeling moment out of proportion to the force it
+        // gives up, because the top is where the arm is longest.
+        let mut mx = main.side * (lower_z * heel_cos + cfg.z_clr)
+            + main_upper.side * (upper_z * heel_cos + cfg.z_clr)
             + jib.side * (jib_z_ce * heel_cos + cfg.z_clr);
         // The righting curve restores towards the local vertical, and in a wave the
         // local vertical is tilted. Evaluating GZ at the heel *relative to the wave
@@ -486,8 +515,11 @@ impl Simulation {
             tws,
             twd,
             twa: wrap_pi(wind_body.y.atan2(wind_body.x)),
-            aws: main_aws,
-            awa: main_awa,
+            // Read at the lower section, which is where a masthead-free instrument and
+            // the helmsman's own face both sit.
+            aws: lower_aws,
+            awa: lower_awa,
+            wind_height: lower_z * heel_cos,
             // Speed through the water, which is what a log reads and what the hull
             // feels. In a seaway it differs from speed over ground by the orbital flow.
             stw: speed,
@@ -502,6 +534,8 @@ impl Simulation {
             leeway: self.state.leeway(),
             yaw_rate: self.state.yaw_rate,
             main,
+            main_upper,
+            twist,
             jib,
 
             significant_height: self.water.significant_height(),
