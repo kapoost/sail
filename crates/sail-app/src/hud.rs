@@ -179,9 +179,11 @@ pub fn draw(
             ));
 
             ui.separator();
-            // Matched on the mode itself. Keying this off `target_label`'s string meant
-            // a rename in sail-core would silently fall through to the heading arm and
-            // print a signed wind angle as a compass course, with no compile error.
+            // Matched on the mode itself, which makes a new mode a compile error here
+            // rather than a silent fall-through. An earlier version keyed off a label
+            // string from sail-core: renaming it would have dropped the vane into the
+            // heading arm and printed a signed wind angle as a compass course, with
+            // nothing to complain about it.
             match pilot.mode {
                 PilotMode::Standby => {
                     ui.label(egui::RichText::new("pilot  standby — hand steering").weak());

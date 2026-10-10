@@ -331,13 +331,4 @@ impl Autopilot {
         };
         Some(self.loop_.correct(cfg, error, st.yaw_rate, dt))
     }
-
-    /// What it is holding, for a gauge.
-    pub fn target_label(&self) -> Option<(&'static str, f64)> {
-        match self.mode {
-            PilotMode::Standby => None,
-            PilotMode::Heading(h) => Some(("heading", h)),
-            PilotMode::ApparentWind(a) => Some(("apparent wind", a)),
-        }
-    }
 }
