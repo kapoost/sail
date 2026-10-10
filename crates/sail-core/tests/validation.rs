@@ -1118,3 +1118,379 @@ fn a_vane_knocked_onto_the_wrong_tack_tacks_back_instead_of_gybing() {
     );
     assert!(ms_to_kn(sim.telemetry.stw) > 4.5, "and still be sailing");
 }
+
+// ---------------------------------------------------------------------------
+// Waves: hydrostatics, natural periods, and what a seaway does to the boat
+// ---------------------------------------------------------------------------
+
+use sail_core::hydrostatics;
+use sail_core::water::{fetch_limited_sea, FlatWater, WaterSurface, WindSea};
+
+/// Calm, no wind, no sails: just the hull and the water.
+fn becalmed(cfg: BoatConfig) -> Simulation {
+    Simulation::new(
+        cfg,
+        BoatState::at_rest(0.0),
+        Box::new(SteadyWind::new(0.0, 0.0)),
+    )
+}
+
+/// Natural period of a decaying oscillation.
+///
+/// Counts crossings in both directions and doubles the mean spacing, because these
+/// modes are well damped — a yacht loses four fifths of its heave amplitude per cycle,
+/// so waiting for three *upward* crossings asks for an oscillation that has already
+/// died. The signal is centred on its tail first, so a settling offset cannot hide a
+/// crossing.
+fn period_from_crossings(samples: &[f64], dt: f64) -> f64 {
+    let tail = &samples[samples.len() * 3 / 4..];
+    let mean = tail.iter().sum::<f64>() / tail.len() as f64;
+    let centred: Vec<f64> = samples.iter().map(|s| s - mean).collect();
+
+    let mut indices = Vec::new();
+    for (i, w) in centred.windows(2).enumerate() {
+        if (w[0] <= 0.0) != (w[1] <= 0.0) {
+            indices.push(i);
+        }
+    }
+    assert!(
+        indices.len() >= 3,
+        "signal did not oscillate: only {} crossings",
+        indices.len()
+    );
+    let half_spans: Vec<f64> = indices
+        .windows(2)
+        .map(|w| (w[1] - w[0]) as f64 * dt)
+        .collect();
+    2.0 * half_spans.iter().sum::<f64>() / half_spans.len() as f64
+}
+
+#[test]
+fn the_boat_floats_at_its_design_waterline() {
+    let cfg = BoatConfig::charter_sloop_34();
+    // The sectional area coefficient is calibrated, not derived, so this is the test
+    // that says the calibration is right. If it fails, the boat displaces the wrong
+    // amount of water and every hydrostatic result above it is wrong too.
+    let volume = cfg.form.volume_at(cfg.form.canoe_draft);
+    let displaced = volume * 1025.0;
+    assert!(
+        (displaced - cfg.displacement).abs() < 0.02 * cfg.displacement,
+        "at its design draft the hull displaces {displaced:.0} kg against a \
+         displacement of {:.0}",
+        cfg.displacement
+    );
+
+    // And it should settle there on its own.
+    let mut sim = becalmed(cfg);
+    sim.run(60.0, &Controls::default());
+    assert!(
+        sim.state.heave.abs() < 0.03,
+        "the boat settled {:.3} m off its waterline",
+        sim.state.heave
+    );
+    assert!(
+        (sim.telemetry.immersion - cfg.form.canoe_draft).abs() < 0.06,
+        "mean immersion {:.3} m against a canoe draft of {:.3}",
+        sim.telemetry.immersion,
+        cfg.form.canoe_draft
+    );
+    assert!(sim.state.pitch.abs() < rad(0.5), "and on an even keel");
+}
+
+#[test]
+fn the_waterplane_is_the_shape_a_cruiser_actually_has() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let cwp = cfg.form.waterplane_area() / (cfg.form.lwl * cfg.form.waterline_beam);
+    // A cruising hull of this size sits around 0.68 to 0.74. Tuning the station shape
+    // by eye gave 0.83, a hull far too full in the ends, and it showed up as heave and
+    // pitch periods a third shorter than they should be.
+    assert!(
+        (0.66..=0.76).contains(&cwp),
+        "waterplane coefficient {cwp:.3} is not a plausible hull"
+    );
+}
+
+#[test]
+fn natural_periods_are_those_of_a_thirty_four_foot_cruiser() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let dt = SUBSTEP;
+
+    // Heave: push her down and let go.
+    let mut sim = becalmed(cfg);
+    sim.run(30.0, &Controls::default());
+    sim.state.heave = -0.25;
+    sim.state.heave_rate = 0.0;
+    let mut heave = Vec::new();
+    for _ in 0..(14.0 / dt) as u64 {
+        sim.run(dt, &Controls::default());
+        heave.push(sim.state.heave);
+    }
+    let t_heave = period_from_crossings(&heave, dt);
+    assert!(
+        (1.2..=2.4).contains(&t_heave),
+        "heave period {t_heave:.2} s; a boat this size runs about 1.7"
+    );
+
+    // Pitch: trim her by the bow and let go.
+    let mut sim = becalmed(cfg);
+    sim.run(30.0, &Controls::default());
+    sim.state.pitch = rad(5.0);
+    sim.state.pitch_rate = 0.0;
+    let mut pitch = Vec::new();
+    for _ in 0..(14.0 / dt) as u64 {
+        sim.run(dt, &Controls::default());
+        pitch.push(sim.state.pitch);
+    }
+    let t_pitch = period_from_crossings(&pitch, dt);
+    assert!(
+        (1.3..=2.9).contains(&t_pitch),
+        "pitch period {t_pitch:.2} s; a boat this size runs about 1.9"
+    );
+
+    // Roll, which was never pinned down before waves made it matter.
+    let mut sim = becalmed(cfg);
+    sim.state.heel = rad(12.0);
+    let mut roll = Vec::new();
+    for _ in 0..(24.0 / dt) as u64 {
+        sim.run(dt, &Controls::default());
+        roll.push(sim.state.heel);
+    }
+    let t_roll = period_from_crossings(&roll, dt);
+    assert!(
+        (2.2..=4.6).contains(&t_roll),
+        "roll period {t_roll:.2} s; a cruiser of this beam and GM runs about 3"
+    );
+    // And roll must be the slowest of the three, which is why it is the mode that
+    // sets the integration step.
+    assert!(t_roll > t_heave && t_roll > t_pitch);
+}
+
+#[test]
+fn fetch_decides_what_sort_of_sea_a_wind_builds() {
+    // The same twenty knots across a bay and across an ocean are not the same sea, and
+    // this is the whole reason the Baltic has a reputation.
+    let (hs_open, tp_open) = fetch_limited_sea(kn_to_ms(20.0), 500_000.0);
+    let (hs_bay, tp_bay) = fetch_limited_sea(kn_to_ms(20.0), 20_000.0);
+
+    assert!(
+        hs_open > hs_bay * 1.8,
+        "open water should build a much bigger sea: {hs_open:.2} m against {hs_bay:.2}"
+    );
+    assert!(
+        tp_open > tp_bay,
+        "and a longer one: {tp_open:.1} s against {tp_bay:.1}"
+    );
+    // Fully developed in twenty knots is a couple of metres at seven-odd seconds.
+    assert!(
+        (1.5..=3.5).contains(&hs_open),
+        "fully developed Hs in 20 kn is {hs_open:.2} m"
+    );
+    assert!((5.5..=9.0).contains(&tp_open), "Tp {tp_open:.1} s");
+    // Flat calm makes no sea at all.
+    assert_eq!(fetch_limited_sea(0.0, 500_000.0).0, 0.0);
+}
+
+#[test]
+fn gerstner_components_obey_deep_water_dispersion() {
+    let sea = WindSea::new(kn_to_ms(14.0), 200_000.0, 0.0, 3);
+    for c in sea.components() {
+        // omega^2 = g k.
+        let expected = (9.80665 * c.k).sqrt();
+        assert!(
+            (c.omega - expected).abs() < 1e-9,
+            "component off dispersion: omega {} against {}",
+            c.omega,
+            expected
+        );
+    }
+    // Long waves run faster than short ones. This is what makes a real sea look
+    // layered rather than like corduroy.
+    let mut sorted: Vec<_> = sea.components().to_vec();
+    sorted.sort_by(|a, b| a.wavelength().partial_cmp(&b.wavelength()).unwrap());
+    for w in sorted.windows(2) {
+        assert!(w[1].celerity() > w[0].celerity());
+    }
+    // And the set lands on the significant height it was asked for.
+    assert!(sea.significant_height() > 0.0);
+    assert!(sea.peak_period() > 2.0);
+}
+
+#[test]
+fn flat_water_costs_nothing() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let s = steady_state(cfg, wind(12.0), rad(45.0), SETTLE, 0.0);
+    // The whole polar rests on this: added resistance in waves must be identically
+    // zero when there are none, or every flat-water number quietly changed.
+    // Not bit-exact zero: the heave rate settles to something like 1e-14 rather than
+    // to nothing, and squaring that is still nothing. The claim is that it costs
+    // nothing, not that the float is clean.
+    assert!(
+        s.telemetry.resistance_waves < 1e-9,
+        "flat water charged {:.3e} N of added resistance",
+        s.telemetry.resistance_waves
+    );
+    assert_eq!(s.telemetry.significant_height, 0.0);
+    assert_eq!(FlatWater.height(glam::DVec2::new(10.0, -3.0), 7.0), 0.0);
+}
+
+/// Sail a given true wind angle in a sea, and report speed and motion.
+fn sail_in_a_sea(
+    cfg: BoatConfig,
+    tws_knots: f64,
+    fetch: f64,
+    twa: f64,
+    seconds: f64,
+) -> (f64, f64, f64, f64) {
+    let heading = wrap_tau(0.0 - twa);
+    let mut state = BoatState::at_rest(heading);
+    state.surge = 0.6 * cfg.hull_speed();
+    let sea = WindSea::new(kn_to_ms(tws_knots), fetch, 0.0, 17);
+    let mut sim = Simulation::new(
+        cfg,
+        state,
+        Box::new(SteadyWind::new(0.0, kn_to_ms(tws_knots))),
+    )
+    .with_water(Box::new(sea));
+    let mut pilot = TillerPilot::new();
+    let mut controls = Controls::default();
+
+    let mut speed_sum = 0.0;
+    let mut samples = 0.0;
+    let mut pitch_peak = 0.0_f64;
+    let mut heave_peak = 0.0_f64;
+    let mut roll_peak = 0.0_f64;
+    let settle = seconds * 0.4;
+    for i in 0..(seconds / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        controls.rudder = pilot.rudder(&cfg, &sim.state, heading, SUBSTEP);
+        sim.run(SUBSTEP, &controls);
+        if i as f64 * SUBSTEP > settle {
+            speed_sum += sim.telemetry.stw;
+            samples += 1.0;
+            pitch_peak = pitch_peak.max(sim.state.pitch.abs());
+            heave_peak = heave_peak.max(sim.state.heave.abs());
+            roll_peak = roll_peak.max(sim.state.heel.abs());
+        }
+    }
+    (speed_sum / samples, pitch_peak, heave_peak, roll_peak)
+}
+
+#[test]
+fn the_boat_rides_the_sea_instead_of_ignoring_it() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let sea = WindSea::new(kn_to_ms(16.0), 200_000.0, 0.0, 17);
+    let hs = sea.significant_height();
+    let (_, pitch, heave, _) = sail_in_a_sea(cfg, 16.0, 200_000.0, rad(45.0), 200.0);
+
+    // A thirty-four footer is short compared with these waves, so it largely follows
+    // them: heave should be a real fraction of the significant height, not a tremor.
+    assert!(
+        heave > 0.15 * hs,
+        "heave peaked at {heave:.2} m in a {hs:.2} m sea — the boat is ignoring it"
+    );
+    assert!(
+        heave < 1.5 * hs,
+        "heave peaked at {heave:.2} m in a {hs:.2} m sea — that is not riding, that is flying"
+    );
+    assert!(
+        deg(pitch) > 1.5,
+        "pitch peaked at {:.1} deg; a boat beating into a sea pitches more than that",
+        deg(pitch)
+    );
+    assert!(
+        deg(pitch) < 20.0,
+        "pitch peaked at {:.1} deg, which would be spectacular",
+        deg(pitch)
+    );
+}
+
+#[test]
+fn a_head_sea_slows_the_boat_and_a_following_sea_barely_does() {
+    let cfg = BoatConfig::charter_sloop_34();
+    // The behavioural test that makes waves physics rather than decoration. Added
+    // resistance comes out of the motion, so it follows the heading for free.
+    let flat_upwind = steady_state(cfg, wind(16.0), rad(45.0), SETTLE, 0.0)
+        .telemetry
+        .stw;
+    let (sea_upwind, pitch_upwind, _, _) = sail_in_a_sea(cfg, 16.0, 200_000.0, rad(45.0), 240.0);
+    let (_, pitch_downwind, _, _) = sail_in_a_sea(cfg, 16.0, 200_000.0, rad(150.0), 240.0);
+
+    assert!(
+        sea_upwind < flat_upwind,
+        "a head sea must cost speed: {:.2} kn in waves against {:.2} flat",
+        ms_to_kn(sea_upwind),
+        ms_to_kn(flat_upwind)
+    );
+    let loss = 1.0 - sea_upwind / flat_upwind;
+    assert!(
+        (0.01..=0.30).contains(&loss),
+        "head-sea loss of {:.1} percent is not a plausible figure",
+        loss * 100.0
+    );
+    // Note what this does *not* assert. Beating does not pitch the boat through a
+    // bigger angle than running — measurement says the opposite, and measurement is
+    // right. Running, the encounter period is long, so the boat has time to follow the
+    // wave surface and takes up most of its slope; beating, it meets the waves well
+    // above its natural pitch frequency and punches through them instead. Large slow
+    // pitch running, sharp small pitch beating. Which is also why a following sea is
+    // the one that broaches you.
+    //
+    // What matters for speed is the pitch *rate*, since that is what the damping — and
+    // therefore the added resistance — is charged on. So compare the cost directly.
+    let (sea_downwind, _, _, _) = sail_in_a_sea(cfg, 16.0, 200_000.0, rad(150.0), 240.0);
+    let flat_downwind = steady_state(cfg, wind(16.0), rad(150.0), SETTLE, 0.0)
+        .telemetry
+        .stw;
+    let downwind_loss = 1.0 - sea_downwind / flat_downwind;
+    assert!(
+        loss > downwind_loss,
+        "a head sea should cost more than a following one: {:.1} percent beating \
+         against {:.1} percent running",
+        loss * 100.0,
+        downwind_loss * 100.0
+    );
+    let _ = (pitch_upwind, pitch_downwind);
+}
+
+#[test]
+fn a_beam_sea_rolls_the_boat() {
+    let cfg = BoatConfig::charter_sloop_34();
+    // Rolling in waves is the GZ curve restoring towards a tilted vertical, not a
+    // bolted-on oscillator — so it should appear without anything asking for it.
+    let (_, _, _, beam_roll) = sail_in_a_sea(cfg, 14.0, 200_000.0, rad(90.0), 200.0);
+    let flat = steady_state(cfg, wind(14.0), rad(90.0), SETTLE, 0.0);
+    assert!(
+        beam_roll > flat.state.heel.abs() + rad(1.0),
+        "beam sea rolled to {:.1} deg against a flat-water heel of {:.1}",
+        deg(beam_roll),
+        deg(flat.state.heel).abs()
+    );
+}
+
+#[test]
+fn hull_stations_narrow_towards_the_ends() {
+    let cfg = BoatConfig::charter_sloop_34();
+    let form = &cfg.form;
+    let midships = form.beam_at(0.0);
+    let bow = form.beam_at(-form.lwl * 0.45);
+    let stern = form.beam_at(form.lwl * 0.45);
+    assert!(midships > bow && midships > stern);
+    // A transom is wider than a stem.
+    assert!(stern > bow);
+    // Reserve buoyancy: past the canoe body the sides go vertical, so immersing
+    // further keeps adding area rather than running out.
+    let at_draft = form.section_area(0.0, form.canoe_draft);
+    let deeper = form.section_area(0.0, form.canoe_draft + 0.3);
+    assert!(
+        deeper > at_draft * 1.3,
+        "no reserve buoyancy above the waterline"
+    );
+    assert_eq!(form.section_area(0.0, -0.1), 0.0);
+    assert_eq!(
+        hydrostatics::STATIONS % 2,
+        1,
+        "an odd count puts a station amidships"
+    );
+}

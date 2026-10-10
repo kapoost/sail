@@ -37,11 +37,13 @@
 pub mod autopilot;
 pub mod boat;
 pub mod hull;
+pub mod hydrostatics;
 pub mod rng;
 pub mod sail;
 pub mod sim;
 pub mod state;
 pub mod units;
+pub mod water;
 pub mod wind;
 
 pub mod prelude {
@@ -51,9 +53,11 @@ pub mod prelude {
     };
     pub use crate::boat::{BoatConfig, RiggedSail};
     pub use crate::hull::Foil;
+    pub use crate::hydrostatics::HullForm;
     pub use crate::sail::{camber_for_outhaul, outhaul_for_heel, SailForces, SailProfile};
     pub use crate::sim::{Simulation, SUBSTEP};
     pub use crate::state::{BoatState, Controls, Telemetry};
     pub use crate::units::{deg, kn_to_ms, ms_to_kn, rad, wrap_pi, wrap_tau};
+    pub use crate::water::{FlatWater, WaterSurface, WindSea};
     pub use crate::wind::{SteadyWind, SyntheticWind, WindField};
 }

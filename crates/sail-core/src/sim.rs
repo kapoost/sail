@@ -10,9 +10,11 @@
 
 use crate::boat::BoatConfig;
 use crate::hull::{frictional_resistance, induced_resistance, residuary_resistance, righting_arm};
+use crate::hydrostatics;
 use crate::sail::{camber_for_outhaul, headsail_blanketing, sail_forces, CAMBER_REFERENCE};
 use crate::state::{BoatState, Controls, Telemetry};
 use crate::units::{rad, wrap_pi, wrap_tau, GRAVITY, RHO_SEA};
+use crate::water::{FlatWater, WaterSurface};
 use crate::wind::{direction_of, shear_factor, WindField};
 use glam::DVec2;
 
@@ -22,19 +24,38 @@ pub struct Simulation {
     pub config: BoatConfig,
     pub state: BoatState,
     pub wind: Box<dyn WindField>,
+    pub water: Box<dyn WaterSurface>,
     pub telemetry: Telemetry,
     accumulator: f64,
+    /// Last substep's wave slopes along and across the hull, so their rate of change
+    /// can be differenced. Motion damping has to be charged on movement *relative to
+    /// the water surface*: a boat pitching exactly with the wave is following it, not
+    /// radiating waves, and charging it for that made a following sea cost as much as
+    /// a head one.
+    prev_slope_along: f64,
+    prev_slope_athwart: f64,
 }
 
 impl Simulation {
+    /// Flat water. Every flat-water result — the polar, the validation suite — rests
+    /// on this being the default, so adding a sea is opt-in rather than a surprise.
     pub fn new(config: BoatConfig, state: BoatState, wind: Box<dyn WindField>) -> Self {
         Self {
             config,
             state,
             wind,
+            water: Box::new(FlatWater),
             telemetry: Telemetry::default(),
             accumulator: 0.0,
+            prev_slope_along: 0.0,
+            prev_slope_athwart: 0.0,
         }
+    }
+
+    /// Put a sea under it.
+    pub fn with_water(mut self, water: Box<dyn WaterSurface>) -> Self {
+        self.water = water;
+        self
     }
 
     /// Advance by `dt` seconds of wall-clock time, in fixed substeps. Leftover time is
@@ -73,13 +94,26 @@ impl Simulation {
         let twd = direction_of(wind_ref);
 
         let velocity = st.velocity_world();
-        let speed = st.speed();
         let heel_cos = st.heel.cos().abs();
+
+        // --- The water the hull is actually in ------------------------------------
+        // Orbital flow, not just surface height. A boat in a seaway is moving through
+        // water that is itself moving, and that difference is why it surges on a wave
+        // rather than only rising on one. Speed through the water and speed over
+        // ground stop being the same number here; the hull cares about the former and
+        // the apparent wind about the latter.
+        let water_velocity = self.water.velocity(st.pos, st.time);
+        let water_drift = DVec2::new(water_velocity.x, water_velocity.y);
+        let relative = st.to_body(velocity - water_drift);
+        let surge_rel = relative.x;
+        let sway_rel = relative.y;
+        let speed = (surge_rel * surge_rel + sway_rel * sway_rel).sqrt();
         // Past roughly 30 degrees the rudder starts to emerge and the keel loses grip.
         // This is why a knocked-down boat stops answering the helm — and it is the
         // mechanism that makes reefing a decision rather than a cosmetic option.
-        let immersion = 1.0 - 0.55 * crate::units::smoothstep(rad(30.0), rad(65.0), st.heel.abs());
-        let appendage_factor = heel_cos * immersion;
+        let appendage_immersion =
+            1.0 - 0.55 * crate::units::smoothstep(rad(30.0), rad(65.0), st.heel.abs());
+        let appendage_factor = heel_cos * appendage_immersion;
 
         // --- Apparent wind, sampled at each sail's centre of effort ---------------
         let (main_area, main_z_ce) = cfg.reefed_main(controls.reef);
@@ -121,16 +155,16 @@ impl Simulation {
         let flow_angle = if speed < 1e-3 {
             0.0
         } else {
-            st.sway.atan2(st.surge)
+            sway_rel.atan2(surge_rel)
         };
 
         // --- Lateral plane: the keel and canoe body earning their leeway -----------
-        let lp_sway = st.sway + st.yaw_rate * cfg.x_clr;
-        let lp_speed = (st.surge * st.surge + lp_sway * lp_sway).sqrt();
+        let lp_sway = sway_rel + st.yaw_rate * cfg.x_clr;
+        let lp_speed = (surge_rel * surge_rel + lp_sway * lp_sway).sqrt();
         let lp_flow_angle = if lp_speed < 1e-3 {
             0.0
         } else {
-            lp_sway.atan2(st.surge)
+            lp_sway.atan2(surge_rel)
         };
         let lp = cfg.lateral_plane.forces(-lp_flow_angle, lp_speed);
         // A heeled foil tilts part of its lift into the vertical.
@@ -142,17 +176,53 @@ impl Simulation {
         let rudder_angle = controls
             .rudder
             .clamp(-cfg.max_rudder_angle, cfg.max_rudder_angle);
-        let rud_sway = st.sway + st.yaw_rate * cfg.x_rudder;
-        let rud_speed = (st.surge * st.surge + rud_sway * rud_sway).sqrt();
+        let rud_sway = sway_rel + st.yaw_rate * cfg.x_rudder;
+        let rud_speed = (surge_rel * surge_rel + rud_sway * rud_sway).sqrt();
         let rud_flow_angle = if rud_speed < 1e-3 {
             0.0
         } else {
-            rud_sway.atan2(st.surge)
+            rud_sway.atan2(surge_rel)
         };
         let rud = cfg.rudder.forces(-rud_flow_angle - rudder_angle, rud_speed);
         let rud_lift = rud.lift * appendage_factor;
         // The rudder's force is normal to its own chord, not to the hull axis.
         let (rud_fx, rud_fy) = resolve(rud_lift, rud.drag, rud_flow_angle + rudder_angle);
+
+        // --- Where the boat sits in the wave --------------------------------------
+        // Both slopes are measured as differences over the hull's own dimensions,
+        // which averages out waves shorter than the boat — the analytic point slope
+        // cannot know that a wave narrower than the beam does not heel her.
+        let forward = st.forward();
+        let starboard = st.starboard();
+        let half_length = cfg.lwl * 0.5;
+        let half_beam = cfg.beam * 0.5;
+        let h_bow = self.water.height(st.pos + forward * half_length, st.time);
+        let h_stern = self.water.height(st.pos - forward * half_length, st.time);
+        let h_stbd = self.water.height(st.pos + starboard * half_beam, st.time);
+        let h_port = self.water.height(st.pos - starboard * half_beam, st.time);
+        let slope_along = (h_bow - h_stern) / cfg.lwl;
+        let slope_athwart_raw = (h_stbd - h_port) / cfg.beam;
+        // Rates of change, for damping relative to the surface.
+        let slope_along_rate = (slope_along - self.prev_slope_along) / dt;
+        let slope_athwart_rate = (slope_athwart_raw - self.prev_slope_athwart) / dt;
+        self.prev_slope_along = slope_along;
+        self.prev_slope_athwart = slope_athwart_raw;
+
+        // --- Added resistance in waves ---------------------------------------------
+        // Charged from the power the motion damping dissipates, on the grounds that a
+        // pitching hull radiates waves and that energy has to be paid for. Identically
+        // zero in flat water, which is why the polar did not move.
+        let heave_c = cfg.heave_damping
+            * 2.0
+            * (cfg.heave_mass * RHO_SEA * GRAVITY * cfg.form.waterplane_area()).sqrt();
+        let pitch_c = cfg.pitch_damping
+            * 2.0
+            * (cfg.pitch_inertia * RHO_SEA * GRAVITY * cfg.form.longitudinal_moment()).sqrt();
+        let heave_rel = st.heave_rate - water_velocity.z;
+        // Pitch relative to the surface, for the same reason heave is.
+        let pitch_rel = st.pitch_rate - slope_along_rate;
+        let motion_power = heave_c * heave_rel * heave_rel + pitch_c * pitch_rel * pitch_rel;
+        let r_waves = cfg.wave_drag_fraction * motion_power / speed.abs().max(0.5);
 
         // --- Bare-hull resistance --------------------------------------------------
         let r_friction = frictional_resistance(speed, cfg.lwl, cfg.wetted_surface);
@@ -168,9 +238,11 @@ impl Simulation {
         let excess = (heel - cfg.rail_down_heel).max(0.0);
         let r_heel = (r_friction + r_residuary)
             * (cfg.heel_drag_factor * heel * heel + cfg.rail_down_factor * excess * excess);
-        let (hull_fx, hull_fy) = resolve(0.0, r_friction + r_residuary + r_heel, flow_angle);
+        let (hull_fx, hull_fy) =
+            resolve(0.0, r_friction + r_residuary + r_heel + r_waves, flow_angle);
 
-        let resistance = r_friction + r_residuary + r_heel + lp.drag + lp_induced + rud.drag;
+        let resistance =
+            r_friction + r_residuary + r_heel + r_waves + lp.drag + lp_induced + rud.drag;
 
         // --- Engine ---------------------------------------------------------------
         let thrust = controls.throttle.clamp(-1.0, 1.0) * cfg.max_thrust;
@@ -205,34 +277,104 @@ impl Simulation {
         // Residual bare-hull yaw damping, on top of what the appendages already give.
         mz -= cfg.yaw_damping * st.yaw_rate * (speed + 0.5);
 
+        // --- Heave and pitch, from distributed buoyancy ---------------------------
+        // Each station asks how deep it is in the *local* surface. In a seaway they
+        // see different wave heights at the same instant, and that difference is the
+        // pitching moment — there is no separate wave-excitation term because none is
+        // needed.
+        let hydro = hydrostatics::integrate(&cfg.form, st.heave, st.pitch, |x| {
+            self.water.height(st.pos + forward * x, st.time)
+        });
+
+        let weight = cfg.displacement * GRAVITY;
+        let heave_stiffness = RHO_SEA * GRAVITY * cfg.form.waterplane_area();
+        let heave_critical = 2.0 * (cfg.heave_mass * heave_stiffness).sqrt();
+        // Damp against the water, not against the world. A boat riding a swell is
+        // barely moving relative to the surface it is on; damping against a fixed
+        // frame would fight the whole wave and pound instead of ride.
+        let heave_relative = st.heave_rate - water_velocity.z;
+        let fz = hydro.lift - weight - cfg.heave_damping * heave_critical * heave_relative;
+
+        let pitch_stiffness = RHO_SEA * GRAVITY * cfg.form.longitudinal_moment();
+        let pitch_critical = 2.0 * (cfg.pitch_inertia * pitch_stiffness).sqrt();
+        let my = hydro.pitch_moment - cfg.pitch_damping * pitch_critical * pitch_rel;
+
         // --- Roll moment ----------------------------------------------------------
         // Heeling arm is the centre of effort above the waterline plus the centre of
         // lateral resistance below it.
         let mut mx = main.side * (main_z_ce * heel_cos + cfg.z_clr)
             + jib.side * (jib_z_ce * heel_cos + cfg.z_clr);
-        mx -= cfg.displacement * GRAVITY * righting_arm(st.heel, cfg.gm, cfg.gz_peak_angle);
-        let roll_stiffness = cfg.displacement * GRAVITY * cfg.gm;
+        // The righting curve restores towards the local vertical, and in a wave the
+        // local vertical is tilted. Evaluating GZ at the heel *relative to the wave
+        // slope* is the whole of wave-induced rolling, to first order, and it keeps
+        // the calibrated curve rather than replacing it. The coefficient is below one
+        // because the keel is deep and the wave's pressure field decays with depth.
+        let slope_athwart = slope_athwart_raw * cfg.effective_wave_slope;
+        mx -= weight * righting_arm(st.heel - slope_athwart, cfg.gm, cfg.gz_peak_angle);
+        let roll_stiffness = weight * cfg.gm;
         let critical = 2.0 * (cfg.roll_inertia * roll_stiffness).sqrt();
-        mx -= cfg.roll_damping * critical * st.roll_rate;
-        mx -= 0.06 * critical * st.roll_rate * st.roll_rate.abs();
+        let roll_rel = st.roll_rate - slope_athwart_rate * cfg.effective_wave_slope;
+        mx -= cfg.roll_damping * critical * roll_rel;
+        mx -= 0.06 * critical * roll_rel * roll_rel.abs();
+        // Keel roll damping, and underway it is the dominant term — three times the
+        // still-water figure at five knots. A keel rolling while moving forward sees
+        // an angle of attack of `p * lever / V` and generates lift against the roll;
+        // the speed cancels out of the product, leaving a damping linear in both. This
+        // is why a boat under way rolls far less than the same boat drifting, and
+        // without it the model rolled thirty-two degrees beating through a one-metre
+        // sea. At rest it contributes nothing, so the still-water roll decay — and the
+        // whole flat-water polar, where the roll rate is zero anyway — is untouched.
+        let lever = cfg.roll_damping_lever;
+        mx -= 0.5
+            * RHO_SEA
+            * cfg.lateral_plane.area
+            * cfg.lateral_plane.lift_slope
+            * lever
+            * lever
+            * speed
+            * roll_rel;
 
         // --- Integrate ------------------------------------------------------------
         let m_x = cfg.displacement + cfg.surge_added_mass;
         let m_y = cfg.displacement + cfg.sway_added_mass;
 
-        let du = fx / m_x + st.sway * st.yaw_rate;
+        // Surfing, done properly: the Froude-Krylov force.
+        //
+        // The first version took the component of the boat's own weight along its axis
+        // from the pitch attitude. That was wrong, and instructively so. Weight and
+        // buoyancy are both vertical, so for a body in equilibrium neither produces
+        // any horizontal force; mixing a gravity-along-axis term with a purely
+        // vertical buoyancy left the two unbalanced, and a mean trim of three tenths
+        // of a degree beating became 284 N of drag conjured out of nothing.
+        //
+        // The horizontal force in a wave comes from the wave's own pressure gradient,
+        // which for a body small against the wavelength is the displacement times g
+        // times the surface slope — formally the same expression as gravity on a hill,
+        // but driven by the water rather than by the hull's attitude. It depends on
+        // where the boat *is* in the wave rather than on how it happens to be trimmed,
+        // so it carries no spurious mean.
+        let surf = -cfg.displacement * GRAVITY * slope_along;
+
+        let du = (fx + surf) / m_x + st.sway * st.yaw_rate;
         let dv = fy / m_y - st.surge * st.yaw_rate;
         let dr = mz / cfg.yaw_inertia;
         let dp = mx / cfg.roll_inertia;
+        let dw = fz / cfg.heave_mass;
+        let dq = my / cfg.pitch_inertia;
 
         let s = &mut self.state;
         s.surge += du * dt;
         s.sway += dv * dt;
         s.yaw_rate += dr * dt;
         s.roll_rate += dp * dt;
+        s.heave_rate += dw * dt;
+        s.pitch_rate += dq * dt;
         s.heading = wrap_tau(s.heading + s.yaw_rate * dt);
         s.heel += s.roll_rate * dt;
         s.heel = s.heel.clamp(-1.4, 1.4);
+        s.heave += s.heave_rate * dt;
+        s.pitch += s.pitch_rate * dt;
+        s.pitch = s.pitch.clamp(-0.6, 0.6);
         s.pos += s.velocity_world() * dt;
         s.time += dt;
 
@@ -246,7 +388,9 @@ impl Simulation {
             twa: wrap_pi(wind_body.y.atan2(wind_body.x)),
             aws: main_aws,
             awa: main_awa,
-            stw: self.state.speed(),
+            // Speed through the water, which is what a log reads and what the hull
+            // feels. In a seaway it differs from speed over ground by the orbital flow.
+            stw: speed,
             sog: v.length(),
             cog: if v.length() > 1e-3 {
                 wrap_tau(v.x.atan2(v.y))
@@ -259,6 +403,14 @@ impl Simulation {
             yaw_rate: self.state.yaw_rate,
             main,
             jib,
+
+            significant_height: self.water.significant_height(),
+            heave: self.state.heave,
+            pitch: self.state.pitch,
+            immersion: hydro.mean_immersion,
+            heave_accel: dw,
+            resistance_waves: r_waves,
+            surf_force: surf,
             drive,
             side: sail_side,
             resistance,

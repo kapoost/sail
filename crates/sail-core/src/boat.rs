@@ -6,6 +6,7 @@
 //! therefore judge.
 
 use crate::hull::{wetted_surface_estimate, Foil};
+use crate::hydrostatics::HullForm;
 use crate::sail::SailProfile;
 use crate::units::rad;
 
@@ -33,6 +34,11 @@ pub struct BoatConfig {
     /// Displacement, kg.
     pub displacement: f64,
     pub wetted_surface: f64,
+
+    /// Longitudinal form used for distributed buoyancy. Heave and pitch come out of
+    /// sampling this against the local water surface, which is also what makes waves
+    /// excite the motion without a separate excitation term.
+    pub form: HullForm,
 
     // --- Resistance ---
     /// Scales the residuary-resistance curve. The one number that sets how fast the
@@ -74,8 +80,33 @@ pub struct BoatConfig {
     pub sway_added_mass: f64,
     pub roll_inertia: f64,
     pub yaw_inertia: f64,
-    /// Fraction of critical damping in roll.
+    /// Heave mass including added mass, which for a hull at these frequencies is
+    /// comparable to the displacement again.
+    pub heave_mass: f64,
+    /// Pitch inertia including added inertia.
+    pub pitch_inertia: f64,
+    /// Fraction of critical damping in heave. Yachts are well damped in heave and
+    /// pitch — the energy goes straight into radiated waves.
+    pub heave_damping: f64,
+    pub pitch_damping: f64,
+    /// What fraction of the power dissipated by heave and pitch damping is charged
+    /// back against forward motion as added resistance in waves.
+    ///
+    /// The argument is energy, not a fitted curve: a pitching hull radiates waves, and
+    /// that power has to come from somewhere. Some of it comes from the incident sea
+    /// and some from the boat's own propulsion, so charging all of it would overstate
+    /// the loss — hence a fraction. The attraction of doing it this way is that it
+    /// needs no sea-state formula and gets the heading dependence free: a head sea
+    /// makes the boat pitch and therefore slows it, a following sea barely does either.
+    pub wave_drag_fraction: f64,
+    /// How much of the wave's surface slope the boat actually takes up. Less than one,
+    /// because the keel is deep and the wave's pressure field decays with depth.
+    pub effective_wave_slope: f64,
+    /// Fraction of critical damping in roll, at rest.
     pub roll_damping: f64,
+    /// Mean depth of the lateral plane below the roll axis, metres. Sets the lever for
+    /// the keel's roll damping, which is the dominant term once the boat is moving.
+    pub roll_damping_lever: f64,
     /// Residual bare-hull yaw damping, N*m per (rad/s * m/s).
     pub yaw_damping: f64,
     /// Strength of the bow-to-windward moment from the asymmetric heeled waterplane.
@@ -122,6 +153,18 @@ impl BoatConfig {
             displacement,
             wetted_surface: wetted_surface_estimate(displacement, lwl),
 
+            form: HullForm {
+                lwl,
+                waterline_beam: 3.30,
+                canoe_draft: 0.55,
+                freeboard: 0.95,
+                // Calibrated so the boat floats at its design waterline. Asserted by
+                // `the_boat_floats_at_its_design_waterline` rather than assumed — it
+                // is low for a sectional area coefficient because the stations here do
+                // not narrow with depth, so this number is carrying the V-shape too.
+                section_coefficient: 0.452,
+            },
+
             residuary_coefficient: 1.15,
             induced_span: 0.80 * 1.90,
             heel_drag_factor: 0.57,
@@ -142,7 +185,14 @@ impl BoatConfig {
             sway_added_mass: 0.85 * displacement,
             roll_inertia: 1.5 * displacement * roll_radius * roll_radius,
             yaw_inertia: 1.3 * displacement * yaw_radius * yaw_radius,
+            heave_mass: 2.8 * displacement,
+            pitch_inertia: 2.5 * displacement * yaw_radius * yaw_radius,
+            heave_damping: 0.26,
+            pitch_damping: 0.32,
+            effective_wave_slope: 0.65,
+            wave_drag_fraction: 0.5,
             roll_damping: 0.14,
+            roll_damping_lever: 1.20,
             yaw_damping: 4200.0,
             heel_yaw_coefficient: 0.060,
 

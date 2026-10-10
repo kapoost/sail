@@ -30,6 +30,13 @@ pub struct BoatState {
     pub yaw_rate: f64,
     /// Roll rate, rad/s.
     pub roll_rate: f64,
+    /// Heave: elevation of the hull reference above mean water level, metres,
+    /// positive up. Zero means floating at the design waterline in flat water.
+    pub heave: f64,
+    pub heave_rate: f64,
+    /// Pitch, radians, positive bow-up.
+    pub pitch: f64,
+    pub pitch_rate: f64,
     /// Seconds since start.
     pub time: f64,
 }
@@ -45,6 +52,10 @@ impl BoatState {
             sway: 0.0,
             yaw_rate: 0.0,
             roll_rate: 0.0,
+            heave: 0.0,
+            heave_rate: 0.0,
+            pitch: 0.0,
+            pitch_rate: 0.0,
             time: 0.0,
         }
     }
@@ -168,6 +179,17 @@ pub struct Telemetry {
     pub main: SailForces,
     pub jib: SailForces,
 
+    /// Sea state and the boat's motion in it.
+    pub significant_height: f64,
+    pub heave: f64,
+    pub pitch: f64,
+    /// Mean immersion across the hull stations, metres. The design figure is the canoe
+    /// body draft; much more than that and the boat is burying itself.
+    pub immersion: f64,
+    /// Vertical acceleration at the hull, m/s^2. What the crew actually feels, and
+    /// what makes a short steep sea so much worse than a long one of the same height.
+    pub heave_accel: f64,
+
     /// Net driving force and side force from the rig, N.
     pub drive: f64,
     pub side: f64,
@@ -177,6 +199,11 @@ pub struct Telemetry {
     pub resistance_friction: f64,
     pub resistance_residuary: f64,
     pub resistance_induced: f64,
+    /// Added resistance from moving in a seaway. Zero in flat water.
+    pub resistance_waves: f64,
+    /// Component of the boat's weight acting along its axis, newtons. Positive is
+    /// forward: bow-down on a wave face, which is surfing.
+    pub surf_force: f64,
 
     /// Rudder angle of attack and how stalled it is.
     pub rudder_alpha: f64,

@@ -67,11 +67,15 @@ sane; run it after touching `sail.rs`, `hull.rs` or `boat.rs`.
 | Stability | GM slope blending into a GZ curve that peaks and gives way |
 | Weather helm | Heel-shifted centre of effort plus the asymmetric heeled waterplane |
 | Wind | Ornstein-Uhlenbeck gusts that veer as they build, with a boundary-layer gradient. `WindField` is where a real GRIB2 forecast replaces it. |
+| Sea | Gerstner components on deep-water dispersion, heights and periods from fetch-limited relations |
+| Heave and pitch | Distributed buoyancy over nine hull stations against the local surface |
+| Waves on roll | The GZ curve evaluated at heel *relative to the wave slope* |
+| Surfing | Froude-Krylov: displacement times g times the surface slope |
+| Added resistance in waves | Charged from the power the motion damping dissipates |
 | Integration | Fixed 200 Hz substeps, decoupled from frame rate |
 
-Not modelled yet, and known to be absent: waves and the boat's motion in them, tide
-and current, sail-to-sail interaction beyond headsail blanketing, and any sea state at
-all.
+Not modelled yet, and known to be absent: tide and current, sail-to-sail interaction
+beyond headsail blanketing, and sail twist.
 
 ### One measured calibration gap, with its cause
 
@@ -121,6 +125,52 @@ and the audio thread reads them lock-free. No loop seams, no transposition artef
 | flogging canvas | how badly the sails are luffing | gated bursts with a hard attack, faster in more wind |
 
 `M` mutes it.
+
+## Waves
+
+`examples/seaway.rs` is the polar's counterpart: what sea a wind builds, how the boat
+moves in it, and what it costs.
+
+Four things are worth knowing about how this is put together, because each one was a
+mistake first.
+
+**Slopes are measured as differences over the boat's own dimensions**, not as analytic
+point derivatives. A wave narrower than the beam does not heel her and a wave shorter
+than the waterline does not trim her; the point slope cannot know that, and using it
+summed up slopes the hull should have averaged out.
+
+**Heave, pitch and roll are damped relative to the water surface, not to the world.**
+A boat pitching exactly with a wave is following it, not radiating energy. Charging
+her for that motion made a following sea cost as much as a head one.
+
+**Surfing is the Froude-Krylov force, not gravity along the hull axis.** The first
+version took the weight component from the pitch attitude, which is wrong: weight and
+buoyancy are both vertical, so neither produces a horizontal force on a body in
+equilibrium. Mixing a gravity-along-axis term with vertical buoyancy left them
+unbalanced and turned a mean trim of three tenths of a degree into 284 N of drag from
+nowhere. The real horizontal force is the wave's pressure gradient — displacement
+times g times the surface slope — which depends on where the boat is in the wave
+rather than on how it is trimmed, and so carries no spurious mean.
+
+**Roll damping underway is dominated by the keel**, not by the still-water decay. A
+keel rolling while moving forward sees an angle of attack and generates lift against
+the roll; at five knots that is three times the figure measured at rest. It is why a
+boat under way rolls so much less than the same boat drifting.
+
+Added resistance is charged from the power the heave and pitch damping dissipate, on
+the grounds that a pitching hull radiates waves and that energy has to be paid for.
+The attraction of doing it this way is that it needs no sea-state formula and gets the
+heading dependence for free. In a 1.3 m coastal sea the model gives up 9 percent
+beating, 2 to 3 percent reaching and 7 percent dead downwind, which is about right.
+
+Roll still uses the calibrated GZ curve rather than coming from the stations.
+Replacing it would discard a matched righting-moment curve, and the whole validated
+polar with it, to re-derive behaviour that is already correct. What waves add is the
+one thing the curve cannot know — that the surface it stands on is tilted — and that
+enters as an offset to the heel it is evaluated at.
+
+Flat water remains the default, so the polar is unchanged to the last digit and every
+flat-water test still measures what it did before.
 
 ## Deliberate decisions
 
