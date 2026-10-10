@@ -114,9 +114,9 @@ pub fn normal_map() -> Image {
             }
             // Tangent space has z out of the surface.
             let normal = Vec3::new(-du, -dv, 1.0).normalize();
-            data.push(encode(normal.x));
-            data.push(encode(normal.y));
-            data.push(encode(normal.z));
+            data.push(encode_normal(normal.x));
+            data.push(encode_normal(normal.y));
+            data.push(encode_normal(normal.z));
             data.push(255);
         }
     }
@@ -132,7 +132,7 @@ pub fn normal_map() -> Image {
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD,
     );
-    with_mipmaps(&mut image, true);
+    build_mipmaps(&mut image, true);
     image.sampler = repeating();
     image
 }
@@ -176,7 +176,7 @@ pub fn roughness_map() -> Image {
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD,
     );
-    with_mipmaps(&mut image, false);
+    build_mipmaps(&mut image, false);
     image.sampler = repeating();
     image
 }
@@ -213,7 +213,7 @@ fn repeating() -> ImageSampler {
 /// surface does when its ripples drop below one pixel. The mean normal flattens, the
 /// distance loses its glitter, and the water goes smooth and dark towards the horizon
 /// the way it really does. The fade is a consequence rather than a fudge.
-fn with_mipmaps(image: &mut Image, renormalise: bool) {
+pub fn build_mipmaps(image: &mut Image, renormalise: bool) {
     let mut width = image.texture_descriptor.size.width;
     let mut height = image.texture_descriptor.size.height;
     let mut level: Vec<u8> = image.data.clone().unwrap_or_default();
@@ -242,9 +242,9 @@ fn with_mipmaps(image: &mut Image, renormalise: bool) {
                         sum[2] / 4.0 / 255.0 * 2.0 - 1.0,
                     )
                     .normalize_or(Vec3::Z);
-                    next.push(encode(v.x));
-                    next.push(encode(v.y));
-                    next.push(encode(v.z));
+                    next.push(encode_normal(v.x));
+                    next.push(encode_normal(v.y));
+                    next.push(encode_normal(v.z));
                     next.push(255);
                 } else {
                     for s in sum {
@@ -264,8 +264,10 @@ fn with_mipmaps(image: &mut Image, renormalise: bool) {
     image.data = Some(chain);
 }
 
+/// Pack a normal component into a byte. Shared, so the deck and the sea cannot
+/// disagree about what a normal map means.
 #[inline]
-fn encode(component: f32) -> u8 {
+pub fn encode_normal(component: f32) -> u8 {
     (((component * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0)) as u8
 }
 

@@ -116,6 +116,7 @@ pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     assets: Res<AssetServer>,
     sim: Res<Sim>,
 ) {
@@ -184,11 +185,27 @@ pub fn setup(
             // Deck, coachroof and cockpit, built over the open hull — see `deck.rs`.
             // Painted rather than varnished: a working boat's deck is painted, and the
             // scan's own weathered planking is the thing worth looking at.
+            let (walked_on, painted) = crate::deck::structure_mesh();
+            // Laid planking on everything you stand on, in metres, so a plank is
+            // 62 mm wide on the foredeck and on the cabin top alike.
             b.spawn((
-                Mesh3d(meshes.add(crate::deck::structure_mesh())),
+                Mesh3d(meshes.add(walked_on)),
                 MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.80, 0.78, 0.72),
-                    perceptual_roughness: 0.75,
+                    base_color: Color::WHITE,
+                    base_color_texture: Some(images.add(crate::deck_texture::planking())),
+                    normal_map_texture: Some(images.add(crate::deck_texture::planking_normal())),
+                    perceptual_roughness: 0.68,
+                    ..default()
+                })),
+                Transform::default(),
+            ));
+            // Cabin sides and the cockpit well: painted, and glossier than the deck,
+            // which is the difference your eye uses to tell a wall from a floor.
+            b.spawn((
+                Mesh3d(meshes.add(painted)),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.88, 0.87, 0.83),
+                    perceptual_roughness: 0.32,
                     double_sided: true,
                     cull_mode: None,
                     ..default()

@@ -196,8 +196,16 @@ pub fn setup(
 }
 
 /// Displace the surface from the physics' own wave field, and keep it under the boat.
+/// Where the surface detail has drifted to, integrated frame by frame.
+#[derive(Resource, Default)]
+pub struct SurfaceDrift {
+    offset: glam::DVec2,
+}
+
 pub fn update_sea(
     origin: Res<frame::RenderOrigin>,
+    time: Res<Time>,
+    mut drift: ResMut<SurfaceDrift>,
     sim: Res<Sim>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut q: Query<(&SeaSurface, &mut Transform)>,
@@ -235,17 +243,26 @@ pub fn update_sea(
             (tm.twd + std::f64::consts::PI).sin(),
             (tm.twd + std::f64::consts::PI).cos(),
         );
-        // Two separate motions, and they were conflated into one before.
+        // Two motions, both integrated rather than evaluated.
         //
         // The slow one is a real surface current, about two and a half percent of the
-        // wind speed, carrying everything downwind together. The fast one is the
-        // ripples' own travel: the normal map stands for short waves a few metres
-        // long, and those move through the water at their own phase speed — nearly
-        // 3 m/s, more than ten times the drift. Advecting the texture at the drift
-        // rate alone is what made the surface read as a photograph of a sea.
-        let drift = downwind * tm.tws * 0.025 * t;
-        let ripples = downwind * sea_texture::ripple_phase_speed() as f64 * t;
-        let current = drift + ripples;
+        // wind speed. The fast one is the ripples' own travel: the normal map stands
+        // for short waves a few metres long, and those move through the water at
+        // their own phase speed of nearly 3 m/s. Advecting at the drift rate alone is
+        // what made the surface read as a photograph of a sea rather than a sea.
+        //
+        // `offset += direction * rate * dt`, and the `dt` is the whole point. Written
+        // the obvious way — `direction * rate * elapsed` — the offset is a vector
+        // whose length grows without bound multiplied by a direction that wanders
+        // with every gust, so a one-degree windshift five minutes in swings an
+        // eight-hundred-metre vector and the texture jumps fifteen metres sideways.
+        // That is the same mistake as the very first texture bug in this file, and
+        // raising the ripple speed tenfold made it ten times worse. Integrating the
+        // rate means a windshift changes where the water is going from now on,
+        // instead of rewriting where it has been.
+        let speed = tm.tws * 0.025 + sea_texture::ripple_phase_speed() as f64;
+        drift.offset += downwind * speed * time.delta_secs_f64();
+        let current = drift.offset;
         // Rebase the texture coordinates by a whole number of tile repeats.
         //
         // The UVs address the sea in world metres so that the detail stays with the

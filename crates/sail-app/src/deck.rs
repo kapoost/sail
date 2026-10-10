@@ -129,12 +129,21 @@ fn camber(across: f32, half: f32) -> f32 {
     0.055 * half * (1.0 - u * u)
 }
 
-/// Build the whole structure above the sheer as one mesh.
-pub fn structure_mesh() -> Mesh {
-    let mut positions: Vec<Vec3> = Vec::new();
-    let mut uvs: Vec<Vec2> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-
+/// Build the structure above the sheer as two meshes: what you walk on, and what you
+/// walk past.
+///
+/// Split by the direction each quad faces, because they want different things. A deck
+/// is laid planking with the lay running fore and aft and the seams catching the
+/// light across it; a cabin side is painted, glossier, and has no lay at all. One
+/// material across both is what made the whole structure read as a single plastic
+/// moulding.
+///
+/// The split also fixes the texture coordinates. They used to be a projection from
+/// directly above, which on a vertical face barely changes with height — so any
+/// texture put on the cabin sides would have smeared into vertical streaks. Each
+/// mesh now gets coordinates in the plane it actually lies in, in metres, so a plank
+/// is 62 mm wide wherever it is and nothing is stretched.
+pub fn structure_mesh() -> (Mesh, Mesh) {
     // Walk the hull in fine steps so the openings start and stop smoothly.
     let steps = 220;
     let z0 = SHEER[0].0;
@@ -168,45 +177,69 @@ pub fn structure_mesh() -> Mesh {
         rings.push(ring);
     }
 
-    // Stitch neighbouring rings. Rings only have the same length where the opening is
-    // present or absent in both, so transitions are skipped — a seam of one step at
-    // the ends of the cabin and the cockpit, which no one will find.
+    // Stitch neighbouring rings, sorting each quad by which way it faces. Rings only
+    // have the same length where the opening is present or absent in both, so the
+    // transitions are skipped — a seam of one step at the ends of the cabin and the
+    // cockpit, which no one will find.
+    let mut deck = Surface::default();
+    let mut sides = Surface::default();
     for i in 0..steps {
         let (a, b) = (&rings[i], &rings[i + 1]);
         if a.len() != b.len() {
             continue;
         }
-        let base_a = positions.len() as u32;
-        for p in a {
-            positions.push(*p);
-            uvs.push(Vec2::new(p.x * 0.5 + 0.5, p.z * 0.25));
-        }
-        let base_b = positions.len() as u32;
-        for p in b {
-            positions.push(*p);
-            uvs.push(Vec2::new(p.x * 0.5 + 0.5, p.z * 0.25));
-        }
-        for k in 0..(a.len() - 1) as u32 {
-            indices.extend_from_slice(&[
-                base_a + k,
-                base_b + k,
-                base_b + k + 1,
-                base_a + k,
-                base_b + k + 1,
-                base_a + k + 1,
-            ]);
+        for k in 0..a.len() - 1 {
+            let quad = [a[k], b[k], b[k + 1], a[k + 1]];
+            let normal = (quad[1] - quad[0])
+                .cross(quad[3] - quad[0])
+                .normalize_or_zero();
+            let target = if normal.y.abs() < 0.5 {
+                &mut sides
+            } else {
+                &mut deck
+            };
+            target.quad(quad, normal.y.abs() >= 0.5);
         }
     }
+    (deck.build(), sides.build())
+}
 
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh.compute_normals();
-    mesh
+/// A mesh under construction, with its own texture coordinates.
+#[derive(Default)]
+struct Surface {
+    positions: Vec<Vec3>,
+    uvs: Vec<Vec2>,
+    indices: Vec<u32>,
+}
+
+impl Surface {
+    fn quad(&mut self, corners: [Vec3; 4], horizontal: bool) {
+        let base = self.positions.len() as u32;
+        for p in corners {
+            self.positions.push(p);
+            // Metres, in the plane the face lies in. A deck is read across and along
+            // the boat; a cabin side along the boat and up it.
+            self.uvs.push(if horizontal {
+                Vec2::new(p.x, p.z)
+            } else {
+                Vec2::new(p.z, p.y)
+            });
+        }
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    fn build(self) -> Mesh {
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
+        mesh.insert_indices(Indices::U32(self.indices));
+        mesh.compute_normals();
+        mesh
+    }
 }
 
 /// Height of the deck at a point, for putting fittings on it rather than near it.

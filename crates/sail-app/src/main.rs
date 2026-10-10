@@ -11,6 +11,7 @@ mod camera;
 mod clutch;
 mod course;
 mod deck;
+mod deck_texture;
 mod frame;
 mod hud;
 mod input;
@@ -92,6 +93,7 @@ fn main() {
         .init_resource::<clutch::Bank>()
         .init_resource::<input::Pilot>()
         .init_resource::<frame::RenderOrigin>()
+        .init_resource::<world::SurfaceDrift>()
         .init_resource::<camera::ChaseState>()
         .add_systems(
             Startup,
