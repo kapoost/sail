@@ -8,6 +8,7 @@
 
 mod boat;
 mod camera;
+mod course;
 mod frame;
 mod hud;
 mod input;
@@ -40,7 +41,13 @@ fn main() {
         .init_resource::<input::HelmSource>()
         .add_systems(
             Startup,
-            (world::setup, boat::setup, camera::setup, hud::build_polar),
+            (
+                world::setup,
+                boat::setup,
+                camera::setup,
+                hud::build_polar,
+                course::setup,
+            ),
         )
         .add_systems(
             Update,
@@ -55,10 +62,11 @@ fn main() {
                     boat::update_windex,
                     boat::update_telltales,
                     boat::update_sails,
+                    course::update,
                     world::follow_boat,
                     camera::follow,
                 ),
-                (camera::toggle, hud::toggle),
+                (camera::toggle, hud::toggle, course::restart),
             )
                 .chain(),
         )

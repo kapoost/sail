@@ -15,6 +15,7 @@ use bevy_egui::{egui, EguiContexts};
 use sail_core::prelude::*;
 use sail_core::wind::{SteadyWind, WindField};
 
+use crate::course::{clock, Course, Leg};
 use crate::sim::Sim;
 
 #[derive(Resource, Default)]
@@ -66,6 +67,7 @@ pub fn draw(
     sim: Res<Sim>,
     polar: Res<Polar>,
     visible: Res<HudVisible>,
+    course: Res<Course>,
 ) -> Result {
     if !visible.0 {
         return Ok(());
@@ -119,18 +121,30 @@ pub fn draw(
             });
 
             ui.separator();
+            draw_course(ui, &course, &sim);
+
+            ui.separator();
             ui.label(egui::RichText::new("trim").strong());
+            let cfg = sim.config();
             egui::Grid::new("trim").num_columns(4).show(ui, |ui| {
-                sail_row(ui, "main", c.main_sheet, &t.main);
+                sail_row(
+                    ui,
+                    "main",
+                    c.main_sheet,
+                    cfg.main.profile.optimal_chord_angle(t.awa),
+                    &t.main,
+                );
                 ui.end_row();
-                sail_row(ui, "genoa", c.jib_sheet, &t.jib);
+                sail_row(
+                    ui,
+                    "genoa",
+                    c.jib_sheet,
+                    cfg.genoa.profile.optimal_chord_angle(t.awa),
+                    &t.jib,
+                );
                 ui.end_row();
             });
-            let (want_main, want_jib) = optimal_sheets(&sim.config(), t.awa);
-            ui.label(format!(
-                "a good trimmer would be at  main {:.2}   genoa {:.2}",
-                want_main, want_jib
-            ));
+
             ui.label(format!(
                 "reef {:.2}    engine {:+.2}    rudder {}",
                 c.reef,
@@ -158,13 +172,61 @@ pub fn draw(
 
             ui.separator();
             ui.small(
-                "A/D or arrows  helm (held where you leave it; Shift for fine)\n\
-                 Space  centre the helm\n\
-                 W/S mainsheet   Q/E genoa winch   R/F reef   Z/X engine\n\
-                 T snap to good trim   C camera   Tab hide this panel",
+                "A / D   helm to port / starboard, held where you leave it\n\
+                 Space   centre the helm\n\
+                 W / S   mainsheet: haul in / ease\n\
+                 E / Q   genoa: grind in / ease\n\
+                 Shift   fine, on both helm and sheets\n\
+                 R / F   reef in / shake out      Z / X  engine astern / ahead\n\
+                 T  snap to good trim    C  camera    L  new lap    Tab  hide panel",
             );
         });
     Ok(())
+}
+
+/// The course, and the only number that will really tell us whether this is a game:
+/// whether a well-sailed beat is meaningfully quicker than a sloppy one.
+fn draw_course(ui: &mut egui::Ui, course: &Course, sim: &Sim) {
+    let (distance, bearing) = course.to_target(sim.sim.state.pos);
+    let t = &sim.sim.telemetry;
+
+    // Progress towards the mark specifically, as opposed to progress upwind. Off the
+    // layline these differ, and the difference is the whole art of calling a tack.
+    let to_mark = glam::DVec2::new(bearing.sin(), bearing.cos());
+    let closing = sim.sim.state.velocity_world().dot(to_mark);
+
+    let (leg, colour) = match course.leg {
+        Leg::Upwind => (
+            "beating to the mark",
+            egui::Color32::from_rgb(120, 190, 240),
+        ),
+        Leg::Downwind => ("running home", egui::Color32::from_rgb(140, 210, 150)),
+        Leg::Finished => (
+            "lap complete — L to go again",
+            egui::Color32::from_rgb(240, 210, 90),
+        ),
+    };
+    ui.label(egui::RichText::new(leg).color(colour).strong());
+    egui::Grid::new("course").num_columns(4).show(ui, |ui| {
+        row(ui, "to mark", &format!("{distance:.0} m"));
+        row(ui, "bearing", &format!("{:03.0}", deg(bearing)));
+        ui.end_row();
+        row(ui, "closing", &format!("{:.2} kn", ms_to_kn(closing)));
+        row(ui, "VMG", &format!("{:.2} kn", ms_to_kn(t.vmg)));
+        ui.end_row();
+        row(ui, "elapsed", &clock(course.elapsed));
+        row(ui, "tacks", &format!("{}", course.tacks));
+        ui.end_row();
+    });
+    if let Some(split) = course.upwind_split {
+        ui.label(format!("windward rounding at {}", clock(split)));
+    }
+    if let Some(best) = course.best_lap {
+        ui.label(
+            egui::RichText::new(format!("best lap {}", clock(best)))
+                .color(egui::Color32::from_rgb(240, 210, 90)),
+        );
+    }
 }
 
 fn row(ui: &mut egui::Ui, label: &str, value: &str) {
@@ -172,10 +234,34 @@ fn row(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.label(egui::RichText::new(value).monospace().strong());
 }
 
-fn sail_row(ui: &mut egui::Ui, label: &str, sheet: f64, f: &sail_core::sail::SailForces) {
+/// One sail's trim, read the way you would read it on the boat: where the boom
+/// actually is, where it wants to be, and which way to move the sheet. The sheet
+/// number alone means nothing to anyone — the boom angle is the physical thing.
+fn sail_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    sheet: f64,
+    want: f64,
+    f: &sail_core::sail::SailForces,
+) {
     ui.label(label);
-    ui.label(egui::RichText::new(format!("sheet {sheet:.2}")).monospace());
-    ui.label(egui::RichText::new(format!("aoa {:+.0}", deg(f.alpha))).monospace());
+    ui.label(
+        egui::RichText::new(format!(
+            "boom {:4.1}  want {:4.1}",
+            deg(f.chord_angle),
+            deg(want)
+        ))
+        .monospace(),
+    );
+    let gap = want - f.chord_angle;
+    let call = if gap > rad(1.5) {
+        "ease"
+    } else if gap < -rad(1.5) {
+        "haul in"
+    } else {
+        "on"
+    };
+    ui.label(egui::RichText::new(format!("{call:>7}  [{sheet:.2}]")).monospace());
     let (state, colour) = if f.coeffs.luffing > 0.3 {
         ("luffing", egui::Color32::from_rgb(230, 170, 60))
     } else if f.coeffs.stalled > 0.4 {

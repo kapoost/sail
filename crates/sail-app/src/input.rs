@@ -34,8 +34,11 @@ pub enum HelmSource {
     Keyboard,
     Stick,
 }
-/// How fast the genoa winch takes up sheet, in sheet fraction per second.
-const WINCH_RATE: f64 = 0.55;
+/// How fast a sheet runs, in sheet fraction per second.
+const SHEET_RATE: f64 = 0.45;
+/// Fine sheet rate while Shift is held. Upwind the whole useful trim band is about a
+/// third of the travel, and placing it to a degree is the entire point of the game.
+const SHEET_FINE: f64 = 0.11;
 /// How fast the keyboard helm swings, radians per second. Full lock in about half a
 /// second, which is roughly how fast you can actually throw a tiller over.
 const KEY_HELM_RATE: f64 = 1.3;
@@ -112,7 +115,9 @@ pub fn gather(
         }
     }
 
-    // --- Mainsheet: a tackle, so absolute -------------------------------------
+    // --- Mainsheet: a tackle you pull and hold, so absolute ---------------------
+    let sheet_rate = if fine { SHEET_FINE } else { SHEET_RATE };
+
     let mut main_set = false;
     if let Some(pad) = pad {
         let y = deadzone(pad.get(GamepadAxis::RightStickY).unwrap_or(0.0));
@@ -125,17 +130,17 @@ pub fn gather(
     if !main_set {
         let mut rate = 0.0;
         if keys.pressed(KeyCode::KeyW) {
-            rate -= WINCH_RATE;
+            rate -= sheet_rate; // haul in
         }
         if keys.pressed(KeyCode::KeyS) {
-            rate += WINCH_RATE;
+            rate += sheet_rate; // ease
         }
         if rate != 0.0 {
             sim.controls.main_sheet = (sim.controls.main_sheet + rate * dt).clamp(0.0, 1.0);
         }
     }
 
-    // --- Genoa sheet: a winch, so a rate --------------------------------------
+    // --- Genoa sheet: a winch, so a rate ---------------------------------------
     let mut winch = 0.0;
     if let Some(pad) = pad {
         let grind = pad.get(GamepadButton::RightTrigger2).unwrap_or(0.0);
@@ -143,14 +148,14 @@ pub fn gather(
         winch += (ease - grind) as f64;
     }
     if keys.pressed(KeyCode::KeyQ) {
-        winch += 1.0;
+        winch += 1.0; // ease
     }
     if keys.pressed(KeyCode::KeyE) {
-        winch -= 1.0;
+        winch -= 1.0; // grind in
     }
     if winch != 0.0 {
         sim.controls.jib_sheet =
-            (sim.controls.jib_sheet + winch.clamp(-1.0, 1.0) * WINCH_RATE * dt).clamp(0.0, 1.0);
+            (sim.controls.jib_sheet + winch.clamp(-1.0, 1.0) * sheet_rate * dt).clamp(0.0, 1.0);
     }
 
     // --- Reef: a job, so discrete ---------------------------------------------

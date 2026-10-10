@@ -122,6 +122,33 @@ impl SailProfile {
     pub fn optimal_chord_angle(&self, awa: f64) -> f64 {
         (awa.abs() - self.alpha_opt).clamp(0.0, self.max_chord_angle)
     }
+
+    /// Boom angle for a sheet position, where 0 is hard in and 1 fully eased.
+    ///
+    /// **Deliberately non-linear, and this is an ergonomic decision rather than a
+    /// physical one.** Close-hauled wants a chord angle around eight degrees out of a
+    /// ninety-degree range, so a linear sheet puts the entire upwind trim band inside
+    /// its first tenth — unusable, and it reads to the player as a sail that jumps
+    /// straight from stalled to luffing with nothing in between. Squaring the input
+    /// spreads that band across the first third of the travel, where the hand can
+    /// actually place it, and leaves the coarse end for reaching and running where a
+    /// few degrees either way costs nothing.
+    #[inline]
+    pub fn chord_angle(&self, sheet: f64) -> f64 {
+        let s = sheet.clamp(0.0, 1.0);
+        self.max_chord_angle * s * s
+    }
+
+    /// Inverse of [`chord_angle`](Self::chord_angle).
+    #[inline]
+    pub fn sheet_for_chord_angle(&self, angle: f64) -> f64 {
+        (angle.clamp(0.0, self.max_chord_angle) / self.max_chord_angle).sqrt()
+    }
+
+    /// Sheet position a good trimmer would be holding for this apparent wind angle.
+    pub fn optimal_sheet(&self, awa: f64) -> f64 {
+        self.sheet_for_chord_angle(self.optimal_chord_angle(awa))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -167,7 +194,7 @@ pub fn sail_forces(
     blanketing: f64,
 ) -> SailForces {
     let beta = awa.abs();
-    let chord_angle = sheet.clamp(0.0, 1.0) * profile.max_chord_angle;
+    let chord_angle = profile.chord_angle(sheet);
     let alpha = beta - chord_angle;
     let coeffs = profile.coefficients(alpha);
 

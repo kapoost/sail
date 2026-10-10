@@ -16,9 +16,10 @@ use glam::DVec2;
 /// Sheet positions that put both sails at their best angle of attack for the given
 /// apparent wind angle.
 pub fn optimal_sheets(cfg: &BoatConfig, awa: f64) -> (f64, f64) {
-    let main = cfg.main.profile.optimal_chord_angle(awa) / cfg.main.profile.max_chord_angle;
-    let jib = cfg.genoa.profile.optimal_chord_angle(awa) / cfg.genoa.profile.max_chord_angle;
-    (main.clamp(0.0, 1.0), jib.clamp(0.0, 1.0))
+    (
+        cfg.main.profile.optimal_sheet(awa),
+        cfg.genoa.profile.optimal_sheet(awa),
+    )
 }
 
 /// Stateless proportional-derivative rudder. Fine for a nudge, wrong for holding a

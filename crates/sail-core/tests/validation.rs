@@ -143,7 +143,7 @@ fn oversheeting_stalls_the_sail() {
     let profile = SailProfile::mainsail(32.0, 12.5);
     let awa = rad(28.0);
     let aws = kn_to_ms(16.0);
-    let optimal = profile.optimal_chord_angle(awa) / profile.max_chord_angle;
+    let optimal = profile.optimal_sheet(awa);
 
     let good = sail_forces(&profile, awa, aws, optimal, 32.0, 0.0, 0.0);
     // Sheeted right in, so the angle of attack is the full apparent wind angle.
@@ -166,11 +166,11 @@ fn easing_past_the_apparent_wind_makes_the_sail_luff() {
     let profile = SailProfile::mainsail(32.0, 12.5);
     let awa = rad(40.0);
     let aws = kn_to_ms(14.0);
-    let optimal = profile.optimal_chord_angle(awa) / profile.max_chord_angle;
+    let optimal = profile.optimal_sheet(awa);
 
     let drawing = sail_forces(&profile, awa, aws, optimal, 32.0, 0.0, 0.0);
     // Eased well past the apparent wind: the sail is now flogging.
-    let flogging = sail_forces(&profile, awa, aws, 0.9, 32.0, 0.0, 0.0);
+    let flogging = sail_forces(&profile, awa, aws, 0.95, 32.0, 0.0, 0.0);
 
     assert!(
         flogging.coeffs.luffing > 0.9,
@@ -201,7 +201,7 @@ fn drive_peaks_near_the_optimal_angle_of_attack() {
             best_sheet = sheet;
         }
     }
-    let predicted = profile.optimal_chord_angle(awa) / profile.max_chord_angle;
+    let predicted = profile.optimal_sheet(awa);
     assert!(
         (best_sheet - predicted).abs() < 0.06,
         "the trim reference should find the real optimum: swept {best_sheet:.2}, predicted {predicted:.2}"
@@ -213,7 +213,7 @@ fn heel_costs_drive() {
     let profile = SailProfile::mainsail(32.0, 12.5);
     let awa = rad(30.0);
     let aws = kn_to_ms(18.0);
-    let sheet = profile.optimal_chord_angle(awa) / profile.max_chord_angle;
+    let sheet = profile.optimal_sheet(awa);
     let upright = sail_forces(&profile, awa, aws, sheet, 32.0, 0.0, 0.0);
     let heeled = sail_forces(&profile, awa, aws, sheet, 32.0, rad(-30.0), 0.0);
     assert!(heeled.drive < upright.drive);
