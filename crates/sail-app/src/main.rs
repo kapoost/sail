@@ -80,6 +80,7 @@ fn main() {
                     boat::update_rudder,
                     boat::update_boom,
                     boat::update_windex,
+                    boat::update_genoa_cars,
                     boat::update_telltales,
                     boat::update_sails,
                     course::update,

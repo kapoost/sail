@@ -28,6 +28,24 @@ pub struct RudderBlade;
 #[derive(Component)]
 pub struct Windex;
 
+/// The genoa sheet car, which slides fore and aft along a track on the side deck.
+/// `starboard` picks which of the two it is.
+#[derive(Component)]
+pub struct GenoaCar {
+    pub starboard: bool,
+}
+
+/// Where the genoa track runs, in the hull's frame: inboard of the rail on the side
+/// deck, from abreast the mast back to the forward end of the cockpit.
+pub const TRACK_X: f32 = 0.38;
+pub const TRACK_FORWARD: f32 = -0.80;
+pub const TRACK_AFT: f32 = 2.20;
+
+/// Fore-and-aft position of the car for a given control setting.
+pub fn car_position(car: f32) -> f32 {
+    TRACK_FORWARD + car.clamp(0.0, 1.0) * (TRACK_AFT - TRACK_FORWARD)
+}
+
 /// Which sail an entity draws, and the handle to its regenerated mesh.
 #[derive(Component)]
 pub struct SailSurface {
@@ -167,6 +185,27 @@ pub fn setup(
                     Transform::default(),
                 ));
             }
+            // Genoa tracks and their cars, one each side. The car is the headsail's
+            // only shape control, so it has to be something you can watch move —
+            // a number on a panel is not a trim you can learn by eye.
+            let track_length = TRACK_AFT - TRACK_FORWARD;
+            let track_mesh = meshes.add(Cuboid::new(0.05, 0.03, track_length));
+            let car_mesh = meshes.add(Cuboid::new(0.085, 0.07, 0.17));
+            for starboard in [false, true] {
+                let x = if starboard { 1.0 } else { -1.0 } * cfg.beam as f32 * TRACK_X;
+                b.spawn((
+                    Mesh3d(track_mesh.clone()),
+                    MeshMaterial3d(spar_mat.clone()),
+                    Transform::from_xyz(x, DECK + 0.015, (TRACK_FORWARD + TRACK_AFT) * 0.5),
+                ));
+                b.spawn((
+                    GenoaCar { starboard },
+                    Mesh3d(car_mesh.clone()),
+                    MeshMaterial3d(underwater_mat.clone()),
+                    Transform::from_xyz(x, DECK + 0.055, car_position(0.4)),
+                ));
+            }
+
             // Masthead windex.
             b.spawn((
                 Windex,
@@ -206,6 +245,16 @@ pub fn update_boom(sim: Res<Sim>, mut q: Query<&mut Transform, With<Boom>>) {
     let angle = -t_.awa.signum() as f32 * t_.main.chord_angle as f32;
     for mut tr in &mut q {
         tr.rotation = Quat::from_rotation_y(angle);
+    }
+}
+
+/// Slide the cars to wherever the control says they are.
+pub fn update_genoa_cars(sim: Res<Sim>, mut q: Query<(&GenoaCar, &mut Transform)>) {
+    let cfg = sim.config();
+    let z = car_position(sim.controls.genoa_car as f32);
+    for (car, mut transform) in &mut q {
+        let side = if car.starboard { 1.0 } else { -1.0 };
+        transform.translation = Vec3::new(side * cfg.beam as f32 * TRACK_X, DECK + 0.055, z);
     }
 }
 

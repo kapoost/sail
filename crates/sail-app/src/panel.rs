@@ -84,248 +84,253 @@ pub fn draw(
         .stroke(egui::Stroke::new(1.0, paint::BEZEL))
         .inner_margin(egui::Margin::symmetric(10, 8));
 
-    // egui 0.36 puts panels inside a root Ui rather than straight onto the context,
-    // and on the background layer so the diagnostic window still floats above them.
-    let mut viewport = egui::Ui::new(
-        ctx.clone(),
-        "console_viewport".into(),
-        egui::UiBuilder::new()
-            .layer_id(egui::LayerId::background())
-            .max_rect(ctx.viewport_rect()),
-    );
+    // Floating blocks sized to their contents, not panels that reserve a full edge of
+    // the screen. A panel took the whole height of the window for a column of
+    // readouts a third as tall, and the water is the thing worth looking at.
+    egui::Area::new("instruments".into())
+        .anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 8.0))
+        .interactable(true)
+        .show(ctx, |ui| {
+            frame.show(ui, |ui| {
+                ui.set_width(186.0);
+                ui.spacing_mut().item_spacing.y = 6.0;
 
-    // --- Instruments down the left ------------------------------------------
-    egui::Panel::left("instruments")
-        .frame(frame)
-        .resizable(false)
-        .exact_size(196.0)
-        .show(&mut viewport, |ui| {
-            ui.spacing_mut().item_spacing.y = 6.0;
-
-            ui.horizontal(|ui| {
-                wind_dial(ui, telemetry.awa, telemetry.twa);
-                ui.add_space(4.0);
-                ui.vertical(|ui| {
-                    gauge(ui, "LOG", ms_to_kn(telemetry.stw), 0.0, 10.0, "kn");
-                    gauge(ui, "WIND", ms_to_kn(telemetry.aws), 0.0, 30.0, "kn");
+                ui.horizontal(|ui| {
+                    wind_dial(ui, telemetry.awa, telemetry.twa);
+                    ui.add_space(4.0);
+                    ui.vertical(|ui| {
+                        gauge(ui, "LOG", ms_to_kn(telemetry.stw), 0.0, 10.0, "kn");
+                        gauge(ui, "WIND", ms_to_kn(telemetry.aws), 0.0, 30.0, "kn");
+                    });
                 });
+
+                heel_scale(ui, telemetry.heel);
+
+                ui.add_space(2.0);
+                readout(ui, "HDG", &format!("{:03.0}", deg(heading)));
+                readout(ui, "TWA", &format!("{:+.0}", deg(telemetry.twa)));
+                readout(ui, "VMG", &format!("{:.2} kn", ms_to_kn(telemetry.vmg)));
+
+                ui.add_space(4.0);
+                ui.separator();
+                let (distance, bearing) = course.to_target(sim.sim.state.pos);
+                ui.label(
+                    egui::RichText::new(match course.leg {
+                        Leg::Upwind => "TO WINDWARD MARK",
+                        Leg::Downwind => "RUNNING HOME",
+                        Leg::Finished => "LAP COMPLETE",
+                    })
+                    .color(paint::LIVE)
+                    .monospace()
+                    .size(11.0),
+                );
+                readout(ui, "RANGE", &format!("{distance:.0} m"));
+                readout(ui, "BRG", &format!("{:03.0}", deg(bearing)));
+                readout(ui, "TIME", &clock(course.elapsed));
+                readout(ui, "TACKS", &format!("{}", course.tacks));
             });
-
-            heel_scale(ui, telemetry.heel);
-
-            ui.add_space(2.0);
-            readout(ui, "HDG", &format!("{:03.0}", deg(heading)));
-            readout(ui, "TWA", &format!("{:+.0}", deg(telemetry.twa)));
-            readout(ui, "VMG", &format!("{:.2} kn", ms_to_kn(telemetry.vmg)));
-
-            ui.add_space(4.0);
-            ui.separator();
-            let (distance, bearing) = course.to_target(sim.sim.state.pos);
-            ui.label(
-                egui::RichText::new(match course.leg {
-                    Leg::Upwind => "TO WINDWARD MARK",
-                    Leg::Downwind => "RUNNING HOME",
-                    Leg::Finished => "LAP COMPLETE",
-                })
-                .color(paint::LIVE)
-                .monospace()
-                .size(11.0),
-            );
-            readout(ui, "RANGE", &format!("{distance:.0} m"));
-            readout(ui, "BRG", &format!("{:03.0}", deg(bearing)));
-            readout(ui, "TIME", &clock(course.elapsed));
-            readout(ui, "TACKS", &format!("{}", course.tacks));
         });
 
     // --- Controls along the bottom -------------------------------------------
-    egui::Panel::bottom("console")
-        .frame(frame)
-        .resizable(false)
-        .exact_size(164.0)
-        .show(&mut viewport, |ui| {
-            ui.horizontal_top(|ui| {
-                // Helm. A tiller is a position your hand holds, so it is a bar you
-                // drag and it stays where you leave it.
-                ui.vertical(|ui| {
-                    let max = cfg.max_rudder_angle;
-                    let mut rudder = sim.controls.rudder;
-                    if tiller(ui, &mut rudder, max) {
-                        sim.controls.rudder = rudder;
-                        pilot.disengage();
-                    }
-                    ui.horizontal(|ui| {
-                        if small_button(ui, "AMIDSHIPS").clicked() {
-                            sim.controls.rudder = 0.0;
+    egui::Area::new("console".into())
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0))
+        .interactable(true)
+        .show(ctx, |ui| {
+            frame.show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    // Helm. A tiller is a position your hand holds, so it is a bar you
+                    // drag and it stays where you leave it.
+                    ui.vertical(|ui| {
+                        let max = cfg.max_rudder_angle;
+                        let mut rudder = sim.controls.rudder;
+                        if tiller(ui, &mut rudder, max) {
+                            sim.controls.rudder = rudder;
                             pilot.disengage();
                         }
-                    });
-                });
-
-                ui.add_space(10.0);
-                separator(ui);
-                ui.add_space(10.0);
-
-                // Sheets, on their own winches, continuously trimmed.
-                let want_main = cfg
-                    .main
-                    .profile
-                    .optimal_sheet(telemetry.awa, telemetry.main.camber);
-                let want_jib = cfg
-                    .genoa
-                    .profile
-                    .optimal_sheet(telemetry.awa, telemetry.jib.camber);
-                let mut main_sheet = sim.controls.main_sheet;
-                let mut jib_sheet = sim.controls.jib_sheet;
-                if lever(
-                    ui,
-                    "MAIN",
-                    &mut main_sheet,
-                    Some(want_main),
-                    sail_state(&telemetry.main),
-                ) {
-                    sim.controls.main_sheet = main_sheet;
-                }
-                if lever(
-                    ui,
-                    "GENOA",
-                    &mut jib_sheet,
-                    Some(want_jib),
-                    sail_state(&telemetry.jib),
-                ) {
-                    sim.controls.jib_sheet = jib_sheet;
-                }
-
-                ui.add_space(10.0);
-                separator(ui);
-                ui.add_space(10.0);
-
-                // The clutch bank: one winch, one line at a time.
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("CLUTCHES")
-                            .color(paint::LABEL)
-                            .monospace()
-                            .size(10.0),
-                    );
-                    ui.horizontal(|ui| {
-                        for (i, line) in BANK.iter().enumerate() {
-                            let mut value = line.get(&sim.controls);
-                            let selected = i == bank.selected;
-                            let (clicked, dragged) = clutch(ui, line.name(), &mut value, selected);
-                            if clicked {
-                                bank.selected = i;
-                                bank.since_change = 0.0;
+                        ui.horizontal(|ui| {
+                            if small_button(ui, "AMIDSHIPS").clicked() {
+                                sim.controls.rudder = 0.0;
+                                pilot.disengage();
                             }
-                            if dragged {
-                                bank.selected = i;
-                                line.set_from_ui(&mut sim.controls, value);
+                        });
+                    });
+
+                    ui.add_space(10.0);
+                    separator(ui);
+                    ui.add_space(10.0);
+
+                    // Sheets, on their own winches, continuously trimmed.
+                    let want_main = cfg
+                        .main
+                        .profile
+                        .optimal_sheet(telemetry.awa, telemetry.main.camber);
+                    let want_jib = cfg
+                        .genoa
+                        .profile
+                        .optimal_sheet(telemetry.awa, telemetry.jib.camber);
+                    let mut main_sheet = sim.controls.main_sheet;
+                    let mut jib_sheet = sim.controls.jib_sheet;
+                    if lever(
+                        ui,
+                        "MAIN",
+                        &mut main_sheet,
+                        Some(want_main),
+                        sail_state(&telemetry.main),
+                    ) {
+                        sim.controls.main_sheet = main_sheet;
+                    }
+                    if lever(
+                        ui,
+                        "GENOA",
+                        &mut jib_sheet,
+                        Some(want_jib),
+                        sail_state(&telemetry.jib),
+                    ) {
+                        sim.controls.jib_sheet = jib_sheet;
+                    }
+
+                    ui.add_space(10.0);
+                    separator(ui);
+                    ui.add_space(10.0);
+
+                    // The clutch bank: one winch, one line at a time.
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new("CLUTCHES")
+                                .color(paint::LABEL)
+                                .monospace()
+                                .size(10.0),
+                        );
+                        ui.horizontal(|ui| {
+                            for (i, line) in BANK.iter().enumerate() {
+                                let mut value = line.get(&sim.controls);
+                                let selected = i == bank.selected;
+                                let (clicked, dragged) =
+                                    clutch(ui, line.name(), &mut value, selected);
+                                if clicked {
+                                    bank.selected = i;
+                                    bank.since_change = 0.0;
+                                }
+                                if dragged {
+                                    bank.selected = i;
+                                    line.set_from_ui(&mut sim.controls, value);
+                                }
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(format!("hauling in {}", bank.line().hauled()))
+                                .color(paint::LABEL)
+                                .size(10.0),
+                        );
+                    });
+
+                    ui.add_space(10.0);
+                    separator(ui);
+                    ui.add_space(10.0);
+
+                    // Engine and the pilot.
+                    ui.vertical(|ui| {
+                        let mut throttle = sim.controls.throttle;
+                        if throttle_lever(ui, &mut throttle) {
+                            sim.controls.throttle = throttle;
+                        }
+                    });
+
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new("PILOT")
+                                .color(paint::LABEL)
+                                .monospace()
+                                .size(10.0),
+                        );
+                        let engaged = pilot.engaged();
+                        if lamp_button(ui, if engaged { "ENGAGED" } else { "STANDBY" }, engaged)
+                            .clicked()
+                        {
+                            if engaged {
+                                pilot.disengage();
+                            } else {
+                                let state = sim.sim.state;
+                                pilot.hold_heading(&state);
                             }
                         }
-                    });
-                    ui.label(
-                        egui::RichText::new(format!("hauling in {}", bank.line().hauled()))
-                            .color(paint::LABEL)
-                            .size(10.0),
-                    );
-                });
-
-                ui.add_space(10.0);
-                separator(ui);
-                ui.add_space(10.0);
-
-                // Engine and the pilot.
-                ui.vertical(|ui| {
-                    let mut throttle = sim.controls.throttle;
-                    if throttle_lever(ui, &mut throttle) {
-                        sim.controls.throttle = throttle;
-                    }
-                });
-
-                ui.add_space(8.0);
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("PILOT")
-                            .color(paint::LABEL)
-                            .monospace()
-                            .size(10.0),
-                    );
-                    let engaged = pilot.engaged();
-                    if lamp_button(ui, if engaged { "ENGAGED" } else { "STANDBY" }, engaged)
+                        let wind_mode = matches!(pilot.mode, PilotMode::ApparentWind(_));
+                        if lamp_button(
+                            ui,
+                            if wind_mode { "WIND VANE" } else { "COMPASS" },
+                            wind_mode,
+                        )
                         .clicked()
-                    {
-                        if engaged {
-                            pilot.disengage();
-                        } else {
-                            let state = sim.sim.state;
-                            pilot.hold_heading(&state);
+                            && pilot.engaged()
+                        {
+                            if wind_mode {
+                                let state = sim.sim.state;
+                                pilot.hold_heading(&state);
+                            } else {
+                                pilot.hold_wind(&telemetry);
+                            }
                         }
-                    }
-                    let wind_mode = matches!(pilot.mode, PilotMode::ApparentWind(_));
-                    if lamp_button(
-                        ui,
-                        if wind_mode { "WIND VANE" } else { "COMPASS" },
-                        wind_mode,
-                    )
-                    .clicked()
-                        && pilot.engaged()
-                    {
-                        if wind_mode {
-                            let state = sim.sim.state;
-                            pilot.hold_heading(&state);
-                        } else {
-                            pilot.hold_wind(&telemetry);
+                        ui.horizontal(|ui| {
+                            if small_button(ui, "<").clicked() {
+                                pilot.adjust(-rad(1.0));
+                            }
+                            if small_button(ui, ">").clicked() {
+                                pilot.adjust(rad(1.0));
+                            }
+                        });
+                    });
+
+                    ui.add_space(10.0);
+                    separator(ui);
+                    ui.add_space(10.0);
+
+                    // Everything else that had only a key.
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new("SHIP")
+                                .color(paint::LABEL)
+                                .monospace()
+                                .size(10.0),
+                        );
+                        // Setting a roller genoa *is* easing the furling line, which is
+                        // correct and gives the console no obvious handle for "put the
+                        // headsail up". These say it in the words a crew would use.
+                        let furled = sim.controls.furl > 0.5;
+                        if small_button(ui, if furled { "SET GENOA" } else { "FURL GENOA" })
+                            .clicked()
+                        {
+                            sim.controls.furl = if furled { 0.0 } else { 1.0 };
                         }
-                    }
-                    ui.horizontal(|ui| {
-                        if small_button(ui, "<").clicked() {
-                            pilot.adjust(-rad(1.0));
+                        if small_button(ui, "TRIM TO BEST").clicked() {
+                            let (m, j) = optimal_sheets(&cfg, telemetry.awa, sim.controls.outhaul);
+                            sim.controls.main_sheet = m;
+                            sim.controls.jib_sheet = j;
                         }
-                        if small_button(ui, ">").clicked() {
-                            pilot.adjust(rad(1.0));
+                        if small_button(
+                            ui,
+                            match *view {
+                                View::Cockpit => "VIEW: HELM",
+                                View::Chase => "VIEW: ASTERN",
+                            },
+                        )
+                        .clicked()
+                        {
+                            *view = match *view {
+                                View::Cockpit => View::Chase,
+                                View::Chase => View::Cockpit,
+                            };
+                        }
+                        let muted = sound.0.muted();
+                        if lamp_button(ui, if muted { "SOUND OFF" } else { "SOUND ON" }, !muted)
+                            .clicked()
+                        {
+                            sound.0.set_muted(!muted);
+                        }
+                        if lamp_button(ui, "DIAGNOSTICS", hud.0).clicked() {
+                            hud.0 = !hud.0;
                         }
                     });
-                });
-
-                ui.add_space(10.0);
-                separator(ui);
-                ui.add_space(10.0);
-
-                // Everything else that had only a key.
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("SHIP")
-                            .color(paint::LABEL)
-                            .monospace()
-                            .size(10.0),
-                    );
-                    if small_button(ui, "TRIM TO BEST").clicked() {
-                        let (m, j) = optimal_sheets(&cfg, telemetry.awa, sim.controls.outhaul);
-                        sim.controls.main_sheet = m;
-                        sim.controls.jib_sheet = j;
-                    }
-                    if small_button(
-                        ui,
-                        match *view {
-                            View::Cockpit => "VIEW: HELM",
-                            View::Chase => "VIEW: ASTERN",
-                        },
-                    )
-                    .clicked()
-                    {
-                        *view = match *view {
-                            View::Cockpit => View::Chase,
-                            View::Chase => View::Cockpit,
-                        };
-                    }
-                    let muted = sound.0.muted();
-                    if lamp_button(ui, if muted { "SOUND OFF" } else { "SOUND ON" }, !muted)
-                        .clicked()
-                    {
-                        sound.0.set_muted(!muted);
-                    }
-                    if lamp_button(ui, "DIAGNOSTICS", hud.0).clicked() {
-                        hud.0 = !hud.0;
-                    }
                 });
             });
         });
@@ -387,10 +392,10 @@ fn wind_dial(ui: &mut egui::Ui, awa: f64, twa: f64) {
     needle(p, c, r * 0.90, awa as f32, 3.2, paint::NEEDLE);
     p.circle_filled(c, 4.0, paint::INK);
     p.text(
-        c + egui::vec2(0.0, r - 14.0),
+        c + egui::vec2(0.0, r * 0.52),
         egui::Align2::CENTER_CENTER,
         format!("{:.0}", deg(awa).abs()),
-        egui::FontId::monospace(13.0),
+        egui::FontId::monospace(12.0),
         paint::INK,
     );
 }
@@ -405,7 +410,7 @@ fn needle(p: &egui::Painter, c: egui::Pos2, len: f32, angle: f32, width: f32, co
 
 /// A linear gauge: a bar against its scale, which reads faster than a number.
 fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &str) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(78.0, 44.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(86.0, 42.0), egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, 2.0, paint::TRACK);
     let f = ((value - lo) / (hi - lo)).clamp(0.0, 1.0) as f32;
@@ -424,8 +429,8 @@ fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &st
     p.text(
         rect.right_top() + egui::vec2(-4.0, 2.0),
         egui::Align2::RIGHT_TOP,
-        format!("{value:.1} {unit}"),
-        egui::FontId::monospace(13.0),
+        format!("{value:.1}{unit}"),
+        egui::FontId::monospace(12.0),
         paint::FACE,
     );
 }
@@ -433,7 +438,7 @@ fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &st
 /// Heel, drawn as a horizon that tilts. One to one, because it has to agree with what
 /// your inner ear is already telling you.
 fn heel_scale(ui: &mut egui::Ui, heel: f64) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(176.0, 46.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(180.0, 42.0), egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, 2.0, paint::TRACK);
     let c = rect.center();

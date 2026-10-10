@@ -296,12 +296,12 @@ pub fn update(
                     // The lazy sheet runs from the same clew but is not pulling, so it
                     // falls away in a bight across the foredeck.
                     from: clew,
-                    // The car's position *is* the control, so it has to be visible:
-                    // the sheet's lead point slides fore and aft along the track.
+                    // Led through the car itself, so the rope and the fitting cannot
+                    // disagree about where the sheet is being turned.
                     to: Vec3::new(
-                        side * cfg.beam as f32 * 0.38,
-                        DECK,
-                        0.1 + sim.controls.genoa_car as f32 * 2.3,
+                        side * cfg.beam as f32 * crate::boat::TRACK_X,
+                        DECK + 0.09,
+                        crate::boat::car_position(sim.controls.genoa_car as f32),
                     ),
                     tension: if working {
                         jib_load * (1.0 - t.jib.coeffs.luffing as f32) * (1.0 - furled)
