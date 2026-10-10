@@ -181,7 +181,7 @@ pub fn update(
         rigging.previous = *now;
     }
 
-    let st = &sim.sim.state;
+    let st = &sim.render_state();
     let cfg = sim.config();
     let t = &sim.sim.telemetry;
     let hull = crate::frame::hull_translation(st);

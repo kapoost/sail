@@ -162,7 +162,7 @@ pub fn follow(
     mut head: ResMut<HeadMotion>,
     mut q: Query<&mut Transform, With<MainCamera>>,
 ) {
-    let st = &sim.sim.state;
+    let st = &sim.render_state();
     let hull = frame::hull_translation(st);
     head.follow(
         st.heel as f32,

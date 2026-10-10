@@ -72,6 +72,14 @@ impl Sim {
         }
     }
 
+    /// Where the boat is for *drawing*, interpolated across the leftover of the fixed
+    /// 200 Hz substep. Instruments and the autopilot read `sim.state` instead: they
+    /// want the integrator's own answer, not a blend, and five milliseconds of it
+    /// makes no difference to a dial.
+    pub fn render_state(&self) -> BoatState {
+        self.sim.render_state()
+    }
+
     pub fn config(&self) -> BoatConfig {
         self.sim.config
     }

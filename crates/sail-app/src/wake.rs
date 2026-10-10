@@ -101,7 +101,7 @@ pub fn update(
     mut wake: ResMut<Wake>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let st = &sim.sim.state;
+    let st = &sim.render_state();
     let now = time.elapsed_secs();
     let stern = st.pos - st.forward() * (sim.config().loa * 0.45);
 

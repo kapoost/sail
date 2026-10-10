@@ -254,8 +254,9 @@ pub fn setup(
 /// Put the hull where the simulation says it is, at the attitude it says it has.
 pub fn update_hull(sim: Res<Sim>, mut q: Query<&mut Transform, With<BoatRoot>>) {
     for mut t in &mut q {
-        t.translation = frame::hull_translation(&sim.sim.state);
-        t.rotation = frame::attitude(&sim.sim.state);
+        let st = sim.render_state();
+        t.translation = frame::hull_translation(&st);
+        t.rotation = frame::attitude(&st);
     }
 }
 
@@ -568,7 +569,14 @@ fn build_sail(
         // tacks and would have been undefined anyway with the boom amidships: the
         // chord lies along the centreline there and has no side to read.
         let mut normal = Vec3::Y.cross(span.normalize()).normalize_or_zero();
-        if normal.x * lee < 0.0 {
+        if normal.x.abs() < 1e-4 {
+            // Boom squared off dead across the boat: the chord has no athwartships
+            // component left to read a side from, and the sail's surface is lying
+            // across the hull. Its leeward is then forward — which is exactly right
+            // for a main squared away on a run, and is the only answer that joins up
+            // continuously with the angles either side of it.
+            normal = Vec3::NEG_Z;
+        } else if normal.x * lee < 0.0 {
             normal = -normal;
         }
         // The outhaul tensions the foot, so its share of the depth sits low down.

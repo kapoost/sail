@@ -142,7 +142,7 @@ pub fn update_sea(
     mut meshes: ResMut<Assets<Mesh>>,
     mut q: Query<(&SeaSurface, &mut Transform)>,
 ) {
-    let st = &sim.sim.state;
+    let st = &sim.render_state();
     let centre = frame::to_bevy(st.pos, 0.0);
     let t = st.time;
 

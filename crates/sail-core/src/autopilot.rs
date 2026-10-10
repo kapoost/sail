@@ -283,7 +283,12 @@ impl Autopilot {
     /// too slow to answer, and the state feeds itself. Handing the helm back is both
     /// what a real pilot does and the only way out.
     pub fn struggling(&self) -> bool {
-        self.loop_.saturated_for() > 6.0
+        self.saturated_seconds() > 6.0
+    }
+
+    /// How long the rudder has been hard over, for diagnostics.
+    pub fn saturated_seconds(&self) -> f64 {
+        self.loop_.saturated_for()
     }
 
     /// Hold the course the boat is on right now.

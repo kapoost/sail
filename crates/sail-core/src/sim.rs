@@ -30,6 +30,9 @@ pub struct Simulation {
     pub water: Box<dyn WaterSurface>,
     pub telemetry: Telemetry,
     accumulator: f64,
+    /// The state one substep back, kept so a frame landing between two substeps can be
+    /// drawn where the boat actually is rather than where it last happened to be.
+    prev_state: BoatState,
     /// Last substep's wave slopes along and across the hull, so their rate of change
     /// can be differenced. Motion damping has to be charged on movement *relative to
     /// the water surface*: a boat pitching exactly with the wave is following it, not
@@ -58,6 +61,7 @@ impl Simulation {
             water: Box::new(FlatWater),
             telemetry: Telemetry::default(),
             accumulator: 0.0,
+            prev_state: state,
             prev_slope_along: 0.0,
             prev_slope_athwart: 0.0,
             slopes_primed: false,
@@ -101,6 +105,7 @@ impl Simulation {
         let max_substeps = 20;
         let mut n = 0;
         while self.accumulator >= SUBSTEP && n < max_substeps {
+            self.prev_state = self.state;
             self.substep(SUBSTEP, controls);
             self.accumulator -= SUBSTEP;
             n += 1;
@@ -110,11 +115,31 @@ impl Simulation {
         }
     }
 
+    /// Where the boat is *now*, as opposed to at the last completed substep.
+    ///
+    /// The integrator runs at a fixed 200 Hz and a rendered frame almost never lands on
+    /// a substep boundary, so there is always a leftover of up to 5 ms sitting in the
+    /// accumulator. Drawing the last completed substep throws that leftover away, and
+    /// the error is not a harmless constant: at 120 frames a second each frame consumes
+    /// two substeps, then two, then one, so the boat advances 10, 10, 5 milliseconds of
+    /// simulated time while the clock advances evenly. That is a twenty percent
+    /// velocity modulation at the beat frequency between the frame rate and 200 Hz, and
+    /// since the frame rate wanders the beat wanders with it — which is why it reads as
+    /// the camera intermittently failing to keep up rather than as steady roughness.
+    ///
+    /// Interpolating the remainder costs one blend per frame and removes all of it.
+    /// Physics still only ever sees whole fixed substeps; this is presentation.
+    pub fn render_state(&self) -> BoatState {
+        let t = (self.accumulator / SUBSTEP).clamp(0.0, 1.0);
+        BoatState::lerp(&self.prev_state, &self.state, t)
+    }
+
     /// Run for a fixed duration with constant controls. Used heavily by the validation
     /// suite to reach steady state.
     pub fn run(&mut self, seconds: f64, controls: &Controls) {
         let steps = (seconds / SUBSTEP).round() as u64;
         for _ in 0..steps {
+            self.prev_state = self.state;
             self.substep(SUBSTEP, controls);
         }
     }

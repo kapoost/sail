@@ -42,6 +42,35 @@ pub struct BoatState {
 }
 
 impl BoatState {
+    /// Blend two states, for drawing a frame that falls between two physics substeps.
+    ///
+    /// The integrator advances in fixed 5 ms steps and a frame almost never lands on
+    /// one, so the leftover has to be interpolated or the picture stutters — see
+    /// [`Simulation::render_state`](crate::sim::Simulation::render_state).
+    ///
+    /// Heading goes the short way round. Lerping 359 degrees to 1 degree through the
+    /// middle spins the boat the wrong way through 358 of them, once per lap, which
+    /// is a bug that hides until somebody sails north.
+    pub fn lerp(a: &Self, b: &Self, t: f64) -> Self {
+        let f = |x: f64, y: f64| x + (y - x) * t;
+        Self {
+            pos: a.pos + (b.pos - a.pos) * t,
+            heading: crate::units::wrap_tau(
+                a.heading + crate::units::wrap_pi(b.heading - a.heading) * t,
+            ),
+            heel: f(a.heel, b.heel),
+            surge: f(a.surge, b.surge),
+            sway: f(a.sway, b.sway),
+            yaw_rate: f(a.yaw_rate, b.yaw_rate),
+            roll_rate: f(a.roll_rate, b.roll_rate),
+            heave: f(a.heave, b.heave),
+            heave_rate: f(a.heave_rate, b.heave_rate),
+            pitch: f(a.pitch, b.pitch),
+            pitch_rate: f(a.pitch_rate, b.pitch_rate),
+            time: f(a.time, b.time),
+        }
+    }
+
     /// Stopped, on the given heading.
     pub fn at_rest(heading: f64) -> Self {
         Self {

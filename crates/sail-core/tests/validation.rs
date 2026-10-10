@@ -1838,3 +1838,79 @@ fn a_headsail_cannot_be_sheeted_past_its_lead() {
         deg(hard_in)
     );
 }
+
+/// A frame that falls between two physics substeps must be drawn between them.
+///
+/// The integrator runs at a fixed 200 Hz and a frame almost never lands on a substep
+/// boundary. Drawing the last completed substep throws the leftover away, and the
+/// error is not a harmless constant: at 120 frames a second a frame consumes two
+/// substeps, then two, then one, so the boat advances 10, 10, 5 milliseconds of
+/// simulated time while the clock advances evenly. The frame rate and 200 Hz beat
+/// against each other, the beat wanders as the frame rate does, and it reads as the
+/// camera intermittently failing to keep up.
+///
+/// So this measures the spread of per-frame displacement rather than asserting that
+/// interpolation happens.
+#[test]
+fn a_rendered_frame_lands_between_substeps() {
+    use sail_core::wind::SteadyWind;
+
+    // Angles go the short way round, or a boat sailing north spins through 358
+    // degrees once a lap.
+    let a = BoatState::at_rest(rad(359.0));
+    let b = BoatState::at_rest(rad(1.0));
+    let mid = BoatState::lerp(&a, &b, 0.5);
+    assert!(
+        wrap_pi(mid.heading).abs() < rad(0.01),
+        "359 to 1 degrees should pass through north, got {:.1}",
+        deg(wrap_pi(mid.heading))
+    );
+    let cfg = BoatConfig::charter_sloop_34();
+    let mut state = BoatState::at_rest(wrap_tau(-rad(45.0)));
+    state.surge = kn_to_ms(6.0);
+    let mut sim = Simulation::new(
+        cfg,
+        state,
+        Box::new(SteadyWind::new(0.0, kn_to_ms(14.0))) as Box<dyn WindField>,
+    );
+    let controls = Controls::close_hauled();
+    // Settle first: the opening seconds are a genuine acceleration and would swamp
+    // the thing being measured.
+    sim.run(120.0, &controls);
+
+    // A frame rate deliberately incommensurate with the 5 ms substep.
+    let frame = 1.0 / 120.0;
+    let mut drawn = Vec::new();
+    let mut raw = Vec::new();
+    for _ in 0..600 {
+        sim.step(frame, &controls);
+        drawn.push(sim.render_state().pos);
+        raw.push(sim.state.pos);
+    }
+
+    let spread = |p: &[glam::DVec2]| {
+        let steps: Vec<f64> = p.windows(2).map(|w| (w[1] - w[0]).length()).collect();
+        let mean = steps.iter().sum::<f64>() / steps.len() as f64;
+        let worst = steps
+            .iter()
+            .map(|s| (s - mean).abs())
+            .fold(0.0_f64, f64::max);
+        worst / mean
+    };
+
+    let interpolated = spread(&drawn);
+    let last_substep = spread(&raw);
+    assert!(
+        last_substep > 0.1,
+        "the unsmoothed case should visibly beat against the substep rate, \
+         got {:.1}% — if this has gone away the test is no longer measuring anything",
+        last_substep * 100.0
+    );
+    assert!(
+        interpolated < 0.02,
+        "a rendered frame should advance evenly: {:.2}% spread interpolated \
+         against {:.1}% drawing the last substep",
+        interpolated * 100.0,
+        last_substep * 100.0
+    );
+}
