@@ -235,7 +235,17 @@ pub fn update_sea(
             (tm.twd + std::f64::consts::PI).sin(),
             (tm.twd + std::f64::consts::PI).cos(),
         );
-        let current = downwind * tm.tws * 0.025 * t;
+        // Two separate motions, and they were conflated into one before.
+        //
+        // The slow one is a real surface current, about two and a half percent of the
+        // wind speed, carrying everything downwind together. The fast one is the
+        // ripples' own travel: the normal map stands for short waves a few metres
+        // long, and those move through the water at their own phase speed — nearly
+        // 3 m/s, more than ten times the drift. Advecting the texture at the drift
+        // rate alone is what made the surface read as a photograph of a sea.
+        let drift = downwind * tm.tws * 0.025 * t;
+        let ripples = downwind * sea_texture::ripple_phase_speed() as f64 * t;
+        let current = drift + ripples;
         // Rebase the texture coordinates by a whole number of tile repeats.
         //
         // The UVs address the sea in world metres so that the detail stays with the
