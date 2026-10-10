@@ -92,7 +92,15 @@ const CLEW_FREE_RISE: f32 = 2.6;
 /// And how low the sheet can drag it before the foot is on the deck.
 const CLEW_MIN_RISE: f32 = 0.35;
 /// Sheet length from the clew to the car, hauled right in and eased right out.
-const SHEET_SHORT: f32 = 2.9;
+/// Shortest the sheet gets: a shackle and the depth of the block, no more.
+///
+/// The sheet does not end at the car — it runs *through* a block on it and on to the
+/// winch, so hauling brings the clew all the way down to the fitting. An earlier value
+/// of 2.9 m said the opposite: the clew could never come within three metres of its
+/// lead, so the genoa was permanently half-eased and could not be sheeted in at all,
+/// whatever the lever said.
+const SHEET_SHORT: f32 = 0.25;
+/// Longest, which is slack enough for the sail to fly off the stay and flog.
 const SHEET_LONG: f32 = 7.4;
 const DECK: f32 = 0.95;
 
@@ -236,6 +244,7 @@ pub fn setup(
             let track_length = TRACK_AFT - TRACK_FORWARD;
             let track_mesh = meshes.add(Cuboid::new(0.05, 0.03, track_length));
             let car_mesh = meshes.add(Cuboid::new(0.085, 0.07, 0.17));
+            let sheave_mesh = meshes.add(Cylinder::new(0.055, 0.03));
             for starboard in [false, true] {
                 let x = if starboard { 1.0 } else { -1.0 } * cfg.beam as f32 * TRACK_X;
                 b.spawn((
@@ -248,7 +257,18 @@ pub fn setup(
                     Mesh3d(car_mesh.clone()),
                     MeshMaterial3d(underwater_mat.clone()),
                     Transform::from_xyz(x, DECK + 0.055, car_position(0.4)),
-                ));
+                ))
+                .with_children(|car| {
+                    // The sheave. The sheet does not end at the car, it turns through
+                    // this and runs on to the winch, which is why hauling brings the
+                    // clew right down to the fitting instead of stopping short of it.
+                    car.spawn((
+                        Mesh3d(sheave_mesh.clone()),
+                        MeshMaterial3d(spar_mat.clone()),
+                        Transform::from_xyz(0.0, 0.07, 0.0)
+                            .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                    ));
+                });
             }
 
             // Masthead windex.
@@ -420,14 +440,18 @@ pub fn update_sails(
             }
         };
         if let Some(mut mesh) = meshes.get_mut(&surface.mesh) {
-            // Only the mainsail twists here; a headsail's shape is set by its lead.
-            let twist = match surface.which {
-                Sail::Main => side * t_.twist as f32,
-                Sail::Genoa => 0.0,
-            };
+            // Both sails twist. The main's comes from the vang arguing with the
+            // mainsheet's angle; the headsail's comes from its lead car, which is the
+            // only shape control it has and so had better be visible in the cloth.
+            let twist = side
+                * match surface.which {
+                    Sail::Main => t_.twist as f32,
+                    Sail::Genoa => t_.jib_twist as f32,
+                };
             build_sail(
                 &mut mesh,
                 &geometry,
+                side,
                 twist,
                 forces.coeffs.luffing as f32,
                 forces.camber as f32,
@@ -439,7 +463,11 @@ pub fn update_sails(
 
 /// Sheet length from the clew to the car for a given sheet setting.
 pub fn sheet_length(jib_sheet: f32) -> f32 {
-    SHEET_SHORT + (SHEET_LONG - SHEET_SHORT) * jib_sheet.clamp(0.0, 1.0)
+    // Squared, for the same reason the sheet-to-chord mapping is: the whole useful
+    // band lives at the hauled-in end, and a linear travel buries it in the first
+    // tenth of the winch.
+    let t = jib_sheet.clamp(0.0, 1.0);
+    SHEET_SHORT + (SHEET_LONG - SHEET_SHORT) * t * t
 }
 
 /// Where a headsail's clew actually ends up.
@@ -542,13 +570,17 @@ fn sail_indices() -> Vec<u32> {
     idx
 }
 
-fn build_sail(mesh: &mut Mesh, g: &SailGeometry, twist: f32, luffing: f32, draft: f32, now: f32) {
+fn build_sail(
+    mesh: &mut Mesh,
+    g: &SailGeometry,
+    lee: f32,
+    twist: f32,
+    luffing: f32,
+    draft: f32,
+    now: f32,
+) {
     let mut positions = Vec::with_capacity(SAIL_U * SAIL_V);
     let mut uvs = Vec::with_capacity(SAIL_U * SAIL_V);
-
-    // Which side the sail bellies towards: away from the chord, on the leeward hand.
-    let chord = g.clew - g.tack;
-    let leeward = if chord.x >= 0.0 { 1.0 } else { -1.0 };
 
     let reference = sail_core::sail::CAMBER_REFERENCE as f32;
     let deviation = draft * (1.0 - luffing) - reference;
@@ -572,8 +604,17 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, twist: f32, luffing: f32, draft
         let span = leech - luff;
         let chord_length = span.length().max(1e-4);
         // Camber acts normal to the chord and across the sail, which for a surface
-        // this upright means the horizontal perpendicular.
-        let normal = span.normalize().cross(Vec3::Y).normalize_or_zero() * leeward;
+        // this upright means the horizontal perpendicular — pointed to leeward,
+        // because that is the only side a sail can belly towards.
+        //
+        // Which side that is comes in as an argument now. It used to be inferred from
+        // the sign of the chord's athwartships component, which was inverted on both
+        // tacks and would have been undefined anyway with the boom amidships: the
+        // chord lies along the centreline there and has no side to read.
+        let mut normal = Vec3::Y.cross(span.normalize()).normalize_or_zero();
+        if normal.x * lee < 0.0 {
+            normal = -normal;
+        }
         // The outhaul tensions the foot, so its share of the depth sits low down.
         let foot_weight = (1.0 - u).powf(1.6);
         let local_camber = reference + deviation * (0.35 + 1.65 * foot_weight);

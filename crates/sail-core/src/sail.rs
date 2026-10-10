@@ -195,6 +195,19 @@ pub struct SailProfile {
     /// Largest chord angle the sheet can reach, radians. For a main this is the boom
     /// hitting the shrouds; past it, deep downwind angles are necessarily stalled.
     pub max_chord_angle: f64,
+    /// Smallest chord angle the sheet can reach, radians.
+    ///
+    /// For a headsail this is not zero and never was: the sheet is led to a block on a
+    /// track bolted to the side deck, so the clew cannot come inboard past the line
+    /// from the tack to that block however hard the winch is ground. A cruiser's genoa
+    /// lead gives something in the region of twelve degrees.
+    ///
+    /// Leaving it at zero had the model believe a genoa sheeted hard in lay on the
+    /// centreline, which upwind means an angle of attack equal to the whole apparent
+    /// wind angle — past the optimum and into soft stall. The boat was fastest with
+    /// the genoa *eased*, which is the opposite of how one sails. The mainsail's floor
+    /// genuinely is zero, because the traveller can bring the boom to the centreline.
+    pub min_chord_angle: f64,
 }
 
 impl SailProfile {
@@ -209,6 +222,7 @@ impl SailProfile {
             luff_margin: rad(4.0),
             cn_separated: 1.5,
             max_chord_angle: rad(90.0),
+            min_chord_angle: 0.0,
         }
     }
 
@@ -224,6 +238,7 @@ impl SailProfile {
             luff_margin: rad(3.5),
             cn_separated: 1.45,
             max_chord_angle: rad(85.0),
+            min_chord_angle: rad(12.0),
         }
     }
 
@@ -295,7 +310,7 @@ impl SailProfile {
     /// apparent wind angle. Used by the validation suite, and by the in-game trim
     /// reference: this is the line a good trimmer is chasing.
     pub fn optimal_chord_angle(&self, awa: f64, camber: f64) -> f64 {
-        (awa.abs() - self.alpha_opt_for(camber)).clamp(0.0, self.max_chord_angle)
+        (awa.abs() - self.alpha_opt_for(camber)).clamp(self.min_chord_angle, self.max_chord_angle)
     }
 
     /// Camber relative to the shape the coefficients were tuned at.
@@ -329,13 +344,15 @@ impl SailProfile {
     #[inline]
     pub fn chord_angle(&self, sheet: f64) -> f64 {
         let s = sheet.clamp(0.0, 1.0);
-        self.max_chord_angle * s * s
+        self.min_chord_angle + (self.max_chord_angle - self.min_chord_angle) * s * s
     }
 
     /// Inverse of [`chord_angle`](Self::chord_angle).
     #[inline]
     pub fn sheet_for_chord_angle(&self, angle: f64) -> f64 {
-        (angle.clamp(0.0, self.max_chord_angle) / self.max_chord_angle).sqrt()
+        let span = (self.max_chord_angle - self.min_chord_angle).max(1e-9);
+        ((angle.clamp(self.min_chord_angle, self.max_chord_angle) - self.min_chord_angle) / span)
+            .sqrt()
     }
 
     /// Sheet position a good trimmer would be holding for this apparent wind angle.

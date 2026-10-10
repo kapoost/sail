@@ -1840,3 +1840,55 @@ fn traveller_opens_the_boom_without_losing_the_leech() {
         base.cos()
     );
 }
+
+/// A headsail cannot be sheeted to the centreline, because its sheet is led to a block
+/// on a track bolted to the side deck.
+///
+/// Without this floor the model believed a genoa ground hard in lay on the centreline,
+/// which upwind is an angle of attack equal to the entire apparent wind angle — past
+/// the optimum and into soft stall. The boat was then fastest with the genoa *eased*,
+/// which is the opposite of how anyone sails, and it made the winch feel backwards.
+/// The mainsail's floor really is zero: the traveller can bring the boom amidships.
+#[test]
+fn a_headsail_cannot_be_sheeted_past_its_lead() {
+    let cfg = BoatConfig::charter_sloop_34();
+
+    let hard_in = cfg.genoa.profile.chord_angle(0.0);
+    assert!(
+        hard_in > rad(8.0) && hard_in < rad(18.0),
+        "a genoa lead gives a sheeting angle of around twelve degrees, got {:.1}",
+        deg(hard_in)
+    );
+    assert_eq!(
+        cfg.main.profile.chord_angle(0.0),
+        0.0,
+        "the traveller can bring the boom to the centreline"
+    );
+
+    // Round-tripping through the sheet mapping must still land where it started, or
+    // the twisted upper sections are being fed a sheet setting that means something
+    // else entirely.
+    for tenth in 0..=10 {
+        let sheet = tenth as f64 / 10.0;
+        let angle = cfg.genoa.profile.chord_angle(sheet);
+        let back = cfg.genoa.profile.sheet_for_chord_angle(angle);
+        assert!(
+            (back - sheet).abs() < 1e-9,
+            "sheet {sheet:.1} round-tripped to {back:.4}"
+        );
+    }
+
+    // And close-hauled, hard in must now be near the optimum rather than past it.
+    let awa = rad(28.0);
+    let want = cfg
+        .genoa
+        .profile
+        .optimal_chord_angle(awa, sail_core::sail::CAMBER_REFERENCE);
+    assert!(
+        (want - hard_in).abs() < rad(6.0),
+        "close-hauled the genoa should want to be near its stops: wants {:.1}, \
+         stops at {:.1}",
+        deg(want),
+        deg(hard_in)
+    );
+}
