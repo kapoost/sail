@@ -13,6 +13,7 @@ mod course;
 mod frame;
 mod hud;
 mod input;
+mod instruments;
 mod rig;
 mod sea_texture;
 mod sim;
@@ -59,7 +60,12 @@ fn main() {
                 course::setup,
                 wake::setup,
                 rig::setup,
-            ),
+                // After boat::setup, which is what creates the hull they hang on.
+                instruments::setup,
+            )
+                // Chained because several of these depend on each other's entities,
+                // and at startup the cost of ordering them is nothing at all.
+                .chain(),
         )
         .add_systems(
             Update,
@@ -80,6 +86,7 @@ fn main() {
                     course::float_marks,
                     wake::update,
                     rig::update,
+                    instruments::update,
                     camera::follow,
                     sound::update,
                 ),
