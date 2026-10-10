@@ -12,6 +12,7 @@ mod course;
 mod frame;
 mod hud;
 mod input;
+mod rig;
 mod sea_texture;
 mod sim;
 mod sky;
@@ -55,6 +56,7 @@ fn main() {
                 sound::setup,
                 course::setup,
                 wake::setup,
+                rig::setup,
             ),
         )
         .add_systems(
@@ -74,6 +76,7 @@ fn main() {
                     world::update_sea,
                     course::float_marks,
                     wake::update,
+                    rig::update,
                     camera::follow,
                     sound::update,
                 ),
