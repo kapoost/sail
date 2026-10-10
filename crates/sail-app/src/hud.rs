@@ -235,6 +235,16 @@ pub fn draw(
             match pilot.mode {
                 PilotMode::Standby => {
                     ui.label(egui::RichText::new("pilot  standby — hand steering").weak());
+                    // If it dropped out, say why. A pilot that disengages silently is
+                    // indistinguishable from one that is broken.
+                    if let Some(reason) = pilot.last_reason {
+                        if pilot.since_reason < 6.0 {
+                            ui.label(
+                                egui::RichText::new(format!("       it dropped out: {reason}"))
+                                    .color(egui::Color32::from_rgb(230, 170, 60)),
+                            );
+                        }
+                    }
                 }
                 PilotMode::ApparentWind(target) => {
                     ui.label(
@@ -299,7 +309,7 @@ pub fn draw(
                  Shift   fine, on both helm and sheets\n\
                  1 / 2   choose a line on the clutch bank\n\
                  A / D   ease / haul in the chosen line (Shift for fine)\n\
-                 P       pilot: standby / hold course / hold wind angle\n\
+                 P       pilot on / off      O  course or wind angle\n\
                  , / .   nudge the pilot's target (Shift for five)\n\
                  Z / X   engine astern / ahead\n\
                  T  snap to trim   C  camera   L  new lap   M  mute   Tab  hide panel",

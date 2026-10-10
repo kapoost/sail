@@ -32,8 +32,40 @@ const STICK_DEADZONE: f32 = 0.12;
 ///
 /// A newtype only because `Resource` cannot be derived on a type from another crate —
 /// which is the small, honest tax for keeping `sail-core` free of engine types.
-#[derive(Resource, Default, Deref, DerefMut)]
-pub struct Pilot(pub Autopilot);
+#[derive(Resource, Default)]
+pub struct Pilot {
+    pub inner: Autopilot,
+    /// Why it last dropped out, and how long ago.
+    ///
+    /// A pilot that disengages without saying why is indistinguishable from one that
+    /// is broken. Recording the reason turns "it keeps switching off" from a report
+    /// into a fact in a single run.
+    pub last_reason: Option<&'static str>,
+    pub since_reason: f32,
+}
+
+impl std::ops::Deref for Pilot {
+    type Target = Autopilot;
+    fn deref(&self) -> &Autopilot {
+        &self.inner
+    }
+}
+
+impl std::ops::DerefMut for Pilot {
+    fn deref_mut(&mut self) -> &mut Autopilot {
+        &mut self.inner
+    }
+}
+
+impl Pilot {
+    fn drop_out(&mut self, reason: &'static str) {
+        if self.inner.engaged() {
+            self.inner.disengage();
+            self.last_reason = Some(reason);
+            self.since_reason = 0.0;
+        }
+    }
+}
 
 /// Which device last touched the helm.
 ///
@@ -83,16 +115,29 @@ pub fn gather(
     let pad = pads.iter().next();
 
     // --- Autopilot -------------------------------------------------------------
-    let cycle = keys.just_pressed(KeyCode::KeyP)
+    pilot.since_reason += time.delta_secs();
+
+    // P engages and disengages; O switches between holding a course and holding a wind
+    // angle. One key cycling three states meant the third press dropped the pilot
+    // whether or not that was what you wanted, which is a surprising way for a piece
+    // of equipment to behave.
+    let toggle = keys.just_pressed(KeyCode::KeyP)
         || pad.is_some_and(|p| p.just_pressed(GamepadButton::Start));
-    if cycle {
+    if toggle {
+        if pilot.engaged() {
+            pilot.drop_out("you switched it off");
+        } else {
+            pilot.hold_heading(&sim.sim.state);
+            pilot.last_reason = None;
+        }
+    }
+    if keys.just_pressed(KeyCode::KeyO) && pilot.engaged() {
         match pilot.mode {
-            PilotMode::Standby => pilot.hold_heading(&sim.sim.state),
             PilotMode::Heading(_) => {
                 let tm = sim.sim.telemetry;
                 pilot.hold_wind(&tm);
             }
-            PilotMode::ApparentWind(_) => pilot.disengage(),
+            _ => pilot.hold_heading(&sim.sim.state),
         }
     }
     let nudge = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
@@ -134,9 +179,15 @@ pub fn gather(
         *helm_source = HelmSource::Keyboard;
     }
 
-    // Touching the helm throws the pilot out.
-    if pilot.engaged() && (key_rate != 0.0 || centring || stick != 0.0) {
-        pilot.disengage();
+    // Touching the helm throws the pilot out, and says so.
+    if pilot.engaged() {
+        if key_rate != 0.0 {
+            pilot.drop_out("you took the helm");
+        } else if centring {
+            pilot.drop_out("you centred the helm");
+        } else if stick != 0.0 {
+            pilot.drop_out("the stick moved");
+        }
     }
     if pilot.engaged() {
         let state = sim.sim.state;
