@@ -100,6 +100,28 @@ model's fastest — it gives away up to about 0.8 percent of VMG in a breeze. Th
 asserted and bounded by `the_outhaul_rule_costs_little_against_the_measured_best`
 rather than left to drift.
 
+## Sound
+
+Synthesised, not sampled. There are no audio files in the repository and there do not
+need to be: wind and water *are* filtered noise, so generating them is the honest
+method rather than a shortcut. It is also the only way to get what matters here — the
+sound has to answer the boat continuously, because it is a feedback channel. You hear
+the rig load up before you see the heel, and you hear a sail start to shake before you
+can read a telltale.
+
+It runs as a `Decodable`, so it is a real-time generator feeding the audio thread, not
+a loop being pitch-shifted. The simulation writes a handful of parameters each frame
+and the audio thread reads them lock-free. No loop seams, no transposition artefacts.
+
+| voice | driven by | note |
+|---|---|---|
+| wind | apparent wind speed | two-pole lowpass whose cutoff opens as it builds: louder *and* brighter |
+| rigging whine | apparent wind speed | pitch from the Strouhal relation `f = St·V/d`, St ≈ 0.2 on a 6 mm shroud — 170 Hz at 5 m/s, 330 at 10 |
+| water at the hull | speed through the water | bandpassed noise with a slow surge on it for the bow wave |
+| flogging canvas | how badly the sails are luffing | gated bursts with a hard attack, faster in more wind |
+
+`M` mutes it.
+
 ## Deliberate decisions
 
 * **Real time, 1:1.** No time compression yet. It will have to come back — forty miles
@@ -109,6 +131,8 @@ rather than left to drift.
 * **Synthetic but physical wind.** Gust statistics rather than a forecast download, so
   week one has no network dependency. The interface is already the right shape.
 * **Bevy, used thin.** Chosen in week two, with working physics already in hand.
+* **Procedural audio.** No asset pipeline to build, nothing to license, and the sound
+  tracks the simulation exactly rather than approximately.
 
 ## Why Bevy
 

@@ -240,7 +240,7 @@ pub fn draw(
                  P       pilot: standby / hold course / hold wind angle\n\
                  , / .   nudge the pilot's target (Shift for five)\n\
                  R / F   reef in / shake out      Z / X  engine astern / ahead\n\
-                 T  snap to good trim    C  camera    L  new lap    Tab  hide panel",
+                 T  snap to trim   C  camera   L  new lap   M  mute   Tab  hide panel",
             );
         });
     Ok(())

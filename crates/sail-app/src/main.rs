@@ -13,6 +13,7 @@ mod frame;
 mod hud;
 mod input;
 mod sim;
+mod sound;
 mod world;
 
 use bevy::prelude::*;
@@ -35,6 +36,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
+        .add_plugins(sound::plugin)
         .insert_resource(sim::Sim::new(WIND_KNOTS, WIND_FROM_DEG, START_TWA_DEG))
         .insert_resource(hud::HudVisible(true))
         .init_resource::<hud::Polar>()
@@ -47,6 +49,7 @@ fn main() {
                 boat::setup,
                 camera::setup,
                 hud::build_polar,
+                sound::setup,
                 course::setup,
             ),
         )
@@ -66,6 +69,7 @@ fn main() {
                     course::update,
                     world::follow_boat,
                     camera::follow,
+                    sound::update,
                 ),
                 (camera::toggle, hud::toggle, course::restart),
             )
