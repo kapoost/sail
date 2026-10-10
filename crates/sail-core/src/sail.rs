@@ -62,6 +62,31 @@ pub fn twist_for_vang(vang: f64, chord_angle: f64) -> f64 {
     MAX_TWIST * (1.0 - leech_tension)
 }
 
+/// Largest twist a headsail's leech will fall off to with the car right aft, radians.
+pub const MAX_LEAD_TWIST: f64 = 15.0 * std::f64::consts::PI / 180.0;
+
+/// Headsail depth from the sheet lead car: 0 is the car right forward, 1 right aft.
+///
+/// The car is the headsail's outhaul and vang in one fitting, which is why a genoa has
+/// no separate controls for either. Forward, the sheet pulls more downward: it
+/// tensions the leech and lets the foot belly out, giving a deep sail with a closed
+/// top. Aft, it pulls more along the foot: flat down low, and the leech falls open so
+/// the head spills. Light air and pointing want the car forward; being overpowered
+/// wants it aft.
+pub fn camber_for_lead(car: f64) -> f64 {
+    let c = car.clamp(0.0, 1.0);
+    CAMBER_DEEP + (CAMBER_FLAT - CAMBER_DEEP) * c
+}
+
+/// Twist in a headsail's leech from the car position, radians.
+///
+/// Unlike the mainsail's vang, there is no competition with the sheet to model: the
+/// car *is* the geometry that decides how much of the sheet's pull goes downward, so
+/// its position sets the twist directly.
+pub fn twist_for_lead(car: f64) -> f64 {
+    MAX_LEAD_TWIST * car.clamp(0.0, 1.0)
+}
+
 /// Outhaul a trimmer would carry, given how hard the boat is already heeling.
 ///
 /// Keyed on heel rather than wind speed, which is both what a trimmer actually reacts

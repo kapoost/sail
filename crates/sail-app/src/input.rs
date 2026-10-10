@@ -124,10 +124,12 @@ pub fn gather(
     let mut key_rate = 0.0;
     let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let rate = if fine { KEY_HELM_FINE } else { KEY_HELM_RATE };
-    if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
+    // Arrows only. A and D are the genoa car now, which is a better home for it than
+    // a number row: it is a trim control your left hand reaches for constantly.
+    if keys.pressed(KeyCode::ArrowLeft) {
         key_rate -= rate;
     }
-    if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
+    if keys.pressed(KeyCode::ArrowRight) {
         key_rate += rate;
     }
     let centring = keys.pressed(KeyCode::Space);
@@ -223,6 +225,21 @@ pub fn gather(
     }
     if outhaul_rate != 0.0 {
         sim.controls.outhaul = (sim.controls.outhaul + outhaul_rate * dt).clamp(0.0, 1.0);
+    }
+
+    // --- Genoa lead car: the headsail's outhaul and vang in one fitting -------
+    // Forward for depth and a closed leech, aft for a flat foot and a head that
+    // spills. It is the only shape control a genoa has, which is why it earns a
+    // hand-level key rather than a number.
+    let mut car_rate = 0.0;
+    if keys.pressed(KeyCode::KeyA) {
+        car_rate -= OUTHAUL_RATE; // forward: fuller, leech closed
+    }
+    if keys.pressed(KeyCode::KeyD) {
+        car_rate += OUTHAUL_RATE; // aft: flatter, leech open
+    }
+    if car_rate != 0.0 {
+        sim.controls.genoa_car = (sim.controls.genoa_car + car_rate * dt).clamp(0.0, 1.0);
     }
 
     // --- Vang: holds the leech down, and so controls twist --------------------

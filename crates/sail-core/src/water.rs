@@ -43,6 +43,17 @@ pub trait WaterSurface: Send + Sync {
         self.velocity(pos, t)
     }
 
+    /// Typical surface slope of this sea, radians — the root-mean-square of its
+    /// component slopes.
+    ///
+    /// What foam and whitecaps have to be judged against. A fixed threshold cannot
+    /// work: a long swell of a given height is far gentler than a short chop of the
+    /// same height, so a number tuned on one produces either no foam at all or a sea
+    /// of milk on the other.
+    fn characteristic_slope(&self) -> f64 {
+        0.0
+    }
+
     /// Horizontal displacement of a surface parcel from its mean position, metres.
     ///
     /// The integral of the orbital velocity, and therefore bounded: in deep water a
@@ -241,6 +252,18 @@ impl WaterSurface for WindSea {
             v.z += orbital * theta.sin();
         }
         v
+    }
+
+    fn characteristic_slope(&self) -> f64 {
+        let sum: f64 = self
+            .components
+            .iter()
+            .map(|c| {
+                let slope = c.amplitude * c.k;
+                slope * slope * 0.5
+            })
+            .sum();
+        sum.sqrt()
     }
 
     fn horizontal_displacement(&self, pos: DVec2, t: f64) -> DVec2 {

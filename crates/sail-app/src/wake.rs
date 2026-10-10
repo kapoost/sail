@@ -136,8 +136,13 @@ pub fn update(
             .samples
             .get(wake.samples.len().saturating_sub(SAMPLES) + index);
         let Some(sample) = sample.filter(|_| index < wake.samples.len()) else {
-            positions.push(Vec3::ZERO);
-            positions.push(Vec3::ZERO);
+            // Collapse unused samples onto the boat, not onto Vec3::ZERO. Zero is the
+            // *world origin*, and the triangles joining those vertices to the real
+            // ones stretched a sheet from the hull all the way back to it — which,
+            // since the boat starts near the origin, drew a grey slab across the sea.
+            let here = frame::to_bevy(st.pos, 0.0);
+            positions.push(here);
+            positions.push(here);
             colours.push([1.0, 1.0, 1.0, 0.0]);
             colours.push([1.0, 1.0, 1.0, 0.0]);
             uvs.push(Vec2::ZERO);

@@ -169,6 +169,19 @@ pub fn draw(
             // centreline the mainsheet is already tensioning the leech, so there is
             // nothing for it to do. Saying so beats letting it look broken.
             ui.label(format!(
+                "genoa car {:.2} ({:.0}% draft, twist {:.1})   {}",
+                c.genoa_car,
+                t.jib.camber * 100.0,
+                deg(t.jib_twist),
+                if c.genoa_car < 0.35 {
+                    "forward — full and powerful"
+                } else if c.genoa_car > 0.7 {
+                    "aft — flat foot, open leech"
+                } else {
+                    "mid track"
+                }
+            ));
+            ui.label(format!(
                 "vang {:.2}   twist {:.1}{}",
                 c.vang,
                 deg(t.twist),
@@ -257,11 +270,12 @@ pub fn draw(
 
             ui.separator();
             ui.small(
-                "A / D   helm to port / starboard, held where you leave it\n\
+                "arrows  helm to port / starboard, held where you leave it\n\
                  Space   centre the helm\n\
                  W / S   mainsheet: haul in / ease\n\
                  E / Q   genoa: grind in / ease\n\
                  Shift   fine, on both helm and sheets\n\
+                 A / D   genoa car: forward for depth / aft for a flat, open leech\n\
                  1 / 2   outhaul: ease for depth / haul out for flat\n\
                  3 / 4   vang: ease for twist / haul on to flatten the leech\n\
                  G       roll the genoa away / back out    [ ]  part furl\n\

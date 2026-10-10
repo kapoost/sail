@@ -5,6 +5,7 @@
 //! that stays level throws it away. The chase view deliberately does *not* heel, since
 //! a horizon that rolls with the hull from outside the boat just makes people ill.
 
+use bevy::camera::Exposure;
 use bevy::light::{GeneratedEnvironmentMapLight, Skybox};
 use bevy::prelude::*;
 
@@ -92,14 +93,22 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.spawn((
         MainCamera,
         Camera3d::default(),
+        // Daylight exposure. Bevy defaults to roughly EV100 9.7 — an indoor setting,
+        // at which white falls around a thousand candela per square metre. A sky of
+        // several thousand then saturates to a flat white sheet with no gradient and
+        // no sun in it, which is exactly what it was doing. Exposing for sunlight and
+        // giving the sky its real luminance is the fix; dimming the sky to suit an
+        // indoor exposure would only have hidden it.
+        Exposure::SUNLIGHT,
         Skybox {
             image: Some(sky.clone()),
-            brightness: 2600.0,
+            // A clear sky runs five to ten thousand candela per square metre.
+            brightness: 8000.0,
             ..default()
         },
         GeneratedEnvironmentMapLight {
             environment_map: sky,
-            intensity: 2600.0,
+            intensity: 8000.0,
             ..default()
         },
         Projection::Perspective(PerspectiveProjection {

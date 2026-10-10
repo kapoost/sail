@@ -45,7 +45,9 @@ pub fn setup(
     // Sun, low enough to put some glitter on the water.
     commands.spawn((
         DirectionalLight {
-            illuminance: 32_000.0,
+            // Real sunlight, now that the camera is exposed for it. Thirty-two
+            // thousand lux is a cloudy afternoon, and the scene was lit for one.
+            illuminance: 85_000.0,
             shadow_maps_enabled: true,
             ..default()
         },
@@ -58,7 +60,7 @@ pub fn setup(
     // it just washes the whole scene out.
     commands.insert_resource(GlobalAmbientLight {
         color: Color::srgb(0.62, 0.74, 0.88),
-        brightness: 60.0,
+        brightness: 300.0,
         ..default()
     });
 
@@ -158,6 +160,7 @@ pub fn update_sea(
         let mut colours = Vec::with_capacity(count);
 
         let hs = (sim.sim.telemetry.significant_height as f32).max(0.05);
+        let typical = (sim.sim.water.characteristic_slope() as f32).max(1e-4);
         // Steady surface drift: about two and a half percent of the wind speed,
         // downwind, which is the usual rule of thumb. This is a real current and it
         // accumulates honestly with time.
@@ -208,8 +211,13 @@ pub fn update_sea(
             let deep = Vec3::new(0.035, 0.095, 0.150);
             let shallow = Vec3::new(0.090, 0.210, 0.260);
             let base = deep.lerp(shallow, (lift * 0.5 + 0.5).clamp(0.0, 1.0));
-            let steepness = (sx * sx + sz * sz).sqrt();
-            let foam = ((steepness - 0.16) / 0.14).clamp(0.0, 1.0) * crest_weight(lift);
+            // Foam judged against this sea's own typical slope rather than a fixed
+            // number. A long swell and a short chop of the same height are nothing
+            // alike in steepness, so a threshold tuned on one gives either no foam at
+            // all — which is what was happening, since the fixed 0.16 sat almost at
+            // this sea's maximum — or a sea of milk on the other.
+            let steepness = (sx * sx + sz * sz).sqrt() / typical;
+            let foam = ((steepness - 1.25) / 0.75).clamp(0.0, 1.0) * crest_weight(lift);
             let colour = base.lerp(Vec3::new(0.82, 0.88, 0.92), foam);
             colours.push([colour.x, colour.y, colour.z, 1.0]);
         }

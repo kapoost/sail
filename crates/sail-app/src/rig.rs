@@ -157,7 +157,10 @@ pub fn update(
         if moved(now.main_sheet, was.main_sheet) {
             light(Kind::MainSheet);
         }
-        if moved(now.jib_sheet, was.jib_sheet) || moved(now.furl, was.furl) {
+        if moved(now.jib_sheet, was.jib_sheet)
+            || moved(now.furl, was.furl)
+            || moved(now.genoa_car, was.genoa_car)
+        {
             light(Kind::JibSheet(false));
             light(Kind::JibSheet(true));
         }
@@ -292,7 +295,13 @@ pub fn update(
                     // The lazy sheet runs from the same clew but is not pulling, so it
                     // falls away in a bight across the foredeck.
                     from: clew,
-                    to: Vec3::new(side * cfg.beam as f32 * 0.38, DECK, 1.0),
+                    // The car's position *is* the control, so it has to be visible:
+                    // the sheet's lead point slides fore and aft along the track.
+                    to: Vec3::new(
+                        side * cfg.beam as f32 * 0.38,
+                        DECK,
+                        0.1 + sim.controls.genoa_car as f32 * 2.3,
+                    ),
                     tension: if working {
                         jib_load * (1.0 - t.jib.coeffs.luffing as f32) * (1.0 - furled)
                     } else {

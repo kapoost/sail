@@ -22,7 +22,12 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 /// which is finer than anything the eye resolves at sailing distances.
 const SIZE: u32 = 512;
 /// How much world the tile covers, metres. Sets the size of the ripples.
-pub const TILE_METRES: f32 = 6.0;
+/// Eleven metres rather than six. At six the repeat was plainly visible across the
+/// middle distance — one tile is about two boat beams, so the eye had dozens of copies
+/// of the same patch in view at once. Breaking a tile properly needs detail at two
+/// scales and therefore two texture lookups, which means a shader; enlarging it is the
+/// honest half-measure until then.
+pub const TILE_METRES: f32 = 11.0;
 
 /// Re-export so the lighting and the sky cannot disagree about where the sun is.
 pub use crate::sky::SUN as SUN_FROM_SKY;

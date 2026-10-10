@@ -245,6 +245,12 @@ impl BoatConfig {
         ((area * 0.62, z_ce * 0.74), (area * 0.38, z_ce * 1.42))
     }
 
+    /// The headsail split the same way, so the lead car's twist has somewhere to act.
+    pub fn genoa_sections(&self, furl: f64) -> ((f64, f64), (f64, f64)) {
+        let (area, z_ce) = self.furled_genoa(furl);
+        ((area * 0.60, z_ce * 0.72), (area * 0.40, z_ce * 1.44))
+    }
+
     /// Headsail area and centre of effort after furling. A rolled genoa loses area
     /// from its foot and leech, so its centre of effort rises slightly even as it
     /// shrinks. At `furl` of 1 it is gone entirely, which is a real and often correct

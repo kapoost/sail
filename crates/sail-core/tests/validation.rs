@@ -1720,3 +1720,69 @@ where
     }
     (sim.telemetry.stw, sim.state.heel)
 }
+
+#[test]
+fn the_genoa_car_is_the_headsails_outhaul_and_vang_at_once() {
+    use sail_core::sail::{camber_for_lead, twist_for_lead};
+    // A genoa has no outhaul and no vang because its lead car does both jobs. Forward,
+    // the sheet pulls more downward: the leech comes tight and the foot bellies out.
+    // Aft, it pulls along the foot: flat down low, and the head falls open and spills.
+    assert!(
+        camber_for_lead(0.0) > camber_for_lead(1.0),
+        "forward should be the deeper setting"
+    );
+    assert!(
+        twist_for_lead(0.0) < twist_for_lead(1.0),
+        "aft should open the leech"
+    );
+    assert_eq!(
+        twist_for_lead(0.0),
+        0.0,
+        "right forward closes it completely"
+    );
+    assert!(
+        deg(twist_for_lead(1.0)) > 10.0,
+        "right aft should spill properly"
+    );
+    // Both ends sit inside the range a real headsail works in.
+    for car in [0.0, 0.5, 1.0] {
+        assert!((0.06..=0.16).contains(&camber_for_lead(car)));
+    }
+
+    // And it does the same thing to the boat that the main's controls do: forward is
+    // power, aft is depowered.
+    let cfg = BoatConfig::charter_sloop_34();
+    let make = wind(20.0);
+    let forward = car_at(cfg, &make, rad(70.0), 0.0);
+    let aft = car_at(cfg, &make, rad(70.0), 1.0);
+    assert!(
+        aft.1.abs() < forward.1.abs(),
+        "the car aft should stand her up: {:.1} deg against {:.1}",
+        deg(aft.1).abs(),
+        deg(forward.1).abs()
+    );
+}
+
+/// Reach at a fixed lead-car position, reporting speed and heel.
+fn car_at<F>(cfg: BoatConfig, make: &F, twa: f64, car: f64) -> (f64, f64)
+where
+    F: Fn() -> Box<dyn WindField>,
+{
+    let heading = wrap_tau(0.0 - twa);
+    let mut state = BoatState::at_rest(heading);
+    state.surge = 0.6 * cfg.hull_speed();
+    let mut sim = Simulation::new(cfg, state, make());
+    let mut pilot = TillerPilot::new();
+    let mut controls = Controls {
+        genoa_car: car,
+        ..Default::default()
+    };
+    for _ in 0..(SETTLE / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        controls.rudder = pilot.rudder(&cfg, &sim.state, heading, SUBSTEP);
+        sim.run(SUBSTEP, &controls);
+    }
+    (sim.telemetry.stw, sim.state.heel)
+}

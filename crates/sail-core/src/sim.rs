@@ -12,7 +12,8 @@ use crate::boat::BoatConfig;
 use crate::hull::{frictional_resistance, induced_resistance, residuary_resistance, righting_arm};
 use crate::hydrostatics;
 use crate::sail::{
-    camber_for_outhaul, headsail_blanketing, sail_forces, twist_for_vang, CAMBER_REFERENCE,
+    camber_for_lead, camber_for_outhaul, headsail_blanketing, sail_forces, twist_for_lead,
+    twist_for_vang,
 };
 use crate::state::{BoatState, Controls, Telemetry};
 use crate::units::{rad, wrap_pi, wrap_tau, GRAVITY, RHO_SEA};
@@ -156,10 +157,13 @@ impl Simulation {
         // some twist in the leech is correct rather than sloppy, and it is what gives
         // the vang a job it can be done well or badly.
         let ((lower_area, lower_z), (upper_area, upper_z)) = cfg.main_sections(controls.reef);
-        let (jib_area, jib_z_ce) = cfg.furled_genoa(controls.furl);
+        let ((jib_lower_area, jib_lower_z), (jib_upper_area, jib_upper_z)) =
+            cfg.genoa_sections(controls.furl);
         let (lower_awa, lower_aws) = apparent_wind(&st, wind_ref, lower_z * heel_cos, velocity);
         let (upper_awa, upper_aws) = apparent_wind(&st, wind_ref, upper_z * heel_cos, velocity);
-        let (jib_awa, jib_aws) = apparent_wind(&st, wind_ref, jib_z_ce * heel_cos, velocity);
+        let (jib_awa, jib_aws) = apparent_wind(&st, wind_ref, jib_lower_z * heel_cos, velocity);
+        let (jib_upper_awa, jib_upper_aws) =
+            apparent_wind(&st, wind_ref, jib_upper_z * heel_cos, velocity);
 
         let main_camber = camber_for_outhaul(controls.outhaul);
         let boom_angle = cfg.main.profile.chord_angle(controls.main_sheet);
@@ -188,21 +192,39 @@ impl Simulation {
             0.0,
             main_camber,
         );
+        // A headsail's depth and twist both come from its sheet lead car — the genoa's
+        // outhaul and vang in one fitting, which is why it has neither separately.
+        let jib_camber = camber_for_lead(controls.genoa_car);
+        let jib_twist = twist_for_lead(controls.genoa_car);
+        let jib_chord = cfg.genoa.profile.chord_angle(controls.jib_sheet);
+        let jib_upper_sheet = cfg
+            .genoa
+            .profile
+            .sheet_for_chord_angle(jib_chord + jib_twist);
+
         let jib = sail_forces(
             &cfg.genoa.profile,
             jib_awa,
             jib_aws,
             controls.jib_sheet,
-            jib_area,
+            jib_lower_area,
             st.heel,
             headsail_blanketing(jib_awa),
-            // A headsail's depth is set by its sheet lead, not by an outhaul. Not yet
-            // a control, so it sits at a working shape.
-            CAMBER_REFERENCE,
+            jib_camber,
+        );
+        let jib_upper = sail_forces(
+            &cfg.genoa.profile,
+            jib_upper_awa,
+            jib_upper_aws,
+            jib_upper_sheet,
+            jib_upper_area,
+            st.heel,
+            headsail_blanketing(jib_upper_awa),
+            jib_camber,
         );
 
-        let drive = main.drive + main_upper.drive + jib.drive;
-        let sail_side = main.side + main_upper.side + jib.side;
+        let drive = main.drive + main_upper.drive + jib.drive + jib_upper.drive;
+        let sail_side = main.side + main_upper.side + jib.side + jib_upper.side;
 
         // --- Hull velocity direction in the body frame ----------------------------
         // Everything hydrodynamic resolves against this. Getting it wrong means
@@ -363,13 +385,18 @@ impl Simulation {
         // Rig side force acting at its fore-and-aft centre of effort. The lead of the
         // centre of effort ahead of the centre of lateral resistance is a lee-helm
         // term; heel pays it back with interest.
-        let mut mz = cfg.main.x_ce * (main.side + main_upper.side) + cfg.genoa.x_ce * jib.side;
+        let mut mz = cfg.main.x_ce * (main.side + main_upper.side)
+            + cfg.genoa.x_ce * (jib.side + jib_upper.side);
         // Heel swings the centre of effort out to leeward, so the driving force now
         // acts on a lever arm and luffs the boat up. This is weather helm.
         let y_lower = lower_z * st.heel.sin();
         let y_upper = upper_z * st.heel.sin();
-        let y_ce_jib = jib_z_ce * st.heel.sin();
-        mz += -(y_lower * main.drive + y_upper * main_upper.drive + y_ce_jib * jib.drive);
+        let y_jib = jib_lower_z * st.heel.sin();
+        let y_jib_upper = jib_upper_z * st.heel.sin();
+        mz += -(y_lower * main.drive
+            + y_upper * main_upper.drive
+            + y_jib * jib.drive
+            + y_jib_upper * jib_upper.drive);
         // The heeled waterplane is asymmetric, which drives the bow to windward too.
         mz += -cfg.heel_yaw_coefficient
             * st.heel.sin()
@@ -416,7 +443,8 @@ impl Simulation {
         // gives up, because the top is where the arm is longest.
         let mut mx = main.side * (lower_z * heel_cos + cfg.z_clr)
             + main_upper.side * (upper_z * heel_cos + cfg.z_clr)
-            + jib.side * (jib_z_ce * heel_cos + cfg.z_clr);
+            + jib.side * (jib_lower_z * heel_cos + cfg.z_clr)
+            + jib_upper.side * (jib_upper_z * heel_cos + cfg.z_clr);
         // The righting curve restores towards the local vertical, and in a wave the
         // local vertical is tilted. Evaluating GZ at the heel *relative to the wave
         // slope* is the whole of wave-induced rolling, to first order, and it keeps
@@ -537,6 +565,8 @@ impl Simulation {
             main_upper,
             twist,
             jib,
+            jib_upper,
+            jib_twist,
 
             significant_height: self.water.significant_height(),
             heave: self.state.heave,

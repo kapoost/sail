@@ -124,6 +124,10 @@ pub struct Controls {
     pub vang: f64,
     /// Mainsail reef, 0 to 1 of the available reduction. Slab or in-mast reefing.
     pub reef: f64,
+    /// Headsail sheet lead car, 0 right forward to 1 right aft. The genoa's outhaul
+    /// and vang in one fitting: forward for depth and a closed leech, aft for a flat
+    /// foot and a head that spills.
+    pub genoa_car: f64,
     /// Headsail furl, 0 fully unrolled to 1 rolled completely away. A roller-furling
     /// genoa is a separate piece of gear from the main's reef, and rolling it is
     /// usually the first thing anyone does — so it gets its own control.
@@ -144,6 +148,7 @@ impl Default for Controls {
             jib_sheet: 0.0,
             outhaul: 0.5,
             vang: 0.6,
+            genoa_car: 0.4,
             reef: 0.0,
             furl: 0.0,
             throttle: 0.0,
@@ -194,7 +199,11 @@ pub struct Telemetry {
     pub main_upper: SailForces,
     /// Twist between the two, radians.
     pub twist: f64,
+    /// Lower section of the headsail.
     pub jib: SailForces,
+    /// Upper section of the headsail, eased by the car's twist.
+    pub jib_upper: SailForces,
+    pub jib_twist: f64,
 
     /// Sea state and the boat's motion in it.
     pub significant_height: f64,
