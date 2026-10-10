@@ -23,7 +23,7 @@ pub struct Sim {
 
 impl Sim {
     pub fn new(weather: Weather) -> Self {
-        let cfg = BoatConfig::charter_sloop_34();
+        let cfg = BoatConfig::archipelago_packet();
         let wind = SyntheticWind::new(weather.wind_from, weather.tws, weather.seed ^ 0x5A11);
         let heading = wrap_tau(weather.wind_from - weather.start_twa);
         let mut state = BoatState::at_rest(heading);

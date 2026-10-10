@@ -1170,19 +1170,27 @@ fn period_from_crossings(samples: &[f64], dt: f64) -> f64 {
 
 #[test]
 fn the_boat_floats_at_its_design_waterline() {
-    let cfg = BoatConfig::charter_sloop_34();
-    // The sectional area coefficient is calibrated, not derived, so this is the test
-    // that says the calibration is right. If it fails, the boat displaces the wrong
-    // amount of water and every hydrostatic result above it is wrong too.
-    let volume = cfg.form.volume_at(cfg.form.canoe_draft);
-    let displaced = volume * 1025.0;
-    assert!(
-        (displaced - cfg.displacement).abs() < 0.02 * cfg.displacement,
-        "at its design draft the hull displaces {displaced:.0} kg against a \
-         displacement of {:.0}",
-        cfg.displacement
-    );
+    // Every hull in the yard, not just the first one. The sectional area coefficient
+    // is calibrated per boat rather than derived, so a new config inherits the last
+    // one's number and floats half a metre high until somebody notices — which is
+    // exactly what the archipelago packet did until this loop was put round the test.
+    for cfg in [
+        BoatConfig::charter_sloop_34(),
+        BoatConfig::performance_cruiser_53(),
+        BoatConfig::archipelago_packet(),
+    ] {
+        let volume = cfg.form.volume_at(cfg.form.canoe_draft);
+        let displaced = volume * 1025.0;
+        assert!(
+            (displaced - cfg.displacement).abs() < 0.02 * cfg.displacement,
+            "{}: at its design draft the hull displaces {displaced:.0} kg against a \
+             displacement of {:.0}",
+            cfg.name,
+            cfg.displacement
+        );
+    }
 
+    let cfg = BoatConfig::charter_sloop_34();
     // And it should settle there on its own.
     let mut sim = becalmed(cfg);
     sim.run(60.0, &Controls::default());

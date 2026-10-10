@@ -66,6 +66,8 @@ fn main() {
         .init_resource::<input::HelmSource>()
         .init_resource::<clutch::Bank>()
         .init_resource::<input::Pilot>()
+        .init_resource::<frame::RenderOrigin>()
+        .init_resource::<camera::ChaseState>()
         .add_systems(
             Startup,
             (
@@ -90,6 +92,9 @@ fn main() {
                 input::gather,
                 clutch::handle,
                 sim::advance,
+                // Pick where the world is drawn from before anything is placed in it,
+                // so the whole frame agrees on one mark.
+                frame::rebase_origin,
                 (
                     boat::update_hull,
                     boat::update_rudder,

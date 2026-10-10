@@ -128,6 +128,7 @@ struct Span {
 }
 
 pub fn update(
+    origin: Res<crate::frame::RenderOrigin>,
     sim: Res<Sim>,
     bank: Res<crate::clutch::Bank>,
     time: Res<Time>,
@@ -184,7 +185,7 @@ pub fn update(
     let st = &sim.render_state();
     let cfg = sim.config();
     let t = &sim.sim.telemetry;
-    let hull = crate::frame::hull_translation(st);
+    let hull = origin.hull_translation(st);
     let attitude = crate::frame::attitude(st);
 
     // Which side the wind is on decides which sheet is working and which shroud is

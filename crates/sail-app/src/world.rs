@@ -160,12 +160,13 @@ pub fn setup(
 
 /// Displace the surface from the physics' own wave field, and keep it under the boat.
 pub fn update_sea(
+    origin: Res<frame::RenderOrigin>,
     sim: Res<Sim>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut q: Query<(&SeaSurface, &mut Transform)>,
 ) {
     let st = &sim.render_state();
-    let centre = frame::to_bevy(st.pos, 0.0);
+    let centre = origin.to_bevy(st.pos, 0.0);
     let t = st.time;
 
     for (sea, mut transform) in &mut q {
@@ -198,6 +199,22 @@ pub fn update_sea(
             (tm.twd + std::f64::consts::PI).cos(),
         );
         let current = downwind * tm.tws * 0.025 * t;
+        // Rebase the texture coordinates by a whole number of tile repeats.
+        //
+        // The UVs address the sea in world metres so that the detail stays with the
+        // water rather than with the boat. That is right, and it is also the thing
+        // that breaks first on a long passage: twenty minutes out, the numbers are in
+        // the hundreds, the GPU interpolates them in single precision across each
+        // triangle, and the quantisation reads as the surface detail stuttering and
+        // racing. Taking off whole repeats costs nothing and cannot shift the pattern,
+        // because a whole repeat is where the pattern comes back to itself. The
+        // subtraction is identical for every vertex, so no triangle is torn.
+        let tile = sea_texture::TILE_METRES as f64;
+        let anchor = st.pos - current;
+        let uv_base = glam::DVec2::new(
+            (anchor.x / tile).round() * tile,
+            (anchor.y / tile).round() * tile,
+        );
 
         for (offset, &min_wavelength) in sea.offsets.iter().zip(&sea.resolutions) {
             // Sample at the true world position. Bevy's -Z is sim north, so the
@@ -216,7 +233,8 @@ pub fn update_sea(
             // that the detail rides the water's own orbital displacement, which is
             // bounded — a surface parcel travels a circle of the wave's amplitude — so
             // the ripples go round with the wave instead of being dragged across it.
-            let parcel = world - sim.sim.water.horizontal_displacement(world, t) - current;
+            let parcel =
+                world - sim.sim.water.horizontal_displacement(world, t) - current - uv_base;
             uvs.push(Vec2::new(
                 parcel.x as f32 / sea_texture::TILE_METRES,
                 -parcel.y as f32 / sea_texture::TILE_METRES,

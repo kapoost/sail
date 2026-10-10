@@ -136,7 +136,7 @@ impl Weather {
             Box::new(sail_core::wind::SteadyWind::new(direction, wind_speed))
         };
         let (start_reef, _) = reef_for_heel(
-            BoatConfig::charter_sloop_34(),
+            BoatConfig::archipelago_packet(),
             &make,
             start_twa.abs(),
             REEF_SETTLE,

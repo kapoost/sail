@@ -96,6 +96,7 @@ pub fn setup(
 }
 
 pub fn update(
+    origin: Res<frame::RenderOrigin>,
     sim: Res<Sim>,
     time: Res<Time>,
     mut wake: ResMut<Wake>,
@@ -140,7 +141,7 @@ pub fn update(
             // *world origin*, and the triangles joining those vertices to the real
             // ones stretched a sheet from the hull all the way back to it — which,
             // since the boat starts near the origin, drew a grey slab across the sea.
-            let here = frame::to_bevy(st.pos, 0.0);
+            let here = origin.to_bevy(st.pos, 0.0);
             positions.push(here);
             positions.push(here);
             colours.push([1.0, 1.0, 1.0, 0.0]);
@@ -158,7 +159,7 @@ pub fn update(
         for side in [-1.0, 1.0] {
             let at = sample.at + sample.across * half_width * side;
             let height = sim.sim.water.height(at, t);
-            positions.push(frame::to_bevy(at, height as f32 + 0.04));
+            positions.push(origin.to_bevy(at, height as f32 + 0.04));
             // Softer at the edges than down the middle, which is where the hull
             // actually churned it.
             colours.push([1.0, 1.0, 1.0, alpha * 0.55]);

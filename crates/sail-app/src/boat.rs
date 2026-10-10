@@ -65,6 +65,20 @@ pub struct Telltale {
     pub along_luff: f32,
 }
 
+/// Overall length of the scanned hull, metres, after its own node transforms.
+///
+/// Measured off the file rather than taken from the museum's "eighteen feet", because
+/// what matters is what the vertices say: 5.396 m stem to stern, 1.573 m across.
+const SCAN_LOA: f32 = 5.396;
+/// How far down the scaled scan is dropped so that y = 0 is her waterline.
+///
+/// The scan is of a boat out of the water, so the file knows nothing about where she
+/// floats. This is not guessed: the mesh was integrated, cell by cell, for the volume
+/// below a trial waterline, and the plane solved for where that volume equals the
+/// displacement. She floats 1.294 m above the bottom of the scaled hull, which also
+/// gave the waterline length and beam the physics config now uses.
+const HULL_SINKAGE: f32 = -1.294;
+
 const MAST_FOOT_Z: f32 = -1.8;
 /// How high a headsail's clew floats when nothing is pulling it down, metres above
 /// the tack. The sail hangs from the stay and the wind holds the foot up; only the
@@ -89,15 +103,11 @@ pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    assets: Res<AssetServer>,
     sim: Res<Sim>,
 ) {
     let cfg = sim.config();
 
-    let hull_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.92, 0.92, 0.90),
-        perceptual_roughness: 0.42,
-        ..default()
-    });
     let underwater_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.11, 0.26, 0.35),
         perceptual_roughness: 0.3,
@@ -130,11 +140,28 @@ pub fn setup(
     commands
         .spawn((BoatRoot, Transform::default(), Visibility::default()))
         .with_children(|b| {
-            // Hull. Bow is at -Z, which is Bevy's forward.
+            // Hull: a photogrammetric scan of a real boat, which is the one thing
+            // here worth measuring rather than drawing. See `assets/ATTRIBUTION.md`.
+            //
+            // Only the shape is borrowed. The scan is of an eighteen-foot Shetland
+            // fourareen and the boat being sailed is thirty-six feet, so it is scaled
+            // to length; what that buys is the proportions, and the length-to-beam of
+            // 3.4 the scan carries is exactly the fine, easily-driven hull the
+            // delivery polar wanted. The shape the game needed and the shape that
+            // turned up were the same shape.
+            //
+            // The scan arrives with its length along X and Y up, so it is turned a
+            // quarter circle to put the bow at -Z where the rest of the boat expects
+            // it, and dropped so her waterline is the waterline.
             b.spawn((
-                Mesh3d(meshes.add(hull_mesh(cfg.loa as f32, cfg.beam as f32))),
-                MeshMaterial3d(hull_mat.clone()),
-                Transform::default(),
+                // Bevy 0.20 renamed the old `SceneRoot` to this, scenes having been
+                // rebuilt around the world-serialization machinery.
+                bevy::world_serialization::WorldAssetRoot(
+                    assets.load(GltfAssetLabel::Scene(0).from_asset("venus.glb")),
+                ),
+                Transform::from_xyz(0.0, HULL_SINKAGE, 0.0)
+                    .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::splat(cfg.loa as f32 / SCAN_LOA)),
             ));
             // Keel fin.
             b.spawn((
@@ -252,10 +279,14 @@ pub fn setup(
 }
 
 /// Put the hull where the simulation says it is, at the attitude it says it has.
-pub fn update_hull(sim: Res<Sim>, mut q: Query<&mut Transform, With<BoatRoot>>) {
+pub fn update_hull(
+    sim: Res<Sim>,
+    origin: Res<frame::RenderOrigin>,
+    mut q: Query<&mut Transform, With<BoatRoot>>,
+) {
     for mut t in &mut q {
         let st = sim.render_state();
-        t.translation = frame::hull_translation(&st);
+        t.translation = origin.hull_translation(&st);
         t.rotation = frame::attitude(&st);
     }
 }
@@ -604,71 +635,4 @@ fn build_sail(
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.compute_normals();
-}
-
-/// A canoe body from a handful of stations. Not a hull form, just enough shape that
-/// the eye reads "boat" instead of "crate" — the real lines can come from a model.
-fn hull_mesh(loa: f32, beam: f32) -> Mesh {
-    const STATIONS: usize = 11;
-    let half_beam = beam * 0.5;
-    let depth = 0.62;
-
-    let mut positions: Vec<Vec3> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-
-    // Section shape at a given fraction from bow (0) to stern (1).
-    let section = |f: f32| -> (f32, f32) {
-        // Beam fills out quickly from the bow, holds through midships, narrows a
-        // little into the transom.
-        let b = (f * 2.1).min(1.0).powf(0.62) * (1.0 - 0.30 * (f - 0.55).max(0.0) / 0.45);
-        let d = (f * 3.0).min(1.0).powf(0.5);
-        (half_beam * b, depth * d)
-    };
-
-    for s in 0..STATIONS {
-        let f = s as f32 / (STATIONS - 1) as f32;
-        let z = -loa * 0.5 + f * loa;
-        let (b, d) = section(f);
-        // Four points per station: port rail, port bilge, starboard bilge, starboard rail.
-        positions.push(Vec3::new(-b, DECK, z));
-        positions.push(Vec3::new(-b * 0.80, -d * 0.55, z));
-        positions.push(Vec3::new(0.0, -d, z));
-        positions.push(Vec3::new(b * 0.80, -d * 0.55, z));
-        positions.push(Vec3::new(b, DECK, z));
-    }
-    let ring = 5;
-    for s in 0..STATIONS - 1 {
-        for p in 0..ring - 1 {
-            let a = (s * ring + p) as u32;
-            let b = ((s + 1) * ring + p) as u32;
-            let c = ((s + 1) * ring + p + 1) as u32;
-            let d = (s * ring + p + 1) as u32;
-            indices.extend_from_slice(&[a, b, c, a, c, d]);
-        }
-    }
-    // Deck: fan between the rails.
-    let deck_start = positions.len() as u32;
-    for s in 0..STATIONS {
-        let f = s as f32 / (STATIONS - 1) as f32;
-        let z = -loa * 0.5 + f * loa;
-        let (b, _) = section(f);
-        positions.push(Vec3::new(-b, DECK, z));
-        positions.push(Vec3::new(b, DECK, z));
-    }
-    for s in 0..STATIONS - 1 {
-        let a = deck_start + (s * 2) as u32;
-        let b = a + 1;
-        let c = a + 3;
-        let d = a + 2;
-        indices.extend_from_slice(&[a, d, c, a, c, b]);
-    }
-
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh.compute_normals();
-    mesh
 }

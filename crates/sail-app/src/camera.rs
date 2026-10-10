@@ -85,6 +85,13 @@ pub struct ChaseState {
     initialised: bool,
 }
 
+impl ChaseState {
+    /// Carry the stored camera position across a change of render origin.
+    pub fn shift(&mut self, by: Vec3) {
+        self.position += by;
+    }
+}
+
 pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     // One cubemap, two jobs: drawn as the sky, and filtered on the GPU into the
     // environment light the water reflects. Sharing the image is what guarantees the
@@ -156,6 +163,7 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>, mut view: 
 
 pub fn follow(
     sim: Res<Sim>,
+    origin: Res<frame::RenderOrigin>,
     view: Res<View>,
     time: Res<Time>,
     mut chase: ResMut<ChaseState>,
@@ -163,7 +171,7 @@ pub fn follow(
     mut q: Query<&mut Transform, With<MainCamera>>,
 ) {
     let st = &sim.render_state();
-    let hull = frame::hull_translation(st);
+    let hull = origin.hull_translation(st);
     head.follow(
         st.heel as f32,
         st.pitch as f32,

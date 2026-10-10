@@ -222,6 +222,144 @@ impl BoatConfig {
         }
     }
 
+    /// The archipelago packet, about thirty-six feet.
+    ///
+    /// Not a model of a particular boat, which is the point. The other two configs
+    /// describe real types and inherit whatever those types are bad at; this one is
+    /// *designed*, for a game about carrying parcels between islands. The design brief
+    /// is a sailing brief rather than a gameplay one, because the two turn out to
+    /// agree, and where they agree is the only place a boat can be tuned for fun
+    /// without lying about physics:
+    ///
+    /// * **Short legs, constant course changes.** Every point of sail gets used within
+    ///   the hour, so a polar with a hole in it — the usual dead run, the usual wide
+    ///   no-go zone — is felt immediately. A hull wants to be easily driven across the
+    ///   whole range rather than optimised at one angle.
+    /// * **Channels and headlands.** Pointing high is worth more than reaching speed,
+    ///   because every degree is a tack not made in a narrow place. That asks for a
+    ///   deep efficient keel, which is a real fitting with a real cost in draught.
+    /// * **Single handed, with cargo.** The rig is fractional: a big main that does the
+    ///   work and a small jib that looks after itself through a tack. Reefing the main
+    ///   is then the whole of shortening down, which is one job rather than two.
+    /// * **Light air happens.** An archipelago is full of wind shadows under islands.
+    ///   Sail area against wetted surface is what matters there, and a narrow hull has
+    ///   little wetted surface to carry.
+    ///
+    /// The proportions come from the hull the boat is drawn with — a Shetland
+    /// fourareen scanned by the Scottish Maritime Museum — scaled to length. Its
+    /// length-to-beam of 3.4 is the Norse inheritance, and it is also exactly what
+    /// makes a hull easily driven: less wave-making for the same displacement. The
+    /// shape the game wanted and the shape that arrived were the same shape, so the
+    /// residuary coefficient is lower than the charter boat's because the hull really
+    /// is finer, not because a slow boat was unwelcome.
+    ///
+    /// Everything here is a starting point for `examples/delivery.rs`, which measures
+    /// what it actually produces.
+    pub fn archipelago_packet() -> Self {
+        let displacement = 5200.0;
+        // Hydrostatics read off the scan rather than guessed: the hull mesh was
+        // integrated station by station and the waterline solved for where the
+        // displaced volume equals the displacement. It put her 0.4 m finer in the
+        // waterline and 0.4 m deeper in the canoe body than the first estimates, which
+        // is the difference between a hull that floats where it is drawn and one that
+        // does not.
+        let lwl = 9.50;
+        // Straight off the scan: 1.573 m of beam at 5.396 m overall, scaled to length.
+        let beam = 3.21;
+        let loa = 11.00;
+        let draft = 1.95;
+
+        // Fractional: the main is the engine, the jib is a handkerchief that tacks
+        // itself. Sail area to displacement works out at about 22, which is generous
+        // without being a racing number.
+        let main_area = 38.0;
+        let main_luff = 14.0;
+        let genoa_area = 27.0;
+        let genoa_luff = 12.4;
+
+        let roll_radius = 0.35 * beam;
+        let yaw_radius = 0.25 * loa;
+
+        Self {
+            name: "archipelago packet 36",
+
+            loa,
+            lwl,
+            beam,
+            draft,
+            displacement,
+            wetted_surface: wetted_surface_estimate(displacement, lwl),
+
+            form: HullForm {
+                lwl,
+                waterline_beam: 2.60,
+                canoe_draft: 1.00,
+                freeboard: 1.45,
+                // Calibrated so she floats at the waterline the scan says she floats
+                // at, and asserted by `the_boat_floats_at_its_design_waterline`. Far
+                // finer than the charter boat's 0.452, because the hull is: a deep,
+                // narrow canoe body puts much less area in each section than a beamy
+                // shallow one of the same beam and draught.
+                section_coefficient: 0.2889,
+            },
+
+            // Finer than the charter boat because the hull is finer. This is the one
+            // number that decides whether she walks through a chop or stops in it.
+            residuary_coefficient: 0.92,
+            induced_span: 0.80 * draft,
+            heel_drag_factor: 0.52,
+            rail_down_heel: rad(22.0),
+            rail_down_factor: 3.0,
+
+            // A deep high-aspect fin: less area than the charter boat's, working
+            // harder, which is what lets her point.
+            lateral_plane: Foil::lateral_plane(4.1, 1.85),
+            x_clr: 0.10,
+            rudder: Foil::rudder(0.58, 2.40),
+            x_rudder: -4.60,
+            max_rudder_angle: rad(40.0),
+
+            // Narrow hulls have little form stability, so the ballast has to do it.
+            gm: 1.30,
+            gz_peak_angle: rad(65.0),
+            z_clr: 0.90,
+
+            surge_added_mass: 0.05 * displacement,
+            sway_added_mass: 0.85 * displacement,
+            roll_inertia: 1.5 * displacement * roll_radius * roll_radius,
+            yaw_inertia: 1.3 * displacement * yaw_radius * yaw_radius,
+            heave_mass: 2.8 * displacement,
+            pitch_inertia: 2.5 * displacement * yaw_radius * yaw_radius,
+            heave_damping: 0.26,
+            pitch_damping: 0.32,
+            effective_wave_slope: 0.62,
+            wave_drag_fraction: 0.44,
+            roll_damping: 0.14,
+            roll_damping_lever: 1.20,
+            lateral_plane_depth: 1.20,
+            rudder_depth: 1.00,
+            yaw_damping: 4000.0,
+            heel_yaw_coefficient: 0.058,
+
+            main: RiggedSail {
+                profile: SailProfile::mainsail(main_area, main_luff),
+                area: main_area,
+                z_ce: 6.60,
+                x_ce: -0.35,
+            },
+            genoa: RiggedSail {
+                profile: SailProfile::genoa(genoa_area, genoa_luff),
+                area: genoa_area,
+                z_ce: 4.40,
+                x_ce: 1.95,
+            },
+            max_reef: 0.60,
+
+            max_thrust: 2100.0,
+            prop_walk: 0.08,
+        }
+    }
+
     /// Mainsail area and centre of effort after reefing. Rolling sail away lowers the
     /// centre of effort as well as shrinking it, which is why a reefed boat stands up
     /// rather than merely slowing down.

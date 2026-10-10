@@ -36,12 +36,19 @@ pub struct Floating {
 }
 
 /// Lift the marks onto the water, and let them lean with the slope.
-pub fn float_marks(sim: Res<Sim>, mut q: Query<(&Floating, &mut Transform)>) {
+pub fn float_marks(
+    sim: Res<Sim>,
+    origin: Res<frame::RenderOrigin>,
+    mut q: Query<(&Floating, &mut Transform)>,
+) {
     let t = sim.sim.state.time;
     for (float, mut transform) in &mut q {
         let height = sim.sim.water.height(float.at, t);
         let slope = sim.sim.water.slope(float.at, t);
-        transform.translation.y = height as f32 + float.lift;
+        // The whole translation, not just the height: a mark is anchored in sim
+        // coordinates and has to be re-placed whenever the render origin moves, or it
+        // stays a kilometre behind the rest of the world.
+        transform.translation = origin.to_bevy(float.at, height as f32 + float.lift);
         // A buoy stands up to the local normal, which on a steep sea is visible.
         transform.rotation =
             Quat::from_rotation_z(-slope.x as f32) * Quat::from_rotation_x(-slope.y as f32);
@@ -105,6 +112,7 @@ pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    origin: Res<frame::RenderOrigin>,
     sim: Res<Sim>,
 ) {
     // Startup runs before the first substep, so telemetry is still zeroed here. Ask
@@ -134,7 +142,7 @@ pub fn setup(
     let flag = meshes.add(Cuboid::new(0.02, 0.5, 0.75));
 
     for (pos, flagged) in [(course.windward, true), (course.start, false)] {
-        let at = frame::to_bevy(pos, 0.0);
+        let at = origin.to_bevy(pos, 0.0);
         commands.spawn((
             Floating {
                 at: pos,
