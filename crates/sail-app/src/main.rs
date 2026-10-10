@@ -120,6 +120,7 @@ fn main() {
                 // Pick where the world is drawn from before anything is placed in it,
                 // so the whole frame agrees on one mark.
                 frame::rebase_origin,
+                world::report_frame_times,
                 (
                     boat::update_hull,
                     boat::update_rudder,

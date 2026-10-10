@@ -60,8 +60,12 @@ const CABIN_FWD: f32 = -3.1;
 const CABIN_AFT: f32 = 0.9;
 const COCKPIT_AFT: f32 = 4.0;
 /// Coachroof height above the deck at its aft end, tapering forward.
-const CABIN_RISE_AFT: f32 = 0.78;
-const CABIN_RISE_FWD: f32 = 0.42;
+/// Low. The first attempt stood 0.78 m above the deck, which on an eleven-metre boat
+/// is a caravan: it blocked the view forward from the cockpit and made her look like
+/// a motorsailer. A coachroof on a hull this fine is something you step over, not
+/// something you walk round.
+const CABIN_RISE_AFT: f32 = 0.46;
+const CABIN_RISE_FWD: f32 = 0.24;
 /// How much of the local half-beam the coachroof takes, leaving a side deck to walk on.
 const CABIN_WIDTH: f32 = 0.56;
 /// The cockpit well: narrower than the cabin, and sunk below the deck.

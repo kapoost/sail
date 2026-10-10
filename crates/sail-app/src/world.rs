@@ -22,12 +22,19 @@ use crate::sea_texture;
 use crate::sim::Sim;
 
 /// Vertices across the grid. Odd, so one sits under the boat.
-const GRID: usize = 161;
-/// Half-width of the sea patch, metres.
-const EXTENT: f32 = 700.0;
-/// Share of the grid spacing that stays uniform. The rest is cubic, which is what
-/// concentrates resolution near the boat.
-const GRADE_LINEAR: f32 = 0.08;
+const GRID: usize = 201;
+/// How far out the grid reaches. Three kilometres is past the horizon from a cockpit,
+/// and it costs almost nothing because the outer rings carry no waves at all — see
+/// `resolutions`.
+const EXTENT: f32 = 3000.0;
+/// Where the wave-carrying part of the grid ends and the flat run to the horizon
+/// begins, metres.
+const NEAR_FIELD: f32 = 209.0;
+/// Vertex spacing at the boat, and at the edge of the near field.
+const SPACING_NEAR: f32 = 1.30;
+const SPACING_FAR: f32 = 4.20;
+/// How many rings make up the near field; the rest sprint to the horizon.
+const NEAR_RINGS: usize = 76;
 
 #[derive(Component)]
 pub struct SeaSurface {
@@ -96,12 +103,37 @@ pub fn setup(
         ..default()
     });
 
-    // Graded spacing: mostly cubic, with a linear floor so the centre does not
-    // collapse to millimetres and waste vertices on detail nobody can see.
+    // Spacing chosen from what the sea is, not from a convenient curve.
+    //
+    // A twelve-knot sea peaks around a thirty-two metre wavelength, and a *moving*
+    // surface needs eight to ten samples across a wave before the crests stop beating
+    // between the vertices as the grid slides along under the boat. The old cubic
+    // grading held eight samples out to fifty-one metres and nothing like it beyond,
+    // which is why the sea kept jumping however much else was fixed: two samples per
+    // wave is Nyquist, and Nyquist is the condition for *reconstructing* a signal, not
+    // for animating one.
+    //
+    // So: spacing opens gently from 1.3 m at the boat to 4.2 m at two hundred metres,
+    // which holds eight samples out to a hundred and eighty, and then the last rings
+    // sprint to three kilometres. Those outer rings cost almost nothing, because they
+    // are too coarse to carry a wave and `update_sea` does not even ask the water
+    // about them.
+    let half = |i: usize| -> f32 {
+        if i <= NEAR_RINGS {
+            // Arithmetic spacing: the sum of a ramp, in closed form.
+            let n = i as f32;
+            let last = (NEAR_RINGS - 1) as f32;
+            SPACING_NEAR * n + (SPACING_FAR - SPACING_NEAR) * n * (n - 1.0) / (2.0 * last)
+        } else {
+            let rest = (GRID / 2 - NEAR_RINGS) as f32;
+            let step = (i - NEAR_RINGS) as f32;
+            NEAR_FIELD * (EXTENT / NEAR_FIELD).powf(step / rest)
+        }
+    };
+    let centre = (GRID / 2) as i32;
     let grade = |i: usize| -> f32 {
-        let t = (i as f32 / (GRID - 1) as f32) * 2.0 - 1.0;
-        let a = t.abs();
-        t.signum() * EXTENT * (GRADE_LINEAR * a + (1.0 - GRADE_LINEAR) * a * a * a)
+        let k = i as i32 - centre;
+        half(k.unsigned_abs() as usize) * (k.signum() as f32)
     };
 
     let mut offsets = Vec::with_capacity(GRID * GRID);
@@ -118,7 +150,12 @@ pub fn setup(
         for iz in 0..GRID {
             offsets.push(Vec2::new(grade(ix), grade(iz)));
             let coarsest = spacing(ix).max(spacing(iz));
-            resolutions.push(2.0 * coarsest as f64);
+            // Four times the spacing, not twice. Twice is the Nyquist limit, at which
+            // a component is kept at full strength with four samples across it — and
+            // four samples is where a moving sea visibly beats. This rolls a component
+            // off between four and eight samples, so nothing is drawn that the mesh
+            // cannot animate smoothly.
+            resolutions.push(4.0 * coarsest as f64);
         }
     }
 
@@ -216,7 +253,24 @@ pub fn update_sea(
             (anchor.y / tile).round() * tile,
         );
 
+        // Past this spacing the mesh carries nothing, so the water is never asked.
+        // On a grid that runs to the horizon that is most of the vertices, and it is
+        // what pays for the fine spacing close in.
+        let longest = sim.sim.water.longest_wavelength();
         for (offset, &min_wavelength) in sea.offsets.iter().zip(&sea.resolutions) {
+            if min_wavelength >= longest {
+                positions.push(Vec3::new(offset.x, 0.0, offset.y));
+                normals.push(Vec3::Y);
+                tangents.push(Vec4::new(1.0, 0.0, 0.0, -1.0));
+                let flat = st.pos + glam::DVec2::new(offset.x as f64, -offset.y as f64) - uv_base;
+                uvs.push(Vec2::new(
+                    flat.x as f32 / sea_texture::TILE_METRES,
+                    -flat.y as f32 / sea_texture::TILE_METRES,
+                ));
+                let deep = Vec3::new(0.035, 0.095, 0.150);
+                colours.push([deep.x, deep.y, deep.z, 1.0]);
+                continue;
+            }
             // Sample at the true world position. Bevy's -Z is sim north, so the
             // horizontal offset flips sign on the way across.
             let world = st.pos + glam::DVec2::new(offset.x as f64, -offset.y as f64);
@@ -274,4 +328,32 @@ pub fn update_sea(
 #[inline]
 fn crest_weight(lift: f32) -> f32 {
     ((lift + 0.15) / 0.6).clamp(0.0, 1.0)
+}
+
+/// Report how long a frame takes, and how evenly.
+///
+/// Guessing at a stutter is a way to spend an afternoon. A sea that "jumps" has two
+/// completely different explanations — the surface being badly sampled, or the whole
+/// application not making its frames — and they are told apart by a number, not by
+/// looking. The worst frame in each second matters more than the mean: a steady
+/// forty is smooth, and a forty that is sometimes ten is not.
+pub fn report_frame_times(time: Res<Time>, mut window: Local<(f32, u32, f32)>) {
+    let dt = time.delta_secs();
+    window.0 += dt;
+    window.1 += 1;
+    window.2 = window.2.max(dt);
+    if window.0 >= 2.0 {
+        // Only when something is actually wrong. Left chattering it buries the one
+        // line that matters, and the whole value of this is that it answered "is the
+        // sea badly sampled or is the application not making its frames" with a
+        // number instead of an afternoon.
+        if window.2 > 0.025 {
+            warn!(
+                "slow frames: {:.0} per second mean, worst {:.1} ms",
+                window.1 as f32 / window.0,
+                window.2 * 1000.0
+            );
+        }
+        *window = (0.0, 0, 0.0);
+    }
 }

@@ -105,6 +105,15 @@ pub trait WaterSurface: Send + Sync {
     fn significant_height(&self) -> f64 {
         0.0
     }
+
+    /// Longest wavelength present, metres.
+    ///
+    /// A presentation layer that band-limits by vertex spacing can ask this and skip
+    /// the water entirely wherever the mesh is too coarse to carry anything — which on
+    /// a grid that reaches the horizon is most of it.
+    fn longest_wavelength(&self) -> f64 {
+        0.0
+    }
 }
 
 /// Dead flat. Every flat-water test and the whole measured polar rest on this.
@@ -333,6 +342,13 @@ impl WaterSurface for WindSea {
             d -= c.direction * (c.amplitude * c.theta(pos, t).sin());
         }
         d
+    }
+
+    fn longest_wavelength(&self) -> f64 {
+        self.components
+            .iter()
+            .map(|c| std::f64::consts::TAU / c.k.max(1e-9))
+            .fold(0.0, f64::max)
     }
 
     fn depth_attenuation(&self, draft: f64) -> f64 {
