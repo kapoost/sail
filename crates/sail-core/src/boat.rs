@@ -104,6 +104,11 @@ pub struct BoatConfig {
     pub effective_wave_slope: f64,
     /// Fraction of critical damping in roll, at rest.
     pub roll_damping: f64,
+    /// Mean depth of the lateral plane below the surface, metres. Used to sample the
+    /// orbital flow the keel actually sees, which is much less than the hull's.
+    pub lateral_plane_depth: f64,
+    /// Mean depth of the rudder below the surface, metres.
+    pub rudder_depth: f64,
     /// Mean depth of the lateral plane below the roll axis, metres. Sets the lever for
     /// the keel's roll damping, which is the dominant term once the boat is moving.
     pub roll_damping_lever: f64,
@@ -193,6 +198,8 @@ impl BoatConfig {
             wave_drag_fraction: 0.5,
             roll_damping: 0.14,
             roll_damping_lever: 1.20,
+            lateral_plane_depth: 1.15,
+            rudder_depth: 0.95,
             yaw_damping: 4200.0,
             heel_yaw_coefficient: 0.060,
 
@@ -244,9 +251,143 @@ impl BoatConfig {
         self.main.area + self.genoa.area
     }
 
+    /// Yaw moment the rudder can produce per radian of helm per unit of speed
+    /// squared, N*m/(rad*(m/s)^2).
+    ///
+    /// The boat's steering authority, and the thing any autopilot's gains have to be
+    /// expressed against. Hard-coding gains tuned on one hull is fine until a second
+    /// hull arrives — the fifty-three footer has 8.8 times the yaw inertia but only
+    /// 4.5 times the authority, so the same numbers left it half as responsive as the
+    /// controller assumed, and it bore away through a full gybe before the pilot could
+    /// catch it.
+    pub fn yaw_authority(&self) -> f64 {
+        0.5 * crate::units::RHO_SEA
+            * self.rudder.area
+            * self.rudder.lift_slope
+            * self.x_rudder.abs()
+    }
+
+    /// PID gains for a tiller pilot on this boat, derived rather than tuned.
+    ///
+    /// Picks a closed-loop yaw frequency and a damping ratio, then solves for the
+    /// gains that produce them given this hull's inertia and steering authority. The
+    /// reference speed is five knots: real pilots have a rudder-gain knob for exactly
+    /// this reason, since authority goes as the square of speed.
+    pub fn pilot_gains(&self) -> (f64, f64, f64) {
+        const FREQUENCY: f64 = 1.09; // rad/s, about a six-second correction
+        const DAMPING: f64 = 0.8;
+        let reference = crate::units::kn_to_ms(5.0);
+        let authority = self.yaw_authority() * reference * reference;
+        let kp = self.yaw_inertia * FREQUENCY * FREQUENCY / authority;
+        let kd = 2.0 * DAMPING * self.yaw_inertia * FREQUENCY / authority;
+        // Integral action only has to cancel a standing weather helm, so it is slow.
+        let ki = kp * 0.4;
+        (kp, ki, kd)
+    }
+
     /// Classic hull-speed ceiling for this waterline, m/s.
     pub fn hull_speed(&self) -> f64 {
         crate::units::hull_speed(self.lwl)
+    }
+
+    /// Performance cruiser, about 53 feet — the Oyster, Hallberg-Rassy and
+    /// Oceanis 51 class.
+    ///
+    /// Not just a scaled-up 34. The point of a bigger boat is that it is a different
+    /// animal in a sea: every natural period lengthens, so a short chop that throws a
+    /// thirty-four footer around barely reaches this one. Roll goes from 2.8 s to
+    /// 3.3, and against a four-second sea that is the difference between being tossed
+    /// and shouldering through.
+    pub fn performance_cruiser_53() -> Self {
+        let displacement = 20_000.0;
+        let lwl = 14.60;
+        let beam = 4.90;
+        let loa = 16.20;
+        let draft = 2.35;
+
+        let main_area = 75.0;
+        let main_luff = 17.5;
+        let genoa_area = 85.0;
+        let genoa_luff = 19.0;
+
+        let roll_radius = 0.35 * beam;
+        let yaw_radius = 0.25 * loa;
+
+        Self {
+            name: "performance cruiser 53",
+
+            loa,
+            lwl,
+            beam,
+            draft,
+            displacement,
+            wetted_surface: wetted_surface_estimate(displacement, lwl),
+
+            form: HullForm {
+                lwl,
+                waterline_beam: 4.60,
+                canoe_draft: 0.80,
+                freeboard: 1.35,
+                // Calibrated for this displacement, same as the 34's is for hers.
+                section_coefficient: 0.511,
+            },
+
+            residuary_coefficient: 1.15,
+            induced_span: 0.80 * draft,
+            heel_drag_factor: 0.57,
+            rail_down_heel: rad(20.0),
+            rail_down_factor: 3.0,
+
+            // Sized against sail area, not plucked. The lateral plane has to balance
+            // the rig's side force at a few degrees of leeway, and the first attempt
+            // gave this boat proportionally *less* keel than the thirty-four footer
+            // (0.059 of sail area against 0.070). The result was thirty-five degrees
+            // of leeway in a seaway: once she slowed, the keel could no longer hold
+            // her, and that is a spiral, not a slow boat.
+            lateral_plane: Foil::lateral_plane(12.0, 1.41),
+            x_clr: 0.15,
+            rudder: Foil::rudder(1.55, 2.20),
+            x_rudder: -6.80,
+            max_rudder_angle: rad(40.0),
+
+            gm: 1.60,
+            gz_peak_angle: rad(60.0),
+            z_clr: 1.05,
+
+            surge_added_mass: 0.05 * displacement,
+            sway_added_mass: 0.85 * displacement,
+            roll_inertia: 1.5 * displacement * roll_radius * roll_radius,
+            yaw_inertia: 1.3 * displacement * yaw_radius * yaw_radius,
+            heave_mass: 2.8 * displacement,
+            pitch_inertia: 2.5 * displacement * yaw_radius * yaw_radius,
+            heave_damping: 0.26,
+            pitch_damping: 0.32,
+            roll_damping: 0.14,
+            roll_damping_lever: 1.55,
+            lateral_plane_depth: 1.45,
+            rudder_depth: 1.20,
+            yaw_damping: 11_000.0,
+            heel_yaw_coefficient: 0.060,
+            effective_wave_slope: 0.65,
+            wave_drag_fraction: 0.5,
+
+            main: RiggedSail {
+                profile: SailProfile::mainsail(main_area, main_luff),
+                area: main_area,
+                z_ce: 8.60,
+                x_ce: -0.45,
+            },
+            genoa: RiggedSail {
+                profile: SailProfile::genoa(genoa_area, genoa_luff),
+                area: genoa_area,
+                z_ce: 6.40,
+                x_ce: 2.90,
+            },
+            max_reef: 0.55,
+
+            max_thrust: 5500.0,
+            prop_walk: 0.08,
+        }
     }
 }
 

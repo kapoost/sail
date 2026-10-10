@@ -34,7 +34,8 @@ pub fn optimal_sheets(cfg: &BoatConfig, awa: f64, outhaul: f64) -> (f64, f64) {
 /// inertia that a pure proportional pilot hunts badly.
 pub fn heading_rudder(cfg: &BoatConfig, st: &BoatState, target_heading: f64) -> f64 {
     let error = wrap_pi(target_heading - st.heading);
-    (2.2 * error - 4.0 * st.yaw_rate).clamp(-cfg.max_rudder_angle, cfg.max_rudder_angle)
+    let (kp, _, kd) = cfg.pilot_gains();
+    (kp * error - kd * st.yaw_rate).clamp(-cfg.max_rudder_angle, cfg.max_rudder_angle)
 }
 
 /// A tiller pilot: PID with anti-windup.
@@ -69,7 +70,8 @@ impl TillerPilot {
     ///
     /// `error` is positive when the bow needs to come to starboard.
     pub fn correct(&mut self, cfg: &BoatConfig, error: f64, yaw_rate: f64, dt: f64) -> f64 {
-        let raw = 2.2 * error + 0.9 * self.integral - 4.0 * yaw_rate;
+        let (kp, ki, kd) = cfg.pilot_gains();
+        let raw = kp * error + ki * self.integral - kd * yaw_rate;
         let clamped = raw.clamp(-cfg.max_rudder_angle, cfg.max_rudder_angle);
         // Anti-windup: stop integrating once the rudder is on the stops, otherwise the
         // integral runs away while the boat is overpowered and cannot answer anyway.
@@ -88,8 +90,8 @@ impl TillerPilot {
 
     /// Current standing rudder angle the pilot is holding, radians. On a well balanced
     /// boat this is the weather helm, expressed as something you can put on a gauge.
-    pub fn standing_helm(&self) -> f64 {
-        0.9 * self.integral
+    pub fn standing_helm(&self, cfg: &BoatConfig) -> f64 {
+        cfg.pilot_gains().1 * self.integral
     }
 }
 

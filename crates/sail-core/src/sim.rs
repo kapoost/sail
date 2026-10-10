@@ -34,6 +34,14 @@ pub struct Simulation {
     /// a head one.
     prev_slope_along: f64,
     prev_slope_athwart: f64,
+    /// Whether the slope history above is real yet.
+    ///
+    /// It has to be asked. Differencing against an unset zero on the very first
+    /// substep reported a slope rate of 16 rad/s where the physical ceiling is 0.24,
+    /// and the energy-based wave drag turned that into fifty megawatts and a force of
+    /// 7.6 MN — enough to reverse a five-tonne boat from three knots to minus seven in
+    /// a single five-millisecond step. Everything after that was the wreckage.
+    slopes_primed: bool,
 }
 
 impl Simulation {
@@ -49,13 +57,37 @@ impl Simulation {
             accumulator: 0.0,
             prev_slope_along: 0.0,
             prev_slope_athwart: 0.0,
+            slopes_primed: false,
         }
     }
 
-    /// Put a sea under it.
+    /// Put a sea under it, and float the boat on it.
+    ///
+    /// The settling is not a nicety. A state built for flat water has `heave` and
+    /// `pitch` at zero, and dropping that into a sea leaves the hull half a metre out
+    /// of position — which for a twenty-tonne boat with a 48 m^2 waterplane is a
+    /// quarter of a meganewton of buoyancy and an acceleration over 12 m/s^2. The
+    /// slam destroys the state inside five seconds, the keel ends up broadside, and a
+    /// stalled keel at speed is a spiral that never recovers. The boat simply never
+    /// sailed.
     pub fn with_water(mut self, water: Box<dyn WaterSurface>) -> Self {
         self.water = water;
+        self.float_on_water();
         self
+    }
+
+    /// Place the hull on the local surface: heave to the water's height, pitch to its
+    /// longitudinal slope.
+    pub fn float_on_water(&mut self) {
+        let st = self.state;
+        let forward = st.forward();
+        let half = self.config.lwl * 0.5;
+        let bow = self.water.height(st.pos + forward * half, st.time);
+        let stern = self.water.height(st.pos - forward * half, st.time);
+        self.state.heave = self.water.height(st.pos, st.time);
+        self.state.pitch = ((bow - stern) / self.config.lwl).atan();
+        self.state.heave_rate = 0.0;
+        self.state.pitch_rate = 0.0;
     }
 
     /// Advance by `dt` seconds of wall-clock time, in fixed substeps. Leftover time is
@@ -159,12 +191,20 @@ impl Simulation {
         };
 
         // --- Lateral plane: the keel and canoe body earning their leeway -----------
-        let lp_sway = sway_rel + st.yaw_rate * cfg.x_clr;
-        let lp_speed = (surge_rel * surge_rel + lp_sway * lp_sway).sqrt();
+        // Sampled at the keel's own depth, not at the surface. The orbital flow down
+        // there is a fraction of what the hull feels, and using the surface value puts
+        // the keel at twenty-odd degrees of angle of attack in a modest sea — stalled,
+        // and braking with kilonewtons of drag that do not exist.
+        let lp_water = self
+            .water
+            .velocity_at_depth(st.pos, cfg.lateral_plane_depth, st.time);
+        let lp_rel = st.to_body(velocity - DVec2::new(lp_water.x, lp_water.y));
+        let lp_sway = lp_rel.y + st.yaw_rate * cfg.x_clr;
+        let lp_speed = (lp_rel.x * lp_rel.x + lp_sway * lp_sway).sqrt();
         let lp_flow_angle = if lp_speed < 1e-3 {
             0.0
         } else {
-            lp_sway.atan2(surge_rel)
+            lp_sway.atan2(lp_rel.x)
         };
         let lp = cfg.lateral_plane.forces(-lp_flow_angle, lp_speed);
         // A heeled foil tilts part of its lift into the vertical.
@@ -176,12 +216,16 @@ impl Simulation {
         let rudder_angle = controls
             .rudder
             .clamp(-cfg.max_rudder_angle, cfg.max_rudder_angle);
-        let rud_sway = sway_rel + st.yaw_rate * cfg.x_rudder;
-        let rud_speed = (surge_rel * surge_rel + rud_sway * rud_sway).sqrt();
+        let rud_water = self
+            .water
+            .velocity_at_depth(st.pos, cfg.rudder_depth, st.time);
+        let rud_rel = st.to_body(velocity - DVec2::new(rud_water.x, rud_water.y));
+        let rud_sway = rud_rel.y + st.yaw_rate * cfg.x_rudder;
+        let rud_speed = (rud_rel.x * rud_rel.x + rud_sway * rud_sway).sqrt();
         let rud_flow_angle = if rud_speed < 1e-3 {
             0.0
         } else {
-            rud_sway.atan2(surge_rel)
+            rud_sway.atan2(rud_rel.x)
         };
         let rud = cfg.rudder.forces(-rud_flow_angle - rudder_angle, rud_speed);
         let rud_lift = rud.lift * appendage_factor;
@@ -202,11 +246,27 @@ impl Simulation {
         let h_port = self.water.height(st.pos - starboard * half_beam, st.time);
         let slope_along = (h_bow - h_stern) / cfg.lwl;
         let slope_athwart_raw = (h_stbd - h_port) / cfg.beam;
-        // Rates of change, for damping relative to the surface.
-        let slope_along_rate = (slope_along - self.prev_slope_along) / dt;
-        let slope_athwart_rate = (slope_athwart_raw - self.prev_slope_athwart) / dt;
+        // Rates of change, for damping relative to the surface. The first substep has
+        // no history to difference against, so it reports no rate rather than a
+        // fabricated one. The clamp is a second line of defence: this rate multiplies
+        // into a force through the motion damping, and a term that can reach
+        // meganewtons from a numerical transient is too sharp an edge to leave
+        // unguarded. The physical ceiling for a four-second sea is a quarter of a
+        // radian per second, so two is generous.
+        const SLOPE_RATE_LIMIT: f64 = 2.0;
+        let (slope_along_rate, slope_athwart_rate) = if self.slopes_primed {
+            (
+                ((slope_along - self.prev_slope_along) / dt)
+                    .clamp(-SLOPE_RATE_LIMIT, SLOPE_RATE_LIMIT),
+                ((slope_athwart_raw - self.prev_slope_athwart) / dt)
+                    .clamp(-SLOPE_RATE_LIMIT, SLOPE_RATE_LIMIT),
+            )
+        } else {
+            (0.0, 0.0)
+        };
         self.prev_slope_along = slope_along;
         self.prev_slope_athwart = slope_athwart_raw;
+        self.slopes_primed = true;
 
         // --- Added resistance in waves ---------------------------------------------
         // Charged from the power the motion damping dissipates, on the grounds that a
@@ -222,7 +282,16 @@ impl Simulation {
         // Pitch relative to the surface, for the same reason heave is.
         let pitch_rel = st.pitch_rate - slope_along_rate;
         let motion_power = heave_c * heave_rel * heave_rel + pitch_c * pitch_rel * pitch_rel;
-        let r_waves = cfg.wave_drag_fraction * motion_power / speed.abs().max(0.5);
+        // Dividing power by speed is only meaningful while the boat is making way. A
+        // simple floor on the denominator is not enough: it leaves a *resistance* that
+        // grows without bound as the boat stops, which is backwards. A boat lying
+        // still in a sea bobs; it does not experience four kilonewtons of drag. This
+        // form has the right asymptotics at both ends — it goes to zero with speed and
+        // to power-over-speed once she is moving.
+        const WAVE_DRAG_KNEE: f64 = 1.2;
+        let v = speed.abs();
+        let r_waves =
+            cfg.wave_drag_fraction * motion_power * v / (v * v + WAVE_DRAG_KNEE * WAVE_DRAG_KNEE);
 
         // --- Bare-hull resistance --------------------------------------------------
         let r_friction = frictional_resistance(speed, cfg.lwl, cfg.wetted_surface);
@@ -335,28 +404,39 @@ impl Simulation {
             * roll_rel;
 
         // --- Integrate ------------------------------------------------------------
+        // Surfing: the wave's inertial force, closed consistently.
+        //
+        // For a deep-water wave the water's horizontal acceleration is exactly
+        // `g * grad(eta)`, since `omega^2 = g k` makes `A omega^2` and `g A k` the same
+        // number. So the Froude-Krylov force on a floating body is its displaced mass
+        // times the water's own acceleration — and because the body floats, displaced
+        // mass *is* its mass.
+        //
+        // That closure matters. Applying the force with the bare mass while the
+        // equation of motion divides by mass-plus-added-mass leaves the boat unable to
+        // follow the water it sits in, and applying it only along the hull axis leaves
+        // it unable to follow sideways at all. Both were true here, and the result was
+        // a boat thrown about *relative to the water* rather than carried along by it:
+        // speed through the water swinging by more than a knot in a one-metre sea,
+        // when it should have been nearly steady while speed over ground surged.
+        //
+        // Using the same effective mass on both sides means that with no sails and no
+        // drag she rides the orbit exactly, which is what a floating object does.
         let m_x = cfg.displacement + cfg.surge_added_mass;
         let m_y = cfg.displacement + cfg.sway_added_mass;
-
-        // Surfing, done properly: the Froude-Krylov force.
-        //
-        // The first version took the component of the boat's own weight along its axis
-        // from the pitch attitude. That was wrong, and instructively so. Weight and
-        // buoyancy are both vertical, so for a body in equilibrium neither produces
-        // any horizontal force; mixing a gravity-along-axis term with a purely
-        // vertical buoyancy left the two unbalanced, and a mean trim of three tenths
-        // of a degree beating became 284 N of drag conjured out of nothing.
-        //
-        // The horizontal force in a wave comes from the wave's own pressure gradient,
-        // which for a body small against the wavelength is the displacement times g
-        // times the surface slope — formally the same expression as gravity on a hill,
-        // but driven by the water rather than by the hull's attitude. It depends on
-        // where the boat *is* in the wave rather than on how it happens to be trimmed,
-        // so it carries no spurious mean.
-        let surf = -cfg.displacement * GRAVITY * slope_along;
+        // Note the sign, which cost an hour. For eta = A cos(theta) the water's
+        // horizontal acceleration is +A omega^2 sin(theta) while g grad(eta) is
+        // -A omega^2 sin(theta): they are opposite. Physically the pressure is higher
+        // under a crest, so water is pushed *down* the slope — and so is a boat. Get
+        // it backwards and the wave drives her up its own face, pumping energy in, and
+        // the symptom is a boat flung about rather than carried.
+        let water_accel = -self.water.slope(st.pos, st.time) * GRAVITY;
+        let accel_body = st.to_body(water_accel);
+        let surf = m_x * accel_body.x;
+        let sway_wave = m_y * accel_body.y;
 
         let du = (fx + surf) / m_x + st.sway * st.yaw_rate;
-        let dv = fy / m_y - st.surge * st.yaw_rate;
+        let dv = (fy + sway_wave) / m_y - st.surge * st.yaw_rate;
         let dr = mz / cfg.yaw_inertia;
         let dp = mx / cfg.roll_inertia;
         let dw = fz / cfg.heave_mass;
@@ -417,6 +497,10 @@ impl Simulation {
             resistance_friction: r_friction,
             resistance_residuary: r_residuary,
             resistance_induced: lp_induced,
+            keel_alpha: lp.alpha,
+            keel_stalled: lp.stalled,
+            keel_surge: lp_rel.x,
+            keel_sway: lp_sway,
             rudder_alpha: rud.alpha,
             rudder_stalled: rud.stalled,
             weather_helm: mz - cfg.x_rudder * rud_fy,

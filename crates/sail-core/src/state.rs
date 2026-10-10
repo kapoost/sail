@@ -205,6 +205,15 @@ pub struct Telemetry {
     /// forward: bow-down on a wave face, which is surfing.
     pub surf_force: f64,
 
+    /// Angle of attack on the lateral plane, radians — the keel's working angle
+    /// relative to the water it is actually in, which in a seaway is not the same as
+    /// the boat's track over the ground.
+    pub keel_alpha: f64,
+    pub keel_stalled: f64,
+    /// Flow at the keel in the body frame, m/s. Diagnostic: when this reverses, the
+    /// boat is being told the water is overtaking it, and everything downstream lies.
+    pub keel_surge: f64,
+    pub keel_sway: f64,
     /// Rudder angle of attack and how stalled it is.
     pub rudder_alpha: f64,
     pub rudder_stalled: f64,

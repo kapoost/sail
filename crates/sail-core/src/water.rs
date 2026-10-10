@@ -30,6 +30,19 @@ pub trait WaterSurface: Send + Sync {
     /// surface normal, so this is what tilts it in a seaway.
     fn slope(&self, pos: DVec2, t: f64) -> DVec2;
 
+    /// Water velocity at a depth below the surface, metres per second.
+    ///
+    /// Orbital motion decays as `exp(-k z)`, and steeply: each component dies off on
+    /// the scale of its own wavelength, so short waves are a surface phenomenon and
+    /// long ones reach well down. This matters more than it looks. A keel two metres
+    /// down sees a quarter to a half less orbital flow than the hull at the surface,
+    /// and feeding it the surface figure puts it at twenty-odd degrees of angle of
+    /// attack — stalled, and braking the boat with kilonewtons that are not there.
+    fn velocity_at_depth(&self, pos: DVec2, depth: f64, t: f64) -> DVec3 {
+        let _ = depth;
+        self.velocity(pos, t)
+    }
+
     /// Significant wave height, metres. Zero for flat water.
     fn significant_height(&self) -> f64 {
         0.0
@@ -49,6 +62,9 @@ impl WaterSurface for FlatWater {
     }
     fn slope(&self, _pos: DVec2, _t: f64) -> DVec2 {
         DVec2::ZERO
+    }
+    fn velocity_at_depth(&self, _pos: DVec2, _depth: f64, _t: f64) -> DVec3 {
+        DVec3::ZERO
     }
 }
 
@@ -184,6 +200,21 @@ impl WaterSurface for WindSea {
             s += c.direction * d;
         }
         s
+    }
+
+    fn velocity_at_depth(&self, pos: DVec2, depth: f64, t: f64) -> DVec3 {
+        let d = depth.max(0.0);
+        let mut v = DVec3::ZERO;
+        for c in &self.components {
+            let theta = c.theta(pos, t);
+            // Each component decays on the scale of its own wavenumber.
+            let decay = (-c.k * d).exp();
+            let orbital = c.amplitude * c.omega * decay;
+            v.x += orbital * theta.cos() * c.direction.x;
+            v.y += orbital * theta.cos() * c.direction.y;
+            v.z += orbital * theta.sin();
+        }
+        v
     }
 
     fn significant_height(&self) -> f64 {
