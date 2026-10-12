@@ -808,6 +808,14 @@ pub fn update_sails(
                 &geometry,
                 &SailTrim {
                     lee: side,
+                    // The main's foot is hauled by the outhaul; a headsail's is pulled
+                    // straight by its sheet, which is the same line that trims it, so
+                    // there is nothing left over to let it hang.
+                    foot_sag: if surface.which == Sail::Main {
+                        0.42 * (1.0 - sim.controls.outhaul as f32)
+                    } else {
+                        0.0
+                    },
                     twist,
                     luffing: forces.coeffs.luffing as f32,
                     // What the sail is cut to, plus what the wind puts into it.
@@ -864,12 +872,21 @@ pub fn update_sails(
 /// the new clew out towards the same boom end, with the same small travel in hand.
 pub fn main_foot(controls: &sail_core::state::Controls) -> f32 {
     /// What the outhaul can move the clew by, metres.
+    ///
+    /// Twenty-two centimetres on a full sail — which is what an outhaul's travel is on a
+    /// six-metre boom, and which is also barely visible from the cockpit, which is fair
+    /// because it is barely visible on a boat. Reefed it is a different line doing a
+    /// different job: the reef cringle starts bunched in the gathered cloth and has to
+    /// be hauled the whole way out to the boom end, so the travel is twice as long and
+    /// you can see the corner move along the spar as you winch it.
     const TRAVEL: f32 = 0.22;
+    const TRAVEL_REEFED: f32 = 0.48;
     /// How far forward each slab's clew cringle is cut.
     const PER_SLAB: f32 = 0.16;
     let slab = (controls.reef as f32 * 3.0).round();
     let hauled = controls.outhaul as f32;
-    crate::rig::BOOM_LENGTH - PER_SLAB * slab - TRAVEL * (1.0 - hauled)
+    let travel = if slab > 0.5 { TRAVEL_REEFED } else { TRAVEL };
+    crate::rig::BOOM_LENGTH - PER_SLAB * slab - travel * (1.0 - hauled)
 }
 
 /// The three corners of whichever sail is up forward.
@@ -1291,6 +1308,8 @@ struct SailTrim<'a> {
     /// Seconds, for the flogging.
     now: f32,
     /// Standing rigging the cloth is not allowed through, as a polyline.
+    /// How far the foot hangs below the straight line from tack to clew, metres.
+    foot_sag: f32,
     shrouds: &'a [Vec3],
     /// Whether this sail has to keep clear of the mast. The main does not: its luff
     /// is bent on to it.
@@ -1304,6 +1323,7 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         luffing,
         draft,
         now,
+        foot_sag,
         shrouds,
         clear_mast,
     } = *trim;
@@ -1353,10 +1373,18 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         // The outhaul tensions the foot, so its share of the depth sits low down.
         let foot_weight = (1.0 - u).powf(1.6);
         let local_camber = reference + deviation * (0.35 + 1.65 * foot_weight);
+        // And an eased foot does not merely get deeper, it *hangs*. The foot is the one
+        // edge an outhaul has its hands on: hauled, it is a straight tight line from
+        // tack to clew; eased, the cloth between them bags down under its own weight.
+        // Which is the half of the control a sailor looks at, and the sail had only the
+        // other half — it changed shape sideways and kept a ruler-straight bottom edge
+        // whatever the line was doing.
+        let hang = foot_sag * (1.0 - u).powf(2.2);
 
         for vi in 0..SAIL_V {
             let v = vi as f32 / (SAIL_V - 1) as f32;
             let belly = (std::f32::consts::PI * v).sin() * local_camber * chord_length;
+            let droop = (std::f32::consts::PI * v).sin() * hang;
             // Creases, radiating from the clew.
             //
             // Not decoration and not something a tiling texture can do, because they
@@ -1383,7 +1411,7 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
                 * 0.42
                 * free_edge
                 * chord_length.max(0.4);
-            let point = luff.lerp(leech, v) + normal * (belly + flap + crease);
+            let point = luff.lerp(leech, v) + normal * (belly + flap + crease) - Vec3::Y * droop;
             let point = clear_of_shrouds(point, normal, shrouds);
             let point = if clear_mast {
                 clear_of_mast(point)
