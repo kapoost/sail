@@ -51,6 +51,25 @@ pub fn camber_for_outhaul(outhaul: f64) -> f64 {
     CAMBER_DEEP + (CAMBER_FLAT - CAMBER_DEEP) * o
 }
 
+/// The same, once the sail is reefed — and it is a different line doing it.
+///
+/// With a slab in, the outhaul is slack: it is still shackled to the original clew,
+/// which is now bunched up in the sailbag of cloth along the boom and pulling on
+/// nothing. What holds the foot out is the reef pennant, hauled down through the cheek
+/// block at the boom end, and that is the line a crew flattens a reefed main with.
+///
+/// Same hand, same decision, different rope — which is why this takes the same control
+/// rather than adding one. What it adds is the flattening the reef does by itself. The
+/// deepest cloth in a mainsail is the lower third; take a slab out of it and what is
+/// left is a flatter sail than the one you started with, at the same setting. That is
+/// part of why a reefed boat stands up better than the lost area alone explains, and it
+/// is worth having in the model rather than discovering as a missing few degrees of
+/// heel.
+pub fn camber_reefed(camber: f64, reef: f64, max_reef: f64) -> f64 {
+    let taken = (reef.clamp(0.0, 1.0) * max_reef).clamp(0.0, 1.0);
+    camber - (camber - CAMBER_FLAT) * 0.45 * taken
+}
+
 /// Largest twist the leech will fall off to with the vang eased right off, radians.
 pub const MAX_TWIST: f64 = 20.0 * std::f64::consts::PI / 180.0;
 

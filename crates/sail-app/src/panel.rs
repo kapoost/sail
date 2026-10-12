@@ -245,9 +245,9 @@ pub fn draw(
                                 // other end of it at the moment.
                                 let rigged = line.rigged_for(&sim.controls);
                                 let name = if rigged {
-                                    line.name().to_string()
+                                    line.name_now(&sim.controls).to_string()
                                 } else {
-                                    format!("({})", line.name())
+                                    format!("({})", line.name_now(&sim.controls))
                                 };
                                 let (clicked, dragged) = clutch(ui, &name, &mut value, selected);
                                 if clicked {
@@ -256,13 +256,30 @@ pub fn draw(
                                 }
                                 if dragged {
                                     bank.selected = i;
-                                    line.set_from_ui(&mut sim.controls, value);
+                                    // A detented line cannot be dragged to anywhere
+                                    // between its stops; the hand on the lever picks
+                                    // the nearest one and the line runs there.
+                                    if let Some(stops) = line.detents(&sim.controls) {
+                                        let nearest = stops
+                                            .iter()
+                                            .copied()
+                                            .min_by(|a, b| {
+                                                (a - value)
+                                                    .abs()
+                                                    .partial_cmp(&(b - value).abs())
+                                                    .unwrap()
+                                            })
+                                            .unwrap_or(0.0);
+                                        bank.target[i] = Some(nearest);
+                                    } else {
+                                        line.set_from_ui(&mut sim.controls, value);
+                                    }
                                 }
                             }
                         });
                         ui.label(
                             egui::RichText::new(if bank.line().rigged_for(&sim.controls) {
-                                format!("hauling in {}", bank.line().hauled())
+                                format!("hauling in {}", bank.line().hauled_now(&sim.controls))
                             } else {
                                 format!("{} is not led to this sail", bank.line().name())
                             })

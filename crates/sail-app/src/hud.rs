@@ -197,12 +197,25 @@ pub fn draw(
                 }
             ));
             ui.label(format!(
-                "main reef {:.2}    {} furl {:.2}{}    stays'l {:.2}    rudder {}",
-                c.reef,
+                "main {}    {} {}    stays'l {}    rudder {}",
+                // Slabs, not a fraction: a sailor says "second reef", never "0.67".
+                match (c.reef * 3.0).round() as i32 {
+                    0 => "full".to_string(),
+                    n => format!("reef {n}"),
+                },
                 c.headsail.name(),
-                c.furl,
-                if c.furl > 0.985 { " (rolled away)" } else { "" },
-                c.staysail,
+                if c.headsail == sail_core::state::Headsail::Genoa {
+                    match c.furl {
+                        f if f > 0.985 => "rolled away".to_string(),
+                        f if f < 0.015 => "full".to_string(),
+                        f => format!("{:.0}% rolled", f * 100.0),
+                    }
+                } else if c.furl > 0.5 {
+                    "handed".to_string()
+                } else {
+                    "set".to_string()
+                },
+                if c.staysail > 0.5 { "set" } else { "handed" },
                 if t.rudder_stalled > 0.4 {
                     "STALLED"
                 } else {

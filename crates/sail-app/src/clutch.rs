@@ -55,6 +55,39 @@ impl Line {
         }
     }
 
+    /// What the line is called with the sail in its present state.
+    ///
+    /// The outhaul becomes the reef pennant the moment a slab goes in, because that is
+    /// what is on the other end of the hand: the outhaul is shackled to the old clew,
+    /// which is bunched along the boom pulling on nothing, and the foot is held out by
+    /// the pennant through the cheek block at the boom end. One control, one decision,
+    /// a different rope — and the bank ought to say which rope.
+    /// The positions this line rests at, if it has any.
+    ///
+    /// Three slabs in the main, because that is what a mainsail has: three rows of reef
+    /// points sewn into it and no fourth. A roller genoa has none — it is a drum, it
+    /// stops wherever you stop it, and sailing with a third of it rolled away is an
+    /// ordinary thing to do. A sail set flying has two, and they are the only two: up,
+    /// or away. So does the staysail, which is hanked on and hoisted and has no middle
+    /// state either.
+    pub fn detents(self, c: &Controls) -> Option<&'static [f64]> {
+        const SLABS: [f64; 4] = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0];
+        const EITHER: [f64; 2] = [0.0, 1.0];
+        match self {
+            Line::Reef => Some(&SLABS),
+            Line::Staysail => Some(&EITHER),
+            Line::Furl if c.headsail != sail_core::state::Headsail::Genoa => Some(&EITHER),
+            _ => None,
+        }
+    }
+
+    pub fn name_now(self, c: &Controls) -> &'static str {
+        match self {
+            Line::Outhaul if c.reef > 0.02 => "reef pennant",
+            _ => self.name(),
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Line::Outhaul => "outhaul",
@@ -68,13 +101,23 @@ impl Line {
 
     /// What hauling it in does, in words, since none of these are obvious from a
     /// number between nought and one.
+    pub fn hauled_now(self, c: &Controls) -> &'static str {
+        match self {
+            Line::Outhaul if c.reef > 0.02 => "flattens the reefed foot",
+            Line::Furl if c.headsail != sail_core::state::Headsail::Genoa => {
+                "hands the sail — there is no half of it"
+            }
+            _ => self.hauled(),
+        }
+    }
+
     pub fn hauled(self) -> &'static str {
         match self {
             Line::Outhaul => "flattens the foot",
             Line::Vang => "takes the twist out",
             Line::GenoaCar => "car aft: flat, open leech",
             Line::Reef => "shortens the main",
-            Line::Furl => "rolls the genoa away",
+            Line::Furl => "rolls the headsail away",
             Line::Staysail => "sets the inner sail",
         }
     }
@@ -114,8 +157,11 @@ impl Line {
     /// up, drop the halyard, hook the tack, winch the clew down. It takes time, and if
     /// it did not then reefing early would cost nothing and the decision would carry
     /// no weight at all.
-    fn rate(self) -> f64 {
+    fn rate(self, c: &Controls) -> f64 {
         match self {
+            // A reef pennant takes the whole load of the foot and comes in on a winch,
+            // where an outhaul is a light tackle you pull by hand.
+            Line::Outhaul if c.reef > 0.02 => 0.17,
             Line::Outhaul => 0.30,
             Line::Vang => 0.35,
             Line::GenoaCar => 0.28,
@@ -135,6 +181,14 @@ pub struct Bank {
     pub selected: usize,
     /// Seconds since the selection last changed, for a brief highlight.
     pub since_change: f32,
+    /// Where a detented line is being hauled to, if it is on its way somewhere.
+    ///
+    /// A slab reef has positions, not a range: there is a first reef, a second and a
+    /// third, and nothing in between but a sail half pulled down. But getting there is
+    /// not instant — you ease the halyard, haul the pennant, winch it home — so the
+    /// line runs at its own pace and *stops at the cringle*. One press starts the job;
+    /// the job takes as long as it takes.
+    pub target: [Option<f64>; BANK.len()],
 }
 
 impl Bank {
@@ -164,17 +218,57 @@ pub fn handle(
 
     let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let line = bank.line();
-    let rate = line.rate() * if fine { 0.3 } else { 1.0 };
+    let selected = bank.selected;
+    let rate = line.rate(&sim.controls) * if fine { 0.3 } else { 1.0 };
 
-    let mut change = 0.0;
-    if keys.pressed(KeyCode::KeyD) {
-        change += rate; // haul in
-    }
-    if keys.pressed(KeyCode::KeyA) {
-        change -= rate; // ease
-    }
-    if change != 0.0 {
+    // A detented line is given a destination and left to get there. Everything else
+    // moves while the key is down, which is what a tackle or a drum does.
+    if let Some(stops) = line.detents(&sim.controls) {
         let now = line.get(&sim.controls);
-        line.set(&mut sim.controls, now + change * dt);
+        let at = bank.target[selected].unwrap_or(now);
+        if keys.just_pressed(KeyCode::KeyD) {
+            bank.target[selected] = stops.iter().copied().find(|s| *s > at + 1e-6).or(Some(1.0));
+        }
+        if keys.just_pressed(KeyCode::KeyA) {
+            bank.target[selected] = stops
+                .iter()
+                .rev()
+                .copied()
+                .find(|s| *s < at - 1e-6)
+                .or(Some(0.0));
+        }
+    } else {
+        bank.target[selected] = None;
+        let mut change = 0.0;
+        if keys.pressed(KeyCode::KeyD) {
+            change += rate; // haul in
+        }
+        if keys.pressed(KeyCode::KeyA) {
+            change -= rate; // ease
+        }
+        if change != 0.0 {
+            let now = line.get(&sim.controls);
+            line.set(&mut sim.controls, now + change * dt);
+        }
+    }
+
+    // Every line that has somewhere to be runs there, selected or not: a reef you
+    // started does not stop because you turned to the vang.
+    for (i, l) in BANK.iter().enumerate() {
+        let Some(want) = bank.target[i] else {
+            continue;
+        };
+        if l.detents(&sim.controls).is_none() {
+            bank.target[i] = None;
+            continue;
+        }
+        let now = l.get(&sim.controls);
+        let step = l.rate(&sim.controls) * dt;
+        if (want - now).abs() <= step {
+            l.set(&mut sim.controls, want);
+            bank.target[i] = None;
+        } else {
+            l.set(&mut sim.controls, now + step * (want - now).signum());
+        }
     }
 }

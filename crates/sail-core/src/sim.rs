@@ -228,7 +228,11 @@ impl Simulation {
         let (jib_upper_awa, jib_upper_aws) =
             apparent_wind(&st, wind_ref, jib_upper_z * heel_cos, velocity);
 
-        let main_camber = camber_for_outhaul(controls.outhaul);
+        let main_camber = crate::sail::camber_reefed(
+            camber_for_outhaul(controls.outhaul),
+            controls.reef,
+            cfg.max_reef,
+        );
         let boom_angle = cfg.main.profile.chord_angle(controls.main_sheet);
         let twist = twist_for_vang(controls.vang, boom_angle);
         // The upper section is eased by the twist, expressed back through the sheet
