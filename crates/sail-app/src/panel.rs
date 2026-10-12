@@ -196,7 +196,7 @@ pub fn draw(
                         "MAIN",
                         &mut main_sheet,
                         Some(want_main),
-                        sail_state(&telemetry.main),
+                        sail_state(&telemetry.main, 1.0 - sim.controls.reef * cfg.max_reef),
                     ) {
                         sim.controls.main_sheet = main_sheet;
                     }
@@ -205,7 +205,7 @@ pub fn draw(
                         "GENOA",
                         &mut jib_sheet,
                         Some(want_jib),
-                        sail_state(&telemetry.jib),
+                        sail_state(&telemetry.jib, 1.0 - sim.controls.furl),
                     ) {
                         sim.controls.jib_sheet = jib_sheet;
                     }
@@ -349,7 +349,17 @@ pub fn draw(
     Ok(())
 }
 
-fn sail_state(f: &sail_core::sail::SailForces) -> (&'static str, egui::Color32) {
+/// What a sail is doing, in one word.
+///
+/// `set` is how much of it is still up. A rolled-away headsail reported DRAWING
+/// because the coefficients are computed from the angle of attack whatever the area
+/// is — true of the cloth, and a lie about the sail, since there was none of it left.
+/// An instrument that is right about a quantity nobody asked for and wrong about the
+/// one on the label is worse than no instrument.
+fn sail_state(f: &sail_core::sail::SailForces, set: f64) -> (&'static str, egui::Color32) {
+    if set < 0.02 {
+        return ("FURLED", paint::LABEL);
+    }
     if f.coeffs.luffing > 0.3 {
         ("LUFFING", paint::LIVE)
     } else if f.coeffs.stalled > 0.4 {

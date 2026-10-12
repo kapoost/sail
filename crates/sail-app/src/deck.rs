@@ -156,23 +156,45 @@ pub fn structure_mesh() -> (Mesh, Mesh) {
         let z = z0 + (z1 - z0) * (i as f32 / steps as f32);
         let (half, sheer) = sheer_at(z);
         let (inner, rise) = opening(z);
-        let mut ring = Vec::with_capacity(9);
-        // Starboard sheer, in across the side deck, up or down the opening, over the
-        // top to the centreline. Mirrored on the way back out to port.
-        for side in [1.0_f32, -1.0] {
+        // One continuous section across the boat: port sheer, in across the side
+        // deck, up the cabin side or down into the cockpit, over the centreline and
+        // back out to starboard.
+        //
+        // The first version built two half-sections — each running from a sheer to the
+        // centreline — and laid them end to end. Stitching then joined the last point
+        // of one half to the first point of the other, which are the centreline and
+        // the *opposite* sheer: a single quad spanning the whole width of the boat,
+        // across the cockpit, through the cabin and out the other side. From the helm
+        // it was a grey wall filling the view. A cross-section has to be a path, not
+        // two paths in a list.
+        let mut ring = Vec::with_capacity(11);
+        let open = inner > 1e-4;
+        for side in [-1.0_f32, 1.0] {
             let x_out = side * half;
             let x_in = side * inner;
-            ring.push(Vec3::new(x_out, sheer, z));
-            ring.push(Vec3::new(x_in, sheer + camber(x_in, half) * 0.6, z));
-            if inner > 1e-4 {
-                ring.push(Vec3::new(x_in, sheer + rise, z));
-                ring.push(Vec3::new(
-                    x_in * 0.5,
-                    sheer + rise + camber(x_in * 0.5, inner) * side.abs(),
-                    z,
-                ));
+            let outward = [
+                Vec3::new(x_out, sheer, z),
+                Vec3::new(x_in, sheer + camber(x_in, half) * 0.6, z),
+            ];
+            let upward = [
+                Vec3::new(x_in, sheer + rise, z),
+                Vec3::new(x_in * 0.5, sheer + rise + camber(x_in * 0.5, inner), z),
+            ];
+            if side < 0.0 {
+                ring.extend_from_slice(&outward);
+                if open {
+                    ring.extend_from_slice(&upward);
+                }
+                ring.push(Vec3::new(0.0, sheer + rise, z));
+            } else {
+                // Back out again, so the path crosses the boat exactly once.
+                if open {
+                    ring.push(upward[1]);
+                    ring.push(upward[0]);
+                }
+                ring.push(outward[1]);
+                ring.push(outward[0]);
             }
-            ring.push(Vec3::new(0.0, sheer + rise, z));
         }
         rings.push(ring);
     }
