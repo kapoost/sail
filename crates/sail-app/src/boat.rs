@@ -844,15 +844,19 @@ pub fn update_sails(
                     } else {
                         &shrouds
                     },
-                    // Every sail forward of the mast has to be kept out of the mast.
-                    //
-                    // This used to be the genoa alone, on the reasoning that a sail set
-                    // flying is tacked ahead of the whole rig and therefore clear of it.
-                    // Its *tack* is. Its leech is not: eased on a reach the cloth sweeps
+                    // The sails on the bow have to be kept out of the mast. A sail set
+                    // flying is tacked a metre and a half ahead of the rig, which clears
+                    // its *tack* and not its leech: eased on a reach the cloth sweeps
                     // aft past the spar, and a gennaker was being drawn straight through
-                    // it. A sail may lie against a mast — they do, and that is where
-                    // they chafe — but it may not pass through one.
-                    clear_mast: surface.which != Sail::Main,
+                    // it.
+                    //
+                    // The staysail is the exception and it is not an oversight. Its own
+                    // stay lands on the mast, so its head is already there and its cloth
+                    // hangs within arm's reach of the spar for its whole hoist — a
+                    // clearance radius does not keep it off the mast, it shoves the
+                    // whole sail sideways every frame. It works forward of the shrouds
+                    // on its own boom and wants nothing in its way.
+                    clear_mast: surface.which == Sail::Headsail,
                 },
             );
         }

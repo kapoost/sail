@@ -376,7 +376,12 @@ impl SailProfile {
             aspect_ratio: luff_height * luff_height / area,
             luff_margin: rad(3.5),
             cn_separated: 1.45,
-            max_chord_angle: rad(62.0),
+            // Seventy-five, not sixty-two. The limit on a self-tacker is its own track
+            // and nothing else: the sail and its boom live forward of the shrouds, with
+            // clear deck either side and nothing to foul, so what stops the boom is the
+            // end of the horse. There is no reason to cap it at a genoa's angle when it
+            // has none of a genoa's obstructions.
+            max_chord_angle: rad(75.0),
             min_chord_angle: rad(8.0),
         }
     }
