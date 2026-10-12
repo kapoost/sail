@@ -256,7 +256,18 @@ impl BoatConfig {
     /// Everything here is a starting point for `examples/delivery.rs`, which measures
     /// what it actually produces.
     pub fn archipelago_packet() -> Self {
-        let displacement = 5200.0;
+        // Light. A displacement-to-length ratio of 116 against the charter boat's 240:
+        // this is the single number that decides whether a boat feels alive, because
+        // everything else — the sail she can carry, the speed she will make for it,
+        // how quickly she answers — is measured against her own weight.
+        //
+        // It is also the honest way to make her fast. There is no multiplier anywhere
+        // in this model that could be turned up; what there is instead is a set of
+        // real decisions a designer makes, and every one of them has a cost. She is
+        // light, so she is wet and she pounds. She is over-canvassed, so she needs
+        // reefing early and often. Her keel is deep, so there are anchorages she
+        // cannot get into. That is the trade, and the trade is what makes it a game.
+        let displacement = 3600.0;
         // Hydrostatics read off the scan rather than guessed: the hull mesh was
         // integrated station by station and the waterline solved for where the
         // displaced volume equals the displacement. It put her 0.4 m finer in the
@@ -269,13 +280,19 @@ impl BoatConfig {
         // not the same thing and is always too small for a hull with any curve in it.
         let beam = 3.40;
         let loa = 11.00;
-        let draft = 1.95;
+        // Deep, with a bulb. This is what buys the righting moment a light hull does
+        // not get from its own weight, and it is the reason she can stand up to that
+        // rig at all. The cost is anchorages: a two-metre draught is a real
+        // constraint in a place where the banks shelve for four hundred metres.
+        let draft = 2.25;
 
         // Fractional: the main is the engine, the jib is a handkerchief that tacks
-        // itself. Sail area to displacement works out at about 22, which is generous
-        // without being a racing number.
-        let main_area = 38.0;
-        let main_luff = 14.0;
+        // itself. Sail area to displacement is now about 31 — a racing number, and
+        // deliberately so. Under-canvassed boats are dull in the light airs an
+        // archipelago is full of, and the cost of a big rig is paid honestly here,
+        // in reefing.
+        let main_area = 46.0;
+        let main_luff = 15.2;
         // How far the boom can be eased before it lies on the cap shroud.
         //
         // Not a round number and not a guess: worked out from this boat's own rig.
@@ -289,7 +306,7 @@ impl BoatConfig {
         // angles worse than the polar alone suggests. Ninety degrees — what this was —
         // is a boom that has swung through its own standing rigging.
         let boom_against_shrouds = rad(75.0);
-        let genoa_area = 27.0;
+        let genoa_area = 26.0;
         let genoa_luff = 12.4;
 
         let roll_radius = 0.35 * beam;
@@ -318,12 +335,15 @@ impl BoatConfig {
                 // finer than the charter boat's 0.452, because the hull is: a deep,
                 // narrow canoe body puts much less area in each section than a beamy
                 // shallow one of the same beam and draught.
-                section_coefficient: 0.2889,
+                section_coefficient: 0.2000,
             },
 
-            // Finer than the charter boat because the hull is finer. This is the one
-            // number that decides whether she walks through a chop or stops in it.
-            residuary_coefficient: 0.92,
+            // Finer again, because a light hull of this length makes far less of a
+            // wave than a heavy one. This is also what softens the hull-speed wall:
+            // a displacement boat is stopped by its own wave system and a light one
+            // climbs over it, which is the difference between a boat that tops out at
+            // seven and a half knots and one that keeps going.
+            residuary_coefficient: 0.74,
             induced_span: 0.80 * draft,
             heel_drag_factor: 0.52,
             rail_down_heel: rad(22.0),
@@ -337,8 +357,15 @@ impl BoatConfig {
             x_rudder: -4.60,
             max_rudder_angle: rad(40.0),
 
-            // Narrow hulls have little form stability, so the ballast has to do it.
-            gm: 1.30,
+            // Narrow hulls have little form stability and light ones have little of
+            // anything else, so the bulb has to do all of it.
+            //
+            // Pulled back from 1.62, which was measured and rejected: at that stiffness
+            // she beat at thirty degrees to the true wind in eighteen knots, which is
+            // a number no boat with soft sails makes and which would have given the
+            // whole thing away. A fast boat is allowed to be fast; it is not allowed to
+            // be impossible.
+            gm: 1.42,
             gz_peak_angle: rad(65.0),
             z_clr: 0.90,
 
@@ -374,9 +401,9 @@ impl BoatConfig {
                 z_ce: 4.40,
                 x_ce: 1.95,
             },
-            max_reef: 0.60,
+            max_reef: 0.68,
 
-            max_thrust: 2100.0,
+            max_thrust: 1600.0,
             prop_walk: 0.08,
         }
     }
