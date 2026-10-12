@@ -34,7 +34,13 @@ pub const MAST_HEAD: f32 = DECK + 15.2;
 /// view like a handrail — and would have taken his head off in a gybe. A cruising boom
 /// clears a standing helmsman, barely, and you duck anyway.
 const BOOM_HEIGHT: f32 = DECK + 1.95;
-const BOOM_LENGTH: f32 = 4.2;
+pub const BOOM_LENGTH: f32 = 4.2;
+/// Where along the boom the vang takes hold, as a fraction of its length.
+///
+/// Shared, because the bail is drawn on the boom and the line is drawn to it, and a
+/// fitting in one place with the rope arriving at another is the fault this rig has
+/// already been caught by four times.
+pub const VANG_ALONG_BOOM: f32 = 0.42;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -325,11 +331,11 @@ pub fn update(
             },
             Kind::Vang => Span {
                 from: Vec3::new(
-                    boom.sin() * BOOM_LENGTH * 0.42,
-                    BOOM_HEIGHT,
-                    MAST_FOOT_Z + boom.cos() * BOOM_LENGTH * 0.42,
+                    boom.sin() * BOOM_LENGTH * VANG_ALONG_BOOM,
+                    BOOM_HEIGHT - 0.115,
+                    MAST_FOOT_Z + boom.cos() * BOOM_LENGTH * VANG_ALONG_BOOM,
                 ),
-                to: Vec3::new(0.0, DECK + 0.1, MAST_FOOT_Z + 0.2),
+                to: Vec3::new(0.0, DECK + 0.08, MAST_FOOT_Z + 0.2),
                 // Its own setting, not the sail's load. A vang hauled on is bar taut
                 // whether or not the main is pulling, and an eased one hangs.
                 tension: 0.12 + 0.88 * sim.controls.vang as f32,

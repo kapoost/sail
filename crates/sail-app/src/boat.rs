@@ -65,12 +65,20 @@ pub fn genoa_car_at(car: f32, starboard: bool) -> Vec3 {
     )
 }
 
-/// Where the track lies at a station: outboard of the coaming, inboard of the toerail.
+/// Where the track lies at a station: out on the side deck, clear of the coaming.
+///
+/// Driven by the side deck, with the coaming only as a floor under it. The first
+/// version had it the other way about — the coaming plus an offset, clamped to the
+/// rail — which looks reasonable until you notice that the coaming does not exist
+/// forward of the cockpit, where `coaming_half_beam` is zero. Most of the track is
+/// forward of the cockpit, so most of it collapsed onto the minimum of a quarter of a
+/// metre from the centreline: the track and both cars ended up tucked against the
+/// mast foot, which is why they could not be found on deck. Measured, before and
+/// after, at seven stations along the track: 0.25 m everywhere, against 1.13 to 1.22.
 pub fn track_x(z: f32) -> f32 {
-    let rail = crate::deck::deck_half_beam(z) - 0.20;
-    (crate::deck::coaming_half_beam(z) + TRACK_OUTBOARD)
-        .min(rail)
-        .max(0.25)
+    let deck = crate::deck::deck_half_beam(z);
+    let inboard = crate::deck::coaming_half_beam(z) + TRACK_OUTBOARD;
+    (deck * 0.72).clamp(inboard, deck - 0.18)
 }
 
 fn lead_height(z: f32) -> f32 {
@@ -358,7 +366,36 @@ pub fn setup(
                     Transform::from_xyz(0.0, 0.0, 2.15)
                         .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                 ));
+                // The vang bail, under the boom where the vang is made fast.
+                //
+                // The line was ending in mid-air against the side of the spar. A vang
+                // pulls down hard enough to bend a boom, so it is never tied to one —
+                // it takes hold of a strap banded right round it, and that strap is
+                // the fitting you look for when you want to know where the vang is
+                // led. A child of the boom, so it swings with the spar it is on.
+                let at = crate::rig::BOOM_LENGTH * crate::rig::VANG_ALONG_BOOM;
+                let cheek = meshes.add(Cuboid::new(0.022, 0.16, 0.09));
+                for side in [-1.0_f32, 1.0] {
+                    boom.spawn((
+                        Mesh3d(cheek.clone()),
+                        MeshMaterial3d(metal.clone()),
+                        Transform::from_xyz(side * 0.058, -0.045, at),
+                    ));
+                }
+                // The pin between the cheeks, which is what the line actually turns on.
+                boom.spawn((
+                    Mesh3d(meshes.add(Cylinder::new(0.016, 0.14))),
+                    MeshMaterial3d(metal.clone()),
+                    Transform::from_xyz(0.0, -0.115, at)
+                        .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                ));
             });
+            // And the padeye it pulls against, at the mast foot.
+            b.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.14, 0.11, 0.04))),
+                MeshMaterial3d(metal.clone()),
+                Transform::from_xyz(0.0, DECK + 0.06, MAST_FOOT_Z + 0.2),
+            ));
             // Sails. Their meshes are rebuilt every frame from the trim.
             b.spawn((
                 SailSurface {
