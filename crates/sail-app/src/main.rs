@@ -98,7 +98,7 @@ fn main() {
         .init_resource::<clutch::Bank>()
         .init_resource::<input::Pilot>()
         .init_resource::<frame::RenderOrigin>()
-        .init_resource::<retro::Retro>()
+        .insert_resource(retro::Retro::from_env())
         .init_resource::<chart::Chart>()
         .init_resource::<chart::Track>()
         .init_resource::<world::SurfaceDrift>()

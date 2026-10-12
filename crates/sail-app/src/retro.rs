@@ -47,6 +47,28 @@ impl Retro {
     pub fn width(&self) -> Option<u32> {
         self.step.map(|s| WIDTHS[s])
     }
+
+    /// Start in the pixelated picture, from `SAIL_PIXELS` in the environment.
+    ///
+    /// Takes the width you want and picks the nearest step, so `SAIL_PIXELS=480` means
+    /// what it says and anything else lands somewhere sensible.
+    pub fn from_env() -> Self {
+        let Some(want) = std::env::var("SAIL_PIXELS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+        else {
+            return Self::default();
+        };
+        let step = WIDTHS
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, w)| w.abs_diff(want))
+            .map(|(i, _)| i);
+        Self {
+            step,
+            ..Self::default()
+        }
+    }
 }
 
 /// `V` steps through sharp, 960, 720, 480 and back.
@@ -98,6 +120,7 @@ pub fn apply(
                     commands.entity(screen).despawn();
                 }
                 retro.sized = (0, 0);
+                info!("picture: sharp");
             }
         }
         Some(size) => {
@@ -142,18 +165,31 @@ pub fn apply(
                         ..default()
                     },
                 ))
+                .with_children(|c| {
+                    // A child of the camera, so switching away takes it with it. It
+                    // was a loose entity, which meant every change of picture left
+                    // another full-screen sprite behind it — invisible, stacked, and
+                    // the sort of leak that is only ever found by someone wondering
+                    // why the frame rate fell over an hour.
+                    c.spawn((
+                        Sprite {
+                            image: handle.clone(),
+                            custom_size: Some(Vec2::new(window.width(), window.height())),
+                            ..default()
+                        },
+                        Transform::default(),
+                    ));
+                })
                 .id();
-            commands.spawn((
-                Sprite {
-                    image: handle.clone(),
-                    custom_size: Some(Vec2::new(window.width(), window.height())),
-                    ..default()
-                },
-                Transform::default(),
-            ));
             retro.screen = Some(screen);
             retro.target = Some(handle);
             retro.sized = size;
+            info!(
+                "picture: {} by {} pixels, scaled up {:.1} times",
+                size.0,
+                size.1,
+                physical.0 as f32 / size.0 as f32
+            );
         }
     }
 }
