@@ -589,7 +589,7 @@ pub fn update_telltales(sim: Res<Sim>, time: Res<Time>, mut q: Query<(&Telltale,
     let now = time.elapsed_secs();
 
     let reef = sim.controls.reef as f32;
-    let foot = 4.2 * (1.0 - 0.35 * reef);
+    let foot = crate::rig::BOOM_LENGTH * (1.0 - 0.35 * reef);
     let boom = side * t_.main.chord_angle as f32;
     let tack = Vec3::new(0.0, BOOM_HEIGHT, MAST_FOOT_Z);
     let head = Vec3::new(
@@ -673,7 +673,7 @@ pub fn update_sails(
         let (forces, geometry) = match surface.which {
             Sail::Main => {
                 let reef = sim.controls.reef as f32;
-                let foot = 4.2 * (1.0 - 0.35 * reef);
+                let foot = crate::rig::BOOM_LENGTH * (1.0 - 0.35 * reef);
                 let boom = side * t_.main.chord_angle as f32;
                 let tack = Vec3::new(0.0, BOOM_HEIGHT, MAST_FOOT_Z);
                 (
@@ -705,7 +705,11 @@ pub fn update_sails(
                 let angle = side * cfg.staysail.profile.chord_angle(sheet) as f32;
                 let tack = Vec3::new(0.0, DECK + 0.12, MAST_FOOT_Z - 3.3);
                 let head = Vec3::new(0.0, DECK + 8.4, MAST_FOOT_Z - 0.15);
-                let foot = 3.1;
+                let foot = foot_for_area(
+                    cfg.staysail.area as f32,
+                    head - tack,
+                    Vec3::new(angle.sin(), 0.0, angle.cos()),
+                );
                 // Hoisted, not furled: it climbs its stay as the halyard goes up.
                 (
                     t_.jib,
@@ -724,10 +728,14 @@ pub fn update_sails(
                 // rather than hung on a wire.
                 let gennaker = sim.controls.headsail == sail_core::state::Headsail::Gennaker;
                 let out = 1.0 - sim.controls.furl as f32;
-                let foot = if gennaker { 7.4 } else { 6.0 } * out;
                 let angle = side * t_.jib.chord_angle as f32;
                 let tack = sprit_end(cfg.loa as f32);
                 let head = Vec3::new(0.0, DECK + if gennaker { 14.0 } else { 14.8 }, MAST_FOOT_Z);
+                let foot = foot_for_area(
+                    cfg.headsail(sim.controls.headsail).area as f32,
+                    head - tack,
+                    Vec3::new(angle.sin(), 0.0, angle.cos()),
+                ) * out;
                 (
                     t_.jib,
                     SailGeometry {
@@ -748,10 +756,14 @@ pub fn update_sails(
                 // A rolling genoa loses area from its foot and leech as the drum
                 // turns, so it visibly shrinks on the stay rather than vanishing.
                 let out = 1.0 - sim.controls.furl as f32;
-                let foot = 4.9 * out;
                 let angle = side * t_.jib.chord_angle as f32;
                 let tack = genoa_tack(cfg.loa as f32);
                 let head = Vec3::new(0.0, DECK + 13.4, MAST_FOOT_Z);
+                let foot = foot_for_area(
+                    cfg.genoa.area as f32,
+                    head - tack,
+                    Vec3::new(angle.sin(), 0.0, angle.cos()),
+                ) * out;
                 // The car the clew is solved against, which must be the one the
                 // fitting is drawn at — the fourth place in this file where the same
                 // geometry had been derived twice.
@@ -813,6 +825,29 @@ pub fn update_sails(
             );
         }
     }
+}
+
+/// The foot length that makes a drawn sail the size the physics thinks it is.
+///
+/// Every sail in this file used to have its foot typed in as a number that looked right,
+/// and every one of them was wrong — the main by 36 percent small, the genoa by 32
+/// percent large, the gennaker by 38 percent small. Which is the same fault as the
+/// shroud, the lead car, the vang bail and the telltales: one thing described twice, in
+/// two places, with nothing keeping the descriptions together. A sail is a measured
+/// quantity in `BoatConfig`; the triangle that draws it has no business inventing its
+/// own.
+///
+/// A sail is not flat, so the cloth is larger than the triangle between its three
+/// corners — roach on a main, camber and a round leech on a headsail. Fifteen percent
+/// covers it for everything here.
+fn foot_for_area(area: f32, luff: Vec3, foot_dir: Vec3) -> f32 {
+    const CLOTH_OVER_TRIANGLE: f32 = 1.15;
+    let dir = foot_dir.normalize_or_zero();
+    // Area of a triangle is half the cross product, so the foot that gives the wanted
+    // area falls straight out of it — and it grows when the sail is sheeted in hard,
+    // which is correct: at a small angle between luff and foot the triangle is narrow.
+    let across = luff.cross(dir).length().max(0.15);
+    (2.0 * area / CLOTH_OVER_TRIANGLE / across).clamp(1.0, 16.0)
 }
 
 /// Where a cap shroud runs, in the boat's own frame.

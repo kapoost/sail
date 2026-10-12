@@ -34,7 +34,18 @@ pub const MAST_HEAD: f32 = DECK + 15.2;
 /// view like a handrail — and would have taken his head off in a gybe. A cruising boom
 /// clears a standing helmsman, barely, and you duck anyway.
 const BOOM_HEIGHT: f32 = DECK + 1.95;
-pub const BOOM_LENGTH: f32 = 4.2;
+/// Boom length, and it is not a free choice.
+///
+/// It is the mainsail's foot, so it is fixed by the sail's area and its luff: a 46
+/// square metre main on a 15.2 metre luff has an average chord of 3.0 m, and with the
+/// roach a modern main carries — call it fifteen percent over the flat triangle — the
+/// foot has to be 5.3 m. It was 4.2, which drew a main of thirty square metres on a
+/// boat whose physics was pulling with forty-six.
+///
+/// That mattered more than it sounds. The genoa was drawn a third too *large* at the
+/// same time, so on deck the headsail looked nearly the size of the main when it is in
+/// fact half of it — the one proportion a sailor reads a rig by, and it was reversed.
+pub const BOOM_LENGTH: f32 = 5.3;
 /// Where along the boom the vang takes hold, as a fraction of its length.
 ///
 /// Shared, because the bail is drawn on the boom and the line is drawn to it, and a
