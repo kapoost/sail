@@ -36,22 +36,14 @@ pub struct Workshop<'a> {
     pub materials: &'a mut Assets<StandardMaterial>,
     pub varnish: Handle<StandardMaterial>,
     pub metal: Handle<StandardMaterial>,
-    pub painted: Handle<StandardMaterial>,
     pub loa: f32,
 }
 
 pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
-    let Workshop {
-        varnish,
-        metal,
-        painted,
-        loa,
-        ..
-    } = &*w;
-    let (varnish, metal, painted, loa) = (varnish.clone(), metal.clone(), painted.clone(), *loa);
-    let varnish = &varnish;
-    let metal = &metal;
-    let painted = &painted;
+    // Cloned out of the workshop so the asset collections inside it stay borrowable.
+    let varnish = &w.varnish.clone();
+    let metal = &w.metal.clone();
+    let loa = w.loa;
     // --- Bowsprit ------------------------------------------------------------
     //
     // A spar out over the stem, for a gennaker to be tacked to later. Stayed by a
@@ -79,8 +71,11 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
         perceptual_roughness: 0.55,
         ..default()
     });
-    let aft = deck::cabin_aft();
-    let at = Vec3::new(0.0, deck::cabin_top(aft) - 0.18, aft + 0.07);
+    // On the forward coaming, facing aft, so it is read from the tiller without
+    // leaning. With no coachroof left there is nowhere else it could sensibly go, and
+    // this is where a flush-decked boat puts it anyway.
+    let fwd = deck::cockpit_fwd();
+    let at = Vec3::new(0.0, deck::deck_height(fwd) + 0.20, fwd + 0.30);
     b.spawn((
         Mesh3d(w.meshes.add(Cylinder::new(0.115, 0.10))),
         MeshMaterial3d(metal.clone()),
@@ -132,7 +127,10 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     let top = w.meshes.add(Cylinder::new(0.125, 0.035));
     for side in [-1.0_f32, 1.0] {
         let z = 1.9;
-        let x = side * deck::deck_half_beam(z) * 0.62;
+        // Just outboard of the coaming, where a hand already on a winch handle is
+        // also inside the cockpit. Keyed to the well's own width rather than to the
+        // beam, so they stay beside it whatever shape the well is.
+        let x = side * (deck::cockpit_half_beam(z) + 0.26);
         let y = deck::deck_height(z) + 0.10;
         b.spawn((
             Mesh3d(drum.clone()),
@@ -145,45 +143,47 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
             Transform::from_xyz(x, y + 0.11, z),
         ));
     }
-    // The clutch-bank winch, on the coachroof where the lines come aft to.
+    // The clutch-bank winch, on the deck just forward of the coaming where the slow
+    // lines come aft to. It used to live on the coachroof; there is no coachroof.
     b.spawn((
         Mesh3d(drum.clone()),
         MeshMaterial3d(metal.clone()),
-        Transform::from_xyz(0.42, deck::cabin_top(0.2) + 0.10, 0.2),
+        Transform::from_xyz(0.46, deck::deck_height(0.2) + 0.10, 0.2),
     ));
 
     // --- Companionway --------------------------------------------------------
     //
-    // A cabin with no way into it is a box. The sliding hatch and the washboards under
-    // it are the most recognisable thing on a small yacht's coachroof, and they also
-    // tell you which end of the cabin is the back.
-    let aft = deck::cabin_aft();
+    // A flush sliding hatch, because there is no trunk for it to stand on any more.
+    // On a working boat this is all there is: a hatch in the deck, and everything you
+    // live in underneath it.
+    let hatch = deck::cockpit_fwd() - 0.9;
     b.spawn((
-        Mesh3d(w.meshes.add(Cuboid::new(0.62, 0.52, 0.04))),
+        Mesh3d(w.meshes.add(Cuboid::new(0.74, 0.10, 0.86))),
         MeshMaterial3d(varnish.clone()),
-        Transform::from_xyz(0.0, deck::cabin_top(aft) - 0.26, aft + 0.02),
+        Transform::from_xyz(0.0, deck::deck_height(hatch) + 0.05, hatch),
     ));
-    // The hatch garage, slid shut.
-    b.spawn((
-        Mesh3d(w.meshes.add(Cuboid::new(0.70, 0.06, 0.78))),
-        MeshMaterial3d(painted.clone()),
-        Transform::from_xyz(0.0, deck::cabin_top(aft - 0.5) + 0.04, aft - 0.45),
-    ));
+    for side in [-1.0_f32, 1.0] {
+        b.spawn((
+            Mesh3d(w.meshes.add(Cuboid::new(0.05, 0.12, 0.94))),
+            MeshMaterial3d(varnish.clone()),
+            Transform::from_xyz(side * 0.40, deck::deck_height(hatch) + 0.06, hatch),
+        ));
+    }
 
     // --- Grabrails -----------------------------------------------------------
     //
-    // Along the coachroof, which is what you hold on the way forward. Cheap, and their
-    // absence is felt the moment anyone looks at the cabin top and wonders how you are
-    // supposed to cross it in a seaway.
-    let rail = w.meshes.add(Cuboid::new(0.05, 0.09, 2.6));
+    // Either side of the hatch, which is what you hold on the way forward. On a flush
+    // deck they matter more than they did on a trunk: there is nothing else up there
+    // to get a hand to.
+    let rail = w.meshes.add(Cuboid::new(0.05, 0.09, 3.2));
     for side in [-1.0_f32, 1.0] {
-        let z = -1.1;
+        let z = -1.6;
         b.spawn((
             Mesh3d(rail.clone()),
             MeshMaterial3d(varnish.clone()),
             Transform::from_xyz(
-                side * deck::cabin_half_beam(z) * 0.72,
-                deck::cabin_top(z) + 0.05,
+                side * deck::deck_half_beam(z) * 0.40,
+                deck::deck_height(z) + 0.05,
                 z,
             ),
         ));

@@ -287,7 +287,6 @@ pub fn setup(
                     materials: &mut materials,
                     varnish: varnish.clone(),
                     metal: metal.clone(),
-                    painted: painted_mat.clone(),
                     loa: cfg.loa as f32,
                 },
             );

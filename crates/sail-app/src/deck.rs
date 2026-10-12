@@ -55,21 +55,17 @@ const SHEER: [(f32, f32, f32); 21] = [
     (5.50, 0.29, 1.35),
 ];
 
-/// Where the coachroof begins and ends, and where the cockpit does.
-const CABIN_FWD: f32 = -3.1;
-const CABIN_AFT: f32 = 0.9;
+/// Where the cockpit begins and ends.
+///
+/// There is no coachroof. She is flush-decked, which is right for this hull and is
+/// what the first version should have been: a cabin trunk on a boat this fine is a
+/// shed on a racing shell, it blocked the whole view forward from the tiller, and
+/// everything that was on top of it belongs on the deck anyway. The accommodation is
+/// under the deck, reached through a hatch, the way it is on a working boat.
+const COCKPIT_FWD: f32 = 0.9;
 const COCKPIT_AFT: f32 = 4.0;
-/// Coachroof height above the deck at its aft end, tapering forward.
-/// Low. The first attempt stood 0.78 m above the deck, which on an eleven-metre boat
-/// is a caravan: it blocked the view forward from the cockpit and made her look like
-/// a motorsailer. A coachroof on a hull this fine is something you step over, not
-/// something you walk round.
-const CABIN_RISE_AFT: f32 = 0.46;
-const CABIN_RISE_FWD: f32 = 0.24;
-/// How much of the local half-beam the coachroof takes, leaving a side deck to walk on.
-const CABIN_WIDTH: f32 = 0.56;
-/// The cockpit well: narrower than the cabin, and sunk below the deck.
-const COCKPIT_WIDTH: f32 = 0.46;
+/// The cockpit well: how much of the local half-beam it takes, and how deep it is.
+const COCKPIT_WIDTH: f32 = 0.52;
 const COCKPIT_DEPTH: f32 = 0.62;
 
 /// Linear interpolation along the sheer table.
@@ -103,30 +99,15 @@ fn ease(t: f32) -> f32 {
 /// which is what makes a foredeck you could stand on to handle an anchor.
 fn opening(z: f32) -> (f32, f32) {
     let (half, _) = sheer_at(z);
-    if z < CABIN_FWD || z > COCKPIT_AFT {
+    if z < COCKPIT_FWD || z > COCKPIT_AFT {
         return (0.0, 0.0);
     }
-    if z <= CABIN_AFT {
-        // The coachroof: narrowing and dropping towards the bow, so the front of it
-        // is a slope rather than a wall.
-        let t = ease((z - CABIN_FWD) / 1.4);
-        let along = (z - CABIN_FWD) / (CABIN_AFT - CABIN_FWD);
-        let rise = CABIN_RISE_FWD + (CABIN_RISE_AFT - CABIN_RISE_FWD) * ease(along);
-        (half * CABIN_WIDTH * t, rise * t)
-    } else {
-        // The cockpit, which goes down rather than up.
-        let t = ease((COCKPIT_AFT - z) / 0.8);
-        (half * COCKPIT_WIDTH * t, -COCKPIT_DEPTH * t)
-    }
+    // Eased in at both ends, so the well has rounded corners in plan rather than
+    // stopping dead against a bulkhead.
+    let t = ease((z - COCKPIT_FWD) / 0.8).min(ease((COCKPIT_AFT - z) / 0.8));
+    (half * COCKPIT_WIDTH * t, -COCKPIT_DEPTH * t)
 }
 
-/// Radius of the coachroof's top corner, metres.
-///
-/// A cabin side meeting a cabin top at a right angle is a packing crate. Every boat
-/// rounds it, partly because that is how a laminate or a bent plank wants to go and
-/// partly because it is what you grab when the deck tips — a sharp edge there is
-/// something you cut your hand on.
-const CABIN_CORNER: f32 = 0.11;
 /// Where the cockpit sole sits below the sheer, metres.
 const SOLE_DROP: f32 = 0.62;
 
@@ -137,27 +118,12 @@ const SOLE_DROP: f32 = 0.62;
 /// one list of points is what lets the stitching treat them all the same.
 fn half_section(z: f32) -> Vec<(f32, f32)> {
     let (half, sheer) = sheer_at(z);
-    let (inner, rise) = opening(z);
-    let mut out: Vec<(f32, f32)> = Vec::with_capacity(10);
+    let (inner, _) = opening(z);
+    let mut out: Vec<(f32, f32)> = Vec::with_capacity(8);
 
     if inner <= 1e-4 {
         // Plain deck, closed to the centreline.
         out.push((0.0, sheer + camber(0.0, half)));
-    } else if rise > 0.0 {
-        // Coachroof: crowned top, then a rounded corner down onto the side.
-        let top = sheer + rise;
-        out.push((0.0, top + camber(0.0, inner)));
-        let flat = (inner - CABIN_CORNER).max(0.0);
-        out.push((flat, top + camber(flat, inner)));
-        // A quarter round, so the top rolls into the side instead of breaking at it.
-        for k in 1..=3 {
-            let a = (k as f32 / 4.0) * std::f32::consts::FRAC_PI_2;
-            out.push((
-                flat + CABIN_CORNER * a.sin(),
-                top - CABIN_CORNER * (1.0 - a.cos()),
-            ));
-        }
-        out.push((inner, sheer));
     } else {
         // Cockpit: a flat sole, vertical sides, and a lip at deck level.
         //
@@ -314,40 +280,39 @@ pub fn cockpit_sole() -> f32 {
     deck_height(2.6) - SOLE_DROP
 }
 
-/// Where the aft face of the coachroof is.
-pub fn cabin_aft() -> f32 {
-    CABIN_AFT
+/// The forward end of the cockpit, which is where its coaming runs across.
+pub fn cockpit_fwd() -> f32 {
+    COCKPIT_FWD
 }
 
-/// Height of the coachroof at a station, for putting things on top of it.
-pub fn cabin_top(z: f32) -> f32 {
-    let (_, rise) = opening(z);
-    sheer_at(z).1 + rise.max(0.0)
-}
-
-/// Half-beam of the coachroof at a station.
-pub fn cabin_half_beam(z: f32) -> f32 {
+/// Half-beam of the cockpit well at a station.
+pub fn cockpit_half_beam(z: f32) -> f32 {
     opening(z).0
 }
 
 /// Height of the cockpit coaming above the deck, metres.
 ///
-/// Low. It is something to brace a foot against and to sit on with your back to, not
-/// a bulwark — and on a boat this fine a tall one would look like an afterthought
-/// bolted to a hull that never asked for it.
-const COAMING: f32 = 0.24;
+/// Taller now that she is flush-decked and it is the only structure above the deck at
+/// all: it is the thing you sit with your back to and brace a foot against, and on a
+/// boat with no cabin trunk it is also the only thing keeping water that comes aboard
+/// out of the well.
+const COAMING: f32 = 0.30;
 /// Height of the toerail above the deck.
 const TOERAIL: f32 = 0.09;
 
-/// The toerail along the sheer, and the coaming round the cockpit.
+/// The toerail along the sheer, and the wooden coaming round the cockpit.
 ///
 /// Both are a strip standing on a curve the file already knows, so both come out of
-/// one routine. The toerail is what covers the joint between the scanned hull and the
-/// built deck — a hard edge there is the single most obvious tell that the two were
-/// made separately — and the coaming is what turns a hole in the deck into a cockpit.
+/// one routine. The toerail covers the joint between the scanned hull and the built
+/// deck — a hard edge there is the single most obvious tell that the two were made
+/// separately — and the coaming is what turns a hole in the deck into a cockpit.
+///
+/// The coaming runs across the forward end as well as down the sides, because that is
+/// the piece you actually brace against and sit with your back to, and a well open at
+/// the front is a footwell, not a cockpit.
 pub fn trim_mesh() -> Mesh {
     let mut surface = Surface::default();
-    let steps = 240;
+    let steps = 260;
     let z0 = SHEER[0].0;
     let z1 = SHEER[SHEER.len() - 1].0;
 
@@ -355,17 +320,18 @@ pub fn trim_mesh() -> Mesh {
     for i in 0..=steps {
         let z = z0 + (z1 - z0) * (i as f32 / steps as f32);
         let (half, sheer) = sheer_at(z);
-        let (inner, rise) = opening(z);
+        let (inner, _) = opening(z);
 
-        // Toerail: a capping on the sheer, both sides.
         let mut low = Vec::new();
         let mut high = Vec::new();
+        // Toerail, capping the sheer both sides.
         for side in [1.0_f32, -1.0] {
             low.push(Vec3::new(side * half, sheer, z));
             high.push(Vec3::new(side * half, sheer + TOERAIL, z));
         }
-        // Coaming: only where the cockpit is, and only on its outer edge.
-        if z > CABIN_AFT && z < COCKPIT_AFT && inner > 0.05 && rise < 0.0 {
+        // Coaming, following the edge of the well all the way round — including
+        // across the ends, where the eased opening carries it.
+        if inner > 0.02 {
             for side in [1.0_f32, -1.0] {
                 low.push(Vec3::new(side * inner, sheer, z));
                 high.push(Vec3::new(side * inner, sheer + COAMING, z));
