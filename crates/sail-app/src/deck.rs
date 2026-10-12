@@ -100,21 +100,48 @@ const COCKPIT_WIDTH: f32 = 0.52;
 const COCKPIT_DEPTH: f32 = 0.62;
 
 /// Linear interpolation along the sheer table.
+/// How many stations either side are averaged in to fair the sheer.
+///
+/// The table is measured off a photogrammetric scan — which is the right way to get a
+/// hull's shape and the wrong way to get its *sheerline*. A scan carries every dent in
+/// an eighty-year-old boat's gunwale and every millimetre of noise in the
+/// reconstruction, and a straight interpolation through those points reproduces all of
+/// it: a deck with hollows and humps in it, which is what it looked like.
+///
+/// A sheerline is the one line on a boat that is never allowed to be lumpy. A shipwright
+/// fairs it — bends a batten through the measured points and takes the curve the batten
+/// makes, because a batten cannot bend sharply and so cannot reproduce noise. Averaging
+/// across five stations, a metre and a quarter of boat, is that batten: wide enough to
+/// swallow the scan's grain, narrow enough to keep the sheer's real spring and the rise
+/// towards the bow.
+const FAIRING: usize = 2;
+
 fn sheer_at(z: f32) -> (f32, f32) {
+    let faired = |i: usize| -> (f32, f32) {
+        let lo = i.saturating_sub(FAIRING);
+        let hi = (i + FAIRING).min(SHEER.len() - 1);
+        let mut rise = 0.0;
+        let mut half = 0.0;
+        for s in &SHEER[lo..=hi] {
+            rise += s.1;
+            half += s.2;
+        }
+        let n = (hi - lo + 1) as f32;
+        (rise / n, half / n)
+    };
     if z <= SHEER[0].0 {
-        return (SHEER[0].1, SHEER[0].2);
+        let (rise, half) = faired(0);
+        return (rise, half);
     }
-    for w in SHEER.windows(2) {
+    for (i, w) in SHEER.windows(2).enumerate() {
         if z <= w[1].0 {
             let t = (z - w[0].0) / (w[1].0 - w[0].0);
-            return (
-                w[0].1 + (w[1].1 - w[0].1) * t,
-                w[0].2 + (w[1].2 - w[0].2) * t,
-            );
+            let a = faired(i);
+            let b = faired(i + 1);
+            return (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
         }
     }
-    let last = SHEER[SHEER.len() - 1];
-    (last.1, last.2)
+    faired(SHEER.len() - 1)
 }
 
 /// Smoothstep, for shapes that have to start and stop without a crease.
