@@ -42,6 +42,19 @@ pub const BANK: [Line; 6] = [
 ];
 
 impl Line {
+    /// Whether this line does anything with the sail that is up.
+    ///
+    /// The genoa car leads the genoa's sheet, and a Code 0 or a gennaker is not sheeted
+    /// to it — it goes to a block on the quarter, right aft, which is a shackle and not
+    /// a control. Reported from the gear rather than hidden, because a line that is
+    /// there and does nothing is a thing a boat genuinely has.
+    pub fn rigged_for(self, c: &Controls) -> bool {
+        match self {
+            Line::GenoaCar => c.headsail == sail_core::state::Headsail::Genoa,
+            _ => true,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Line::Outhaul => "outhaul",

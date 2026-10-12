@@ -208,8 +208,20 @@ impl Simulation {
         let ((lower_area, lower_z), (upper_area, upper_z)) = cfg.main_sections(controls.reef);
         let flying = controls.headsail;
         let head = cfg.headsail(flying);
+        // A roller genoa is a trim control: half rolled is a smaller genoa and a real
+        // way to sail. A sail set flying is not. There is no useful half of a Code 0 —
+        // start the furling line and the luff goes slack, the sail folds along its
+        // length and flogs, and what is left is doing nothing but wearing itself out.
+        // So for the flying sails the line is a hoist, not a reef: the sail is up, or it
+        // is away, and the little in between is where it stops working rather than a
+        // band to be sailed in.
+        let furl = if flying.flying() {
+            1.0 - smoothstep(0.10, 0.45, controls.furl)
+        } else {
+            1.0 - controls.furl.clamp(0.0, 1.0)
+        };
         let ((jib_lower_area, jib_lower_z), (jib_upper_area, jib_upper_z)) =
-            cfg.headsail_sections(flying, controls.furl);
+            cfg.headsail_sections(flying, 1.0 - furl);
         let (lower_awa, lower_aws) = apparent_wind(&st, wind_ref, lower_z * heel_cos, velocity);
         let (upper_awa, upper_aws) = apparent_wind(&st, wind_ref, upper_z * heel_cos, velocity);
         let (jib_awa, jib_aws) = apparent_wind(&st, wind_ref, jib_lower_z * heel_cos, velocity);
@@ -245,8 +257,25 @@ impl Simulation {
         );
         // A headsail's depth and twist both come from its sheet lead car — the genoa's
         // outhaul and vang in one fitting, which is why it has neither separately.
-        let jib_camber = camber_for_lead(controls.genoa_car);
-        let jib_twist = twist_for_lead(controls.genoa_car);
+        // Where the headsail's depth comes from, which is not the same question for all
+        // three. A genoa's shape is made by its lead car — the car is its outhaul and
+        // its vang in one fitting. A sail set flying has no car and no such control: its
+        // depth is cut into it by the sailmaker and nothing on board changes it.
+        let jib_camber = match flying {
+            crate::state::Headsail::Genoa => camber_for_lead(controls.genoa_car),
+            crate::state::Headsail::Code0 => crate::sail::CAMBER_CODE_ZERO,
+            crate::state::Headsail::Gennaker => crate::sail::CAMBER_GENNAKER,
+        };
+        // Twist, and the same question again: a genoa's leech is opened and closed by
+        // its lead car, and a sail set flying has no car to lead to. Its sheet goes to a
+        // block on the quarter, as far aft as the boat allows, so its leech falls open
+        // to whatever its own cut and the sheet tension give it — a fixed, generous
+        // amount, and nothing on the bank changes it.
+        let jib_twist = if flying.flying() {
+            crate::sail::MAX_LEAD_TWIST * 0.75
+        } else {
+            twist_for_lead(controls.genoa_car)
+        };
         let jib_chord = head.profile.chord_angle(controls.jib_sheet);
         let jib_upper_sheet = head.profile.sheet_for_chord_angle(jib_chord + jib_twist);
 

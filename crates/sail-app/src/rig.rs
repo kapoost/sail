@@ -33,19 +33,39 @@ pub const MAST_HEAD: f32 = DECK + 15.2;
 /// It was a quarter of a metre *below* the helmsman's eye, which put it across the
 /// view like a handrail — and would have taken his head off in a gybe. A cruising boom
 /// clears a standing helmsman, barely, and you duck anyway.
-const BOOM_HEIGHT: f32 = DECK + 1.95;
+/// How high the boom rides above the deck at the gooseneck.
+///
+/// Defined here and nowhere else. It was in two files with the same number in both,
+/// which is the arrangement that works right up until one of them is changed.
+///
+/// Lowered from 1.95 to 1.62. A boom that high stands over a cockpit nobody could see
+/// past; this is still a comfortable duck underneath and it puts the sail's area where
+/// it does the most good and the least heeling — the end of a boom is the one part of a
+/// mainsail you can lower without losing any of it.
+pub const BOOM_HEIGHT: f32 = DECK + 1.62;
 /// Boom length, and it is not a free choice.
 ///
-/// It is the mainsail's foot, so it is fixed by the sail's area and its luff: a 46
-/// square metre main on a 15.2 metre luff has an average chord of 3.0 m, and with the
-/// roach a modern main carries — call it fifteen percent over the flat triangle — the
-/// foot has to be 5.3 m. It was 4.2, which drew a main of thirty square metres on a
-/// boat whose physics was pulling with forty-six.
+/// It is the mainsail's foot, so it is fixed by the sail's area and its luff — and by
+/// the luff the *drawn* rig actually has, which is the correction that followed. The
+/// first pass used the configured luff of 15.2 m and got 5.3 m; but the drawn mast
+/// gives only 13.78 m of hoist above the boom, so at 5.3 the triangle came to 41 square
+/// metres rather than 46. With the real hoist the foot is 5.80 m, and the clew lands
+/// well forward of the transom, which is where a boom of that length ends on a boat of
+/// this one's size.
+///
+/// The configured luff and the drawn hoist still differ by 1.7 m, and the honest fix is
+/// a taller mast rather than a longer boom — the aspect ratio the force model uses comes
+/// from that luff. It is written down here rather than quietly absorbed, because moving
+/// the masthead moves the shrouds, the forestay, the spreaders and every headsail head
+/// with it, and that is a change to make deliberately.
+///
+/// It was 4.2, which drew a main of thirty square metres on a boat whose physics was
+/// pulling with forty-six.
 ///
 /// That mattered more than it sounds. The genoa was drawn a third too *large* at the
 /// same time, so on deck the headsail looked nearly the size of the main when it is in
 /// fact half of it — the one proportion a sailor reads a rig by, and it was reversed.
-pub const BOOM_LENGTH: f32 = 5.3;
+pub const BOOM_LENGTH: f32 = 5.80;
 /// Where along the boom the vang takes hold, as a fraction of its length.
 ///
 /// Shared, because the bail is drawn on the boom and the line is drawn to it, and a
@@ -67,10 +87,13 @@ enum Kind {
     MainSheet,
     Vang,
     JibSheet(bool),
+    /// The staysail's sheet. One of them, because a club-footed staysail tacks itself:
+    /// the boom crosses, the sheet never does.
+    StaysailSheet,
 }
 
 /// All the lines, in the order they are packed into the mesh.
-const LINES: [Kind; 12] = [
+const LINES: [Kind; 13] = [
     Kind::Outhaul,
     Kind::Bobstay,
     Kind::SpritShroud(false),
@@ -85,6 +108,7 @@ const LINES: [Kind; 12] = [
     // a loop in it, and seeing which is which is half of knowing what tack you are on.
     Kind::JibSheet(false),
     Kind::JibSheet(true),
+    Kind::StaysailSheet,
 ];
 
 /// How long a line stays lit after the control that moves it is touched.
@@ -191,6 +215,9 @@ pub fn update(
         if moved(now.main_sheet, was.main_sheet) {
             light(Kind::MainSheet);
         }
+        if moved(now.staysail, was.staysail) {
+            light(Kind::StaysailSheet);
+        }
         if moved(now.jib_sheet, was.jib_sheet)
             || moved(now.furl, was.furl)
             || moved(now.genoa_car, was.genoa_car)
@@ -224,7 +251,6 @@ pub fn update(
     // going soft.
     let lee = -(t.awa.signum() as f32);
     let boom = lee * t.main.chord_angle as f32;
-    let jib_angle = lee * t.jib.chord_angle as f32;
     let heel = st.heel as f32;
 
     // Reference force for normalising sheet loads: the rig's own dynamic pressure at a
@@ -369,6 +395,31 @@ pub fn update(
                 colour: vang_green,
                 stiff: false,
             },
+            Kind::StaysailSheet => {
+                // From a point part way out along the club boom down to a deck eye on
+                // the centreline. That is the whole of a self-tacker's rigging: nothing
+                // leads aft, nothing is handed across, and tacking takes no hands.
+                let set = sim.controls.staysail as f32;
+                let sheet_angle = cfg
+                    .staysail
+                    .profile
+                    .optimal_sheet(t.awa, sail_core::sail::CAMBER_REFERENCE);
+                let club = lee * cfg.staysail.profile.chord_angle(sheet_angle) as f32;
+                let length = crate::boat::staysail_boom_length(cfg.staysail.area as f32);
+                let at = crate::boat::staysail_boom_end(club, length * 0.72);
+                Span {
+                    from: at,
+                    to: Vec3::new(
+                        0.0,
+                        crate::deck::deck_height(MAST_FOOT_Z - 2.1) + 0.06,
+                        MAST_FOOT_Z - 2.1,
+                    ),
+                    tension: jib_load * 0.45 * set,
+                    width: 0.024,
+                    colour: sheet_blue,
+                    stiff: false,
+                }
+            }
             Kind::JibSheet(starboard) => {
                 let side = if starboard { 1.0 } else { -1.0 };
                 let working = side * lee > 0.0;
@@ -376,16 +427,28 @@ pub fn update(
                 // has no clew to pull on at all.
                 // The same solve the sail uses, so the rope ends where the sail's
                 // corner is rather than near it.
-                let out = 1.0 - furled;
-                let tack = crate::boat::genoa_tack(cfg.loa as f32);
-                let car_at = crate::boat::genoa_car_at(sim.controls.genoa_car as f32, starboard);
-                let clew = crate::boat::genoa_clew(
-                    tack,
-                    jib_angle,
-                    4.9 * out,
-                    car_at,
-                    crate::boat::sheet_length(sim.controls.jib_sheet as f32),
+                // The sail's own three corners, from the one function that knows them,
+                // so the rope ends at the clew rather than near it. It used to solve the
+                // clew a second time here with its own typed-in foot length, and when
+                // the sail's was replaced by the measured one this copy stayed behind.
+                let shape = crate::boat::headsail_shape(
+                    &cfg,
+                    &sim.controls,
+                    if starboard { 1.0 } else { -1.0 },
+                    t.jib.chord_angle as f32,
                 );
+                let clew = shape.clew;
+                // A flying sail is sheeted to a block on the quarter, right aft, not to
+                // the genoa track — which is why the car does nothing when one is up.
+                let car_at = if sim.controls.headsail == sail_core::state::Headsail::Genoa {
+                    crate::boat::genoa_car_at(sim.controls.genoa_car as f32, starboard)
+                } else {
+                    Vec3::new(
+                        if starboard { 1.15 } else { -1.15 },
+                        crate::deck::deck_height(3.9) + 0.07,
+                        3.9,
+                    )
+                };
                 Span {
                     // The lazy sheet runs from the same clew but is not pulling, so it
                     // falls away in a bight across the foredeck.

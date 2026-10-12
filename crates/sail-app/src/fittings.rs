@@ -26,7 +26,13 @@ pub struct CompassCard;
 /// Where the rudder stock comes through the deck, metres aft of the centre of gravity.
 const STOCK_Z: f32 = 4.60;
 /// Length of the tiller forward of the stock.
-const TILLER_LENGTH: f32 = 1.70;
+///
+/// A metre and a quarter. It was 1.70, which is a tiller for a much heavier boat and
+/// looked like one — it reached most of the way up the cockpit. The length is a real
+/// trade and not a drawing choice: a long tiller gives leverage and feel, a short one
+/// gives the crew somewhere to sit, and on a boat this light the helm loads are small
+/// enough that the crew wins.
+const TILLER_LENGTH: f32 = 1.25;
 
 /// Everything needed to put a fitting on the boat: somewhere to make meshes and
 /// textures, and the handful of finishes the whole boat is built out of.
@@ -102,7 +108,7 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     ))
     .with_children(|t| {
         t.spawn((
-            Mesh3d(w.meshes.add(Cuboid::new(0.055, 0.075, TILLER_LENGTH))),
+            Mesh3d(w.meshes.add(Cuboid::new(0.045, 0.062, TILLER_LENGTH))),
             MeshMaterial3d(varnish.clone()),
             // Forward of the pivot, and rising slightly, the way a tiller does so it
             // clears the coaming when it is hard over.
@@ -111,7 +117,7 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
         ));
         // The head of the stock it is clamped to.
         t.spawn((
-            Mesh3d(w.meshes.add(Cylinder::new(0.065, 0.24))),
+            Mesh3d(w.meshes.add(Cylinder::new(0.055, 0.21))),
             MeshMaterial3d(metal.clone()),
             Transform::from_xyz(0.0, 0.0, 0.0),
         ));

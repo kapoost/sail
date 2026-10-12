@@ -152,7 +152,7 @@ const HULL_SINKAGE: f32 = -1.294;
 const MAST_FOOT_Z: f32 = -1.8;
 /// Height of the boom above the waterline — the mainsail's tack, and the one number
 /// three separate places were each spelling out as `DECK + 1.25`.
-const BOOM_HEIGHT: f32 = DECK + 1.95;
+use crate::rig::BOOM_HEIGHT;
 /// How high a headsail's clew floats when nothing is pulling it down, metres above
 /// the tack. The sail hangs from the stay and the wind holds the foot up; only the
 /// sheet brings it down.
@@ -382,9 +382,15 @@ pub fn setup(
             ))
             .with_children(|boom| {
                 boom.spawn((
-                    Mesh3d(meshes.add(Cylinder::new(0.065, 4.3))),
+                    // The spar is the foot of the sail, so it is drawn at the length
+                    // the sail is cut to — the sixth thing in this file that was
+                    // described in two places and had drifted apart.
+                    Mesh3d(meshes.add(Cylinder::new(
+                        0.065,
+                        crate::rig::BOOM_LENGTH,
+                    ))),
                     MeshMaterial3d(spar_mat.clone()),
-                    Transform::from_xyz(0.0, 0.0, 2.15)
+                    Transform::from_xyz(0.0, 0.0, crate::rig::BOOM_LENGTH * 0.5)
                         .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                 ));
                 // The vang bail, under the boom where the vang is made fast.
@@ -421,6 +427,22 @@ pub fn setup(
                     MAST_FOOT_Z + 0.2,
                 ),
             ));
+            // The staysail's club boom, pivoting at its own tack. Self-tacking: the
+            // sheet does not change sides, the boom does.
+            b.spawn((
+                StaysailBoom,
+                Transform::from_translation(staysail_tack()),
+                Visibility::default(),
+            ))
+            .with_children(|club| {
+                let length = staysail_boom_length(cfg.staysail.area as f32);
+                club.spawn((
+                    Mesh3d(meshes.add(Cylinder::new(0.045, length))),
+                    MeshMaterial3d(spar_mat.clone()),
+                    Transform::from_xyz(0.0, 0.11, length * 0.5)
+                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                ));
+            });
             // Sails. Their meshes are rebuilt every frame from the trim.
             b.spawn((
                 SailSurface {
@@ -531,6 +553,31 @@ pub fn update_rudder(sim: Res<Sim>, mut q: Query<&mut Transform, With<RudderBlad
         // Positive rudder turns the bow to starboard, so the blade's trailing edge
         // goes to starboard, which is a negative rotation about the vertical.
         t.rotation = Quat::from_rotation_y(-angle);
+    }
+}
+
+/// The club boom swings to whatever angle the staysail has found, and goes away with
+/// the sail — a boom lying on the foredeck with no sail on it is not a thing a boat has
+/// in the middle of a passage.
+pub fn update_staysail_boom(
+    sim: Res<Sim>,
+    mut q: Query<(&mut Transform, &mut Visibility), With<StaysailBoom>>,
+) {
+    let t_ = &sim.sim.telemetry;
+    let cfg = sim.config();
+    let side = -t_.awa.signum() as f32;
+    let sheet = cfg
+        .staysail
+        .profile
+        .optimal_sheet(t_.awa, sail_core::sail::CAMBER_REFERENCE);
+    let angle = side * cfg.staysail.profile.chord_angle(sheet) as f32;
+    for (mut tr, mut vis) in &mut q {
+        tr.rotation = Quat::from_rotation_y(angle);
+        *vis = if sim.controls.staysail < 0.02 {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
     }
 }
 
@@ -673,7 +720,18 @@ pub fn update_sails(
         let (forces, geometry) = match surface.which {
             Sail::Main => {
                 let reef = sim.controls.reef as f32;
-                let foot = crate::rig::BOOM_LENGTH * (1.0 - 0.35 * reef);
+                // A slab reef takes the luff down and leaves the foot where it was.
+                //
+                // The reefing pennant runs through a cheek block at the *end* of the
+                // boom, so hauling it down puts the new clew within a few centimetres
+                // of where the old one was. What you lose is hoist. This used to pull
+                // the foot in by a third of the reef, which drew a sail hanging off the
+                // middle of its own boom — and left the spar sticking a metre past the
+                // cloth, which is what a boom does on no boat at all.
+                let foot = crate::rig::BOOM_LENGTH * (1.0 - 0.06 * reef);
+                // And the hoist comes down by exactly the area the rig is losing, so
+                // the drawn triangle stays the size the force model is pulling with.
+                let shrink = 1.0 - reef * cfg.max_reef as f32;
                 let boom = side * t_.main.chord_angle as f32;
                 let tack = Vec3::new(0.0, BOOM_HEIGHT, MAST_FOOT_Z);
                 (
@@ -683,7 +741,7 @@ pub fn update_sails(
                         // Reefing pulls the head down the mast, not the foot up.
                         head: Vec3::new(
                             0.0,
-                            BOOM_HEIGHT + (15.4 - BOOM_HEIGHT) * (1.0 - 0.45 * reef),
+                            BOOM_HEIGHT + (DECK + 15.4 - BOOM_HEIGHT) * shrink,
                             MAST_FOOT_Z,
                         ),
                         // The clew is the boom end: level with the tack, because the
@@ -703,86 +761,25 @@ pub fn update_sails(
                     .profile
                     .optimal_sheet(t_.awa, sail_core::sail::CAMBER_REFERENCE);
                 let angle = side * cfg.staysail.profile.chord_angle(sheet) as f32;
-                let tack = Vec3::new(0.0, DECK + 0.12, MAST_FOOT_Z - 3.3);
-                let head = Vec3::new(0.0, DECK + 8.4, MAST_FOOT_Z - 0.15);
-                let foot = foot_for_area(
-                    cfg.staysail.area as f32,
-                    head - tack,
-                    Vec3::new(angle.sin(), 0.0, angle.cos()),
-                );
+                let tack = staysail_tack();
+                let head = staysail_head();
+                let foot = staysail_boom_length(cfg.staysail.area as f32);
                 // Hoisted, not furled: it climbs its stay as the halyard goes up.
                 (
                     t_.jib,
                     SailGeometry {
                         tack,
                         head: tack.lerp(head, 0.18 + 0.82 * set),
-                        clew: tack
-                            + Vec3::new(angle.sin() * foot, 0.30, angle.cos() * foot * 0.55),
+                        // On the boom end, because that is where a club-footed sail's
+                        // clew is: shackled to the spar, not flying free.
+                        clew: staysail_boom_end(angle, foot),
                     },
                 )
             }
-            Sail::Headsail if sim.controls.headsail != sail_core::state::Headsail::Genoa => {
-                // A sail set flying: tacked out on the sprit end, hoisted to the
-                // masthead, clew sheeted away aft. Nothing holds its luff but its own
-                // tension, which is why it is drawn from three corners and a curve
-                // rather than hung on a wire.
-                let gennaker = sim.controls.headsail == sail_core::state::Headsail::Gennaker;
-                let out = 1.0 - sim.controls.furl as f32;
-                let angle = side * t_.jib.chord_angle as f32;
-                let tack = sprit_end(cfg.loa as f32);
-                let head = Vec3::new(0.0, DECK + if gennaker { 14.0 } else { 14.8 }, MAST_FOOT_Z);
-                let foot = foot_for_area(
-                    cfg.headsail(sim.controls.headsail).area as f32,
-                    head - tack,
-                    Vec3::new(angle.sin(), 0.0, angle.cos()),
-                ) * out;
-                (
-                    t_.jib,
-                    SailGeometry {
-                        tack,
-                        head: tack.lerp(head, 0.3 + 0.7 * out),
-                        // Flown free: the clew swings on the arc of its own foot, out
-                        // to leeward and lifting, with no lead car to pull it down.
-                        clew: tack
-                            + Vec3::new(
-                                angle.sin() * foot,
-                                if gennaker { 1.35 } else { 0.85 },
-                                angle.cos() * foot,
-                            ),
-                    },
-                )
-            }
-            Sail::Headsail => {
-                // A rolling genoa loses area from its foot and leech as the drum
-                // turns, so it visibly shrinks on the stay rather than vanishing.
-                let out = 1.0 - sim.controls.furl as f32;
-                let angle = side * t_.jib.chord_angle as f32;
-                let tack = genoa_tack(cfg.loa as f32);
-                let head = Vec3::new(0.0, DECK + 13.4, MAST_FOOT_Z);
-                let foot = foot_for_area(
-                    cfg.genoa.area as f32,
-                    head - tack,
-                    Vec3::new(angle.sin(), 0.0, angle.cos()),
-                ) * out;
-                // The car the clew is solved against, which must be the one the
-                // fitting is drawn at — the fourth place in this file where the same
-                // geometry had been derived twice.
-                let car = genoa_car_at(sim.controls.genoa_car as f32, side > 0.0);
-                (
-                    t_.jib,
-                    SailGeometry {
-                        tack,
-                        head: tack.lerp(head, 0.35 + 0.65 * out),
-                        clew: genoa_clew(
-                            tack,
-                            angle,
-                            foot,
-                            car,
-                            sheet_length(sim.controls.jib_sheet as f32),
-                        ),
-                    },
-                )
-            }
+            Sail::Headsail => (
+                t_.jib,
+                headsail_shape(&cfg, &sim.controls, side, t_.jib.chord_angle as f32),
+            ),
         };
         if let Some(mut mesh) = meshes.get_mut(&surface.mesh) {
             // Both sails twist. The main's comes from the vang arguing with the
@@ -825,6 +822,109 @@ pub fn update_sails(
             );
         }
     }
+}
+
+
+/// The three corners of whichever sail is up forward.
+///
+/// One definition, used by the cloth and by the sheet that pulls on it. They were two,
+/// and the sheet's copy still had the old typed-in foot length in it after the sail's
+/// had been replaced by the measured one — which is the same fault as the shroud, the
+/// lead car, the vang bail, the telltales and the sail areas, caught this time before
+/// anybody had to look at it on the water.
+pub fn headsail_shape(
+    cfg: &sail_core::boat::BoatConfig,
+    controls: &sail_core::state::Controls,
+    side: f32,
+    chord: f32,
+) -> SailGeometry {
+    let angle = side * chord;
+    let kind = controls.headsail;
+    if kind == sail_core::state::Headsail::Genoa {
+        // A rolling genoa loses area from its foot and leech as the drum turns, so it
+        // visibly shrinks on the stay rather than vanishing.
+        let out = 1.0 - controls.furl as f32;
+        let tack = genoa_tack(cfg.loa as f32);
+        let head = Vec3::new(0.0, DECK + 13.4, MAST_FOOT_Z);
+        let foot = foot_for_area(
+            cfg.genoa.area as f32,
+            head - tack,
+            Vec3::new(angle.sin(), 0.0, angle.cos()),
+        ) * out;
+        // The car the clew is solved against, which must be the one the fitting is
+        // drawn at.
+        let car = genoa_car_at(controls.genoa_car as f32, side > 0.0);
+        return SailGeometry {
+            tack,
+            head: tack.lerp(head, 0.35 + 0.65 * out),
+            clew: genoa_clew(
+                tack,
+                angle,
+                foot,
+                car,
+                sheet_length(controls.jib_sheet as f32),
+            ),
+        };
+    }
+    // A sail set flying: tacked out on the sprit end, hoisted to the masthead, clew
+    // sheeted away aft. Nothing holds its luff but its own tension.
+    let gennaker = kind == sail_core::state::Headsail::Gennaker;
+    // The same hoist curve the force model uses: up, or away, and the sliver between is
+    // the sail folding rather than a size to sail in.
+    let out =
+        1.0 - sail_core::units::smoothstep(0.10, 0.45, controls.furl) as f32;
+    let tack = sprit_end(cfg.loa as f32);
+    let head = Vec3::new(0.0, DECK + if gennaker { 14.0 } else { 14.8 }, MAST_FOOT_Z);
+    let foot = foot_for_area(
+        cfg.headsail(kind).area as f32,
+        head - tack,
+        Vec3::new(angle.sin(), 0.0, angle.cos()),
+    ) * out;
+    SailGeometry {
+        tack,
+        head: tack.lerp(head, 0.3 + 0.7 * out),
+        // Flown free: the clew swings on the arc of its own foot, out to leeward and
+        // lifting, with no lead car to pull it down.
+        clew: tack
+            + Vec3::new(
+                angle.sin() * foot,
+                if gennaker { 1.35 } else { 0.85 },
+                angle.cos() * foot,
+            ),
+    }
+}
+
+/// Marks the staysail's club boom, which swings on its own.
+#[derive(Component)]
+pub struct StaysailBoom;
+
+/// Where the staysail is tacked down, on its own stay a third of the way aft.
+pub fn staysail_tack() -> Vec3 {
+    Vec3::new(0.0, DECK + 0.12, MAST_FOOT_Z - 3.3)
+}
+
+/// The head of it, where the inner stay meets the mast.
+pub fn staysail_head() -> Vec3 {
+    Vec3::new(0.0, DECK + 8.4, MAST_FOOT_Z - 0.15)
+}
+
+/// The club boom's length, which is the sail's foot and therefore not a free choice.
+///
+/// A spar does not change length with the trim, so it is cut for a working angle and
+/// the sail is cut to the spar. Taken at thirty degrees of chord, which is where a
+/// self-tacker spends most of its life.
+pub fn staysail_boom_length(area: f32) -> f32 {
+    foot_for_area(
+        area,
+        staysail_head() - staysail_tack(),
+        Vec3::new(0.5, 0.0, 0.866),
+    )
+}
+
+/// Where the end of that boom is, which is also the sail's clew. One definition, so
+/// the spar and the cloth cannot end up in different places.
+pub fn staysail_boom_end(angle: f32, length: f32) -> Vec3 {
+    staysail_tack() + Vec3::new(angle.sin() * length, 0.22, angle.cos() * length)
 }
 
 /// The foot length that makes a drawn sail the size the physics thinks it is.
@@ -1026,10 +1126,10 @@ pub fn genoa_clew(tack: Vec3, angle: f32, foot: f32, car: Vec3, sheet: f32) -> V
 /// headsail, whose foot is a free curve rising from the tack to a clew well above the
 /// deck. The result was a genoa with its clew glued to the deck, dragging along it.
 /// Three corners is both more correct and less code.
-struct SailGeometry {
-    tack: Vec3,
-    head: Vec3,
-    clew: Vec3,
+pub struct SailGeometry {
+    pub tack: Vec3,
+    pub head: Vec3,
+    pub clew: Vec3,
 }
 
 const SAIL_U: usize = 9;

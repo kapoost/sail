@@ -239,8 +239,17 @@ pub fn draw(
                             for (i, line) in BANK.iter().enumerate() {
                                 let mut value = line.get(&sim.controls);
                                 let selected = i == bank.selected;
-                                let (clicked, dragged) =
-                                    clutch(ui, line.name(), &mut value, selected);
+                                // A line that leads nowhere on the sail that is up gets
+                                // its name bracketed rather than hidden: the clutch is
+                                // still on the coachroof, it just has nothing on the
+                                // other end of it at the moment.
+                                let rigged = line.rigged_for(&sim.controls);
+                                let name = if rigged {
+                                    line.name().to_string()
+                                } else {
+                                    format!("({})", line.name())
+                                };
+                                let (clicked, dragged) = clutch(ui, &name, &mut value, selected);
                                 if clicked {
                                     bank.selected = i;
                                     bank.since_change = 0.0;
@@ -252,7 +261,11 @@ pub fn draw(
                             }
                         });
                         ui.label(
-                            egui::RichText::new(format!("hauling in {}", bank.line().hauled()))
+                            egui::RichText::new(if bank.line().rigged_for(&sim.controls) {
+                                format!("hauling in {}", bank.line().hauled())
+                            } else {
+                                format!("{} is not led to this sail", bank.line().name())
+                            })
                                 .color(paint::LABEL)
                                 .size(10.0),
                         );

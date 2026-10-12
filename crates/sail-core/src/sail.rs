@@ -21,6 +21,18 @@ pub const CAMBER_REFERENCE: f64 = 0.11;
 pub const CAMBER_DEEP: f64 = 0.15;
 /// Draft with the outhaul hard out. Flat, less power, less heeling force.
 pub const CAMBER_FLAT: f64 = 0.07;
+/// Draft of a Code 0. Flat for a sail set flying, which is what makes it a Code 0
+/// rather than a spinnaker: the rating rule draws the line at a mid-girth of 55 percent
+/// of the foot, and the shape that gets you there is nearly a genoa's.
+pub const CAMBER_CODE_ZERO: f64 = 0.10;
+/// Draft of a gennaker, and it is a different kind of sail because of this number.
+///
+/// Twenty-two percent. Three times a flattened mainsail. A sail with that much shape
+/// cannot be flattened, will not point, and generates more force than anything else on
+/// the boat once the wind is abaft the beam — and it has to *look* like that, because a
+/// gennaker drawn with a genoa's section is the one sail in the wardrobe a sailor can
+/// identify as wrong from a photograph.
+pub const CAMBER_GENNAKER: f64 = 0.22;
 
 /// How far the best angle of attack moves per unit of relative camber. A deeper sail
 /// peaks earlier because the camber is already doing part of the work.
