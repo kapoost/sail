@@ -1,28 +1,36 @@
-//! Something to sail to.
+//! The delivery run: where the parcels are going, and whether they got there in time.
 //!
-//! The smallest honest goal for a sailor: a mark set to windward. You cannot reach it
-//! by pointing at it, so getting there means beating, and beating means tacking and
-//! trimming — the core skill this proof of concept exists to test. Without a mark the
-//! build is a boat on an empty sea, and "is this fun" has nothing to bite on.
+//! This replaced a windward mark and a lap time, which were the right goal for a
+//! physics proof of concept and the wrong one for a game. A beat to a buoy asks "can
+//! you tack well"; a consignment between two anchorages asks the questions the
+//! archipelago exists to ask — which side of that island, is the short way through
+//! the sound worth the wind shadow, can you lay it or is this two tacks, and is there
+//! water where you are going.
 //!
-//! The lap time is also the development instrument that matters most. If a
-//! well-trimmed beat is meaningfully faster than a sloppy one, the game has depth. If
-//! it is not, no amount of water shader will save it.
+//! The deadline is what makes those questions cost something. Without one every route
+//! is equally good and the islands are scenery again.
 
 use bevy::prelude::*;
 use glam::DVec2;
+use sail_core::land::Harbour;
 use sail_core::prelude::*;
 
 use crate::frame;
 use crate::sim::Sim;
 
-/// How far to windward the mark is set, metres. At a VMG around four knots that is
-/// about a six-minute beat, which is long enough to need real tacking decisions and
-/// short enough to sail twice in a sitting.
-const BEAT_LENGTH: f64 = 800.0;
-/// How close counts as rounded. A real rounding is tighter, but the boat has no
-/// bowsprit to judge by yet.
-const ROUNDING_RADIUS: f64 = 22.0;
+/// How close counts as arrived, metres. An anchorage, not a berth: you are there when
+/// you could reasonably drop the hook.
+const ARRIVAL_RADIUS: f64 = 120.0;
+/// And slow enough to be stopping rather than passing through.
+const ARRIVAL_SPEED: f64 = 2.0;
+/// Speed made good the deadline assumes, knots.
+///
+/// Three and a half. The boat does better than that on a reach and much worse beating
+/// into a headland's wind shadow, so a consignment is comfortable if you route it well
+/// and tight if you do not — which is the whole of the game.
+const PLANNING_SPEED_KN: f64 = 3.5;
+/// Slack on top, seconds, so a short hop is not impossible.
+const SLACK: f64 = 420.0;
 
 /// Anything moored that has to ride the sea rather than hang over it. A mark sitting
 /// at mean water level while a wave passes through it is the single most jarring
@@ -33,6 +41,143 @@ pub struct Floating {
     pub at: DVec2,
     /// Height above the local surface, metres.
     pub lift: f32,
+}
+
+/// The pole that marks where you are going now.
+#[derive(Component)]
+pub struct Destination;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Leg {
+    /// Carrying a consignment.
+    Carrying,
+    /// Nowhere to go: there is only one anchorage, or none.
+    Idle,
+}
+
+#[derive(Resource)]
+pub struct Course {
+    pub harbours: Vec<Harbour>,
+    pub from: usize,
+    pub to: usize,
+    pub leg: Leg,
+    /// Seconds since this consignment was taken on.
+    pub elapsed: f64,
+    /// Seconds allowed for it.
+    pub allowed: f64,
+    pub delivered: u32,
+    pub late: u32,
+    /// Best delivery so far, as a fraction of the time allowed.
+    pub best_margin: Option<f64>,
+    pub tacks: u32,
+    last_tack_side: f64,
+    /// Counts up while the boat sits in the arrival circle, so a fast pass through it
+    /// does not count as a delivery.
+    settling: f64,
+}
+
+impl Course {
+    fn new(harbours: Vec<Harbour>, start: DVec2) -> Self {
+        // Start from whichever anchorage is nearest, so the first consignment reads as
+        // leaving from somewhere rather than materialising at sea.
+        let from = nearest(&harbours, start);
+        let mut course = Self {
+            harbours,
+            from,
+            to: from,
+            leg: Leg::Idle,
+            elapsed: 0.0,
+            allowed: 0.0,
+            delivered: 0,
+            late: 0,
+            best_margin: None,
+            tacks: 0,
+            last_tack_side: 0.0,
+            settling: 0.0,
+        };
+        course.take_consignment(start);
+        course
+    }
+
+    /// Where the parcels are going now.
+    pub fn target(&self) -> DVec2 {
+        self.harbours
+            .get(self.to)
+            .map(|h| h.at)
+            .unwrap_or(DVec2::ZERO)
+    }
+
+    pub fn destination_name(&self) -> &str {
+        self.harbours
+            .get(self.to)
+            .map(|h| h.name.as_str())
+            .unwrap_or("nowhere")
+    }
+
+    pub fn origin_name(&self) -> &str {
+        self.harbours
+            .get(self.from)
+            .map(|h| h.name.as_str())
+            .unwrap_or("nowhere")
+    }
+
+    /// Distance and compass bearing to the destination.
+    pub fn to_target(&self, pos: DVec2) -> (f64, f64) {
+        let d = self.target() - pos;
+        (d.length(), wrap_tau(d.x.atan2(d.y)))
+    }
+
+    /// Seconds left before the consignment is late. Negative once it is.
+    pub fn remaining(&self) -> f64 {
+        self.allowed - self.elapsed
+    }
+
+    /// Pick somewhere new to go, and work out how long it should take.
+    ///
+    /// The deadline is the straight-line distance at a planning speed, which is
+    /// deliberately *not* a routed estimate: a crow-flies allowance is generous for a
+    /// reach and punishing for a dead beat, which is exactly the judgement a skipper
+    /// is paid for. Taking the job is the decision; the wind decides the rest.
+    fn take_consignment(&mut self, from_pos: DVec2) {
+        if self.harbours.len() < 2 {
+            self.leg = Leg::Idle;
+            return;
+        }
+        // Somewhere other than here, and preferably not the nearest: a run should be
+        // a passage. Deterministic in the delivery count so a session replays.
+        let mut best = (self.from, 0.0);
+        for (i, h) in self.harbours.iter().enumerate() {
+            if i == self.from {
+                continue;
+            }
+            let d = (h.at - from_pos).length();
+            // A cheap rotating preference, so the run does not shuttle between two.
+            let score = d * (0.6 + 0.4 * (((i as u32 ^ self.delivered) % 7) as f64 / 7.0));
+            if score > best.1 {
+                best = (i, score);
+            }
+        }
+        self.to = best.0;
+        let distance = (self.target() - from_pos).length();
+        self.allowed = distance / kn_to_ms(PLANNING_SPEED_KN) + SLACK;
+        self.elapsed = 0.0;
+        self.settling = 0.0;
+        self.leg = Leg::Carrying;
+    }
+}
+
+fn nearest(harbours: &[Harbour], pos: DVec2) -> usize {
+    harbours
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| {
+            (a.at - pos)
+                .length()
+                .partial_cmp(&(b.at - pos).length())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(i, _)| i)
+        .unwrap_or(0)
 }
 
 /// Lift the marks onto the water, and let them lean with the slope.
@@ -55,59 +200,6 @@ pub fn float_marks(
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Leg {
-    /// Beating to the windward mark.
-    Upwind,
-    /// Running back to the start.
-    Downwind,
-    Finished,
-}
-
-#[derive(Resource)]
-pub struct Course {
-    pub start: DVec2,
-    pub windward: DVec2,
-    pub leg: Leg,
-    pub elapsed: f64,
-    /// Elapsed time at the windward rounding, for splitting the lap.
-    pub upwind_split: Option<f64>,
-    pub best_lap: Option<f64>,
-    pub tacks: u32,
-    /// Sign of the true wind angle last frame, to count tacks.
-    last_tack_side: f64,
-}
-
-impl Course {
-    fn new(start: DVec2, wind_from: f64) -> Self {
-        // Straight upwind from the start.
-        let to_wind = DVec2::new(wind_from.sin(), wind_from.cos());
-        Self {
-            start,
-            windward: start + to_wind * BEAT_LENGTH,
-            leg: Leg::Upwind,
-            elapsed: 0.0,
-            upwind_split: None,
-            best_lap: None,
-            tacks: 0,
-            last_tack_side: 0.0,
-        }
-    }
-
-    pub fn target(&self) -> DVec2 {
-        match self.leg {
-            Leg::Upwind => self.windward,
-            _ => self.start,
-        }
-    }
-
-    /// Distance and compass bearing to the mark in play.
-    pub fn to_target(&self, pos: DVec2) -> (f64, f64) {
-        let d = self.target() - pos;
-        (d.length(), wrap_tau(d.x.atan2(d.y)))
-    }
-}
-
 pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -115,18 +207,17 @@ pub fn setup(
     origin: Res<frame::RenderOrigin>,
     sim: Res<Sim>,
 ) {
-    // Startup runs before the first substep, so telemetry is still zeroed here. Ask
-    // the wind field directly.
-    let wind_from = sail_core::wind::direction_of(sim.sim.wind.sample(sim.sim.state.pos, 0.0));
-    let course = Course::new(sim.sim.state.pos, wind_from);
+    let harbours = sim
+        .sim
+        .land
+        .as_ref()
+        .map(|l| l.harbours())
+        .unwrap_or_default();
+    let course = Course::new(harbours, sim.sim.state.pos);
 
     let buoy_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.95, 0.35, 0.08),
         perceptual_roughness: 0.6,
-        ..default()
-    });
-    let pole_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.12, 0.12, 0.14),
         ..default()
     });
     let flag_mat = materials.add(StandardMaterial {
@@ -136,45 +227,55 @@ pub fn setup(
         cull_mode: None,
         ..default()
     });
-
     let body = meshes.add(Sphere::new(0.9));
-    let pole = meshes.add(Cylinder::new(0.05, 3.4));
-    let flag = meshes.add(Cuboid::new(0.02, 0.5, 0.75));
+    let pole = meshes.add(Cylinder::new(0.06, 6.0));
+    let flag = meshes.add(Cuboid::new(0.02, 0.6, 0.9));
 
-    for (pos, flagged) in [(course.windward, true), (course.start, false)] {
-        let at = origin.to_bevy(pos, 0.0);
+    // One buoy off every anchorage, so the chart is the world rather than a menu.
+    for h in &course.harbours {
+        let at = origin.to_bevy(h.at, 0.0);
         commands.spawn((
             Floating {
-                at: pos,
+                at: h.at,
                 lift: 0.35,
             },
             Mesh3d(body.clone()),
             MeshMaterial3d(buoy_mat.clone()),
             Transform::from_translation(at + Vec3::Y * 0.35),
         ));
-        // A bare buoy is invisible at eight hundred metres — a real course uses a pin
-        // with a flag for exactly this reason.
-        commands.spawn((
-            Floating { at: pos, lift: 1.9 },
+    }
+
+    // And a tall flagged pole that moves to wherever the parcels are going.
+    let at = origin.to_bevy(course.target(), 0.0);
+    commands
+        .spawn((
+            Destination,
+            Floating {
+                at: course.target(),
+                lift: 3.0,
+            },
             Mesh3d(pole.clone()),
-            MeshMaterial3d(pole_mat.clone()),
-            Transform::from_translation(at + Vec3::Y * 1.9),
-        ));
-        if flagged {
-            commands.spawn((
-                Floating { at: pos, lift: 3.1 },
+            MeshMaterial3d(buoy_mat.clone()),
+            Transform::from_translation(at + Vec3::Y * 3.0),
+        ))
+        .with_children(|p| {
+            p.spawn((
                 Mesh3d(flag.clone()),
                 MeshMaterial3d(flag_mat.clone()),
-                Transform::from_translation(at + Vec3::new(0.0, 3.1, 0.4)),
+                Transform::from_xyz(0.0, 2.6, 0.5),
             ));
-        }
-    }
+        });
 
     commands.insert_resource(course);
 }
 
-pub fn update(sim: Res<Sim>, time: Res<Time>, mut course: ResMut<Course>) {
-    if course.leg == Leg::Finished {
+pub fn update(
+    sim: Res<Sim>,
+    time: Res<Time>,
+    mut course: ResMut<Course>,
+    mut marks: Query<&mut Floating, With<Destination>>,
+) {
+    if course.leg == Leg::Idle {
         return;
     }
     course.elapsed += time.delta_secs_f64();
@@ -190,46 +291,55 @@ pub fn update(sim: Res<Sim>, time: Res<Time>, mut course: ResMut<Course>) {
         course.last_tack_side = side;
     }
 
-    let (distance, _) = course.to_target(sim.sim.state.pos);
-    if distance < ROUNDING_RADIUS {
-        match course.leg {
-            Leg::Upwind => {
-                course.upwind_split = Some(course.elapsed);
-                course.leg = Leg::Downwind;
-            }
-            Leg::Downwind => {
-                let lap = course.elapsed;
-                course.best_lap = Some(course.best_lap.map_or(lap, |b| b.min(lap)));
-                course.leg = Leg::Finished;
-            }
-            Leg::Finished => {}
+    let pos = sim.sim.state.pos;
+    let (distance, _) = course.to_target(pos);
+    let slow = sim.sim.telemetry.stw < kn_to_ms(ARRIVAL_SPEED);
+    if distance < ARRIVAL_RADIUS && slow {
+        // Dropping the hook takes a moment. Requiring the boat to *stay* means a
+        // delivery is an arrival rather than a drive-by, which is the difference
+        // between sailing to a place and sailing at it.
+        course.settling += time.delta_secs_f64();
+    } else {
+        course.settling = 0.0;
+    }
+
+    if course.settling > 4.0 {
+        let margin = course.remaining() / course.allowed.max(1.0);
+        if margin < 0.0 {
+            course.late += 1;
+        }
+        course.delivered += 1;
+        course.best_margin = Some(course.best_margin.map_or(margin, |b| b.max(margin)));
+        course.from = course.to;
+        let here = course.target();
+        course.take_consignment(here);
+        for mut mark in &mut marks {
+            mark.at = course.target();
         }
     }
 }
 
-/// Start another lap from wherever the boat happens to be.
-pub fn restart(keys: Res<ButtonInput<KeyCode>>, sim: Res<Sim>, mut course: ResMut<Course>) {
+/// Give up on this consignment and take another from where you are.
+pub fn restart(
+    keys: Res<ButtonInput<KeyCode>>,
+    sim: Res<Sim>,
+    mut course: ResMut<Course>,
+    mut marks: Query<&mut Floating, With<Destination>>,
+) {
     if !keys.just_pressed(KeyCode::KeyL) {
         return;
     }
-    let best = course.best_lap;
-    let start = course.start;
-    let windward = course.windward;
-    *course = Course {
-        start,
-        windward,
-        leg: Leg::Upwind,
-        elapsed: 0.0,
-        upwind_split: None,
-        best_lap: best,
-        tacks: 0,
-        last_tack_side: sim.sim.telemetry.twa.signum(),
-    };
+    let pos = sim.sim.state.pos;
+    course.from = nearest(&course.harbours, pos);
+    course.tacks = 0;
+    course.take_consignment(pos);
+    for mut mark in &mut marks {
+        mark.at = course.target();
+    }
 }
 
-/// Minutes and seconds, because a lap time read as 412.7 seconds means nothing.
+/// Minutes and seconds, because a passage time read as 412.7 seconds means nothing.
 pub fn clock(seconds: f64) -> String {
-    let m = (seconds / 60.0).floor() as i64;
-    let s = seconds - m as f64 * 60.0;
-    format!("{m}:{s:04.1}")
+    let s = seconds.max(0.0);
+    format!("{}:{:04.1}", (s / 60.0) as u32, s % 60.0)
 }

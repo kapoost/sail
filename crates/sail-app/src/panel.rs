@@ -41,6 +41,8 @@ mod paint {
     pub const NEEDLE: Color32 = Color32::from_rgb(186, 44, 34);
     pub const LIVE: Color32 = Color32::from_rgb(232, 176, 58);
     pub const GOOD: Color32 = Color32::from_rgb(120, 190, 130);
+    /// For the things you want seen across a cockpit in a hurry: overdue, aground.
+    pub const BAD: Color32 = Color32::from_rgb(224, 104, 84);
     pub const TRACK: Color32 = Color32::from_rgb(26, 27, 29);
     pub const LABEL: Color32 = Color32::from_rgb(176, 178, 182);
 }
@@ -123,20 +125,30 @@ pub fn draw(
                 ui.add_space(4.0);
                 ui.separator();
                 let (distance, bearing) = course.to_target(sim.sim.state.pos);
+                let overdue = course.remaining() < 0.0;
                 ui.label(
                     egui::RichText::new(match course.leg {
-                        Leg::Upwind => "TO WINDWARD MARK",
-                        Leg::Downwind => "RUNNING HOME",
-                        Leg::Finished => "LAP COMPLETE",
+                        Leg::Carrying => "BOUND FOR",
+                        Leg::Idle => "NO CONSIGNMENT",
                     })
-                    .color(paint::LIVE)
+                    .color(paint::LABEL)
                     .monospace()
-                    .size(11.0),
+                    .size(10.0),
                 );
-                readout(ui, "RANGE", &format!("{distance:.0} m"));
+                ui.label(
+                    egui::RichText::new(course.destination_name().to_uppercase())
+                        .color(if overdue { paint::BAD } else { paint::LIVE })
+                        .monospace()
+                        .size(13.0),
+                );
+                readout(ui, "RANGE", &format!("{:.2} nm", distance / 1852.0));
                 readout(ui, "BRG", &format!("{:03.0}", deg(bearing)));
-                readout(ui, "TIME", &clock(course.elapsed));
-                readout(ui, "TACKS", &format!("{}", course.tacks));
+                readout(
+                    ui,
+                    if overdue { "OVERDUE" } else { "LEFT" },
+                    &clock(course.remaining().abs()),
+                );
+                readout(ui, "DONE", &format!("{}", course.delivered));
             });
         });
 

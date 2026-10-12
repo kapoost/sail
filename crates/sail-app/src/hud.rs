@@ -322,47 +322,69 @@ pub fn draw(
     Ok(())
 }
 
-/// The course, and the only number that will really tell us whether this is a game:
-/// whether a well-sailed beat is meaningfully quicker than a sloppy one.
+/// The consignment in hand, and whether it is going to make it.
 fn draw_course(ui: &mut egui::Ui, course: &Course, sim: &Sim) {
     let (distance, bearing) = course.to_target(sim.sim.state.pos);
     let t = &sim.sim.telemetry;
 
-    // Progress towards the mark specifically, as opposed to progress upwind. Off the
-    // layline these differ, and the difference is the whole art of calling a tack.
+    // Progress towards the destination specifically, as opposed to progress upwind.
+    // Off the layline these differ, and the difference is the whole art of calling a
+    // tack — which is now a routing decision rather than a racing one.
     let to_mark = glam::DVec2::new(bearing.sin(), bearing.cos());
     let closing = sim.sim.state.velocity_world().dot(to_mark);
 
-    let (leg, colour) = match course.leg {
-        Leg::Upwind => (
-            "beating to the mark",
+    let (text, colour) = match course.leg {
+        Leg::Carrying if course.remaining() > 0.0 => (
+            format!("{} to {}", course.origin_name(), course.destination_name()),
             egui::Color32::from_rgb(120, 190, 240),
         ),
-        Leg::Downwind => ("running home", egui::Color32::from_rgb(140, 210, 150)),
-        Leg::Finished => (
-            "lap complete — L to go again",
-            egui::Color32::from_rgb(240, 210, 90),
+        Leg::Carrying => (
+            format!("{} — overdue", course.destination_name()),
+            egui::Color32::from_rgb(240, 120, 90),
+        ),
+        Leg::Idle => (
+            "nowhere to deliver to".into(),
+            egui::Color32::from_rgb(170, 170, 170),
         ),
     };
-    ui.label(egui::RichText::new(leg).color(colour).strong());
+    ui.label(egui::RichText::new(text).color(colour).strong());
     egui::Grid::new("course").num_columns(4).show(ui, |ui| {
-        row(ui, "to mark", &format!("{distance:.0} m"));
+        row(ui, "to run", &format!("{:.2} nm", distance / 1852.0));
         row(ui, "bearing", &format!("{:03.0}", deg(bearing)));
         ui.end_row();
         row(ui, "closing", &format!("{:.2} kn", ms_to_kn(closing)));
         row(ui, "VMG", &format!("{:.2} kn", ms_to_kn(t.vmg)));
         ui.end_row();
         row(ui, "elapsed", &clock(course.elapsed));
-        row(ui, "tacks", &format!("{}", course.tacks));
+        row(ui, "left", &clock(course.remaining()));
+        ui.end_row();
+        row(ui, "delivered", &format!("{}", course.delivered));
+        row(ui, "late", &format!("{}", course.late));
+        ui.end_row();
+        // The sounder belongs next to the passage, not next to the sails: it is a
+        // navigation instrument and this is the navigation panel.
+        row(ui, "depth", &format!("{:.1} m", t.depth));
+        row(ui, "under keel", &format!("{:+.1} m", t.under_keel));
         ui.end_row();
     });
-    if let Some(split) = course.upwind_split {
-        ui.label(format!("windward rounding at {}", clock(split)));
-    }
-    if let Some(best) = course.best_lap {
+    if t.under_keel < 1.0 {
         ui.label(
-            egui::RichText::new(format!("best lap {}", clock(best)))
-                .color(egui::Color32::from_rgb(240, 210, 90)),
+            egui::RichText::new(if t.under_keel < 0.0 {
+                "AGROUND"
+            } else {
+                "shoaling — water under the keel"
+            })
+            .color(egui::Color32::from_rgb(240, 120, 90))
+            .strong(),
+        );
+    }
+    if let Some(best) = course.best_margin {
+        ui.label(
+            egui::RichText::new(format!(
+                "best delivery had {:.0}% of the time to spare",
+                best * 100.0
+            ))
+            .color(egui::Color32::from_rgb(240, 210, 90)),
         );
     }
 }

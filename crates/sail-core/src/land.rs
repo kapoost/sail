@@ -331,3 +331,100 @@ impl crate::wind::WindField for ShelteredWind {
         self.inner.step(dt);
     }
 }
+
+/// Somewhere to deliver to.
+///
+/// Not a built harbour — an anchorage, which is what most of an archipelago has. The
+/// siting is the same judgement a skipper makes off a chart: find the deepest bite out
+/// of the coast, because an indented shore is one with land either side of it, and
+/// land either side of you is shelter from everything except the one direction the bay
+/// opens to.
+#[derive(Clone, Debug)]
+pub struct Harbour {
+    pub at: DVec2,
+    pub name: String,
+    /// The bearing the bay opens to — the one direction it gives no shelter from.
+    pub exposed_to: f64,
+}
+
+/// How far off the beach the anchorage lies, metres.
+///
+/// Far enough to float: the bank gives about five and a half metres here, which is an
+/// anchorage rather than a stranding, and it is still close enough that arriving means
+/// threading the shoal rather than stopping somewhere near an island.
+const ANCHORAGE_OFF: f64 = 150.0;
+
+impl Island {
+    /// The deepest bay on this coast, as a bearing from the centre.
+    fn best_bay(&self) -> f64 {
+        let mut best = (0.0, f64::INFINITY);
+        for i in 0..180 {
+            let bearing = i as f64 / 180.0 * std::f64::consts::TAU;
+            let r = self.shore_radius(bearing);
+            if r < best.1 {
+                best = (bearing, r);
+            }
+        }
+        best.0
+    }
+
+    /// Where a boat would lie off this island.
+    pub fn anchorage(&self) -> DVec2 {
+        let bearing = self.best_bay();
+        let out = self.shore_radius(bearing) + ANCHORAGE_OFF;
+        self.centre + DVec2::new(bearing.sin(), bearing.cos()) * out
+    }
+}
+
+/// Place names, assembled rather than listed.
+///
+/// Norse, because these islands are shaped like Norse ones and because a delivery run
+/// reads as a voyage when its ends have names and as a test harness when they do not.
+/// Deterministic in the island's own position, so the same archipelago always has the
+/// same place names and a run can be described to somebody else.
+fn place_name(seed: u64) -> String {
+    const HEAD: [&str; 16] = [
+        "Haug", "Vatn", "Skarv", "Grim", "Brei", "Nord", "Sand", "Fugl", "Stein", "Hval", "Kirk",
+        "Mel", "Ulv", "Orm", "Sel", "Berg",
+    ];
+    const TAIL: [&str; 10] = [
+        "vik", "sund", "nes", "vog", "holm", "ey", "stad", "havn", "voe", "skerry",
+    ];
+    let mut rng = Pcg32::new(seed);
+    let head = HEAD[(rng.next_u32() as usize) % HEAD.len()];
+    let tail = TAIL[(rng.next_u32() as usize) % TAIL.len()];
+    format!("{head}{tail}")
+}
+
+impl Archipelago {
+    /// Everywhere worth delivering to.
+    ///
+    /// Only islands big enough to have somebody living on them. A skerry is a hazard,
+    /// not a destination, and a run between two rocks a hundred metres apart is not a
+    /// passage.
+    pub fn harbours(&self) -> Vec<Harbour> {
+        const SETTLED: f64 = 320.0;
+        self.islands
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.radius >= SETTLED)
+            .map(|(index, i)| {
+                let at = i.anchorage();
+                let d = at - i.centre;
+                Harbour {
+                    at,
+                    // The index goes into the seed as well as the position. Position
+                    // alone collided — two islands eight kilometres apart both came
+                    // out "Fuglstad", which on a chart is an error rather than a
+                    // coincidence.
+                    name: place_name(
+                        (i.centre.x.abs() as u64).wrapping_mul(0x9E37_79B9)
+                            ^ (i.centre.y.abs() as u64).wrapping_mul(0x85EB_CA6B)
+                            ^ (index as u64).wrapping_mul(0xC2B2_AE35),
+                    ),
+                    exposed_to: wrap_tau(d.x.atan2(d.y)),
+                }
+            })
+            .collect()
+    }
+}

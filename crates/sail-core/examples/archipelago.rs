@@ -75,5 +75,33 @@ fn main() {
             if land.aground(pos, 1.95) { "yes" } else { "no" }
         );
     }
-    println!("\nopen water is {OPEN_WATER:.0} m, and the shelf reaches 80 m offshore.");
+    println!(
+        "\nopen water is {OPEN_WATER:.0} m, and the shelf reaches four hundred metres offshore."
+    );
+
+    let harbours = land.harbours();
+    println!("\n{} anchorages worth delivering to", harbours.len());
+    println!(
+        "{:>12}{:>9}{:>9}{:>9}{:>12}",
+        "name", "x km", "y km", "depth", "open to"
+    );
+    for h in &harbours {
+        println!(
+            "{:>12}{:>9.2}{:>9.2}{:>9.1}{:>11.0}°",
+            h.name,
+            h.at.x / 1000.0,
+            h.at.y / 1000.0,
+            land.depth(h.at),
+            deg(h.exposed_to)
+        );
+    }
+    if harbours.len() > 1 {
+        let (a, b) = (&harbours[0], &harbours[1]);
+        println!(
+            "\na run from {} to {} is {:.1} nautical miles",
+            a.name,
+            b.name,
+            (b.at - a.at).length() / 1852.0
+        );
+    }
 }
