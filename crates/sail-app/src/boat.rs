@@ -544,26 +544,79 @@ pub fn update_windex(sim: Res<Sim>, mut q: Query<&mut Transform, With<Windex>>) 
 /// Telltales stream aft when the flow is attached, lift and shake when the sail is
 /// luffing, and droop when it has stalled. That is the actual diagnostic: the same
 /// "sail is wrong" reads differently depending on which way it is wrong.
+/// Put the telltales on the sail and let them live.
+///
+/// They had come adrift from it, and for the usual reason: their position was worked
+/// out in the boat's own frame — a height above a deck constant, a distance aft of the
+/// mast — while the sail itself had since acquired a belly, twist, a reef that moves
+/// its head, and a shroud to lean on. Two descriptions of one surface, and only one of
+/// them was being kept up to date. They are sampled off the sail's own geometry now,
+/// a little abaft the luff, which is where a telltale is sewn.
+///
+/// And their behaviour was backwards. They stood rigid in attached flow and only moved
+/// when the sail was luffing, which is the opposite of what a strip of wool does: in
+/// good flow it streams aft and *shivers*, never quite still, and that restless
+/// steadiness is the whole signal. It is when the flow goes that it stops streaming —
+/// first lifting and wandering, then falling against the cloth when the sail stalls.
+///
+/// Which matters, because this is an instrument. A trimmer reads the windward
+/// telltales to find the groove, and a telltale that is perfectly still is not telling
+/// anyone anything.
 pub fn update_telltales(sim: Res<Sim>, time: Res<Time>, mut q: Query<(&Telltale, &mut Transform)>) {
     let t_ = &sim.sim.telemetry;
     let side = -t_.awa.signum() as f32;
-    let boom = side * t_.main.chord_angle as f32;
     let luff = t_.main.coeffs.luffing as f32;
     let stall = t_.main.coeffs.stalled as f32;
     let now = time.elapsed_secs();
 
+    let reef = sim.controls.reef as f32;
+    let foot = 4.2 * (1.0 - 0.35 * reef);
+    let boom = side * t_.main.chord_angle as f32;
+    let tack = Vec3::new(0.0, BOOM_HEIGHT, MAST_FOOT_Z);
+    let head = Vec3::new(
+        0.0,
+        BOOM_HEIGHT + (15.4 - BOOM_HEIGHT) * (1.0 - 0.45 * reef),
+        MAST_FOOT_Z,
+    );
+    let clew = tack + Vec3::new(boom.sin() * foot, 0.0, boom.cos() * foot);
+
     for (tt, mut tr) in &mut q {
-        let height = DECK + 1.4 + tt.along_luff * 12.2;
-        // Just aft of the luff, which is where a telltale lives.
-        let aft = 0.55 + tt.along_luff * 0.25;
-        tr.translation = Vec3::new(
-            boom.sin() * aft * 0.4 + side * 0.12,
-            height,
-            MAST_FOOT_Z + aft,
-        );
-        let shake = (now * 11.0 + tt.along_luff * 7.0).sin() * luff * 0.9;
-        let droop = -stall * 0.7;
-        tr.rotation = Quat::from_rotation_y(boom) * Quat::from_rotation_x(shake + droop);
+        // The same three corners the sail mesh is built from, so the two cannot drift
+        // apart again — and a short way out along the chord, where the wool is sewn.
+        let u = tt.along_luff;
+        let on_luff = tack.lerp(head, u);
+        let to_leech = clew.lerp(head, u) - on_luff;
+        let chord = to_leech.length().max(0.01);
+        let along = to_leech / chord;
+        // Clear of the cloth on the windward side, which is the set you read.
+        let normal = Vec3::Y.cross(along).normalize_or_zero();
+        let out = if normal.x * side < 0.0 {
+            normal
+        } else {
+            -normal
+        };
+        tr.translation = on_luff + along * (chord * 0.12).min(0.75) + out * 0.04;
+
+        // Three scales of motion, and the slowest is the one that reads.
+        //
+        // A shiver that never stops, a slow wander that makes the shiver look alive
+        // rather than mechanical, and — once the flow lets go — a lift and a thrash.
+        // The frequencies are deliberately not multiples of each other, or the three
+        // lock together within a second and the whole thing beats.
+        let phase = u * 7.3;
+        let shiver = (now * 13.7 + phase).sin() * 0.055;
+        let wander = (now * 1.9 + phase * 2.1).sin() * 0.085;
+        let thrash = ((now * 9.1 + phase).sin() + (now * 5.3 + phase * 1.7).sin()) * 0.55 * luff;
+        let lift = 0.35 * luff;
+        // Stalled: it falls back against the sail and goes dead, which is the other
+        // half of the reading and the half most simulators leave out.
+        let dead = 1.0 - stall * 0.85;
+        let swing = (shiver + wander + thrash) * dead + lift;
+        let droop = -stall * 0.9;
+
+        tr.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, along)
+            * Quat::from_rotation_y(swing)
+            * Quat::from_rotation_x(droop);
     }
 }
 
