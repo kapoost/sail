@@ -59,12 +59,14 @@ pub fn setup(
     for island in land.islands() {
         commands.spawn((
             Landmass { at: island.centre },
+            crate::ink::Inked,
             Mesh3d(meshes.add(island_mesh(island, false))),
             MeshMaterial3d(rock.clone()),
             Transform::from_translation(origin.to_bevy(island.centre, 0.0)),
         ));
         commands.spawn((
             Landmass { at: island.centre },
+            crate::ink::Inked,
             Mesh3d(meshes.add(island_mesh(island, true))),
             MeshMaterial3d(shoal.clone()),
             Transform::from_translation(origin.to_bevy(island.centre, 0.0)),

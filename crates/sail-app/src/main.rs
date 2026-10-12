@@ -16,6 +16,7 @@ mod deck_texture;
 mod fittings;
 mod frame;
 mod hud;
+mod ink;
 mod input;
 mod islands;
 mod panel;
@@ -143,7 +144,8 @@ fn main() {
                 // Pick where the world is drawn from before anything is placed in it,
                 // so the whole frame agrees on one mark.
                 frame::rebase_origin,
-                world::report_frame_times,
+                world::report_vitals,
+                    world::report_frame_times,
                 chart::record,
                 islands::follow_origin,
                 (
@@ -173,6 +175,7 @@ fn main() {
                     chart::toggle,
                     retro::toggle,
                     world::toggle_ink,
+                    ink::apply,
                     retro::apply,
                 ),
             )

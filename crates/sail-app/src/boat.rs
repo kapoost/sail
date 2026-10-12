@@ -220,7 +220,12 @@ pub fn setup(
     let genoa_mesh = meshes.add(empty_sail_mesh());
 
     commands
-        .spawn((BoatRoot, Transform::default(), Visibility::default()))
+        .spawn((
+            BoatRoot,
+            crate::ink::Inked,
+            Transform::default(),
+            Visibility::default(),
+        ))
         .with_children(|b| {
             // Hull: a photogrammetric scan of a real boat, which is the one thing
             // here worth measuring rather than drawing. See `assets/ATTRIBUTION.md`.

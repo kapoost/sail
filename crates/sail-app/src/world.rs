@@ -211,6 +211,26 @@ pub struct SurfaceDrift {
 /// suggest a gradient.
 const INK_BANDS: usize = 4;
 
+/// How wide the contour line on the water is, as a fraction of a tone band.
+///
+/// The sea gets no silhouette, because it has nothing to be a silhouette against — it
+/// is what everything else is drawn against. What a drawn sea has instead is a contour:
+/// the line along the top of a wave, which in this style is not a separate thing at all.
+/// It is the edge between two tones. The bands are already here, so the line is drawn
+/// by darkening the water that sits just on the shallow side of each step, and it lands
+/// exactly where an inker would put it — along the crest and around the shoulder —
+/// because that is where the tone changes.
+const CONTOUR: f32 = 0.13;
+
+/// How strongly the contour is struck, towards white.
+///
+/// White, not dark. The boat is drawn with dark lines because a dark line separates a
+/// solid object from what is behind it, but water has nothing behind it and no edge to
+/// separate — what the line is marking is the crest, and a crest is where the water is
+/// bright. Drawn dark it reads as a crack in the surface; drawn white it reads as the
+/// top of a wave, which is what every painter of water has done with it.
+const CONTOUR_INK: f32 = 0.6;
+
 /// How nearly a facet must mirror the sun to be struck as a highlight.
 ///
 /// The cosine of the angle between the surface normal and the half-vector between eye
@@ -424,6 +444,7 @@ pub fn update_sea(
             let deep = Vec3::new(0.035, 0.095, 0.150);
             let shallow = Vec3::new(0.090, 0.210, 0.260);
             let mut tone = (lift * 0.5 + 0.5).clamp(0.0, 1.0);
+            let mut edge = 1.0;
             if ink {
                 // Drawn water, not photographed water.
                 //
@@ -435,8 +456,11 @@ pub fn update_sea(
                 // It is the right place for it, too: this colour is already computed
                 // per vertex on the processor every frame, so a style that would
                 // normally want a shader costs one rounding here.
-                tone = (tone * INK_BANDS as f32).floor() / (INK_BANDS - 1) as f32;
-                tone = tone.clamp(0.0, 1.0);
+                let banded = (tone * INK_BANDS as f32).floor();
+                // How far into its band this vertex sits, kept before the tone is
+                // flattened, because afterwards the information is gone.
+                edge = tone * INK_BANDS as f32 - banded;
+                tone = (banded / (INK_BANDS - 1) as f32).clamp(0.0, 1.0);
             }
             let base = deep.lerp(shallow, tone);
             // Foam judged against this sea's own typical slope rather than a fixed
@@ -461,6 +485,10 @@ pub fn update_sea(
                 },
                 foam,
             );
+            if ink && edge < CONTOUR {
+                // The contour line along the step between two tones.
+                colour = colour.lerp(Vec3::new(0.97, 0.99, 1.0), CONTOUR_INK);
+            }
             if ink {
                 // Glints off the wave faces.
                 //
@@ -504,6 +532,44 @@ fn crest_weight(lift: f32) -> f32 {
 /// application not making its frames — and they are told apart by a number, not by
 /// looking. The worst frame in each second matters more than the mean: a steady
 /// forty is smooth, and a forty that is sometimes ten is not.
+/// What is growing, once a minute.
+///
+/// Added after a run froze at the two-hour mark. The stack said what it was not: the
+/// main thread was inside `renderer_extract` waiting on the render thread while Metal
+/// sat in `submitCommandBuffers`, so the simulation was still stepping and nothing in
+/// this crate was deadlocked — the submission queue was the thing that had stopped
+/// moving. That is the signature of a graphics resource that keeps being created and
+/// never dropped, and it is also the signature of a driver having a bad afternoon. One
+/// frozen process cannot tell those apart, and guessing at it would have meant
+/// rewriting something that may well be innocent.
+///
+/// So this writes down the four counts that would separate them. If entities or assets
+/// climb steadily across a long passage, the leak is ours and the log says which kind.
+/// If they sit flat and the picture stops anyway, it is not ours, and that is worth
+/// knowing before a day is spent looking.
+pub fn report_vitals(
+    time: Res<Time>,
+    meshes: Res<Assets<Mesh>>,
+    images: Res<Assets<Image>>,
+    materials: Res<Assets<StandardMaterial>>,
+    entities: Query<()>,
+    mut since: Local<f32>,
+) {
+    *since += time.delta_secs();
+    if *since < 60.0 {
+        return;
+    }
+    *since = 0.0;
+    info!(
+        "vitals at {:.0} min: {} entities, {} meshes, {} images, {} materials",
+        time.elapsed_secs() / 60.0,
+        entities.iter().count(),
+        meshes.len(),
+        images.len(),
+        materials.len(),
+    );
+}
+
 pub fn report_frame_times(time: Res<Time>, mut window: Local<(f32, u32, f32)>) {
     let dt = time.delta_secs();
     window.0 += dt;
