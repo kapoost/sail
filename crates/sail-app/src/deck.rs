@@ -277,6 +277,23 @@ impl Surface {
             .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
+    /// A quad on a strip of trim, with the grain running *along* it.
+    ///
+    /// The field planking is addressed across the boat, which is right for planks laid
+    /// fore and aft. A king plank and a covering board are the same timber turned the
+    /// other way, so their texture has to turn with them or the grain runs across the
+    /// board instead of down it.
+    fn strip(&mut self, corners: [Vec3; 4], along: f32) {
+        let base = self.positions.len() as u32;
+        for (i, p) in corners.iter().enumerate() {
+            self.positions.push(*p);
+            let across = if i == 0 || i == 3 { 0.0 } else { 0.18 };
+            self.uvs.push(Vec2::new(across, along));
+        }
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
     fn build(self) -> Mesh {
         let mut mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
@@ -392,27 +409,95 @@ pub fn trim_mesh() -> Mesh {
     surface.build()
 }
 
-/// The bottom boards: a planked floor over the bilge, seen down through the cockpit.
+/// The inside of the cockpit: a floor over the bilge and the lining up to the deck.
 ///
-/// Wider than the opening so no gap shows at its edges, and narrower than the hull so
-/// it sits inside her rather than through her sides. It runs a little beyond the
-/// cockpit at both ends for the same reason — you can see further forward and aft
-/// through a hole than the hole itself is long.
+/// A floor alone was not enough, and the reason is a sight line rather than a texture.
+/// Boards wider than the opening hide the sea when you look *straight down*, but from
+/// astern and above you see past their edge, down into the hull, and the sea surface
+/// runs through her at the waterline — so there it was, inside the boat.
+///
+/// The answer is to close the surface. The lining runs from the edge of the boards
+/// out and up to the deck's own edge, sloping the way a hull's topsides do, so there
+/// is no line of sight into the hull at all: floor, lining, deck, in one unbroken
+/// skin. That is also what a decked boat really has below her side decks.
+///
+/// Both ends look after themselves, because the opening eases to nothing there and
+/// takes the floor and the lining with it.
 pub fn sole_mesh() -> Mesh {
     let mut surface = Surface::default();
-    let (z0, z1) = (COCKPIT_FWD - 0.8, COCKPIT_AFT + 0.8);
-    let steps = 60;
-    let mut previous: Option<[Vec3; 2]> = None;
+    let (z0, z1) = (COCKPIT_FWD - 0.5, COCKPIT_AFT + 0.5);
+    let steps = 90;
+    let mut previous: Option<Vec<Vec3>> = None;
+    for i in 0..=steps {
+        let z = z0 + (z1 - z0) * (i as f32 / steps as f32);
+        let (_, sheer) = sheer_at(z);
+        let inner = opening(z).0;
+        let floor = sheer - SOLE_DROP;
+        // Narrower than the opening, so the lining leans outboard going up.
+        let boards = inner * 0.76;
+        let section = vec![
+            Vec3::new(-inner, sheer, z),
+            Vec3::new(-boards, floor, z),
+            Vec3::new(boards, floor, z),
+            Vec3::new(inner, sheer, z),
+        ];
+        if let Some(p) = previous.take() {
+            for k in 0..section.len() - 1 {
+                surface.quad([p[k], section[k], section[k + 1], p[k + 1]], k == 1);
+            }
+        }
+        previous = Some(section);
+    }
+    surface.build()
+}
+
+/// The king plank and the covering board.
+///
+/// A laid deck is not a field of parallel planks running off the edge of the boat. It
+/// has a **king plank** down the centreline that the others are sprung against, and a
+/// **covering board** following the sheer that they are cut into. Without them the
+/// planking just meets itself at the centreline and runs off into the toerail, which
+/// is what "the texture is broken down the middle" actually was: not a fault in the
+/// texture, but the one timber on a deck whose job is to be there.
+///
+/// Laid as their own strips with their own texture coordinates — grain along the plank
+/// rather than across it — because that is how they are cut, and because the change of
+/// direction at the join is the thing the eye reads as carpentry.
+pub fn deck_detail_mesh() -> Mesh {
+    let mut surface = Surface::default();
+    let steps = 220;
+    let z0 = SHEER[0].0;
+    let z1 = SHEER[SHEER.len() - 1].0;
+    /// Half-width of the king plank, metres.
+    const KING: f32 = 0.085;
+    /// Width of the covering board, inboard from the toerail.
+    const BOARD: f32 = 0.20;
+    /// Proud of the deck by a shaving, so it never fights the planking for depth.
+    const PROUD: f32 = 0.004;
+
+    let mut previous: Option<(Option<[Vec3; 2]>, [Vec3; 4])> = None;
     for i in 0..=steps {
         let z = z0 + (z1 - z0) * (i as f32 / steps as f32);
         let (half, sheer) = sheer_at(z);
-        let y = sheer - SOLE_DROP;
-        let x = half * 0.70;
-        let edge = [Vec3::new(-x, y, z), Vec3::new(x, y, z)];
-        if let Some(p) = previous {
-            surface.quad([p[0], edge[0], edge[1], p[1]], true);
+        let open = opening(z).0 > 1e-4;
+        let y = sheer + camber(0.0, half) * 0.5 + PROUD;
+
+        // The king plank only exists where the deck is closed across the middle.
+        let king = (!open).then_some([Vec3::new(-KING, y, z), Vec3::new(KING, y, z)]);
+        let board = [
+            Vec3::new(-half, sheer + PROUD, z),
+            Vec3::new(-(half - BOARD), sheer + PROUD, z),
+            Vec3::new(half - BOARD, sheer + PROUD, z),
+            Vec3::new(half, sheer + PROUD, z),
+        ];
+        if let Some((pk, pb)) = previous.take() {
+            if let (Some(a), Some(b)) = (pk, king) {
+                surface.strip([a[0], b[0], b[1], a[1]], z);
+            }
+            surface.strip([pb[0], board[0], board[1], pb[1]], z);
+            surface.strip([pb[2], board[2], board[3], pb[3]], z);
         }
-        previous = Some(edge);
+        previous = Some((king, board));
     }
     surface.build()
 }

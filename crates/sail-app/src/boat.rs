@@ -296,6 +296,17 @@ pub fn setup(
                 })),
                 Transform::default(),
             ));
+            // King plank and covering board, in the same timber as the trim.
+            b.spawn((
+                Mesh3d(meshes.add(crate::deck::deck_detail_mesh())),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.70, 0.64, 0.52),
+                    base_color_texture: Some(images.add(crate::deck_texture::planking())),
+                    perceptual_roughness: 0.60,
+                    ..default()
+                })),
+                Transform::default(),
+            ));
             // Toerail along the sheer and coaming round the cockpit: varnished, so
             // they read as trim rather than as more deck.
             let varnish = materials.add(StandardMaterial {
