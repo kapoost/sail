@@ -112,6 +112,12 @@ pub fn car_position(car: f32) -> f32 {
     TRACK_FORWARD + car.clamp(0.0, 1.0) * (TRACK_AFT - TRACK_FORWARD)
 }
 
+/// Where the mast is stepped, metres aft of the centre of gravity.
+const MAST_FOOT_Z: f32 = -1.8;
+/// Height of the boom above the waterline — the mainsail's tack. Defined in `rig`, so
+/// the spar and the sail cannot disagree about it.
+use crate::rig::BOOM_HEIGHT;
+
 /// Which sail an entity draws, and the handle to its regenerated mesh.
 #[derive(Component)]
 pub struct SailSurface {
@@ -149,27 +155,6 @@ const SCAN_LOA: f32 = 5.396;
 /// gave the waterline length and beam the physics config now uses.
 const HULL_SINKAGE: f32 = -1.294;
 
-const MAST_FOOT_Z: f32 = -1.8;
-/// Height of the boom above the waterline — the mainsail's tack, and the one number
-/// three separate places were each spelling out as `DECK + 1.25`.
-use crate::rig::BOOM_HEIGHT;
-/// How high a headsail's clew floats when nothing is pulling it down, metres above
-/// the tack. The sail hangs from the stay and the wind holds the foot up; only the
-/// sheet brings it down.
-const CLEW_FREE_RISE: f32 = 2.6;
-/// And how low the sheet can drag it before the foot is on the deck.
-const CLEW_MIN_RISE: f32 = 0.35;
-/// Sheet length from the clew to the car, hauled right in and eased right out.
-/// Shortest the sheet gets: a shackle and the depth of the block, no more.
-///
-/// The sheet does not end at the car — it runs *through* a block on it and on to the
-/// winch, so hauling brings the clew all the way down to the fitting. An earlier value
-/// of 2.9 m said the opposite: the clew could never come within three metres of its
-/// lead, so the genoa was permanently half-eased and could not be sheeted in at all,
-/// whatever the lever said.
-const SHEET_SHORT: f32 = 0.25;
-/// Longest, which is slack enough for the sail to fly off the stay and flog.
-const SHEET_LONG: f32 = 7.4;
 /// Height of the gunwale above the waterline, metres.
 ///
 /// Measured off the scan station by station, not taken from the bounding box: the top
@@ -873,17 +858,15 @@ pub fn headsail_shape(
         ) * out;
         // The car the clew is solved against, which must be the one the fitting is
         // drawn at.
-        let car = genoa_car_at(controls.genoa_car as f32, side > 0.0);
+        let hoisted = tack.lerp(head, 0.35 + 0.65 * out);
+        let cloth = Cloth::cut(tack, hoisted, foot);
+        // The car is the headsail's shape control: forward for a deep sail, aft for a
+        // flat one. That depth is what moves the ring the clew rides.
+        let belly = 1.0 - controls.genoa_car as f32;
         return SailGeometry {
             tack,
-            head: tack.lerp(head, 0.35 + 0.65 * out),
-            clew: genoa_clew(
-                tack,
-                angle,
-                foot,
-                car,
-                sheet_length(controls.jib_sheet as f32),
-            ),
+            head: hoisted,
+            clew: clew_on_cloth(tack, hoisted, &cloth, belly, angle),
         };
     }
     // A sail set flying: tacked out on the sprit end, hoisted to the masthead, clew
@@ -903,17 +886,15 @@ pub fn headsail_shape(
         head - tack,
         Vec3::new(angle.sin(), 0.0, angle.cos()),
     ) * out;
+    let hoisted = tack.lerp(head, 0.3 + 0.7 * out);
+    let cloth = Cloth::cut(tack, hoisted, foot);
+    // A gennaker is cut deep and a Code 0 nearly flat, and neither has a car to change
+    // it: the depth is the sailmaker's, not the trimmer's.
+    let belly = if gennaker { 1.0 } else { 0.25 };
     SailGeometry {
         tack,
-        head: tack.lerp(head, 0.3 + 0.7 * out),
-        // Flown free: the clew swings on the arc of its own foot, out to leeward and
-        // lifting, with no lead car to pull it down.
-        clew: tack
-            + Vec3::new(
-                angle.sin() * foot,
-                if gennaker { 1.35 } else { 0.85 },
-                angle.cos() * foot,
-            ),
+        head: hoisted,
+        clew: clew_on_cloth(tack, hoisted, &cloth, belly, angle),
     }
 }
 
@@ -1075,72 +1056,100 @@ fn clear_of_mast(point: Vec3) -> Vec3 {
     )
 }
 
-/// Sheet length from the clew to the car for a given sheet setting.
-pub fn sheet_length(jib_sheet: f32) -> f32 {
-    // Squared, for the same reason the sheet-to-chord mapping is: the whole useful
-    // band lives at the hauled-in end, and a linear travel buries it in the first
-    // tenth of the winch.
-    let t = jib_sheet.clamp(0.0, 1.0);
-    SHEET_SHORT + (SHEET_LONG - SHEET_SHORT) * t * t
+
+
+/// A sail is a piece of cloth and cloth does not stretch.
+///
+/// This replaced the thing that was wrong with every headsail in the file. The clew was
+/// being placed on a *sphere* about the tack — foot length only — and then shoved to
+/// leeward by whatever the sheet allowed, which let it fly three and a half metres off
+/// the centreline on a boat with a metre and three quarters of half-beam. Reported from
+/// the deck exactly that way: with the car right forward the clew always ends up outside
+/// the boat, and the foot has a fixed length.
+///
+/// It does, and so does the leech, and that is the constraint that was missing. Two
+/// fixed lengths from two fixed corners put the clew on a *circle* — the intersection of
+/// the foot's sphere about the tack and the leech's sphere about the head — and the only
+/// freedom left is where on that ring it sits. It cannot leave the boat because the
+/// cloth will not let it.
+///
+/// What makes the ring move is the belly. The lengths that are fixed are measured along
+/// the cloth, and a sail with camber in it takes up some of that length in the curve, so
+/// the straight-line distances shrink. Measured on this rig: flattened, the ring has a
+/// radius of 2.79 m and the clew sits 2.39 m above the water with the sheet in; with the
+/// sail deep the ring shrinks to 1.80 m and lifts, and the clew rises to 3.08. Which is
+/// the other half of what was reported — the car forward makes the sail deep, and a deep
+/// sail carries its clew higher and further inboard.
+pub struct Cloth {
+    /// Along the foot, tack to clew.
+    pub foot: f32,
+    /// Along the leech, head to clew.
+    pub leech: f32,
 }
 
-/// Where a headsail's clew actually ends up.
-///
-/// Two constraints and a push, which between them are the whole of headsail shape:
-///
-/// * the foot cannot stretch, so the clew lies on a sphere about the tack;
-/// * the sheet cannot stretch either, so once taut the clew lies on a sphere about
-///   the car;
-/// * and the wind pushes the sail to leeward, which picks which point on the circle
-///   where those two spheres meet.
-///
-/// The first attempt solved only the *height* and kept the bearing from the force
-/// model. That left the clew hanging near the centreline while the car sat out on the
-/// side deck, so the sheet ran diagonally across instead of pulling the corner to
-/// where it was led — and from the cockpit the sheets looked as though they were made
-/// fast to the boom rather than to the headsail. The sheet pulls in every direction
-/// it is led, not just downwards.
-///
-/// If the sheet is longer than it needs to be, nothing is taut and the clew floats:
-/// out to leeward and well clear of the deck, which is the state the sail is in while
-/// it is flogging and is exactly what it should look like.
-pub fn genoa_clew(tack: Vec3, angle: f32, foot: f32, car: Vec3, sheet: f32) -> Vec3 {
-    let leeward = Vec3::new(angle.signum(), 0.28, 0.0).normalize();
-    // Freely hanging: on the sphere about the tack, blown to leeward and aft.
-    let free_dir = Vec3::new(angle.sin(), 0.0, angle.cos()).normalize_or_zero();
-    let free = tack + free_dir * foot + Vec3::Y * CLEW_FREE_RISE;
-    let free = tack + (free - tack).normalize_or_zero() * foot;
+impl Cloth {
+    /// The dimensions a sailmaker would cut, from the shape the sail is designed to.
+    ///
+    /// The leech is not a free number: given the luff and the foot it falls out of where
+    /// the clew is meant to sit, and sitting it a little above the tack is what makes a
+    /// headsail's clew ride where a headsail's clew rides rather than on the deck.
+    pub fn cut(tack: Vec3, head: Vec3, foot: f32) -> Self {
+        let aft = Vec3::new(0.0, 0.42, 1.0).normalize();
+        let design = tack + aft * foot;
+        Self {
+            foot,
+            leech: (head - design).length(),
+        }
+    }
+}
 
-    let to_car = car - tack;
-    let span = to_car.length();
-    if span < 1e-4 {
-        return free;
-    }
-    if sheet >= span + foot {
-        // Slack: nothing is pulling.
-        return free;
-    }
-    if sheet + foot <= span {
-        // Bar taut and still short: the clew is dragged straight at the car.
-        return tack + to_car / span * foot;
-    }
+/// Where on that ring the clew has been pulled to.
+///
+/// The sheet decides, and the force model has already decided what the sheet means: it
+/// gives a chord angle. So the clew goes to the point on the ring whose bearing from the
+/// tack matches that angle — or to the nearest the cloth allows, which is the whole
+/// point. One description of where the sail is, shared by the physics and the picture.
+pub fn clew_on_cloth(tack: Vec3, head: Vec3, cloth: &Cloth, belly: f32, chord: f32) -> Vec3 {
+    // Camber takes up cloth, so the straight-line lengths shrink.
+    let b = belly.clamp(0.0, 1.0);
+    let foot = cloth.foot * (1.0 - 0.11 * b);
+    let leech = cloth.leech * (1.0 - 0.05 * b);
 
-    // The two spheres meet in a circle. Find it, then take the point on it that the
-    // wind would push the sail towards.
-    let axis = to_car / span;
-    let along = (foot * foot - sheet * sheet + span * span) / (2.0 * span);
+    let luff_v = head - tack;
+    let luff = luff_v.length().max(0.1);
+    let axis = luff_v / luff;
+    let along = (foot * foot - leech * leech + luff * luff) / (2.0 * luff);
     let radius = (foot * foot - along * along).max(0.0).sqrt();
     let centre = tack + axis * along;
-
-    // Project the leeward push into the circle's plane to choose the point.
-    let mut out = leeward - axis * leeward.dot(axis);
-    if out.length_squared() < 1e-8 {
-        out = Vec3::Y - axis * axis.y;
+    if radius < 1e-3 {
+        return centre;
     }
-    let clew = centre + out.normalize_or_zero() * radius;
-    // Never below the deck, whatever the geometry says.
-    Vec3::new(clew.x, clew.y.max(DECK + CLEW_MIN_RISE), clew.z)
+    // A frame on the ring: aft, and athwartships.
+    let aft = Vec3::Z;
+    let e1 = (aft - axis * aft.dot(axis)).normalize_or_zero();
+    let e2 = axis.cross(e1).normalize_or_zero();
+    let e2 = if e2.x * chord < 0.0 { -e2 } else { e2 };
+
+    // Walk the ring and take the point whose bearing from the tack is closest to the
+    // chord angle the sheet has set. Sampling rather than solving: the ring is a curve in
+    // three dimensions and the bearing along it is not monotonic once the luff is raked.
+    let want = chord.abs();
+    let mut best = centre + e1 * radius;
+    let mut best_err = f32::MAX;
+    for i in 0..=72 {
+        let phi = std::f32::consts::PI * i as f32 / 72.0;
+        let p = centre + e1 * (radius * phi.cos()) + e2 * (radius * phi.sin());
+        let from_tack = p - tack;
+        let bearing = from_tack.x.abs().atan2(from_tack.z.max(0.01));
+        let err = (bearing - want).abs();
+        if err < best_err {
+            best_err = err;
+            best = p;
+        }
+    }
+    best
 }
+
 
 /// A sail is three corners and the surface between them.
 ///
