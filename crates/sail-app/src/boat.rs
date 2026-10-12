@@ -127,15 +127,21 @@ pub fn setup(
         perceptual_roughness: 0.3,
         ..default()
     });
+    // Varnished spruce, not anodised aluminium. She is a boat built of driftwood on
+    // Foula in 1898; an alloy rig on her would be the one thing in the scene that
+    // nobody would believe.
     let spar_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.70, 0.71, 0.73),
-        metallic: 0.65,
-        perceptual_roughness: 0.35,
+        base_color: Color::srgb(0.52, 0.38, 0.21),
+        metallic: 0.0,
+        perceptual_roughness: 0.22,
+        reflectance: 0.45,
         ..default()
     });
     let sail_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.95, 0.94, 0.90),
-        perceptual_roughness: 0.85,
+        base_color: Color::WHITE,
+        base_color_texture: Some(images.add(crate::sail_texture::cloth())),
+        normal_map_texture: Some(images.add(crate::sail_texture::cloth_normal())),
+        perceptual_roughness: 0.78,
         double_sided: true,
         cull_mode: None,
         ..default()
@@ -675,6 +681,22 @@ fn build_sail(
         for vi in 0..SAIL_V {
             let v = vi as f32 / (SAIL_V - 1) as f32;
             let belly = (std::f32::consts::PI * v).sin() * local_camber * chord_length;
+            // Creases, radiating from the clew.
+            //
+            // Not decoration and not something a tiling texture can do, because they
+            // belong to the sail rather than to the cloth: a corner takes the load of
+            // everything attached to it, and the cloth pulls into lines running away
+            // from it. They are also what a trimmer reads — the ones from the clew
+            // tell you about the foot — so a sail without them is missing an
+            // instrument, not just a detail.
+            //
+            // Strongest at the clew, fading out over about a third of the sail, and
+            // vanishing when the sail is luffing, because an unloaded sail has no
+            // load lines in it.
+            let from_clew = ((1.0 - v) * (1.0 - v) + u * u).sqrt();
+            let pull = (1.0 - from_clew * 1.8).max(0.0) * (1.0 - luffing);
+            let fan = (u.atan2(1.0 - v + 1e-3) * 7.0).sin();
+            let crease = pull * pull * fan * 0.016 * chord_length;
             // A luffing sail shakes along its free edge only: it is bolted to the mast
             // up the luff and to the boom along the foot, and the clew is pinned by
             // the outhaul, so the shaking vanishes at v = 0, at u = 0, and therefore
@@ -685,8 +707,16 @@ fn build_sail(
                 * 0.42
                 * free_edge
                 * chord_length.max(0.4);
-            positions.push(luff.lerp(leech, v) + normal * (belly + flap));
-            uvs.push(Vec2::new(v, u));
+            let point = luff.lerp(leech, v) + normal * (belly + flap + crease);
+            positions.push(point);
+            // Metres, not a normalised zero to one. A panel of sailcloth is a metre
+            // wide whatever sail it is in, so the seams have to be laid out in the
+            // sail's own size — otherwise a reefed main grows its panels as it
+            // shrinks, which is the one thing cloth cannot do.
+            uvs.push(Vec2::new(
+                (point - luff).length() / crate::sail_texture::PANEL_METRES,
+                (point.y - g.tack.y) / crate::sail_texture::PANEL_METRES,
+            ));
         }
     }
 

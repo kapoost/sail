@@ -18,6 +18,7 @@ mod input;
 mod islands;
 mod panel;
 mod rig;
+mod sail_texture;
 mod sea_texture;
 mod sim;
 mod sky;
