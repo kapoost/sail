@@ -488,23 +488,33 @@ pub fn trim_mesh() -> Mesh {
         // Coaming, following the edge of the well all the way round — including
         // across the ends, where the eased opening carries it. Built as a real rim:
         // up the inside face, across the top, and down the outside.
-        if inner > 0.02 {
-            for side in [1.0_f32, -1.0] {
-                let edge = side * inner;
-                let out = side * (inner + COAMING_THICK);
-                low.push(Vec3::new(edge, sheer, z));
-                high.push(Vec3::new(edge, sheer + COAMING, z));
-                low.push(Vec3::new(edge, sheer + COAMING, z));
-                high.push(Vec3::new(out, sheer + COAMING, z));
-                low.push(Vec3::new(out, sheer + COAMING, z));
-                high.push(Vec3::new(out, sheer, z));
-            }
+        //
+        // Emitted at *every* station, with its height easing to nothing where the
+        // opening does, rather than only where the opening is wide. The two are not the
+        // same thing, and the difference was a hole in the boat: the stitching between
+        // consecutive stations is skipped when the point counts differ, so at the
+        // station where the coaming first appeared the quad joining it to the station
+        // before was dropped, and the forward end of the cockpit rim was simply open —
+        // reported from the deck as a gap in the planking, which is what you could see
+        // through it.
+        //
+        // A degenerate ring of six coincident points costs nothing and keeps every
+        // station the same shape, which is the only thing the stitching asks for.
+        let rim = (inner / 0.25).clamp(0.0, 1.0) * COAMING;
+        for side in [1.0_f32, -1.0] {
+            let edge = side * inner;
+            let out = side * (inner + COAMING_THICK * (rim / COAMING).max(0.0));
+            low.push(Vec3::new(edge, sheer, z));
+            high.push(Vec3::new(edge, sheer + rim, z));
+            low.push(Vec3::new(edge, sheer + rim, z));
+            high.push(Vec3::new(out, sheer + rim, z));
+            low.push(Vec3::new(out, sheer + rim, z));
+            high.push(Vec3::new(out, sheer, z));
         }
         if let Some((plow, phigh)) = previous.take() {
-            if plow.len() == low.len() {
-                for k in 0..low.len() {
-                    surface.quad([plow[k], low[k], high[k], phigh[k]], false);
-                }
+            debug_assert_eq!(plow.len(), low.len(), "trim sections must match");
+            for k in 0..low.len().min(plow.len()) {
+                surface.quad([plow[k], low[k], high[k], phigh[k]], false);
             }
         }
         previous = Some((low, high));

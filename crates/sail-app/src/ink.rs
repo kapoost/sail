@@ -77,19 +77,30 @@ pub struct Outlined;
 /// the island, and one that reads on the island swallows the boat. A comic inks the
 /// large shape with the bolder line anyway.
 ///
+/// Thinned twice: 0.0045 to 0.0028 and then to 0.0012, which is a hairline. The whole
+/// weight of the drawing moves to the *number* of lines rather than their thickness —
+/// a fine pen used everywhere, which is the manga hand rather than the comic-book one.
+/// The mast now carries 18 mm, the hull 14, a winch 5.
+///
 /// Thinned from 0.0045, because the boldest lines in the picture — the mast and the
 /// topsides, which are also the longest objects — were the ones overdoing it: 69 mm and
 /// 52 mm of black around a spar a hundred millimetres thick and a hull you are standing
 /// on. They draw 43 mm and 32 mm now, the boom 17, a winch 10, and an island still
 /// reaches its cap. A line should say where a thing ends, not become the thing.
-const SILHOUETTE: f32 = 0.0028;
+const SILHOUETTE: f32 = 0.0012;
 
 /// Absolute bounds on it, because the relative rule has to be stopped at both ends: a
 /// winch handle would get a line too fine to see, an island one you could moor to.
-const SILHOUETTE_MIN: f32 = 0.010;
+const SILHOUETTE_MIN: f32 = 0.005;
 const SILHOUETTE_MAX: f32 = 0.9;
 
 /// How sharply two faces must disagree before the edge between them is a fold.
+///
+/// Thirty-two degrees, down from sixty, which draws far more of the boat: every box
+/// corner, every change of plane in the deck furniture, the chamfer on a hatch. With a
+/// hairline to draw them in, more lines is what adds the detail that thickness used to —
+/// and the share rule below is what keeps the extra sensitivity from turning a scan's
+/// grain into a net.
 ///
 /// Sixty degrees, which is generous, and on its own nowhere near enough. Measured on
 /// this boat: at sixty, the hull scan called 23 187 of its 41 500 edges folds — 56% of
@@ -97,7 +108,7 @@ const SILHOUETTE_MAX: f32 = 0.9;
 /// scan is not a boat with a great many chines in it. It is a surface with grain, and
 /// the angle test cannot tell grain from a fold because at the scale of one triangle
 /// there is no difference. See `CHAINED` for what does tell them apart.
-const CREASE_ANGLE: f32 = 60.0;
+const CREASE_ANGLE: f32 = 32.0;
 
 /// The share of a mesh's edges that may fold before the mesh is judged to have no folds
 /// in it at all.
@@ -290,7 +301,15 @@ pub fn creases(mesh: &Mesh) -> Option<(Mesh, usize)> {
         }
     }
 
-    if folds.len() as f32 > considered as f32 * GRAIN_SHARE {
+    // The share rule is a defence against *measured* geometry, so it is only applied to
+    // geometry big enough to have been measured. A photogrammetric hull is twenty-seven
+    // thousand triangles of surface with grain in it; a winch drum is forty triangles
+    // somebody wrote down, and every fold in it is there on purpose. Testing the second
+    // kind by the same rule threw away whole fittings the moment the crease angle was
+    // lowered enough to find their chamfers — which is the opposite of what lowering it
+    // was for.
+    const MEASURED: usize = 2_000;
+    if tris.len() > MEASURED && folds.len() as f32 > considered as f32 * GRAIN_SHARE {
         return None;
     }
 
