@@ -960,15 +960,26 @@ pub fn headsail_shape(
             Vec3::new(angle.sin(), 0.0, angle.cos()),
             1.15,
         ) * out;
-        // The car the clew is solved against, which must be the one the fitting is
-        // drawn at.
-        let hoisted = tack.lerp(head, 0.35 + 0.65 * out);
+        // The head does not move. A roller genoa is wound round its own stay: it gets
+        // narrower from the foot and the leech while the halyard stays where it is, and
+        // the head stays at the top until the whole sail is gone. Walking it down the
+        // wire as the drum turned was drawing a sail being *lowered*, which is a
+        // different operation with a different line.
+        //
+        // This was written once before and did not take — the edit was aimed at text
+        // that had since moved, and the commit claimed it anyway. Measured in the
+        // running app this time: with the drum nearly home the head was sitting five
+        // metres above the tack instead of fifteen.
+        let hoisted = head;
         // A genoa is cut low: its foot sweeps the deck and its clew rides just above
         // the rail. That is what the "rise" is — how far above the tack the sail is cut
         // to carry its clew — and it is most of what tells a genoa from a reaching sail
         // at a glance. The flying sails are cut away underneath, high-clewed so they
         // clear the pulpit and the water, and they were all being cut the same.
-        let cloth = Cloth::cut(tack, hoisted, foot, 0.16);
+        // Cut high enough to keep its own foot off the deck: at a rise of 0.16 the clew
+        // sat barely a metre above the planking and the cloth below it went through the
+        // foredeck. A genoa is cut low. It is not cut into the boat.
+        let cloth = Cloth::cut(tack, hoisted, foot, 0.30);
         // The car is the headsail's shape control: forward for a deep sail, aft for a
         // flat one. That depth is what moves the ring the clew rides.
         let belly = 1.0 - controls.genoa_car as f32;

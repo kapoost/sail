@@ -6,6 +6,7 @@
 
 use bevy::prelude::*;
 use sail_core::prelude::*;
+use sail_core::state::Headsail;
 use sail_core::water::WindSea;
 use sail_core::wind::SyntheticWind;
 
@@ -55,6 +56,14 @@ impl Sim {
         sim.run(SUBSTEP, &Controls::default());
         // Full depth to start: the boat is upright and underpowered, so there is no
         // reason to take anything out of the sail yet.
+        // Which sail to start with, so one can be looked at without furling and
+        // changing first. `SAIL_HEADSAIL=code0` or `=gennaker`; anything else is the
+        // genoa.
+        let headsail = match std::env::var("SAIL_HEADSAIL").as_deref() {
+            Ok("code0") => Headsail::Code0,
+            Ok("gennaker") => Headsail::Gennaker,
+            _ => Headsail::Genoa,
+        };
         let outhaul = 0.0;
         let (main_sheet, jib_sheet) = optimal_sheets(&cfg, sim.telemetry.awa, outhaul);
         Self {
@@ -62,9 +71,11 @@ impl Sim {
             controls: Controls {
                 main_sheet,
                 jib_sheet,
+                headsail,
                 outhaul,
-                // Genoa rolled away: main alone, to isolate what the mainsail does.
-                furl: 1.0,
+                // Genoa rolled away: main alone, to isolate what the mainsail does —
+                // unless a sail was asked for by name, in which case it is wanted set.
+                furl: if headsail == Headsail::Genoa { 1.0 } else { 0.0 },
                 // Whatever the forecast said to tie in before casting off.
                 reef: weather.start_reef,
                 ..Default::default()
