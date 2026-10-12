@@ -157,6 +157,22 @@ pub fn update(
     let forward = st.forward();
     let starboard = st.starboard();
     let lee = -sim.sim.telemetry.awa.signum();
+
+    // And the stem cutting a wave, which is a different thing from a bow wave and looks
+    // it: not a steady moustache but a burst, thrown when she drives her forefoot into
+    // the back of the next one. It is the sound a boat makes as much as the sight, and
+    // in a seaway it is most of the white water there is.
+    //
+    // Measured where the stem is: the water's own surface there against the hull's, with
+    // her heave and pitch in it. Buried, she throws it; riding over, she does not.
+    let stem = st.pos + forward * (cfg.loa * 0.48);
+    let surface = sim.sim.water.height(stem, t);
+    let stem_rides = st.heave + (cfg.loa * 0.48) * st.pitch.sin();
+    let buried = (surface - stem_rides - 0.15).max(0.0);
+    if buried > 0.0 && speed > 1.0 {
+        spray.owed += (buried * 260.0 * fraction) as f32 * dt;
+    }
+
     let Spray {
         live, seed, owed, ..
     } = &mut *spray;
@@ -164,16 +180,31 @@ pub fn update(
         *owed -= 1.0;
         let r = &mut *seed;
         // Two thirds at the stem, the rest along the lee bow and the quarter.
+        // How wide she is at a station, as a fraction of her greatest half-beam. The
+        // same fine ellipse the culling test uses, so foam is born exactly where the
+        // planking is rather than at a fixed distance from the centreline that is
+        // outside her at the bow and inside her amidships.
+        let hull_at = |along: f64| (1.0 - (along * 2.0).powi(2)).max(0.0).sqrt();
         let where_ = r.next_f64();
         let (along, across) = if where_ < 0.62 {
             // At the stem: a touch ahead of the bow, scattered either side of it.
             (0.46 + 0.04 * r.next_f64(), (r.next_f64() - 0.5) * 0.5)
         } else if where_ < 0.88 {
-            // The lee bow, from the stem back to amidships — and *outside* the planking.
-            (0.12 + 0.3 * r.next_f64(), lee * (1.05 + 0.5 * r.next_f64()))
+            // The lee bow, from the stem back to amidships, hard against the planking.
+            //
+            // These were pushed out to a beam and a half to keep them from appearing
+            // inside the boat, which was the wrong cure: foam is made *at* the hull, by
+            // the hull, and a band of white standing off the topsides with clear water
+            // between is not something a boat does. The waterplane test does that job
+            // properly now — the hull is narrow at the ends, so a speck three quarters
+            // of the way out is already outside her up forward and gets culled where she
+            // is wide amidships.
+            let along = 0.12 + 0.3 * r.next_f64();
+            (along, lee * hull_at(along) * (1.02 + 0.22 * r.next_f64()))
         } else {
             // The quarter, feeding the wake.
-            (-0.3 - 0.15 * r.next_f64(), lee * (1.0 + 0.5 * r.next_f64()))
+            let along = -0.3 - 0.15 * r.next_f64();
+            (along, lee * hull_at(along) * (1.02 + 0.3 * r.next_f64()))
         };
         let at = st.pos + forward * (cfg.loa * along) + starboard * (cfg.beam * 0.5 * across);
         // Thrown outward and a little forward of where it was made, then left behind.
