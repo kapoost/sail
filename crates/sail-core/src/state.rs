@@ -37,6 +37,15 @@ pub struct BoatState {
     /// Pitch, radians, positive bow-up.
     pub pitch: f64,
     pub pitch_rate: f64,
+    /// Where the boom actually is, radians from the centreline, always positive —
+    /// which side it is on is decided by the wind.
+    ///
+    /// A degree of freedom of its own, because a boom is sixty kilogrammes of spar and
+    /// cloth hanging off a lever and a sheet that can only pull. See
+    /// [`crate::sim::Simulation`] for what that costs in a seaway.
+    pub boom_angle: f64,
+    /// How fast it is swinging, rad/s.
+    pub boom_rate: f64,
     /// Seconds since start.
     pub time: f64,
 }
@@ -67,6 +76,8 @@ impl BoatState {
             heave_rate: f(a.heave_rate, b.heave_rate),
             pitch: f(a.pitch, b.pitch),
             pitch_rate: f(a.pitch_rate, b.pitch_rate),
+            boom_angle: f(a.boom_angle, b.boom_angle),
+            boom_rate: f(a.boom_rate, b.boom_rate),
             time: f(a.time, b.time),
         }
     }
@@ -85,6 +96,8 @@ impl BoatState {
             heave_rate: 0.0,
             pitch: 0.0,
             pitch_rate: 0.0,
+            boom_angle: 0.0,
+            boom_rate: 0.0,
             time: 0.0,
         }
     }

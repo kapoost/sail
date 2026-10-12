@@ -23,6 +23,16 @@ use glam::DVec2;
 
 pub const SUBSTEP: f64 = 1.0 / 200.0;
 
+/// How hard the mainsheet holds the boom once it is tight, newton-metres per radian.
+///
+/// Stiff, because a tackle is: a few degrees of give under the full load of the sail,
+/// no more. Any softer and the boom wanders visibly in steady air, which it does not.
+const SHEET_STIFFNESS: f64 = 140_000.0;
+/// Damping while the sheet is tight — the tackle's own friction, which is considerable.
+const SHEET_DAMPING: f64 = 5_000.0;
+/// And while it is slack, when only the air and the gooseneck are resisting.
+const BOOM_DAMPING: f64 = 260.0;
+
 pub struct Simulation {
     pub config: BoatConfig,
     pub state: BoatState,
@@ -259,7 +269,33 @@ impl Simulation {
             controls.reef,
             cfg.max_reef,
         );
-        let boom_angle = cfg.main.profile.chord_angle(controls.main_sheet);
+        // Where the sheet says the boom may go, and where the boom actually is.
+        //
+        // Those are the same thing in flat water and they are not the same thing in a
+        // seaway, because the sheet is a rope: it can pull the boom in and it cannot
+        // push it out. The boom is sixty kilogrammes of spar and cloth two and a half
+        // metres out on a lever, the wind holds it against the sheet, and anything that
+        // takes the wind out of it for a moment — a roll to windward, the wave that
+        // started the roll — lets it swing in on its own weight. Then the breeze comes
+        // back and the sheet snatches.
+        //
+        // The cost is not the noise. It is that each of those excursions moves the angle
+        // of attack by a few degrees, and a sail working at its limit has nowhere to put
+        // them: trimmed on the edge of the groove, a sail knocked two degrees further in
+        // stalls, and two degrees out luffs, and either way the flow has to rebuild. A
+        // boat in a seaway cannot be trimmed as fine as a boat on flat water, and this
+        // is where that comes from.
+        let boom_set = cfg.main.profile.chord_angle(controls.main_sheet);
+        // Before the first step there is nothing to continue from, so the boom starts
+        // where the sheet has it rather than slamming out from the centreline.
+        if st.boom_angle == 0.0 && st.boom_rate == 0.0 {
+            self.state.boom_angle = boom_set;
+        }
+        let boom_angle = if st.boom_angle == 0.0 && st.boom_rate == 0.0 {
+            boom_set
+        } else {
+            st.boom_angle
+        };
         let twist = twist_for_vang(controls.vang, boom_angle);
         // The upper section is eased by the twist, expressed back through the sheet
         // mapping so both sections go through the same force model.
@@ -753,6 +789,46 @@ impl Simulation {
         s.roll_rate += dp * dt;
         s.heave_rate += dw * dt;
         s.pitch_rate += dq * dt;
+
+        // --- The boom ---------------------------------------------------------------
+        // Its own little pendulum, swinging about the mast. Four things act on it and
+        // the first is the only one that is ever large: the sail's own force, which
+        // holds it out against the sheet and is why the boom sits still in steady air.
+        {
+            let inertia = (cfg.boom_mass * cfg.boom_cg * cfg.boom_cg).max(1.0);
+            // The sail pressing the boom to leeward, taken at the sail's own lever.
+            let push = (main.lift.hypot(main.drag) + main_upper.lift.hypot(main_upper.drag))
+                * cfg.boom_cg
+                * 0.45;
+            // Heeled over, the boom's own weight pulls it downhill — which is to
+            // leeward, and which is why a rolling boat's boom works against its sheet.
+            let gravity = cfg.boom_mass
+                * GRAVITY
+                * cfg.boom_cg
+                * st.heel.abs().sin()
+                * st.boom_angle.cos();
+            // The sheet. A rope: it pulls when it is tight and does nothing when it is
+            // not, and the whole behaviour here comes out of that one asymmetry.
+            let stretch = st.boom_angle - boom_set;
+            let (sheet, damping) = if stretch > 0.0 {
+                (-SHEET_STIFFNESS * stretch, SHEET_DAMPING)
+            } else {
+                (0.0, BOOM_DAMPING)
+            };
+            let accel = (push + gravity + sheet - damping * st.boom_rate) / inertia;
+            s.boom_rate += accel * dt;
+            s.boom_angle += s.boom_rate * dt;
+            // It cannot come inboard of the centreline, and it cannot go past the cap
+            // shroud — the same limit the force model uses for the sheet.
+            let hard_over = cfg.main.profile.max_chord_angle;
+            if s.boom_angle < 0.0 {
+                s.boom_angle = 0.0;
+                s.boom_rate = s.boom_rate.max(0.0);
+            } else if s.boom_angle > hard_over {
+                s.boom_angle = hard_over;
+                s.boom_rate = s.boom_rate.min(0.0);
+            }
+        }
         s.heading = wrap_tau(s.heading + s.yaw_rate * dt);
         s.heel += s.roll_rate * dt;
         s.heel = s.heel.clamp(-1.4, 1.4);

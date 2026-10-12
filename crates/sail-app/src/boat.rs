@@ -864,7 +864,8 @@ pub fn headsail_shape(
         // visibly shrinks on the stay rather than vanishing.
         let out = 1.0 - controls.furl as f32;
         let tack = genoa_tack(cfg.loa as f32);
-        let head = Vec3::new(0.0, DECK + 13.4, MAST_FOOT_Z);
+        // The genoa's head is the forestay's head: it is hanked to it.
+        let head = Vec3::new(0.0, crate::rig::FORESTAY_HEAD - 0.1, MAST_FOOT_Z);
         let foot = foot_for_area(
             cfg.genoa.area as f32,
             head - tack,
@@ -893,7 +894,10 @@ pub fn headsail_shape(
     let out =
         1.0 - sail_core::units::smoothstep(0.10, 0.45, controls.furl) as f32;
     let tack = sprit_end(cfg.loa as f32);
-    let head = Vec3::new(0.0, DECK + if gennaker { 14.0 } else { 14.8 }, MAST_FOOT_Z);
+    // Both go to the masthead. A sail set flying is hoisted on its own halyard to the
+    // very top of the spar — above the forestay, which is where its extra hoist comes
+    // from and half the reason it is worth setting.
+    let head = Vec3::new(0.0, crate::rig::MAST_HEAD - 0.12, MAST_FOOT_Z);
     let foot = foot_for_area(
         cfg.headsail(kind).area as f32,
         head - tack,

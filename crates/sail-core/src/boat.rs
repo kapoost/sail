@@ -127,6 +127,15 @@ pub struct BoatConfig {
     pub gennaker: RiggedSail,
     /// The inner headsail of a double head rig.
     pub staysail: RiggedSail,
+    /// Mass of the boom and the cloth that hangs on it, kg.
+    ///
+    /// Not a detail. A boom is the one part of the rig with enough mass, far enough out
+    /// on a lever, to have opinions of its own in a seaway — and the sheet that holds it
+    /// is a rope, which can pull and cannot push.
+    pub boom_mass: f64,
+    /// How far out along the boom that mass acts, metres.
+    pub boom_cg: f64,
+
     /// Chord angle at which the headsail starts to lie on the standing rigging.
     ///
     /// Derived from where the cap shroud stands at the sail's own mid-height, not
@@ -245,6 +254,8 @@ impl BoatConfig {
                 z_ce: 3.60,
                 x_ce: 1.05,
             },
+            boom_mass: 58.0,
+            boom_cg: 2.4,
             headsail_bears_at: rad(19.0),
             max_reef: 0.55,
 
@@ -453,6 +464,8 @@ impl BoatConfig {
                 z_ce: 3.60,
                 x_ce: 1.05,
             },
+            boom_mass: 58.0,
+            boom_cg: 2.4,
             headsail_bears_at: rad(17.0),
             max_reef: 0.68,
 
@@ -686,6 +699,8 @@ impl BoatConfig {
                 z_ce: 3.60,
                 x_ce: 1.05,
             },
+            boom_mass: 58.0,
+            boom_cg: 2.4,
             headsail_bears_at: rad(19.0),
             max_reef: 0.55,
 

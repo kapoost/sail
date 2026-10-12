@@ -28,6 +28,14 @@ const SEGMENTS: usize = 14;
 const DECK: f32 = 0.95;
 const MAST_FOOT_Z: f32 = -1.8;
 pub const MAST_HEAD: f32 = DECK + 15.2;
+
+/// Where the forestay lands, which is not the masthead.
+///
+/// A fraction below it. The sails set flying go to the very top — that is the point of
+/// them, and it is why a Code 0 out-measures a genoa on the same rig — while the
+/// forestay stops short, so the genoa's head and the sails hoisted above it are not
+/// fighting over the same crane. Half a metre is the usual gap on a rig this size.
+pub const FORESTAY_HEAD: f32 = MAST_HEAD - 0.55;
 /// The boom, high enough to stand under.
 ///
 /// It was a quarter of a metre *below* the helmsman's eye, which put it across the
@@ -328,7 +336,7 @@ pub fn update(
                 }
             }
             Kind::Forestay => Span {
-                from: masthead,
+                from: Vec3::new(0.0, FORESTAY_HEAD, MAST_FOOT_Z),
                 // The stemhead, where the headsail is tacked too — the same fitting,
                 // and now the same point. It was using the flat deck constant and so
                 // stood a quarter of a metre inside the bow.
@@ -418,7 +426,13 @@ pub fn update(
                         crate::deck::deck_height(MAST_FOOT_Z - 2.1) + 0.06,
                         MAST_FOOT_Z - 2.1,
                     ),
-                    tension: jib_load * 0.45 * set,
+                    // Bar taut whenever the sail is up, because on a club-footed
+                    // staysail this one rope holds the boom against the whole force of
+                    // the sail — there is no second sheet and no tackle to share it.
+                    // It was drawn at 0.45 of the headsail's load, which hung it in a
+                    // bight beside a sail that was plainly working, and a slack rope on
+                    // a straining sail reads as a mistake because it is one.
+                    tension: (0.55 + 0.45 * jib_load) * set,
                     width: 0.024,
                     colour: sheet_blue,
                     stiff: false,
@@ -454,9 +468,13 @@ pub fn update(
                     )
                 };
                 Span {
-                    // The lazy sheet runs from the same clew but is not pulling, so it
-                    // falls away in a bight across the foredeck.
-                    from: clew,
+                    // Only the working sheet is drawn at all now. The lazy one used to
+                    // be shown lying across the foredeck in a bight — which is true of a
+                    // real boat and reads as a mistake on a screen, because a slack rope
+                    // drawn beside a straining one looks like the straining one has gone
+                    // slack too. Asked for from the deck, and the deck is right: show
+                    // what is working.
+                    from: if working { clew } else { car_at },
                     // Led through the car itself, so the rope and the fitting cannot
                     // disagree about where the sheet is being turned.
                     to: car_at,

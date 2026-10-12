@@ -158,6 +158,70 @@ fn squall_row(cfg: BoatConfig, peak_kn: f64, twa: f64, head: Headsail, reef: f64
 fn main() {
     let cfg = BoatConfig::archipelago_packet();
 
+    // --- What the boom does in a seaway --------------------------------------
+    println!("-- the boom against its sheet: flat water against a sea --");
+    println!(
+        "{:>4}{:>6}{:>8}{:>10}{:>12}{:>10}",
+        "TWA", "wind", "sea", "STW", "boom swing", "slack for"
+    );
+    for (twa_deg, tws) in [(42.0, 10.0), (42.0, 16.0), (135.0, 10.0), (135.0, 16.0), (150.0, 16.0)] {
+        for (label, hs) in [("flat", 0.0), ("sea", 1.2)] {
+            let wind = || -> Box<dyn WindField> { Box::new(SteadyWind::new(0.0, kn_to_ms(tws))) };
+            let heading = wrap_tau(sail_core::wind::direction_of(
+                wind().sample(glam::DVec2::ZERO, 0.0),
+            ) - rad(twa_deg));
+            let mut state = BoatState::at_rest(heading);
+            state.surge = 0.6 * cfg.hull_speed();
+            let mut sim = Simulation::new(cfg, state, wind());
+            if hs > 0.0 {
+                sim = sim.with_water(Box::new(sail_core::water::WindSea::new(
+                    kn_to_ms(tws),
+                    60_000.0,
+                    0.0,
+                    5,
+                )));
+            }
+            let mut pilot = TillerPilot::new();
+            let mut controls = Controls::default();
+            let mut swing: f64 = 0.0;
+            let mut slack = 0.0;
+            let steps = (240.0 / SUBSTEP) as u64;
+            for i in 0..steps {
+                let (m, j) = optimal_sheets_with(
+                    &cfg,
+                    sim.telemetry.awa,
+                    controls.outhaul,
+                    Headsail::Genoa,
+                );
+                controls.main_sheet = m;
+                controls.jib_sheet = j;
+                controls.rudder = pilot.correct_under_load(
+                    &cfg,
+                    wrap_pi(heading - sim.state.heading),
+                    sim.state.yaw_rate,
+                    sim.telemetry.weather_helm,
+                    SUBSTEP,
+                );
+                sim.run(SUBSTEP, &controls);
+                if i > steps / 3 {
+                    let set = cfg.main.profile.chord_angle(controls.main_sheet);
+                    let off = sim.state.boom_angle - set;
+                    swing = swing.max(off.abs());
+                    if off < -rad(0.5) {
+                        slack += SUBSTEP;
+                    }
+                }
+            }
+            println!(
+                "{twa_deg:>4.0}{tws:>6.0}{label:>8}{:>10.2}{:>11.1}deg{:>9.1}s",
+                ms_to_kn(sim.telemetry.stw),
+                deg(swing),
+                slack,
+            );
+        }
+    }
+    println!();
+
     // --- Helm, heel and leeway, which is the everyday question ---------------
     println!("-- holding a course, full sail, what the helm and the hull are doing --");
     println!(
