@@ -791,7 +791,19 @@ pub fn update_sails(
                     luffing: forces.coeffs.luffing as f32,
                     draft: forces.camber as f32,
                     now,
-                    shrouds: &shrouds,
+                    // Once the sail is eased far enough it is sheeted outboard of the
+                    // cap shroud and flying clear of the rig, so the wire stops being
+                    // an obstacle and the cloth must stop being held off it. The same
+                    // angle the force model uses, because the picture and the physics
+                    // have to agree about where the sail is — the fault this file keeps
+                    // being caught by.
+                    shrouds: if surface.which == Sail::Headsail
+                        && t_.jib.chord_angle.abs() > cfg.headsail_bears_at + sail_core::units::rad(30.0)
+                    {
+                        &[]
+                    } else {
+                        &shrouds
+                    },
                     // Only a sail on the stay has to be kept off the mast and the
                     // shrouds. A sail flown from the sprit is ahead of both, and a
                     // staysail is inside everything and small enough to clear it.
