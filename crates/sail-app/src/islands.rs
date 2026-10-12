@@ -121,13 +121,15 @@ fn island_mesh(island: &Island, below: bool) -> Mesh {
             };
             positions.push(Vec3::new(bearing.sin() * r, y, -bearing.cos() * r));
             colours.push(if below {
-                // Pale sand going to the colour of deep water, so a bank announces
-                // itself through the surface the way a real one does.
+                // The shoal, going to the colour of deep water, so a bank announces
+                // itself through the surface the way a real one does — but a northern
+                // bank is stone and weed, not coral sand, so it is a cold grey-green
+                // rather than the tropical pale it was.
                 let fade = 1.0 - t;
                 [
-                    0.30 + 0.34 * fade,
-                    0.38 + 0.30 * fade,
-                    0.36 + 0.18 * fade,
+                    0.11 + 0.17 * fade,
+                    0.16 + 0.21 * fade,
+                    0.17 + 0.15 * fade,
                     1.0,
                 ]
             } else {
@@ -140,12 +142,32 @@ fn island_mesh(island: &Island, below: bool) -> Mesh {
                         a[2] + (b[2] - a[2]) * f,
                     ]
                 };
-                let c = if up < 0.06 {
-                    band([0.24, 0.23, 0.20], [0.52, 0.49, 0.40], up / 0.06)
-                } else if up < 0.22 {
-                    band([0.52, 0.49, 0.40], [0.26, 0.31, 0.20], (up - 0.06) / 0.16)
+                // Northern, and not a cheerful place.
+                //
+                // The bands these had were a temperate island: brown rock, a sandy
+                // strand, green heath, grey tops. The far north has none of that. The
+                // tide line is black — wet basalt and weed, the darkest thing in the
+                // whole picture — and above it there is no sand to speak of, only a
+                // narrow grey shingle where the sea throws stones. The heath above that
+                // is peat and dead heather, which is brown going on black and has no
+                // green in it until June. The tops are bare rock and lichen, pale and
+                // cold, and they are the only light thing on the island.
+                //
+                // Keeping them this dark is also what makes the sea read: a sunlit
+                // crest against a green island is just another bright thing, and against
+                // wet black rock it is the brightest thing on the screen.
+                let c = if up < 0.05 {
+                    // Weed and wet stone at the water's edge.
+                    band([0.055, 0.060, 0.065], [0.105, 0.105, 0.100], up / 0.05)
+                } else if up < 0.12 {
+                    // The shingle the sea throws up, and only as wide as it throws it.
+                    band([0.105, 0.105, 0.100], [0.255, 0.250, 0.235], (up - 0.05) / 0.07)
+                } else if up < 0.42 {
+                    // Peat and winter heather.
+                    band([0.255, 0.250, 0.235], [0.150, 0.135, 0.105], (up - 0.12) / 0.30)
                 } else {
-                    band([0.26, 0.31, 0.20], [0.40, 0.39, 0.36], (up - 0.22) / 0.78)
+                    // Bare rock and lichen on the summits.
+                    band([0.150, 0.135, 0.105], [0.360, 0.365, 0.360], (up - 0.42) / 0.58)
                 };
                 [c[0], c[1], c[2], 1.0]
             });
