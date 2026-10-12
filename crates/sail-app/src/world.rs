@@ -93,9 +93,33 @@ pub fn setup(
     //
     // White base colour because the water's own colour is carried per vertex, which
     // is what lets a crest reach foam without overdriving a dark base past one.
+    // The ripple animation, baked here so the first frame is ready before anything is
+    // drawn. `SAIL_WATER_FRAMES=0` turns it off and leaves the still map, which is both
+    // an escape hatch and the way to see what the motion is actually buying.
+    let animated = std::env::var("SAIL_WATER_FRAMES").is_ok_and(|v| v == "0");
+    let film: Vec<Handle<Image>> = if animated {
+        Vec::new()
+    } else {
+        let started = std::time::Instant::now();
+        let frames: Vec<Handle<Image>> = sea_texture::normal_map_frames()
+            .into_iter()
+            .map(|f| images.add(f))
+            .collect();
+        info!(
+            "water: {} ripple frames over {:.1} s, baked in {:.2} s",
+            frames.len(),
+            sea_texture::RIPPLE_LOOP,
+            started.elapsed().as_secs_f32()
+        );
+        frames
+    };
+    let first = film
+        .first()
+        .cloned()
+        .unwrap_or_else(|| images.add(sea_texture::normal_map()));
     let water = materials.add(StandardMaterial {
         base_color: Color::WHITE,
-        normal_map_texture: Some(images.add(sea_texture::normal_map())),
+        normal_map_texture: Some(first),
         metallic_roughness_texture: Some(images.add(sea_texture::roughness_map())),
         perceptual_roughness: 1.0,
         metallic: 0.0,
@@ -103,6 +127,11 @@ pub fn setup(
         double_sided: true,
         cull_mode: None,
         ..default()
+    });
+    commands.insert_resource(SeaFilm {
+        frames: film,
+        material: Some(water.clone()),
+        shown: 0,
     });
 
     // Spacing chosen from what the sea is, not from a convenient curve.
@@ -259,6 +288,52 @@ fn stipple(parcel: glam::DVec2) -> f32 {
     (h >> 40) as f32 / 16_777_216.0
 }
 
+/// The ripple animation: one normal map per frame of the loop, and the material they
+/// are shown on.
+///
+/// Pre-baked rather than regenerated. Making the map afresh every frame would be the
+/// obvious way and it is the wrong one twice over: half a megabyte of texture rebuilt
+/// and re-uploaded sixty times a second is real work on both the processor and the bus,
+/// and it is exactly the kind of per-frame graphics-resource churn that a long run
+/// punishes. There is an unexplained stall in this application's history that has that
+/// shape, and this is not the moment to add another candidate. Baked frames are a fixed
+/// cost paid once at startup, and after that showing one is a pointer swap.
+#[derive(Resource, Default)]
+pub struct SeaFilm {
+    frames: Vec<Handle<Image>>,
+    material: Option<Handle<StandardMaterial>>,
+    shown: usize,
+}
+
+/// Show the frame the clock is on.
+///
+/// The material is only touched when the frame actually changes — twelve times a second
+/// rather than sixty — because writing a material marks it changed and its bind group is
+/// rebuilt, and there is no reason to pay that for a frame that is already up.
+pub fn roll_sea_film(
+    time: Res<Time>,
+    mut film: ResMut<SeaFilm>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if film.frames.is_empty() {
+        return;
+    }
+    let count = film.frames.len();
+    let phase = time.elapsed_secs() / sea_texture::RIPPLE_LOOP;
+    let want = ((phase.fract() + 1.0).fract() * count as f32) as usize % count;
+    if want == film.shown {
+        return;
+    }
+    film.shown = want;
+    let Some(handle) = film.material.clone() else {
+        return;
+    };
+    let frame = film.frames[want].clone();
+    if let Some(m) = materials.get_mut(&handle).as_deref_mut() {
+        m.normal_map_texture = Some(frame);
+    }
+}
+
 /// Whether the sea is drawn rather than lit.
 #[derive(Resource, Default)]
 pub struct Ink(pub bool);
@@ -369,7 +444,18 @@ pub fn update_sea(
         // raising the ripple speed tenfold made it ten times worse. Integrating the
         // rate means a windshift changes where the water is going from now on,
         // instead of rewriting where it has been.
-        let speed = tm.tws * 0.025 + sea_texture::ripple_phase_speed() as f64;
+        // The current, and only the current.
+        //
+        // This used to carry a ripple speed as well — the group velocity of a one-metre
+        // wave, about 0.6 m/s — because the texture was a still photograph and sliding
+        // it was the only motion available. It was always a lie of a particular kind:
+        // sliding moves every scale in the pattern at one speed and in one direction,
+        // and water does the opposite. Short ripples crawl, long ones run, and the
+        // pattern reforms instead of marching. The ripples travel inside the frames
+        // now, each at its own dispersion speed, so the texture coordinates are left to
+        // carry what genuinely is a bulk translation: the wind-driven surface drift, two
+        // and a half percent of the wind speed.
+        let speed = tm.tws * 0.025;
         drift.offset += downwind * speed * time.delta_secs_f64();
         let current = drift.offset;
         // Rebase the texture coordinates by a whole number of tile repeats.

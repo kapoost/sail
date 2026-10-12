@@ -38,12 +38,42 @@ pub const TILE_METRES: f32 = 24.0;
 /// Re-export so the lighting and the sky cannot disagree about where the sun is.
 pub use crate::sky::SUN as SUN_FROM_SKY;
 
+/// Resolution of the animated frames.
+///
+/// Half the still map's. Forty-eight frames is the whole cost of this feature and it is
+/// paid in memory: at 1024 it would be a quarter of a gigabyte of texture for moving
+/// water, which is not a trade anyone would take. At 512 a tile texel is 4.7 cm and the
+/// shortest ripple in the spectrum still spans eleven of them, which is plenty to carry
+/// a smooth normal — and the window this is played in is 480 pixels across.
+const ANIM_SIZE: u32 = 512;
+
+/// How long the ripple animation takes to come back to itself, seconds.
+///
+/// Every component's frequency is rounded to a whole number of cycles in this window,
+/// which is what makes the loop seamless — the alternative is a jump every time it
+/// wraps, and a jump in water is the most visible thing there is. The rounding is also
+/// the cost: at three seconds the granularity is a third of a hertz, so the shortest
+/// ripples land within two percent of their true speed and the longest, which are slow
+/// and small, run up to a third fast. That is the right way round. The eye follows the
+/// band around a metre, and that band is nearly exact.
+pub const RIPPLE_LOOP: f32 = 3.0;
+
+/// How many frames the loop is cut into.
+///
+/// Twelve a second. Below that the shorter ripples strobe; above it the memory climbs
+/// for motion nobody is looking at, since what the frames carry is the ripples'
+/// *travel* and evolution while the slow surface current is still carried smoothly by
+/// the texture coordinates.
+pub const RIPPLE_FRAMES: usize = 36;
+
 /// One ripple: integer cycles across the tile, so the result tiles seamlessly.
 struct Ripple {
     cycles_u: f32,
     cycles_v: f32,
     amplitude: f32,
     phase: f32,
+    /// Angular frequency, radians per second, rounded to close the loop.
+    omega: f32,
 }
 
 /// The ripple spectrum, generated rather than written out by hand.
@@ -81,10 +111,31 @@ fn ripples() -> Vec<Ripple> {
             continue;
         }
         let k_actual = (cycles_u * cycles_u + cycles_v * cycles_v).sqrt().max(1.0);
+        // Dispersion, so each ripple travels at its own speed rather than the whole
+        // pattern sliding at one. This is the thing the texture could not do before:
+        // a still image advected downwind moves every scale at the same rate, which is
+        // the one behaviour water never has. Short waves are slow and long waves are
+        // fast, and that difference *is* the look of a water surface — a pattern that
+        // keeps reforming rather than one that marches.
+        //
+        // Gravity and surface tension both, because at these sizes neither dominates
+        // alone: at half a metre the gravity term still carries it, at two centimetres
+        // the capillary term would, and the crossover sits inside the band.
+        const G: f32 = 9.80665;
+        const SIGMA_OVER_RHO: f32 = 7.4e-5;
+        let k_rad = std::f32::consts::TAU * k_actual / TILE_METRES;
+        let omega_true = (G * k_rad + SIGMA_OVER_RHO * k_rad * k_rad * k_rad).sqrt();
+        // Rounded to a whole number of cycles in the loop. At least one, or the slowest
+        // components freeze — and frozen large-scale structure in a tiled texture is
+        // precisely what gives a procedural sea away.
+        let cycles_in_loop = (omega_true * RIPPLE_LOOP / std::f32::consts::TAU)
+            .round()
+            .max(1.0);
         out.push(Ripple {
             cycles_u,
             cycles_v,
             amplitude: 0.075 / k_actual,
+            omega: std::f32::consts::TAU * cycles_in_loop / RIPPLE_LOOP,
             // Irrational stride, so no two components ever line up to make a seam.
             phase: (i as f32 * 2.399_963_2) % std::f32::consts::TAU,
         });
@@ -94,11 +145,45 @@ fn ripples() -> Vec<Ripple> {
 
 /// Tangent-space normal map for the small-scale ripples.
 pub fn normal_map() -> Image {
+    normal_map_at(SIZE, 0.0)
+}
+
+/// The whole loop, as one image per frame.
+///
+/// Built on every core there is, because the serial version is the difference between
+/// a game that starts and a game you wait for: thirty-six frames is thirty-six times
+/// the work of the one map this used to make.
+pub fn normal_map_frames() -> Vec<Image> {
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(RIPPLE_FRAMES);
+    let mut out: Vec<Option<Image>> = (0..RIPPLE_FRAMES).map(|_| None).collect();
+    std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for (chunk, slot) in out.chunks_mut(RIPPLE_FRAMES.div_ceil(threads)).enumerate() {
+            let base = chunk * RIPPLE_FRAMES.div_ceil(threads);
+            handles.push(scope.spawn(move || {
+                for (i, cell) in slot.iter_mut().enumerate() {
+                    let t = (base + i) as f32 / RIPPLE_FRAMES as f32 * RIPPLE_LOOP;
+                    *cell = Some(normal_map_at(ANIM_SIZE, t));
+                }
+            }));
+        }
+        for h in handles {
+            let _ = h.join();
+        }
+    });
+    out.into_iter().flatten().collect()
+}
+
+/// One frame of it, at a chosen resolution and a chosen moment in the loop.
+fn normal_map_at(size: u32, t: f32) -> Image {
     let spectrum = ripples();
-    let mut data = Vec::with_capacity((SIZE * SIZE * 4) as usize);
-    let n = SIZE as f32;
-    for y in 0..SIZE {
-        for x in 0..SIZE {
+    let mut data = Vec::with_capacity((size * size * 4) as usize);
+    let n = size as f32;
+    for y in 0..size {
+        for x in 0..size {
             let u = x as f32 / n;
             let v = y as f32 / n;
             // Analytic gradient of the summed ripples. Exact, and far cheaper than
@@ -107,7 +192,7 @@ pub fn normal_map() -> Image {
             let mut dv = 0.0;
             for r in &spectrum {
                 let k = std::f32::consts::TAU;
-                let theta = k * (r.cycles_u * u + r.cycles_v * v) + r.phase;
+                let theta = k * (r.cycles_u * u + r.cycles_v * v) - r.omega * t + r.phase;
                 let c = theta.cos() * r.amplitude * k;
                 du += c * r.cycles_u;
                 dv += c * r.cycles_v;
@@ -122,8 +207,8 @@ pub fn normal_map() -> Image {
     }
     let mut image = Image::new(
         Extent3d {
-            width: SIZE,
-            height: SIZE,
+            width: size,
+            height: size,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
@@ -271,29 +356,3 @@ pub fn encode_normal(component: f32) -> u8 {
     (((component * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0)) as u8
 }
 
-/// How fast the ripple pattern itself travels over the water, metres per second.
-///
-/// Not the surface drift, and not what the first attempt at this computed either.
-///
-/// Two things were wrong with that. It took its wavelength from the size of the
-/// texture tile, so enlarging the tile from eleven metres to twenty-four raised the
-/// speed from 2.8 m/s to 4.1 — eight knots, faster than the boat, and with the whole
-/// map sliding coherently downwind it read exactly as what it was: the sea flowing
-/// sideways past a boat on a reach. The scale should come from the detail the eye
-/// actually follows, which is around a metre, not from however big the tile happens
-/// to be.
-///
-/// And it used the phase speed. What a observer sees travelling across water is the
-/// **group**, not the phase, and in deep water the group moves at half the phase
-/// speed. Phase velocity is the right number for where a single crest will be; group
-/// velocity is the right number for where the *pattern* will be, and a texture is a
-/// pattern.
-///
-/// A one-metre wave gives 1.25 m/s of phase and 0.63 m/s of group, which is a surface
-/// that is alive without being a conveyor belt.
-pub fn ripple_phase_speed() -> f32 {
-    /// The scale of ripple the eye follows, metres. Independent of the tile.
-    const VISIBLE_RIPPLE: f32 = 1.0;
-    let phase = (9.80665 * VISIBLE_RIPPLE / std::f32::consts::TAU).sqrt();
-    phase * 0.5
-}

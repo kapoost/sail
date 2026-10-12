@@ -109,6 +109,7 @@ fn main() {
         .init_resource::<frame::RenderOrigin>()
         .insert_resource(retro::Retro::from_env())
         .insert_resource(world::Ink::from_env())
+        .init_resource::<world::SeaFilm>()
         .init_resource::<chart::Chart>()
         .init_resource::<chart::Track>()
         .init_resource::<world::SurfaceDrift>()
@@ -175,6 +176,7 @@ fn main() {
                     chart::toggle,
                     retro::toggle,
                     world::toggle_ink,
+                    world::roll_sea_film,
                     ink::apply,
                     retro::apply,
                 ),
