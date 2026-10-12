@@ -283,15 +283,19 @@ pub fn update(
         .iter()
         .map(|kind| match *kind {
             Kind::Outhaul => Span {
-                // Along the underside of the boom, from the gooseneck out to the clew.
-                // Drawn mostly so the control has something to show for itself: with
-                // no line on screen, hauling the foot flat was invisible.
+                // Along the underside of the boom, from the gooseneck out to the clew —
+                // the clew the sail is actually drawn with, so the rope ends where the
+                // corner is. Which is also what makes the control visible: the tail of
+                // it shortens as the clew goes out to the nock.
                 from: Vec3::new(0.0, BOOM_HEIGHT - 0.07, MAST_FOOT_Z),
-                to: Vec3::new(
-                    boom.sin() * BOOM_LENGTH,
-                    BOOM_HEIGHT - 0.07,
-                    MAST_FOOT_Z + boom.cos() * BOOM_LENGTH,
-                ),
+                to: {
+                    let reach = crate::boat::main_foot(&sim.controls);
+                    Vec3::new(
+                        boom.sin() * reach,
+                        BOOM_HEIGHT - 0.07,
+                        MAST_FOOT_Z + boom.cos() * reach,
+                    )
+                },
                 tension: 0.35 + 0.65 * sim.controls.outhaul as f32,
                 width: 0.022,
                 colour: outhaul_red,

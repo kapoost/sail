@@ -720,15 +720,11 @@ pub fn update_sails(
         let (forces, geometry) = match surface.which {
             Sail::Main => {
                 let reef = sim.controls.reef as f32;
-                // A slab reef takes the luff down and leaves the foot where it was.
-                //
-                // The reefing pennant runs through a cheek block at the *end* of the
-                // boom, so hauling it down puts the new clew within a few centimetres
-                // of where the old one was. What you lose is hoist. This used to pull
-                // the foot in by a third of the reef, which drew a sail hanging off the
-                // middle of its own boom — and left the spar sticking a metre past the
-                // cloth, which is what a boom does on no boat at all.
-                let foot = crate::rig::BOOM_LENGTH * (1.0 - 0.06 * reef);
+                // A slab reef takes the luff down and leaves the foot where it was: the
+                // pennant runs through a cheek block at the *end* of the boom, so the
+                // new clew lands within a hand's breadth of the old one. What you lose
+                // is hoist.
+                let foot = main_foot(&sim.controls);
                 // And the hoist comes down by exactly the area the rig is losing, so
                 // the drawn triangle stays the size the force model is pulling with.
                 let shrink = 1.0 - reef * cfg.max_reef as f32;
@@ -824,6 +820,29 @@ pub fn update_sails(
     }
 }
 
+
+/// How far the clew sits from the gooseneck along the boom.
+///
+/// This is what the outhaul does, and it is a small thing: it hauls the clew the last
+/// hand's breadth out towards the boom end and holds it there, which tightens the foot
+/// and takes the belly out of the bottom of the sail. Twenty-two centimetres of travel.
+/// It is not a way of shortening the sail — that is the reef's job — and drawing it as
+/// one was wrong in a way that showed, because a sail whose whole foot changes length
+/// with a trim control is a sail nobody has ever sheeted.
+///
+/// Reefing moves the point the outhaul is working on. Each slab's clew cringle is cut a
+/// little inboard of the one below it, so when the first reef goes in the whole
+/// argument moves forward along the spar and starts again from there: the pennant hauls
+/// the new clew out towards the same boom end, with the same small travel in hand.
+pub fn main_foot(controls: &sail_core::state::Controls) -> f32 {
+    /// What the outhaul can move the clew by, metres.
+    const TRAVEL: f32 = 0.22;
+    /// How far forward each slab's clew cringle is cut.
+    const PER_SLAB: f32 = 0.16;
+    let slab = (controls.reef as f32 * 3.0).round();
+    let hauled = controls.outhaul as f32;
+    crate::rig::BOOM_LENGTH - PER_SLAB * slab - TRAVEL * (1.0 - hauled)
+}
 
 /// The three corners of whichever sail is up forward.
 ///
