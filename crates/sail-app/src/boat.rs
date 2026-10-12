@@ -405,7 +405,11 @@ pub fn setup(
             b.spawn((
                 Mesh3d(meshes.add(Cuboid::new(0.14, 0.11, 0.04))),
                 MeshMaterial3d(metal.clone()),
-                Transform::from_xyz(0.0, DECK + 0.06, MAST_FOOT_Z + 0.2),
+                Transform::from_xyz(
+                    0.0,
+                    crate::deck::deck_height(MAST_FOOT_Z + 0.2) + 0.03,
+                    MAST_FOOT_Z + 0.2,
+                ),
             ));
             // Sails. Their meshes are rebuilt every frame from the trim.
             b.spawn((

@@ -288,7 +288,10 @@ pub fn update(
             }
             Kind::Forestay => Span {
                 from: masthead,
-                to: Vec3::new(0.0, DECK + 0.25, -(cfg.loa as f32) * 0.46),
+                // The stemhead, where the headsail is tacked too — the same fitting,
+                // and now the same point. It was using the flat deck constant and so
+                // stood a quarter of a metre inside the bow.
+                to: crate::boat::genoa_tack(cfg.loa as f32),
                 tension: 1.0,
                 width: 0.022,
                 colour: wire,
@@ -296,7 +299,12 @@ pub fn update(
             },
             Kind::Backstay => Span {
                 from: masthead,
-                to: Vec3::new(0.0, DECK + 0.20, (cfg.loa as f32) * 0.46),
+                // On the counter, which rises: the flat deck constant put this one
+                // forty-five centimetres *below* the deck it is bolted to.
+                to: {
+                    let z = cfg.loa as f32 * 0.46;
+                    Vec3::new(0.0, crate::deck::deck_height(z) + 0.10, z)
+                },
                 tension: 1.0,
                 width: 0.022,
                 colour: wire,
@@ -321,7 +329,10 @@ pub fn update(
             }
             Kind::MainSheet => Span {
                 from: boom_end,
-                to: Vec3::new(0.0, DECK, 1.7),
+                // Down to a strop on the cockpit sole. At deck height it ended in
+                // mid-air in the middle of the opening, which is where the cockpit is
+                // rather than where anything is bolted.
+                to: Vec3::new(0.0, crate::deck::cockpit_sole(), 1.9),
                 // A luffing main pulls on nothing, and the sheet says so before the
                 // telltales have finished.
                 tension: main_load * (1.0 - t.main.coeffs.luffing as f32),
@@ -335,7 +346,11 @@ pub fn update(
                     BOOM_HEIGHT - 0.115,
                     MAST_FOOT_Z + boom.cos() * BOOM_LENGTH * VANG_ALONG_BOOM,
                 ),
-                to: Vec3::new(0.0, DECK + 0.08, MAST_FOOT_Z + 0.2),
+                to: Vec3::new(
+                    0.0,
+                    crate::deck::deck_height(MAST_FOOT_Z + 0.2) + 0.08,
+                    MAST_FOOT_Z + 0.2,
+                ),
                 // Its own setting, not the sail's load. A vang hauled on is bar taut
                 // whether or not the main is pulling, and an eased one hangs.
                 tension: 0.12 + 0.88 * sim.controls.vang as f32,

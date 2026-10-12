@@ -110,13 +110,20 @@ fn opening(z: f32) -> (f32, f32) {
 
 /// Where the bottom boards sit below the deck, metres.
 ///
-/// Low enough that you are standing *in* the hull and looking at her planking, high
-/// enough to be above the waterline — which is the whole point of them. Opening the
-/// cockpit through the deck meant you could see the sea inside the boat, because the
-/// sea surface runs straight through the hull and there was nothing in the way. The
-/// answer is not to cut a hole in the ocean; it is that a boat has a floor over her
-/// bilge, and this one had none.
-const SOLE_DROP: f32 = 0.68;
+/// Low enough that you are standing *in* the hull, high enough to stay dry.
+///
+/// This is the number that decides whether you see the sea inside the boat, and the
+/// first two attempts both got it wrong by treating the problem as one of hiding.
+/// Lining the inside did not help and could not: at a drop of 0.68 m the floor stood
+/// only 0.18 m above mean water, while the sea the game draws has a significant height
+/// of around 0.8 m, so its crests reach four tenths of a metre and genuinely come up
+/// through the floor. No amount of surface in the way fixes a floor that is under the
+/// water.
+///
+/// At 0.42 m of drop the boards sit 0.44 m up, two and a half times the clearance, and
+/// the well is a footwell you sit beside rather than a hole you stand in — which on a
+/// boat laid out like this is right anyway.
+const SOLE_DROP: f32 = 0.42;
 
 /// The section from the centreline out to the sheer, as `(x, y)` going outwards.
 ///
@@ -351,7 +358,11 @@ const COAMING: f32 = 0.16;
 /// to judge that it is wood rather than a line drawn on the deck.
 const COAMING_THICK: f32 = 0.055;
 /// Height of the toerail above the deck.
-const TOERAIL: f32 = 0.09;
+const TOERAIL: f32 = 0.11;
+/// And how thick, inboard from the sheer. It sits on the deck's edge rather than
+/// hanging outboard of the hull, because the hull is a scan and ends exactly where it
+/// ends.
+const TOERAIL_THICK: f32 = 0.06;
 
 /// The toerail along the sheer, and the wooden coaming round the cockpit.
 ///
@@ -377,10 +388,19 @@ pub fn trim_mesh() -> Mesh {
 
         let mut low = Vec::new();
         let mut high = Vec::new();
-        // Toerail, capping the sheer both sides.
+        // Toerail, capping the sheer both sides. Built as a section with thickness —
+        // inboard face, top, outboard face — rather than one ribbon standing on edge.
+        // A rail you can see the top of is a piece of timber; a rail you cannot is a
+        // line drawn along the deck, which is what it looked like.
         for side in [1.0_f32, -1.0] {
-            low.push(Vec3::new(side * half, sheer, z));
-            high.push(Vec3::new(side * half, sheer + TOERAIL, z));
+            let inner_face = side * (half - TOERAIL_THICK);
+            let outer_face = side * half;
+            low.push(Vec3::new(inner_face, sheer, z));
+            high.push(Vec3::new(inner_face, sheer + TOERAIL, z));
+            low.push(Vec3::new(inner_face, sheer + TOERAIL, z));
+            high.push(Vec3::new(outer_face, sheer + TOERAIL, z));
+            low.push(Vec3::new(outer_face, sheer + TOERAIL, z));
+            high.push(Vec3::new(outer_face, sheer, z));
         }
         // Coaming, following the edge of the well all the way round — including
         // across the ends, where the eased opening carries it. Built as a real rim:

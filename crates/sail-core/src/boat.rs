@@ -276,6 +276,19 @@ impl BoatConfig {
         // without being a racing number.
         let main_area = 38.0;
         let main_luff = 14.0;
+        // How far the boom can be eased before it lies on the cap shroud.
+        //
+        // Not a round number and not a guess: worked out from this boat's own rig.
+        // The shroud runs from the masthead at 16.0 m to the rail at 0.45 of the beam,
+        // so at boom height it stands 1.33 m outboard and 0.35 m abaft the mast —
+        // which from the gooseneck is a bearing of 75 degrees at 1.38 m along the
+        // boom. Past that the spar is through the wire.
+        //
+        // It matters because it is the reason you cannot square a main off on a run,
+        // the reason a preventer exists, and the reason a boat of this rig sails deep
+        // angles worse than the polar alone suggests. Ninety degrees — what this was —
+        // is a boom that has swung through its own standing rigging.
+        let boom_against_shrouds = rad(75.0);
         let genoa_area = 27.0;
         let genoa_luff = 12.4;
 
@@ -347,7 +360,10 @@ impl BoatConfig {
             heel_yaw_coefficient: 0.058,
 
             main: RiggedSail {
-                profile: SailProfile::mainsail(main_area, main_luff),
+                profile: SailProfile {
+                    max_chord_angle: boom_against_shrouds,
+                    ..SailProfile::mainsail(main_area, main_luff)
+                },
                 area: main_area,
                 z_ce: 6.60,
                 x_ce: -0.35,
