@@ -12,6 +12,7 @@ mod clutch;
 mod course;
 mod deck;
 mod deck_texture;
+mod fittings;
 mod frame;
 mod hud;
 mod input;
@@ -130,6 +131,7 @@ fn main() {
                 (
                     boat::update_hull,
                     boat::update_rudder,
+                    fittings::update_tiller,
                     boat::update_boom,
                     boat::update_windex,
                     boat::update_genoa_cars,

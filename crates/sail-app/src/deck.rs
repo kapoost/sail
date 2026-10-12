@@ -256,3 +256,72 @@ pub fn deck_half_beam(z: f32) -> f32 {
 pub fn cockpit_sole() -> f32 {
     deck_height(2.6) - COCKPIT_DEPTH
 }
+
+/// Where the aft face of the coachroof is.
+pub fn cabin_aft() -> f32 {
+    CABIN_AFT
+}
+
+/// Height of the coachroof at a station, for putting things on top of it.
+pub fn cabin_top(z: f32) -> f32 {
+    let (_, rise) = opening(z);
+    sheer_at(z).1 + rise.max(0.0)
+}
+
+/// Half-beam of the coachroof at a station.
+pub fn cabin_half_beam(z: f32) -> f32 {
+    opening(z).0
+}
+
+/// Height of the cockpit coaming above the deck, metres.
+///
+/// Low. It is something to brace a foot against and to sit on with your back to, not
+/// a bulwark — and on a boat this fine a tall one would look like an afterthought
+/// bolted to a hull that never asked for it.
+const COAMING: f32 = 0.24;
+/// Height of the toerail above the deck.
+const TOERAIL: f32 = 0.09;
+
+/// The toerail along the sheer, and the coaming round the cockpit.
+///
+/// Both are a strip standing on a curve the file already knows, so both come out of
+/// one routine. The toerail is what covers the joint between the scanned hull and the
+/// built deck — a hard edge there is the single most obvious tell that the two were
+/// made separately — and the coaming is what turns a hole in the deck into a cockpit.
+pub fn trim_mesh() -> Mesh {
+    let mut surface = Surface::default();
+    let steps = 240;
+    let z0 = SHEER[0].0;
+    let z1 = SHEER[SHEER.len() - 1].0;
+
+    let mut previous: Option<(Vec<Vec3>, Vec<Vec3>)> = None;
+    for i in 0..=steps {
+        let z = z0 + (z1 - z0) * (i as f32 / steps as f32);
+        let (half, sheer) = sheer_at(z);
+        let (inner, rise) = opening(z);
+
+        // Toerail: a capping on the sheer, both sides.
+        let mut low = Vec::new();
+        let mut high = Vec::new();
+        for side in [1.0_f32, -1.0] {
+            low.push(Vec3::new(side * half, sheer, z));
+            high.push(Vec3::new(side * half, sheer + TOERAIL, z));
+        }
+        // Coaming: only where the cockpit is, and only on its outer edge.
+        if z > CABIN_AFT && z < COCKPIT_AFT && inner > 0.05 && rise < 0.0 {
+            for side in [1.0_f32, -1.0] {
+                low.push(Vec3::new(side * inner, sheer, z));
+                high.push(Vec3::new(side * inner, sheer + COAMING, z));
+            }
+        }
+        if let Some((plow, phigh)) = previous.take() {
+            if plow.len() == low.len() {
+                for k in 0..low.len() {
+                    surface.quad([plow[k], low[k], high[k], phigh[k]], false);
+                }
+            }
+        }
+        previous = Some((low, high));
+    }
+    surface.build()
+}

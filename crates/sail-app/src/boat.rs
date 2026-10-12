@@ -207,17 +207,41 @@ pub fn setup(
             ));
             // Cabin sides and the cockpit well: painted, and glossier than the deck,
             // which is the difference your eye uses to tell a wall from a floor.
+            let painted_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.88, 0.87, 0.83),
+                perceptual_roughness: 0.32,
+                double_sided: true,
+                cull_mode: None,
+                ..default()
+            });
             b.spawn((
                 Mesh3d(meshes.add(painted)),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.88, 0.87, 0.83),
-                    perceptual_roughness: 0.32,
-                    double_sided: true,
-                    cull_mode: None,
-                    ..default()
-                })),
+                MeshMaterial3d(painted_mat.clone()),
                 Transform::default(),
             ));
+            // Toerail along the sheer and coaming round the cockpit: varnished, so
+            // they read as trim rather than as more deck.
+            let varnish = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.46, 0.31, 0.16),
+                perceptual_roughness: 0.25,
+                reflectance: 0.45,
+                double_sided: true,
+                cull_mode: None,
+                ..default()
+            });
+            let metal = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.74, 0.74, 0.76),
+                metallic: 0.85,
+                perceptual_roughness: 0.30,
+                ..default()
+            });
+            b.spawn((
+                Mesh3d(meshes.add(crate::deck::trim_mesh())),
+                MeshMaterial3d(varnish.clone()),
+                Transform::default(),
+            ));
+            crate::fittings::spawn(b, &mut meshes, &varnish, &metal, &painted_mat);
+
             // Keel fin.
             b.spawn((
                 Mesh3d(meshes.add(Cuboid::new(0.16, cfg.draft as f32 - 0.5, 1.25))),
