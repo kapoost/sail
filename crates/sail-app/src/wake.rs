@@ -17,9 +17,13 @@ use bevy::prelude::*;
 use crate::frame;
 use crate::sim::Sim;
 
-/// Samples kept. At half a metre apart that is sixty metres of wake, which is about
-/// as far as one stays visible on open water.
-const SAMPLES: usize = 120;
+/// Samples kept. At half a metre apart that is a hundred and twenty metres of wake.
+///
+/// Asked for from the deck: the track she has been over should stay bright behind her.
+/// It should, and it does on the water — a disturbed strip holds its smoothed, paler
+/// look for a minute or more in a seaway, long after the foam in it has gone. Sixty
+/// metres was a wake; this is a track.
+const SAMPLES: usize = 240;
 /// Points across the wake at each sample.
 ///
 /// Two was not enough and was the whole of the problem. With only the edges, the quad
@@ -30,9 +34,13 @@ const SAMPLES: usize = 120;
 const ACROSS: usize = 5;
 /// Distance between samples, metres.
 const SPACING: f64 = 0.5;
-/// How long a sample stays visible, seconds. Long enough to see, short enough that a
-/// slow boat does not trail a scar.
-const LIFETIME: f32 = 14.0;
+/// How long a sample stays visible, seconds.
+///
+/// Thirty-five, up from fourteen. At seven knots the oldest sample in the buffer is a
+/// hundred and twenty metres astern and half a minute old, so the two limits are now
+/// about equal and whichever runs out first does so honestly: a fast boat is cut off by
+/// the length of the buffer, a slow one by the water settling.
+const LIFETIME: f32 = 35.0;
 
 #[derive(Clone, Copy)]
 struct Sample {
@@ -122,7 +130,11 @@ pub fn update(
     // Lay a new sample once she has moved far enough to have left a new mark.
     let moved = wake.last.is_none_or(|l| (stern - l).length() >= SPACING);
     if moved {
-        let strength = (sail_core::units::ms_to_kn(sim.sim.telemetry.stw) / 6.0).clamp(0.0, 1.0);
+        // What she is actually tearing up. Squared rather than linear, because that is
+        // how the energy she leaves in the water grows, and because it keeps a boat
+        // drifting at two knots from laying the same white scar as one driving at eight.
+        let knots = sail_core::units::ms_to_kn(sim.sim.telemetry.stw).max(0.0);
+        let strength = ((knots / 6.5).powi(2)).clamp(0.0, 1.0);
         wake.samples.push(Sample {
             at: stern,
             across: st.starboard(),
@@ -165,8 +177,14 @@ pub fn update(
         let age = (now - sample.born).max(0.0);
         let life = (1.0 - age / LIFETIME).clamp(0.0, 1.0);
         // A wake spreads as it ages and thins as it spreads.
-        let half_width = beam * (0.75 + 1.1 * (age as f64 / LIFETIME as f64).min(1.0));
-        let alpha = life * life * sample.strength * 0.42;
+        let half_width = beam * (0.75 + 1.6 * (age as f64 / LIFETIME as f64).min(1.0));
+        // Two fades in one: the foam goes quickly, and the smoothed water it leaves
+        // behind stays. A single curve could only do one of them, and doing the first
+        // alone is what made the wake vanish while the track it marked was still there
+        // on the sea astern.
+        let foam = life.powf(3.0);
+        let track = life.powf(0.55);
+        let alpha = (foam * 0.55 + track * 0.30) * sample.strength;
 
         for k in 0..ACROSS {
             // -1 at the port edge, 0 down the middle, +1 at the starboard edge.
