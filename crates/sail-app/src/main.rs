@@ -88,6 +88,13 @@ fn main() {
                 }),
         )
         .add_plugins(EguiPlugin::default())
+        // The plugin must not claim the first camera for its context: that is the one
+        // looking at the sea, and in the pixelated picture it draws into a 480-pixel
+        // image. The instruments get a camera of their own — see `retro::UiCamera`.
+        .insert_resource(bevy_egui::EguiGlobalSettings {
+            auto_create_primary_context: false,
+            ..default()
+        })
         .add_plugins(sound::plugin)
         .insert_resource(sim::Sim::new(weather))
         .insert_resource(weather)
@@ -108,6 +115,7 @@ fn main() {
         .add_systems(
             Startup,
             (
+                retro::setup_ui_camera,
                 world::setup,
                 boat::setup,
                 islands::setup,
@@ -170,13 +178,7 @@ fn main() {
         )
         .add_systems(
             EguiPrimaryContextPass,
-            (
-                retro::scale_instruments,
-                panel::draw,
-                chart::draw,
-                hud::draw,
-            )
-                .chain(),
+            (panel::draw, chart::draw, hud::draw).chain(),
         )
         .run();
 }

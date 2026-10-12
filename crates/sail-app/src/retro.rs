@@ -194,34 +194,39 @@ pub fn apply(
     }
 }
 
-/// Lay the instruments out as if the screen were its usual size.
+/// The camera the instruments are drawn on.
 ///
-/// They are drawn into the same small image as the world, which is what gives them
-/// their blocky look — and, left alone, also makes one gauge fill a quarter of the
-/// window, because egui was laying out in a four-hundred-and-eighty-point screen and
-/// the result was then blown up six times.
+/// Its own, always pointed at the window, and therefore always at the full density of
+/// the screen. `bevy_egui` otherwise puts its context on the first camera the
+/// application makes — the one looking at the sea — and the moment that starts drawing
+/// into a 480-pixel image the console goes in with it.
 ///
-/// Telling egui how many of its points go to a pixel fixes the size without touching
-/// the look: the panels come out the same fraction of the screen they always were,
-/// drawn at a third of the density. Chunky text at a readable size, which is what the
-/// old games had — they were not laid out small, they were laid out normally on a
-/// screen that had few pixels.
-pub fn scale_instruments(
-    retro: Res<Retro>,
-    windows: Query<&Window>,
-    mut contexts: bevy_egui::EguiContexts,
-) -> Result {
-    let Ok(window) = windows.single() else {
-        return Ok(());
-    };
-    let logical = window.width().max(1.0);
-    let ppp = match retro.width() {
-        Some(w) => w as f32 / logical,
-        None => 1.0,
-    };
-    let ctx = contexts.ctx_mut()?;
-    if (ctx.pixels_per_point() - ppp).abs() > 1e-4 {
-        ctx.set_pixels_per_point(ppp);
-    }
-    Ok(())
+/// Both of the obvious ways round that were tried and are in the history. Laying the
+/// panels out in the small image makes them six times too big; scaling the layout down
+/// to fit puts a nine-point label on three pixels, at which glyphs stop having shapes,
+/// and growing the type inside that layout only trades legibility for a console that
+/// no longer fits its own boxes. There is no setting that makes a readable instrument
+/// out of 480 pixels, because the panel genuinely needs about fourteen hundred points
+/// of width.
+///
+/// So the panel is drawn at the resolution it needs and the sea at the resolution it
+/// wants. That is not a compromise between the two looks, it is the one arrangement in
+/// which each is what it should be — and the crisp lettering over a coarse sea is the
+/// same trick as the sharp wind over it: one deliberate layer of detail on top of a
+/// deliberately coarse picture.
+#[derive(Component)]
+pub struct UiCamera;
+
+pub fn setup_ui_camera(mut commands: Commands) {
+    commands.spawn((
+        UiCamera,
+        Camera2d,
+        Camera {
+            // After the world and after the upscaled picture, clearing neither.
+            order: 3,
+            clear_color: bevy::camera::ClearColorConfig::None,
+            ..default()
+        },
+        bevy_egui::PrimaryEguiContext,
+    ));
 }
