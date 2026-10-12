@@ -76,11 +76,17 @@ pub struct Outlined;
 /// a four-hundred-metre island. A fixed offset that reads on the boat is invisible on
 /// the island, and one that reads on the island swallows the boat. A comic inks the
 /// large shape with the bolder line anyway.
-const SILHOUETTE: f32 = 0.0045;
+///
+/// Thinned from 0.0045, because the boldest lines in the picture — the mast and the
+/// topsides, which are also the longest objects — were the ones overdoing it: 69 mm and
+/// 52 mm of black around a spar a hundred millimetres thick and a hull you are standing
+/// on. They draw 43 mm and 32 mm now, the boom 17, a winch 10, and an island still
+/// reaches its cap. A line should say where a thing ends, not become the thing.
+const SILHOUETTE: f32 = 0.0028;
 
 /// Absolute bounds on it, because the relative rule has to be stopped at both ends: a
 /// winch handle would get a line too fine to see, an island one you could moor to.
-const SILHOUETTE_MIN: f32 = 0.012;
+const SILHOUETTE_MIN: f32 = 0.010;
 const SILHOUETTE_MAX: f32 = 0.9;
 
 /// How sharply two faces must disagree before the edge between them is a fold.
@@ -310,7 +316,13 @@ pub fn creases(mesh: &Mesh) -> Option<(Mesh, usize)> {
     Some((m, count))
 }
 
-/// The colour the lines are drawn in: near black, with the cold of the scene in it.
+/// The colour the lines are drawn in: black.
+///
+/// It was a very dark indigo, on the honest argument that nothing in a lit world is
+/// truly black. That argument is right about *shadows* and wrong about ink, which is
+/// what this is: a drawn line is not a dark part of the scene, it is a mark made on top
+/// of the scene, and a mark made in ink is made in ink. The tint only showed up as a
+/// faint blue cast along every edge on the boat.
 ///
 /// Not black. Black is what you reach for first and it is the one choice that cannot be
 /// right, because nothing in a lit world is black — an outline in pure black reads as a
@@ -318,7 +330,7 @@ pub fn creases(mesh: &Mesh) -> Option<(Mesh, usize)> {
 /// Every ink tradition worth copying tints its darks: a comic inker's black is warm, a
 /// cel painter's shadow line is the shadow colour of the scene. Here the scene is a
 /// cold grey-blue sea under a northern sky, so the darks go indigo.
-const INK: Vec3 = Vec3::new(0.012, 0.014, 0.022);
+const INK: Vec3 = Vec3::ZERO;
 
 /// How much of the object's own colour survives in its outline. None of it.
 ///
