@@ -470,10 +470,15 @@ pub fn update_sails(
     let cfg = sim.config();
     let side = -t_.awa.signum() as f32;
     let now = time.elapsed_secs();
-    let shrouds = [
-        shroud(cfg.beam as f32, false),
-        shroud(cfg.beam as f32, true),
-    ];
+    // Only the leeward shroud. A sail bears on the wire the wind is pressing it
+    // against and is *supposed* to be to leeward of the other one — that is where it
+    // lives. Handing both to the constraint made the windward shroud an obstacle too,
+    // and since the test is "the cloth may not be to leeward of the wire", every point
+    // on the mainsail's luff counted as having gone through it. Measured on the
+    // half-height luff: 0.84 m from the windward shroud, which the falloff weighted at
+    // 0.87, which shoved the cloth three quarters of a metre to windward and collapsed
+    // the sail.
+    let shrouds = [shroud(cfg.beam as f32, side > 0.0)];
 
     for (surface, mut visibility) in &mut q {
         *visibility = if surface.which == Sail::Genoa && sim.controls.furl > 0.985 {
