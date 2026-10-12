@@ -291,6 +291,9 @@ impl Simulation {
         if st.boom_angle == 0.0 && st.boom_rate == 0.0 {
             self.state.boom_angle = boom_set;
         }
+        // Signed towards leeward: positive is where a drawing sail lives, negative is the
+        // boom having come across to windward, where its angle of attack is the apparent
+        // wind angle *plus* the swing and the sail does nothing but flog.
         let boom_angle = if st.boom_angle == 0.0 && st.boom_rate == 0.0 {
             boom_set
         } else {
@@ -300,6 +303,20 @@ impl Simulation {
         // The upper section is eased by the twist, expressed back through the sheet
         // mapping so both sections go through the same force model.
         let upper_sheet = cfg.main.profile.sheet_for_chord_angle(boom_angle + twist);
+
+        // What each sail does to the other's wind. Worked out from the lift each would
+        // make on its own — two extra coefficient lookups — and then applied to the
+        // angle the other one sees.
+        // Taken from the step before, which at two hundred a second is five milliseconds
+        // out of date and saves computing every sail twice. The pair is a feedback loop
+        // either way; a loop that is one substep behind settles to the same place.
+        let (bend_main, bend_jib) =
+            crate::sail::slot_interaction(self.telemetry.main.coeffs.cl, self.telemetry.jib.coeffs.cl);
+        let bent = |awa: f64, by: f64| awa.signum() * (awa.abs() + by).max(0.0);
+        let lower_awa = bent(lower_awa, bend_main);
+        let upper_awa = bent(upper_awa, bend_main);
+        let jib_awa = bent(jib_awa, bend_jib);
+        let jib_upper_awa = bent(jib_upper_awa, bend_jib);
 
         let main = sail_forces(
             &cfg.main.profile,
@@ -832,24 +849,33 @@ impl Simulation {
                 * st.boom_angle.cos();
             // The sheet. A rope: it pulls when it is tight and does nothing when it is
             // not, and the whole behaviour here comes out of that one asymmetry.
-            let stretch = st.boom_angle - boom_set;
+            //
+            // It is made fast on the centreline, so what it limits is how far the boom
+            // can get from the centreline — on *either* side. In a breeze that never
+            // matters, because the wind holds the boom out to leeward against the sheet
+            // and it stays there. In light air with any swell running it is the whole
+            // story: there is not enough wind to hold the boom anywhere, the roll throws
+            // it across, it fetches up against the sheet on the far side, and the sail
+            // slams and flogs. Which is the most recognisable thing a boat does in a
+            // calm, and the model could not do it while the boom was pinned to one side.
+            let stretch = st.boom_angle.abs() - boom_set;
             let (sheet, damping) = if stretch > 0.0 {
-                (-SHEET_STIFFNESS * stretch, SHEET_DAMPING)
+                (
+                    -SHEET_STIFFNESS * stretch * st.boom_angle.signum(),
+                    SHEET_DAMPING,
+                )
             } else {
                 (0.0, BOOM_DAMPING)
             };
             let accel = (push + gravity + sheet - damping * st.boom_rate) / inertia;
             s.boom_rate += accel * dt;
             s.boom_angle += s.boom_rate * dt;
-            // It cannot come inboard of the centreline, and it cannot go past the cap
-            // shroud — the same limit the force model uses for the sheet.
+            // The cap shroud stops it on either side — the same limit the force model
+            // uses for the sheet, and the thing a boom actually hits.
             let hard_over = cfg.main.profile.max_chord_angle;
-            if s.boom_angle < 0.0 {
-                s.boom_angle = 0.0;
-                s.boom_rate = s.boom_rate.max(0.0);
-            } else if s.boom_angle > hard_over {
-                s.boom_angle = hard_over;
-                s.boom_rate = s.boom_rate.min(0.0);
+            if s.boom_angle.abs() > hard_over {
+                s.boom_angle = hard_over * s.boom_angle.signum();
+                s.boom_rate = 0.0;
             }
         }
         s.heading = wrap_tau(s.heading + s.yaw_rate * dt);
@@ -877,6 +903,8 @@ impl Simulation {
         let wind_body = self.state.to_body(to_wind);
         let v = self.state.velocity_world();
         self.telemetry = Telemetry {
+            bend_main,
+            bend_jib,
             depth,
             under_keel: depth - cfg.draft,
             tws,

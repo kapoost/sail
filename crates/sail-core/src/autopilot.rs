@@ -30,13 +30,33 @@ pub fn optimal_sheets_with(
     outhaul: f64,
     head: crate::state::Headsail,
 ) -> (f64, f64) {
+    optimal_sheets_bent(cfg, awa, outhaul, head, 0.0, 0.0)
+}
+
+/// The same, told how the two sails are bending each other's wind.
+///
+/// This is not a refinement, it is the difference between trimming and guessing. The
+/// headsail's downwash takes several degrees off the angle the mainsail meets, so a main
+/// trimmed to the masthead fly is trimmed for a wind that is not there — eased too far,
+/// every time, by exactly the amount of the bend. Hand the trimmer the bent angle and it
+/// sheets the main in near the centreline the way a crew does, for the reason a crew
+/// does it.
+pub fn optimal_sheets_bent(
+    cfg: &BoatConfig,
+    awa: f64,
+    outhaul: f64,
+    head: crate::state::Headsail,
+    bend_main: f64,
+    bend_jib: f64,
+) -> (f64, f64) {
+    let bent = |by: f64| awa.signum() * (awa.abs() + by).max(0.0);
     (
         cfg.main
             .profile
-            .optimal_sheet(awa, crate::sail::camber_for_outhaul(outhaul)),
+            .optimal_sheet(bent(bend_main), crate::sail::camber_for_outhaul(outhaul)),
         cfg.headsail(head)
             .profile
-            .optimal_sheet(awa, crate::sail::CAMBER_REFERENCE),
+            .optimal_sheet(bent(bend_jib), crate::sail::CAMBER_REFERENCE),
     )
 }
 
@@ -272,7 +292,14 @@ where
         let step = (want - controls.outhaul).clamp(-0.25 * SUBSTEP, 0.25 * SUBSTEP);
         controls.outhaul = (controls.outhaul + step).clamp(0.0, 1.0);
 
-        let (m, j) = optimal_sheets_with(&cfg, sim.telemetry.awa, controls.outhaul, head);
+        let (m, j) = optimal_sheets_bent(
+            &cfg,
+            sim.telemetry.awa,
+            controls.outhaul,
+            head,
+            sim.telemetry.bend_main,
+            sim.telemetry.bend_jib,
+        );
         controls.main_sheet = m;
         controls.jib_sheet = j;
         controls.rudder = pilot.rudder(&cfg, &sim.state, heading, SUBSTEP);

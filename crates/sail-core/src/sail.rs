@@ -133,6 +133,50 @@ pub fn rig_interference(chord_angle: f64, bears_at: f64) -> (f64, f64) {
     (1.0 - 0.08 * t, 1.0 + 0.15 * t)
 }
 
+/// How the two sails bend the wind for each other.
+///
+/// They are not two sails in the same breeze. Each one's circulation turns the flow the
+/// other arrives in, and the pair has been understood this way since Gentry took it
+/// apart in the seventies — before which half of trim theory was wrong in print.
+///
+/// The headsail's circulation *downwashes* the main: the flow reaching the mainsail's
+/// luff has already been bent to leeward, so the main meets it at a smaller angle than
+/// the masthead fly suggests. That is why a mainsail can be sheeted almost to the
+/// centreline upwind without stalling — and why, when the headsail is sheeted too hard,
+/// the bend becomes too much and the main's luff backwinds.
+///
+/// The mainsail's circulation *upwashes* the headsail: the flow arriving at the
+/// headsail is turned to windward, so the headsail meets it at a larger angle than it
+/// would alone. Which is the thing that was missing, and the thing a trimmer feels
+/// first: haul the main in and the headsail starts working at a higher angle of attack
+/// without anybody having touched its sheet. It goes soft, then it backwinds, and the
+/// cure is to ease the main.
+///
+/// Returned as angles to add to each sail's apparent wind, in radians. The sizes are
+/// the usual quoted ones — a few degrees each, the headsail's effect on the main the
+/// larger of the two, both scaled by how hard the sail doing the bending is working.
+pub fn slot_interaction(main_cl: f64, jib_cl: f64) -> (f64, f64) {
+    /// Downwash on the main per unit of headsail lift coefficient.
+    ///
+    /// Three degrees, not the six this started at, and the reason is that the bend is
+    /// not uniform across the sail. It is strongest at the mainsail's luff — where the
+    /// published four to eight degrees is measured, and where the backwinding shows —
+    /// and nearly nothing by the leech. A single number applied to the whole sail has to
+    /// be the average of that, not the peak.
+    ///
+    /// Measured consequence of getting it wrong: at six degrees per unit, a close-hauled
+    /// boat in five knots of breeze had nine and a half degrees taken off a sixteen
+    /// degree apparent wind, which left the mainsail six degrees of angle and no useful
+    /// drive at all. The main is a third of the drive upwind, not a rag.
+    const ON_MAIN: f64 = 3.0 * std::f64::consts::PI / 180.0;
+    /// Upwash on the headsail per unit of mainsail lift coefficient.
+    const ON_JIB: f64 = 3.2 * std::f64::consts::PI / 180.0;
+    (
+        -ON_MAIN * jib_cl.clamp(0.0, 1.8),
+        ON_JIB * main_cl.clamp(0.0, 1.8),
+    )
+}
+
 /// Where along the chord the force actually acts, as a fraction back from the luff.
 ///
 /// Until now every sail's force was applied at a point fixed in the configuration, as

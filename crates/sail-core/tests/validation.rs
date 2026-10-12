@@ -840,7 +840,17 @@ where
         ..Default::default()
     };
     for _ in 0..(SETTLE / SUBSTEP) as u64 {
-        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, outhaul);
+        // Trimmed knowing how the two sails bend each other's wind, which is what a
+        // crew trims by: a main sheeted to the masthead fly is eased too far by exactly
+        // the headsail's downwash, every time.
+        let (m, j) = sail_core::autopilot::optimal_sheets_bent(
+            &cfg,
+            sim.telemetry.awa,
+            outhaul,
+            sail_core::state::Headsail::Genoa,
+            sim.telemetry.bend_main,
+            sim.telemetry.bend_jib,
+        );
         controls.main_sheet = m;
         controls.jib_sheet = j;
         controls.rudder = pilot.rudder(&cfg, &sim.state, heading, SUBSTEP);

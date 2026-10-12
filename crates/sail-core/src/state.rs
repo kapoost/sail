@@ -290,6 +290,15 @@ pub struct Telemetry {
     /// Apparent wind at the rig, speed and angle.
     pub aws: f64,
     pub awa: f64,
+    /// How much each sail's wind has been bent by the other, radians, to be added to the
+    /// apparent wind angle before trimming it. See [`crate::sail::slot_interaction`].
+    ///
+    /// Published rather than kept inside the force model because a trimmer has to work
+    /// with the same numbers the sail does: the whole reason a mainsail is sheeted near
+    /// the centreline upwind is the headsail's downwash, and a trim routine that does not
+    /// know about it will sheet the main for a wind that is not there.
+    pub bend_main: f64,
+    pub bend_jib: f64,
     /// Height above the water the apparent wind was read at, metres.
     ///
     /// Not a detail. The true wind is quoted at ten metres and the boundary layer

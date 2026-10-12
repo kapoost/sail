@@ -780,7 +780,19 @@ pub fn update_sails(
                     lee: side,
                     twist,
                     luffing: forces.coeffs.luffing as f32,
-                    draft: forces.camber as f32,
+                    // What the sail is cut to, plus what the wind puts into it.
+                    //
+                    // The camber in the trim is the designed shape — what the outhaul
+                    // and the lead car are arguing about upwind. Off the wind the sail
+                    // stops being a wing and becomes a bag: with the sheet eased there is
+                    // nothing tensioning the leech, the cloth takes the shape it was cut
+                    // to and then some, and the foot comes straight between tack and clew
+                    // because that is the one edge still under load. A sailmaker builds
+                    // that in deliberately — the broadseam is there to put a belly in
+                    // exactly this condition — so a reaching sail drawn with its upwind
+                    // section looks starved, which is what it looked like.
+                    draft: forces.camber as f32
+                        * (1.0 + 1.9 * forces.chord_angle.abs().sin() as f32),
                     now,
                     // Once the sail is eased far enough it is sheeted outboard of the
                     // cap shroud and flying clear of the rig, so the wire stops being
@@ -861,7 +873,12 @@ pub fn headsail_shape(
         // The car the clew is solved against, which must be the one the fitting is
         // drawn at.
         let hoisted = tack.lerp(head, 0.35 + 0.65 * out);
-        let cloth = Cloth::cut(tack, hoisted, foot, 0.42);
+        // A genoa is cut low: its foot sweeps the deck and its clew rides just above
+        // the rail. That is what the "rise" is — how far above the tack the sail is cut
+        // to carry its clew — and it is most of what tells a genoa from a reaching sail
+        // at a glance. The flying sails are cut away underneath, high-clewed so they
+        // clear the pulpit and the water, and they were all being cut the same.
+        let cloth = Cloth::cut(tack, hoisted, foot, 0.16);
         // The car is the headsail's shape control: forward for a deep sail, aft for a
         // flat one. That depth is what moves the ring the clew rides.
         let belly = 1.0 - controls.genoa_car as f32;
@@ -894,7 +911,7 @@ pub fn headsail_shape(
         fullness,
     ) * out;
     let hoisted = tack.lerp(head, 0.3 + 0.7 * out);
-    let cloth = Cloth::cut(tack, hoisted, foot, 0.45);
+    let cloth = Cloth::cut(tack, hoisted, foot, if gennaker { 0.62 } else { 0.52 });
     // A gennaker is cut deep and a Code 0 nearly flat, and neither has a car to change
     // it: the depth is the sailmaker's, not the trimmer's.
     let belly = if gennaker { 1.0 } else { 0.25 };
