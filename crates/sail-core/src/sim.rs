@@ -409,6 +409,19 @@ impl Simulation {
         } else {
             headsail_blanketing(jib_upper_awa, boom_angle)
         };
+        // Cloth on cloth: the inner sail eased out into the back of the outer one.
+        // Computed here, before either sail's forces, because both of them have to know
+        // about it — the one being leant on as much as the one doing the leaning.
+        let set_inner = controls.staysail.clamp(0.0, 1.0);
+        let fouling = if set_inner > 1e-3 {
+            crate::sail::cloth_on_cloth(
+                cfg.staysail.profile.chord_angle(controls.staysail_sheet),
+                jib_chord,
+            )
+        } else {
+            0.0
+        };
+
         let jib = sail_forces(
             &head.profile,
             jib_awa,
@@ -425,7 +438,11 @@ impl Simulation {
         // what says so out loud, so the picture shakes and the instruments read LUFFING
         // rather than showing a serene triangle doing nothing.
         let mut jib = jib;
-        jib.coeffs.luffing = jib.coeffs.luffing.max(1.0 - fill);
+        // Collapsed, or lying against the sail inside it. Both of those are cloth that
+        // has stopped being a wing, and both have to say so where it can be seen: the
+        // force model was taking the drive away quietly and leaving two serene triangles
+        // pressed into each other. A fouled rig is the noisiest thing on a boat.
+        jib.coeffs.luffing = jib.coeffs.luffing.max(1.0 - fill).max(fouling);
         let jib_upper = sail_forces(
             &head.profile,
             jib_upper_awa,
@@ -438,7 +455,7 @@ impl Simulation {
         )
         .scaled(jib_upper_lift, jib_upper_drag);
         let mut jib_upper = jib_upper;
-        jib_upper.coeffs.luffing = jib_upper.coeffs.luffing.max(1.0 - fill);
+        jib_upper.coeffs.luffing = jib_upper.coeffs.luffing.max(1.0 - fill).max(fouling);
 
         // --- Staysail: the inner sail of a double head rig ------------------------
         //
@@ -455,7 +472,7 @@ impl Simulation {
         // ways. The net is positive — this is why double head rigs exist — but it is
         // much less than the staysail's area suggests, and a model that just added the
         // square metres would make it the obvious choice everywhere, which it is not.
-        let stay_set = controls.staysail.clamp(0.0, 1.0);
+        let stay_set = set_inner;
         let stay = if stay_set > 1e-3 {
             let sail = &cfg.staysail;
             let (stay_awa, stay_aws) = apparent_wind(
@@ -482,16 +499,6 @@ impl Simulation {
         } else {
             None
         };
-        // Cloth on cloth: the inner sail eased out into the back of the outer one.
-        let fouling = if stay_set > 1e-3 {
-            crate::sail::cloth_on_cloth(
-                cfg.staysail.profile.chord_angle(controls.staysail_sheet),
-                jib_chord,
-            )
-        } else {
-            0.0
-        };
-
         // What the others give up for the company.
         //
         // The outer sail always pays a little. The mainsail pays only when the staysail

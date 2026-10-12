@@ -27,6 +27,7 @@ mod sea_texture;
 mod sim;
 mod sky;
 mod sound;
+mod spray;
 mod wake;
 mod weather;
 mod windstreaks;
@@ -127,6 +128,7 @@ fn main() {
                 sound::setup,
                 course::setup,
                 wake::setup,
+                spray::setup,
                 rig::setup,
                 panel::setup,
                 windstreaks::setup,
@@ -168,6 +170,7 @@ fn main() {
                     camera::follow,
                     sound::update,
                     windstreaks::update,
+                    spray::update,
                 ),
                 (
                     camera::toggle,
