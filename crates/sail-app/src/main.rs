@@ -28,6 +28,7 @@ mod sky;
 mod sound;
 mod wake;
 mod weather;
+mod windstreaks;
 mod world;
 
 use bevy::prelude::*;
@@ -117,6 +118,7 @@ fn main() {
                 wake::setup,
                 rig::setup,
                 panel::setup,
+                windstreaks::setup,
             )
                 // Chained because several of these depend on each other's entities,
                 // and at startup the cost of ordering them is nothing at all.
@@ -152,6 +154,7 @@ fn main() {
                     rig::update,
                     camera::follow,
                     sound::update,
+                    windstreaks::update,
                 ),
                 (
                     camera::toggle,
@@ -167,7 +170,13 @@ fn main() {
         )
         .add_systems(
             EguiPrimaryContextPass,
-            (panel::draw, chart::draw, hud::draw).chain(),
+            (
+                retro::scale_instruments,
+                panel::draw,
+                chart::draw,
+                hud::draw,
+            )
+                .chain(),
         )
         .run();
 }

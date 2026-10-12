@@ -193,3 +193,35 @@ pub fn apply(
         }
     }
 }
+
+/// Lay the instruments out as if the screen were its usual size.
+///
+/// They are drawn into the same small image as the world, which is what gives them
+/// their blocky look — and, left alone, also makes one gauge fill a quarter of the
+/// window, because egui was laying out in a four-hundred-and-eighty-point screen and
+/// the result was then blown up six times.
+///
+/// Telling egui how many of its points go to a pixel fixes the size without touching
+/// the look: the panels come out the same fraction of the screen they always were,
+/// drawn at a third of the density. Chunky text at a readable size, which is what the
+/// old games had — they were not laid out small, they were laid out normally on a
+/// screen that had few pixels.
+pub fn scale_instruments(
+    retro: Res<Retro>,
+    windows: Query<&Window>,
+    mut contexts: bevy_egui::EguiContexts,
+) -> Result {
+    let Ok(window) = windows.single() else {
+        return Ok(());
+    };
+    let logical = window.width().max(1.0);
+    let ppp = match retro.width() {
+        Some(w) => w as f32 / logical,
+        None => 1.0,
+    };
+    let ctx = contexts.ctx_mut()?;
+    if (ctx.pixels_per_point() - ppp).abs() > 1e-4 {
+        ctx.set_pixels_per_point(ppp);
+    }
+    Ok(())
+}
