@@ -230,3 +230,49 @@ pub fn setup_ui_camera(mut commands: Commands) {
         bevy_egui::PrimaryEguiContext,
     ));
 }
+
+/// Put a terminal face on every instrument.
+///
+/// The last thing that could not be pixelated. The console is drawn at the full
+/// resolution of the screen because no arrangement makes a readable panel out of four
+/// hundred and eighty pixels — but a *typeface* can be built on a pixel grid and drawn
+/// sharply, which gets the look without giving up the legibility. The letters are
+/// blocky because their shapes are blocky, not because they are being resampled.
+///
+/// VT323 is a revival of the DEC VT320's character set. It is not a costume: a boat's
+/// instrument panel is a terminal, and this is what terminals looked like. It is also
+/// narrow, which is what let it drop into a layout drawn for something else without
+/// bursting a single box.
+///
+/// The tweak is needed because the face is drawn small for its nominal size — a
+/// terminal cell is tall and thin — so everything would come out a third smaller than
+/// the sizes the panel asks for.
+pub fn install_font(mut contexts: bevy_egui::EguiContexts) -> Result {
+    use bevy_egui::egui::{FontData, FontDefinitions, FontFamily, FontTweak};
+    let ctx = contexts.ctx_mut()?;
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert(
+        "vt323".into(),
+        std::sync::Arc::new(
+            FontData::from_static(include_bytes!("../../../assets/VT323-Regular.ttf")).tweak(
+                FontTweak {
+                    scale: 1.32,
+                    y_offset_factor: -0.06,
+                    ..default()
+                },
+            ),
+        ),
+    );
+    // Both families, because the panel asks for monospace and the chart for the
+    // proportional one, and a console with two eras of lettering on it is worse than
+    // either.
+    for family in [FontFamily::Monospace, FontFamily::Proportional] {
+        fonts
+            .families
+            .entry(family)
+            .or_default()
+            .insert(0, "vt323".into());
+    }
+    ctx.set_fonts(fonts);
+    Ok(())
+}

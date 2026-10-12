@@ -178,7 +178,15 @@ fn main() {
         )
         .add_systems(
             EguiPrimaryContextPass,
-            (panel::draw, chart::draw, hud::draw).chain(),
+            (
+                // Once, at the start: `set_fonts` rebuilds the atlas, so it must not
+                // be called every frame.
+                retro::install_font.run_if(bevy::ecs::schedule::common_conditions::run_once),
+                panel::draw,
+                chart::draw,
+                hud::draw,
+            )
+                .chain(),
         )
         .run();
 }

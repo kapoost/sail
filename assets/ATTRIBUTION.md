@@ -28,3 +28,21 @@ config in `sail-core`, which is a designed vessel rather than this one. Taking t
 fourareen's own numbers would mean modelling an eighteen-foot open boat whose
 stability comes from crew weight rather than ballast — a different physics problem,
 and not the one this game is about.
+
+## `VT323-Regular.ttf`
+
+**VT323** by Peter Hull — a revival of the character set of the DEC VT320 terminal.
+
+* Licence: **SIL Open Font License 1.1**, text in `VT323-OFL.txt` alongside it.
+* Source: <https://github.com/google/fonts/tree/main/ofl/vt323>
+
+Used for every word on the console and the chart. A boat's instrument panel *is* a
+terminal, so a terminal face is not a costume on it — and in the pixelated picture it
+does the job no setting could: the lettering is drawn at the full resolution of the
+screen, so it stays legible, while its letterforms are built on a pixel grid, so it
+still belongs to the same decade as the sea behind it.
+
+Chosen over the two other obvious candidates after looking at all three. Press Start 2P
+is eight pixels wide per glyph and would burst every box on the console. Silkscreen is
+the more aggressively square of the two that fit, and remains the alternative if this
+one ever reads as too soft.
