@@ -280,9 +280,12 @@ pub fn update(
         // bubble catches the sky, turns, and goes out, and what the eye picks up from a
         // bow wave is that seething rather than any single bright patch. Two beats, not
         // one, and both prime-ish so a thousand specks never fall into step.
+        // Slower than it was. At seventeen beats a second a speck crosses every shade it
+        // has between one frame and the next, which is the same thing as not having them
+        // — the levels only read if the climb through them takes long enough to see.
         let twinkle = 0.62
             + 0.38
-                * (0.6 * (s.age * 17.0 + s.phase).sin() + 0.4 * (s.age * 9.3 + s.phase * 2.1).sin());
+                * (0.6 * (s.age * 7.5 + s.phase).sin() + 0.4 * (s.age * 4.1 + s.phase * 2.1).sin());
         let alpha = (1.0 - life).powf(1.7) * 0.95 * twinkle.clamp(0.0, 1.4);
         // Foam is not white. It starts as the sea with air beaten into it and whitens as
         // the bubbles rise, so a fresh speck carries the water's own colour and an old
@@ -293,13 +296,21 @@ pub fn update(
             sea.lerp(Vec3::ONE, (life * 1.4 + (1.0 - s.tint) * 0.5).clamp(0.0, 1.0));
         let mut alpha = alpha;
         if ink.0 {
-            // Drawn foam is ink, not airbrush. An inker does not fade a speck out over
-            // two seconds — the mark is there at full strength or it is not there, and
-            // what makes the water seethe is marks appearing and vanishing rather than
-            // dimming. So the twinkle becomes the switch: above the line it is a white
-            // dot, below it there is nothing, and the sparkle comes out of the same
-            // phases that were only shading it before.
-            alpha = if alpha > 0.22 { 0.95 } else { 0.0 };
+            // Drawn foam is ink rather than airbrush, but ink is not a light switch.
+            //
+            // The first version made the twinkle binary — a white dot or nothing — which
+            // is how a single mark behaves on a page and not how a field of them reads
+            // in motion: a thousand specks blinking on and off is a static noise, and
+            // what the eye wants from broken water is specks *coming up* and *going
+            // out*. The seething is in the transitions.
+            //
+            // Four levels, so each speck climbs and falls through three intermediate
+            // shades on its way. Still quantised — still the drawn sea's own grammar,
+            // where a tone is one of a few and never anything between — but with
+            // somewhere to go.
+            const LEVELS: f32 = 4.0;
+            let stepped = (alpha / 0.95 * LEVELS).round() / LEVELS;
+            alpha = stepped.clamp(0.0, 1.0) * 0.95;
             colour = Vec3::new(0.97, 0.99, 1.0);
         }
         let height = sim.sim.water.height(s.at, t) + 0.06;
