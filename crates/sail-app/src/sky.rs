@@ -37,7 +37,7 @@ pub const SUN: Vec3 = Vec3::new(-0.62, 0.30, -0.72);
 /// sun in it, which is the light a high latitude has for most of the sailing season: the
 /// sun never gets far up, so the sky above you stays a hard blue while everything near
 /// the water is washed pale and faintly warm.
-const ZENITH: Vec3 = Vec3::new(0.10, 0.24, 0.58);
+pub const ZENITH: Vec3 = Vec3::new(0.10, 0.24, 0.58);
 pub const HORIZON: Vec3 = Vec3::new(0.70, 0.76, 0.84);
 /// What the lower hemisphere contributes. Never seen directly — the sea covers it —
 /// but the water's downward-facing reflections sample it, so it has to be a plausible
@@ -65,9 +65,21 @@ const SCALE_HIGH: f32 = 5200.0;
 /// How much of the sky each deck covers.
 ///
 /// The low one is broken and the high one nearly solid, which is the ordinary northern
-/// arrangement: squalls and rags running under a high sheet.
-const COVER_LOW: f32 = 0.42;
-const COVER_HIGH: f32 = 0.30;
+/// arrangement: squalls and rags running under a high sheet. Both raised for weather —
+/// this is a sky with something in it rather than a fine afternoon.
+const COVER_LOW: f32 = 0.55;
+const COVER_HIGH: f32 = 0.46;
+
+/// The storm cells: a third deck, sparse and enormous, standing above the other two.
+///
+/// A squall is not more cloud, it is a different *shape* of cloud — one tower every few
+/// miles, with a flat dark base and ten thousand feet of white above it. So it gets its
+/// own deck at its own height, covering very little of the sky, and the drama comes from
+/// the contrast between the few cells and the gaps between them rather than from
+/// filling everything in.
+const CLOUD_STORM: f32 = 6200.0;
+const SCALE_STORM: f32 = 9000.0;
+const COVER_STORM: f32 = 0.26;
 
 /// A hash-based value noise, so the sky is the same sky every time without a texture
 /// file to ship or a seed to lose.
@@ -141,6 +153,38 @@ fn deck(dir: Vec3, sun: Vec3, height: f32, scale: f32, cover: f32, drift: f32) -
     (density, lit)
 }
 
+/// Shafts of light between the clouds, which cost nothing because they are baked.
+///
+/// Crepuscular rays are the sun's light picked out by haze where cloud is not blocking
+/// it, so the quantity that draws them is already here: step from a direction towards
+/// the sun, ask the cloud decks how much is in the way, and what comes back is how much
+/// of a shaft there is. Eight samples, once per texel, at startup — against doing it in
+/// a shader every frame for every pixel, which is the usual way and the reason most
+/// games have no rays at all.
+///
+/// They only show near the sun and only where the air between is thick with haze, so
+/// the result is multiplied by both: a tight angular falloff and the same forward
+/// scattering the sky already uses.
+fn shafts(dir: Vec3, sun: Vec3) -> f32 {
+    let alignment = dir.dot(sun);
+    if alignment <= 0.55 || dir.y <= 0.0 {
+        return 0.0;
+    }
+    const STEPS: usize = 8;
+    let mut clear = 0.0;
+    for i in 1..=STEPS {
+        let f = i as f32 / STEPS as f32;
+        let at = dir.lerp(sun, f * 0.85).normalize();
+        let (low, _) = deck(at, sun, CLOUD_LOW, SCALE_LOW, COVER_LOW, 3.0);
+        let (storm, _) = deck(at, sun, CLOUD_STORM, SCALE_STORM, COVER_STORM, 23.0);
+        clear += (1.0 - (low + storm).min(1.0)) / STEPS as f32;
+    }
+    // Sharpened: a shaft is a shaft because it has an edge. And faded out towards the
+    // zenith, since a ray you are looking along is a ray you cannot see.
+    let reach = ((alignment - 0.55) / 0.45).clamp(0.0, 1.0).powf(1.6);
+    clear.powf(2.2) * reach * (1.0 - dir.y).clamp(0.0, 1.0)
+}
+
 /// Build the sky cubemap.
 pub fn cubemap() -> Image {
     let sun = SUN.normalize();
@@ -212,17 +256,31 @@ fn sky_colour(dir: Vec3, sun: Vec3) -> Vec3 {
     };
 
     // Two cloud decks, the high one laid in first so the low one runs in front of it.
+    let (storm_d, storm_l) = deck(dir, sun, CLOUD_STORM, SCALE_STORM, COVER_STORM, 23.0);
     let (high_d, high_l) = deck(dir, sun, CLOUD_HIGH, SCALE_HIGH, COVER_HIGH, 11.0);
     let (low_d, low_l) = deck(dir, sun, CLOUD_LOW, SCALE_LOW, COVER_LOW, 3.0);
+    // How high up this direction is looking, which stands in for how far up a cell it
+    // is seeing. A squall is dark underneath and brilliant on top, and that is one
+    // cloud, not two: the base is in its own shadow and the anvil is in the sun.
+    let towering = ((dir.y - 0.10) / 0.55).clamp(0.0, 1.0);
     // Cloud colours: a cold shadow and a warm sunlit face, because the only light on
     // them is a low sun and everything it does not reach is lit by the sky instead.
-    let shadow = Vec3::new(0.34, 0.40, 0.52);
-    let sunlit = Vec3::new(1.05, 0.97, 0.88);
+    // Storm colours. The shadowed side of a squall is nearly black with a blue cast in
+    // it — far darker than ordinary cloud, which is what makes the lit parts look as
+    // bright as they do — and the sunlit face is close to white, because a cumulonimbus
+    // is thick enough to scatter everything back out at you.
+    let shadow = Vec3::new(0.10, 0.13, 0.19);
+    let sunlit = Vec3::new(1.25, 1.18, 1.08);
     let sky = {
-        let high = shadow.lerp(sunlit, high_l * 0.85);
-        let low = shadow.lerp(sunlit, low_l);
-        let with_high = sky.lerp(high, high_d * 0.88);
-        with_high.lerp(low, low_d)
+        let storm = shadow.lerp(sunlit, (storm_l * 0.4 + towering * 0.75).clamp(0.0, 1.0));
+        let high = shadow.lerp(sunlit, (high_l * 0.7 + towering * 0.4).clamp(0.0, 1.0));
+        // The low deck is the one that stays dark: it is under everything else and only
+        // its edges catch the sun. This is what makes a squall line read as a squall
+        // line rather than as grey weather.
+        let low = shadow.lerp(sunlit, (low_l * 0.9 + towering * 0.15).clamp(0.0, 1.0) * 0.8);
+        let with_storm = sky.lerp(storm, storm_d * 0.95);
+        let with_high = with_storm.lerp(high, high_d * 0.8);
+        with_high.lerp(low, low_d * 0.92)
     };
 
     let alignment = dir.dot(sun).max(0.0);
@@ -230,7 +288,7 @@ fn sky_colour(dir: Vec3, sun: Vec3) -> Vec3 {
     // whole sky brighter near the sun.
     // The sun is behind whatever cloud is in front of it, which is the other half of
     // why a northern sky has any drama in it: the disc comes and goes.
-    let veiled = (1.0 - low_d * 0.95) * (1.0 - high_d * 0.6);
+    let veiled = (1.0 - low_d * 0.95) * (1.0 - high_d * 0.6) * (1.0 - storm_d * 0.98);
     let disc = if alignment > 0.99975 {
         SUN_DISC * veiled
     } else {
@@ -240,7 +298,10 @@ fn sky_colour(dir: Vec3, sun: Vec3) -> Vec3 {
     let haze = alignment.powf(5.0) * 0.45;
 
     let warm = Vec3::new(1.0, 0.94, 0.82);
-    sky + warm * (disc + corona) + warm * haze
+    // And the shafts, which are the haze lit along a clear line to the sun. Added rather
+    // than mixed, because that is what light does to air.
+    let rays = shafts(dir, sun) * 0.5;
+    sky + warm * (disc + corona) + warm * haze + warm * rays
 }
 
 /// The colour the haze has to be.

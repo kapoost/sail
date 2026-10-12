@@ -555,15 +555,27 @@ pub fn update_sea(
             // goes. A manga sea is a mid tone with white in it: the darkest thing on the
             // page is the *line*, not the field it is drawn on, and the field has to stay
             // light enough for a black stroke to show against it.
+            // Both derived from the sky, because that is where a sea's colour comes
+            // from: most of what you see looking down at water is the sky looking back
+            // at you, plus the small amount of blue-green the water itself returns from
+            // below. They were written out as constants beside the sky's own, which
+            // meant a storm could roll in overhead and the sea underneath it stayed the
+            // colour of a fine afternoon.
+            //
+            // A trough is lit by the narrow strip of sky it can see, which is mostly the
+            // zenith, so it takes the zenith darkened; a crest sees the whole dome and
+            // takes the horizon. The water's own body colour leans green, which is why
+            // the two are not simply the sky scaled.
+            let body = Vec3::new(0.02, 0.07, 0.06);
             let (deep, shallow) = if ink {
                 (
-                    Vec3::new(0.150, 0.250, 0.330),
-                    Vec3::new(0.330, 0.470, 0.540),
+                    crate::sky::ZENITH * 0.55 + body * 1.6,
+                    crate::sky::HORIZON * 0.44 + body,
                 )
             } else {
                 (
-                    Vec3::new(0.035, 0.095, 0.150),
-                    Vec3::new(0.090, 0.210, 0.260),
+                    crate::sky::ZENITH * 0.16 + body * 0.6,
+                    crate::sky::HORIZON * 0.17 + body * 1.4,
                 )
             };
             let mut tone = (lift * 0.5 + 0.5).clamp(0.0, 1.0);
