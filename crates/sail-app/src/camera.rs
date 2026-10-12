@@ -151,6 +151,17 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.spawn((
         MainCamera,
         Camera3d::default(),
+        // Eight samples rather than the default four, and stated rather than inherited
+        // so there is no doubt it reaches a render-to-texture target.
+        //
+        // It smooths the boat's edge against the sea *inside* the small picture, which
+        // is the only place it can: each of those pixels is six across on the screen,
+        // so what multisampling buys is the colour of the boundary pixel rather than
+        // the straightness of the boundary. It takes the hardness off a hull against
+        // the water without touching the grain. Going further would mean rendering at
+        // twice the width and filtering down before the nearest-neighbour blow-up —
+        // genuinely antialiased pixel art — which is a bigger change than a trial.
+        bevy::render::view::Msaa::Sample8,
         // Daylight exposure. Bevy defaults to roughly EV100 9.7 — an indoor setting,
         // at which white falls around a thousand candela per square metre. A sky of
         // several thousand then saturates to a flat white sheet with no gradient and

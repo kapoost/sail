@@ -276,3 +276,24 @@ pub fn install_font(mut contexts: bevy_egui::EguiContexts) -> Result {
     ctx.set_fonts(fonts);
     Ok(())
 }
+
+/// How large the instruments are drawn, against the screen's own density.
+///
+/// Below one they shrink. The console was laid out for a window of its own and takes
+/// a good share of a cockpit view; a little under is enough to give the sea back the
+/// middle of the screen without making anything hard to hit with a mouse.
+const UI_SCALE: f32 = 0.84;
+
+/// Set the instruments' size. Their own camera means this is independent of the
+/// picture the world is drawn in.
+pub fn scale_instruments(windows: Query<&Window>, mut contexts: bevy_egui::EguiContexts) -> Result {
+    let Ok(window) = windows.single() else {
+        return Ok(());
+    };
+    let ppp = window.scale_factor() * UI_SCALE;
+    let ctx = contexts.ctx_mut()?;
+    if (ctx.pixels_per_point() - ppp).abs() > 1e-4 {
+        ctx.set_pixels_per_point(ppp);
+    }
+    Ok(())
+}
