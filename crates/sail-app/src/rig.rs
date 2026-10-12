@@ -451,9 +451,15 @@ pub fn update(
                 // as a tackle and not as one rope drawn three times.
                 let across = (at - eye).cross(Vec3::Y).normalize_or_zero() * 0.035;
                 let spread = across * (part as f32 - 1.0);
+                // With the sail handed there is no tackle on deck: it comes off with the
+                // sail, or at best lies coiled on the boom. Drawn anyway at zero tension
+                // it sagged in a long arc right across the foredeck, which reads as a
+                // sheet going from nowhere to nothing — and was reported as exactly
+                // that.
+                let shown = set > 0.02;
                 Span {
-                    from: at + spread,
-                    to: eye + spread,
+                    from: if shown { at + spread } else { eye },
+                    to: if shown { eye + spread } else { eye },
                     // Bar taut whenever the sail is up, because on a club-footed
                     // staysail this one rope holds the boom against the whole force of
                     // the sail — there is no second sheet and no tackle to share it.

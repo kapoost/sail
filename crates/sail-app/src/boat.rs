@@ -1121,11 +1121,15 @@ fn clear_of_shrouds(point: Vec3, normal: Vec3, shrouds: &[Vec3]) -> Vec3 {
             continue;
         }
         // Windward of the wire is `along <= -radius`; anything else has gone through.
-        if along > -SHROUD_RADIUS {
-            let u = 1.0 - lateral / SHROUD_INFLUENCE;
-            let weight = u * u * (3.0 - 2.0 * u);
-            p -= normal * (along + SHROUD_RADIUS) * weight;
-        }
+        let u = 1.0 - lateral / SHROUD_INFLUENCE;
+        let weight = u * u * (3.0 - 2.0 * u);
+        // Rounded off in the depth as well as across. The push already faded sideways,
+        // but along the wire's own normal it switched on at a point: zero one side of
+        // the surface and growing linearly the other, which is continuous and has a
+        // corner in it — and a corner in a displacement is a crease in the cloth. Same
+        // fault as the hard floor over the deck, in the second of the three places that
+        // shove a sail about.
+        p -= normal * soft_push(along + SHROUD_RADIUS, 0.10) * weight;
     }
     p
 }
@@ -1143,10 +1147,28 @@ const MAST_CLEARANCE: f32 = 0.16;
 ///
 /// Only the headsail is held off. The mainsail's luff is bent *on* the mast; pushing
 /// it clear would tear the sail off the spar it is attached to.
+/// A push that has no corner in it: zero well clear, the full amount well inside, and a
+/// smooth bend in between.
+///
+/// `softplus`, which is the positive part of a number with its corner rounded over a
+/// band. Cloth meeting anything — the deck, a wire, a spar — flattens into it over a
+/// hand's breadth rather than hinging against it, and a displacement with a kink in it
+/// draws that kink into the sail.
+fn soft_push(depth: f32, band: f32) -> f32 {
+    let x = depth / band;
+    if x > 8.0 {
+        depth
+    } else if x < -8.0 {
+        0.0
+    } else {
+        band * (1.0 + x.exp()).ln()
+    }
+}
+
 fn clear_of_mast(point: Vec3) -> Vec3 {
     let radial = Vec2::new(point.x, point.z - MAST_FOOT_Z);
     let d = radial.length();
-    if d >= MAST_CLEARANCE || point.y < DECK || point.y > crate::rig::MAST_HEAD {
+    if point.y < DECK || point.y > crate::rig::MAST_HEAD || d >= MAST_CLEARANCE + 0.5 {
         return point;
     }
     // Dead on the axis: nothing to push along, so nudge it forward out of the spar.
@@ -1155,11 +1177,11 @@ fn clear_of_mast(point: Vec3) -> Vec3 {
     } else {
         radial / d
     };
-    Vec3::new(
-        out.x * MAST_CLEARANCE,
-        point.y,
-        MAST_FOOT_Z + out.y * MAST_CLEARANCE,
-    )
+    // The same rounding again: pushed to the clearance radius when it is inside, left
+    // alone when it is well outside, and eased between the two instead of snapping to
+    // the circle at a point.
+    let eased = MAST_CLEARANCE + soft_push(d - MAST_CLEARANCE, 0.12);
+    Vec3::new(out.x * eased, point.y, MAST_FOOT_Z + out.y * eased)
 }
 
 
