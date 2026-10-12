@@ -109,6 +109,7 @@ pub fn gather(
     pads: Query<&Gamepad>,
     mut helm_source: ResMut<HelmSource>,
     mut pilot: ResMut<Pilot>,
+    mut assisting: Local<f32>,
 ) {
     let dt = time.delta_secs_f64();
     let cfg = sim.config();
@@ -299,10 +300,22 @@ pub fn gather(
         }
     }
 
-    // --- Trim assist: show me the line a good trimmer would be on -------------
-    let assist = keys.just_pressed(KeyCode::KeyT)
-        || pad.is_some_and(|p| p.just_pressed(GamepadButton::North));
-    if assist {
+    // --- Trim assist: a crew on the sheets for five seconds -------------------
+    //
+    // It used to trim once, on the keypress, which is the one moment it is least use.
+    // The reason is the gybe: through a gybe the apparent wind swings across a hundred
+    // and something degrees in a few seconds, and a trim taken at the start of it is
+    // wrong before the boom has moved. What a crew does is *stay on the sheets* while
+    // the boat comes round, and that is what this does now — five seconds of somebody
+    // trimming, which is about as long as a gybe takes and not nearly long enough to
+    // sail the boat for you.
+    if keys.just_pressed(KeyCode::KeyT)
+        || pad.is_some_and(|p| p.just_pressed(GamepadButton::North))
+    {
+        *assisting = 5.0;
+    }
+    if *assisting > 0.0 {
+        *assisting -= time.delta_secs();
         let awa = sim.sim.telemetry.awa;
         sim.controls.outhaul = outhaul_for_heel(
             sim.sim.telemetry.heel,
@@ -310,7 +323,11 @@ pub fn gather(
         );
         let (m, j) =
             optimal_sheets_with(&cfg, awa, sim.controls.outhaul, sim.controls.headsail);
-        sim.controls.main_sheet = m;
-        sim.controls.jib_sheet = j;
+        // Hands, not servos: the sheets are hauled towards the right place at a winch's
+        // pace rather than teleported to it. Through a gybe that is the difference
+        // between a crew and a cheat.
+        let haul = (SHEET_RATE * 2.2 * dt).min(1.0);
+        sim.controls.main_sheet += (m - sim.controls.main_sheet) * haul;
+        sim.controls.jib_sheet += (j - sim.controls.jib_sheet) * haul;
     }
 }

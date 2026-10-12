@@ -222,11 +222,37 @@ impl Simulation {
         };
         let ((jib_lower_area, jib_lower_z), (jib_upper_area, jib_upper_z)) =
             cfg.headsail_sections(flying, 1.0 - furl);
-        let (lower_awa, lower_aws) = apparent_wind(&st, wind_ref, lower_z * heel_cos, velocity);
-        let (upper_awa, upper_aws) = apparent_wind(&st, wind_ref, upper_z * heel_cos, velocity);
-        let (jib_awa, jib_aws) = apparent_wind(&st, wind_ref, jib_lower_z * heel_cos, velocity);
-        let (jib_upper_awa, jib_upper_aws) =
-            apparent_wind(&st, wind_ref, jib_upper_z * heel_cos, velocity);
+        // How fast each sail's centre of effort is being swung sideways by the roll.
+        // A point `h` above the roll axis moves at `p * h` when the boat rolls at `p`.
+        let swing = |h: f64| st.roll_rate * h;
+        let (lower_awa, lower_aws) = apparent_wind(
+            &st,
+            wind_ref,
+            lower_z * heel_cos,
+            velocity,
+            swing(lower_z * heel_cos),
+        );
+        let (upper_awa, upper_aws) = apparent_wind(
+            &st,
+            wind_ref,
+            upper_z * heel_cos,
+            velocity,
+            swing(upper_z * heel_cos),
+        );
+        let (jib_awa, jib_aws) = apparent_wind(
+            &st,
+            wind_ref,
+            jib_lower_z * heel_cos,
+            velocity,
+            swing(jib_lower_z * heel_cos),
+        );
+        let (jib_upper_awa, jib_upper_aws) = apparent_wind(
+            &st,
+            wind_ref,
+            jib_upper_z * heel_cos,
+            velocity,
+            swing(jib_upper_z * heel_cos),
+        );
 
         let main_camber = crate::sail::camber_reefed(
             camber_for_outhaul(controls.outhaul),
@@ -371,8 +397,13 @@ impl Simulation {
         let stay_set = controls.staysail.clamp(0.0, 1.0);
         let stay = if stay_set > 1e-3 {
             let sail = &cfg.staysail;
-            let (stay_awa, stay_aws) =
-                apparent_wind(&st, wind_ref, sail.z_ce * heel_cos, velocity);
+            let (stay_awa, stay_aws) = apparent_wind(
+                &st,
+                wind_ref,
+                sail.z_ce * heel_cos,
+                velocity,
+                st.roll_rate * sail.z_ce * heel_cos,
+            );
             // Self-tacking: it finds its own best angle, limited by its track.
             let sheet = sail.profile.optimal_sheet(stay_awa, crate::sail::CAMBER_REFERENCE);
             let covered = if flying.flying() { 0.80 } else { 0.35 };
@@ -578,10 +609,18 @@ impl Simulation {
             + cfg.staysail.x_ce * stay_side;
         // Heel swings the centre of effort out to leeward, so the driving force now
         // acts on a lever arm and luffs the boat up. This is weather helm.
-        let y_lower = lower_z * st.heel.sin();
-        let y_upper = upper_z * st.heel.sin();
-        let y_jib = jib_lower_z * st.heel.sin();
-        let y_jib_upper = jib_upper_z * st.heel.sin();
+        // Two things put a sail's centre of effort out to leeward, and the second one
+        // is why a boat can be broached while standing upright: heel swings it out, and
+        // easing the sheet carries it out. See [`crate::sail::lateral_offset`].
+        let to_leeward = -lower_awa.signum();
+        let main_out = to_leeward
+            * crate::sail::lateral_offset(&cfg.main.profile, cfg.main.area, boom_angle, false);
+        let jib_out = to_leeward
+            * crate::sail::lateral_offset(&head.profile, head.area, jib_chord, flying.flying());
+        let y_lower = lower_z * st.heel.sin() + main_out;
+        let y_upper = upper_z * st.heel.sin() + main_out;
+        let y_jib = jib_lower_z * st.heel.sin() + jib_out;
+        let y_jib_upper = jib_upper_z * st.heel.sin() + jib_out;
         mz += -(y_lower * main.drive
             + y_upper * main_upper.drive
             + y_jib * jib.drive
@@ -807,11 +846,44 @@ fn resolve(lift: f64, drag: f64, flow_angle: f64) -> (f64, f64) {
 
 /// Apparent wind at a given height above the water, in the body frame.
 /// Returns the signed angle (positive with the wind on the starboard side) and speed.
-fn apparent_wind(st: &BoatState, wind_ref: DVec2, height: f64, velocity: DVec2) -> (f64, f64) {
+/// The wind a sail feels, which is not the wind the boat feels.
+///
+/// Three things separate them, and the third was missing.
+///
+/// The wind aloft is stronger — that is the shear. The boat's own motion takes some of
+/// it away — that is the apparent wind. And the *sail is moving sideways*, because the
+/// boat is rolling and the sail is six metres up: at a third of a radian a second, the
+/// head of the mainsail is swinging through the air at nearly two metres a second,
+/// which is a quarter of the breeze on a light day. Leaving it out does not merely lose
+/// a detail. It removes a feedback loop that works in both directions and decides how
+/// the boat behaves at the two ends of the wind range.
+///
+/// Close-hauled, rolling to leeward swings the sail downwind, the angle of attack drops,
+/// the force falls, and the roll is checked. That is aerodynamic roll damping, and it is
+/// most of why a boat under sail rolls so much less than the same boat lying ahull.
+///
+/// Running with the boom squared off, the same geometry has the opposite sign: rolling
+/// to windward swings the sail *into* the wind, the angle of attack grows, the force
+/// grows, and the roll goes further. Negative damping. That is the death roll, and it is
+/// the reason a boat under spinnaker can wind herself up through three rolls into a
+/// broach while the helmsman does everything right.
+///
+/// So this is the boom swinging, written where it belongs: not as a separate oscillator
+/// bolted to the rig, but as the sail being told where it actually is.
+fn apparent_wind(
+    st: &BoatState,
+    wind_ref: DVec2,
+    height: f64,
+    velocity: DVec2,
+    lateral: f64,
+) -> (f64, f64) {
     let true_flow = wind_ref * shear_factor(height);
     let apparent_flow = true_flow - velocity;
-    let body = st.to_body(apparent_flow);
+    let mut body = st.to_body(apparent_flow);
+    // The sail's own swing, subtracted the same way the hull's motion is: a sail moving
+    // to starboard sees the air coming at it from starboard.
+    body.y -= lateral;
     // The wind comes FROM the direction opposite to the flow.
     let awa = wrap_pi((-body.y).atan2(-body.x));
-    (awa, apparent_flow.length())
+    (awa, body.length())
 }

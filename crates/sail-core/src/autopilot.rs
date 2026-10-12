@@ -9,7 +9,7 @@
 use crate::boat::BoatConfig;
 use crate::sim::{Simulation, SUBSTEP};
 use crate::state::{BoatState, Controls, Telemetry};
-use crate::units::{rad, wrap_pi, wrap_tau};
+use crate::units::{rad, smoothstep, wrap_pi, wrap_tau};
 use crate::wind::{direction_of, WindField};
 use glam::DVec2;
 
@@ -61,6 +61,9 @@ pub fn heading_rudder(cfg: &BoatConfig, st: &BoatState, target_heading: f64) -> 
 #[derive(Clone, Debug, Default)]
 pub struct TillerPilot {
     integral: f64,
+    /// Where the ram actually has the helm, which is not always where the loop asked
+    /// for it: the rudder has to be swung there, and swinging takes time and force.
+    last: f64,
     /// How long the output has been hard against the stops.
     ///
     /// A rudder on the stops is not steering, it is braking — a stalled foil with
@@ -91,12 +94,60 @@ impl TillerPilot {
     ///
     /// `error` is positive when the bow needs to come to starboard.
     pub fn correct(&mut self, cfg: &BoatConfig, error: f64, yaw_rate: f64, dt: f64) -> f64 {
+        self.correct_under_load(cfg, error, yaw_rate, 0.0, dt)
+    }
+
+    /// The same loop, against a boat that is fighting it.
+    ///
+    /// A tiller pilot is a small electric ram with a motor in it. On this size of boat
+    /// it pushes sixty kilogrammes or so, and that is the whole of what it has — there
+    /// is no crew on the end of it leaning back. So it has two limits a hand does not:
+    /// it can only push so hard, and it can only move so fast, and both get worse
+    /// together because a loaded motor turns slower.
+    ///
+    /// Which is the thing an overcanvassed boat does to an autopilot, and it does it
+    /// long before anything breaks. Measured on this boat: an easy beat loads the helm
+    /// with about three and a half kilonewton-metres, being properly pressed with
+    /// twelve to sixteen, and a beam reach in twenty knots under full sail with
+    /// twenty-five — which is eighteen degrees of standing helm, and no tiller pilot
+    /// alive holds that. It does not fail cleanly either. First it holds the course
+    /// with the rudder further and further over, then it stops being able to put the
+    /// rudder where it wants, then it cannot swing it fast enough to catch her, and
+    /// then she is away and the ram is still pushing.
+    ///
+    /// The right answer to all of that is to reef. That is the point.
+    pub fn correct_under_load(
+        &mut self,
+        cfg: &BoatConfig,
+        error: f64,
+        yaw_rate: f64,
+        load: f64,
+        dt: f64,
+    ) -> f64 {
+        /// Helm load the ram handles without noticing, newton-metres.
+        const EASY: f64 = 9_000.0;
+        /// And the load at which it has nothing left.
+        const OVERWHELMED: f64 = 24_000.0;
+        /// How fast the ram swings the helm with nothing against it, rad/s.
+        const RAM_RATE: f64 = 0.55;
+
+        let capacity = 1.0 - smoothstep(EASY, OVERWHELMED, load.abs());
         let (kp, ki, kd) = cfg.pilot_gains();
         let raw = kp * error + ki * self.integral - kd * yaw_rate;
-        let clamped = raw.clamp(-cfg.max_rudder_angle, cfg.max_rudder_angle);
+        // What it can hold, and what it can hold it at.
+        let reach = cfg.max_rudder_angle * (0.28 + 0.72 * capacity);
+        let clamped = raw.clamp(-reach, reach);
+        // And how fast it gets there: a loaded motor is a slow motor.
+        let step = RAM_RATE * (0.35 + 0.65 * capacity) * dt;
+        let clamped = if (clamped - self.last).abs() <= step {
+            clamped
+        } else {
+            self.last + step * (clamped - self.last).signum()
+        };
+        self.last = clamped;
         // Anti-windup: stop integrating once the rudder is on the stops, otherwise the
         // integral runs away while the boat is overpowered and cannot answer anyway.
-        if (raw - clamped).abs() < 1e-9 {
+        if (raw - clamped).abs() < 1e-6 {
             self.integral += error * dt;
             self.integral = self.integral.clamp(-6.0, 6.0);
             self.saturated_for = 0.0;
@@ -116,6 +167,7 @@ impl TillerPilot {
     pub fn reset(&mut self) {
         self.integral = 0.0;
         self.saturated_for = 0.0;
+        self.last = 0.0;
     }
 
     /// Current standing rudder angle the pilot is holding, radians. On a well balanced
@@ -440,6 +492,11 @@ impl Autopilot {
                 }
             }
         };
-        Some(self.loop_.correct(cfg, error, st.yaw_rate, dt))
+        // The load the ram is working against, which is everything the rig and the
+        // hull are doing to turn her, with the rudder's own contribution taken out.
+        Some(
+            self.loop_
+                .correct_under_load(cfg, error, st.yaw_rate, tm.weather_helm, dt),
+        )
     }
 }

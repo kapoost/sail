@@ -133,6 +133,33 @@ pub fn rig_interference(chord_angle: f64, bears_at: f64) -> (f64, f64) {
     (1.0 - 0.08 * t, 1.0 + 0.15 * t)
 }
 
+/// How far to leeward a sail's own centre of effort sits once it is eased, metres.
+///
+/// The piece that was missing, and it is the piece a broach is made of.
+///
+/// Weather helm was modelled only through heel: heel swings the centre of effort out to
+/// leeward, the drive acts on that lever, and the boat luffs up. True, and on its own
+/// it says a boat that is not heeling cannot round up — which is why this model would
+/// shrug off a thirty-four knot squall at a hundred and thirty-five degrees with a
+/// gennaker set, taking four degrees off course. A real boat broaches *there*, at the
+/// angle where she heels least.
+///
+/// Because heel is not the only thing that puts the sail out to leeward. Easing does.
+/// A boom squared off to seventy-five degrees carries its sail a metre and more off the
+/// centreline with the boat dead upright, and a gennaker tacked to the sprit and
+/// sheeted aft is further out still — its whole belly is out there. The drive acts
+/// through that offset and the moment is the same moment heel makes.
+///
+/// The arm is a fraction of the sail's own mean chord, which comes out of the area and
+/// the aspect ratio without anyone having to measure a sail twice. A sail set flying
+/// gets the larger fraction: it has no stay holding its luff in and nothing between it
+/// and the water, so it bellies out where a genoa is held against the shrouds.
+pub fn lateral_offset(profile: &SailProfile, area: f64, chord_angle: f64, flying: bool) -> f64 {
+    let mean_chord = (area / profile.aspect_ratio.max(0.2)).sqrt();
+    let fraction = if flying { 0.55 } else { 0.35 };
+    fraction * mean_chord * chord_angle.abs().sin()
+}
+
 /// Largest twist a headsail's leech will fall off to with the car right aft, radians.
 pub const MAX_LEAD_TWIST: f64 = 15.0 * std::f64::consts::PI / 180.0;
 
@@ -369,9 +396,24 @@ impl SailProfile {
         } else {
             cl_max * (1.0 - 0.25 * past_peak * past_peak)
         };
+        // Separation drag past the best angle, and this number was measured against
+        // published sail data rather than chosen.
+        //
+        // At 0.35 the model gave a mainsail a lift-to-drag of 2.3 at thirty-four
+        // degrees of attack and 2.0 at forty. Real sails — Marchaj's measurements, and
+        // every wind-tunnel set since — are at 1.3 to 1.5 there. The error does not look
+        // like much until you ask where the resultant force points: a sail with L/D of
+        // 2.2 carries its force twenty-four degrees forward of its own normal, and one
+        // with 1.4 carries it eight. On a broad reach with the boom squared off, that is
+        // the difference between a side force of a few hundred newtons and none at all —
+        // which is why this boat used to sail at a hundred and thirty-five degrees in
+        // twenty-six knots of wind heeled two tenths of a degree, and could not be made
+        // to broach at any wind speed with any sail set.
+        //
+        // 0.60 puts L/D at 1.5 where the measurements put it.
         let cd_attached = cd0
             + cl_attached * cl_attached / (std::f64::consts::PI * self.aspect_ratio.max(0.5))
-            + 0.35 * past_peak * past_peak;
+            + 0.60 * past_peak * past_peak;
 
         // Fully separated: a cambered plate presenting its area to the flow. This is
         // what a mainsail squared off on a run is actually doing.
