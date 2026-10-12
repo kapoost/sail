@@ -149,6 +149,20 @@ fn half_section(z: f32) -> Vec<(f32, f32)> {
         out.push((inner, sheer));
     }
     out.push((half, sheer));
+    // And a skirt, tucked down inside the planking.
+    //
+    // The sheer heights in the table are *smoothed*, because the raw scan jumps a
+    // hand's breadth between neighbouring stations and a deck laid along that reads as
+    // a mistake. The consequence is that wherever the real sheer falls below the
+    // smoothed line, the deck's edge and the hull's edge do not meet and you can see
+    // daylight — or rather sea — between them.
+    //
+    // So the deck does not stop at its edge. It carries on down and inboard, following
+    // the way the topsides tumble home, far enough to cover the worst of the scatter.
+    // Which is also how a deck is really built: it lands on a shelf inside the
+    // planking rather than butting against its top edge.
+    out.push((half - 0.04, sheer - 0.14));
+    out.push((half - 0.14, sheer - 0.34));
     out
 }
 
