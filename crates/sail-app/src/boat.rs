@@ -478,7 +478,7 @@ pub fn update_sails(
     // half-height luff: 0.84 m from the windward shroud, which the falloff weighted at
     // 0.87, which shoved the cloth three quarters of a metre to windward and collapsed
     // the sail.
-    let shrouds = [shroud(cfg.beam as f32, side > 0.0)];
+    let shrouds = shroud_polyline(cfg.beam as f32, side > 0.0, t_.heel as f32, side);
 
     for (surface, mut visibility) in &mut q {
         *visibility = if surface.which == Sail::Genoa && sim.controls.furl > 0.985 {
@@ -576,6 +576,22 @@ pub fn shroud(beam: f32, starboard: bool) -> (Vec3, Vec3) {
     )
 }
 
+/// The leeward shroud as the rigging actually draws it, sagged and all.
+///
+/// Sampled into a short polyline rather than used as a straight chord. The chord was
+/// the third time in this file that two places computed the same piece of geometry and
+/// disagreed: the cloth was held off the straight line between the shroud's ends while
+/// the wire itself was drawn hanging below it, so it cut through a sail that was, by
+/// its own lights, perfectly clear. Both now come from the same two functions.
+fn shroud_polyline(beam: f32, starboard: bool, heel: f32, lee: f32) -> Vec<Vec3> {
+    let (top, foot) = shroud(beam, starboard);
+    let slack = crate::rig::shroud_slack(starboard, heel, lee);
+    let sag = crate::rig::line_sag((foot - top).length(), 1.0 - slack, true);
+    (0..9)
+        .map(|i| crate::rig::curve(top, foot, sag, i as f32 / 8.0))
+        .collect()
+}
+
 /// How close the cloth may come to the wire, metres.
 const SHROUD_RADIUS: f32 = 0.05;
 /// How far either side of the wire the sail is dragged into the crease, metres.
@@ -593,9 +609,10 @@ const SHROUD_INFLUENCE: f32 = 0.9;
 /// split the offset into a component along the sail's own leeward normal and one
 /// across it, and clamp the first. The second drives a smooth falloff, so the crease
 /// spreads either side of the wire rather than being a dimple where they touch.
-fn clear_of_shrouds(point: Vec3, normal: Vec3, shrouds: &[(Vec3, Vec3)]) -> Vec3 {
+fn clear_of_shrouds(point: Vec3, normal: Vec3, shrouds: &[Vec3]) -> Vec3 {
     let mut p = point;
-    for (a, b) in shrouds {
+    for pair in shrouds.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
         let run = *b - *a;
         let len2 = run.length_squared().max(1e-6);
         let t = ((p - *a).dot(run) / len2).clamp(0.0, 1.0);
@@ -734,8 +751,8 @@ struct SailTrim<'a> {
     draft: f32,
     /// Seconds, for the flogging.
     now: f32,
-    /// Standing rigging the cloth is not allowed through.
-    shrouds: &'a [(Vec3, Vec3)],
+    /// Standing rigging the cloth is not allowed through, as a polyline.
+    shrouds: &'a [Vec3],
 }
 
 fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {

@@ -129,6 +129,8 @@ struct Span {
     /// Rope diameter as drawn. Over-scaled, as rope always is in a game: a true 10 mm
     /// sheet at five metres is two pixels and simply disappears.
     width: f32,
+    /// Wire rather than rope: it goes slack without bellying.
+    stiff: bool,
     colour: [f32; 4],
 }
 
@@ -242,6 +244,7 @@ pub fn update(
                 tension: 0.35 + 0.65 * sim.controls.outhaul as f32,
                 width: 0.022,
                 colour: outhaul_red,
+                stiff: false,
             },
             Kind::Forestay => Span {
                 from: masthead,
@@ -249,6 +252,7 @@ pub fn update(
                 tension: 1.0,
                 width: 0.022,
                 colour: wire,
+                stiff: true,
             },
             Kind::Backstay => Span {
                 from: masthead,
@@ -256,18 +260,15 @@ pub fn update(
                 tension: 1.0,
                 width: 0.022,
                 colour: wire,
+                stiff: true,
             },
             Kind::Shroud(starboard) => {
-                let side = if starboard { 1.0 } else { -1.0 };
                 // The leeward shroud slackens as she heels: the mast leans away from
                 // it and the windward one takes the load. Watching this happen is one
-                // of the ways you know you are overpowered.
-                let leeward = side * lee > 0.0;
-                let slack = if leeward {
-                    (heel.abs() / rad(28.0) as f32).clamp(0.0, 0.85)
-                } else {
-                    0.0
-                };
+                // of the ways you know you are overpowered. The rule lives in
+                // `shroud_slack`, because the sails have to lean on this wire where it
+                // actually ends up.
+                let slack = shroud_slack(starboard, heel, lee);
                 let (top, foot) = crate::boat::shroud(cfg.beam as f32, starboard);
                 Span {
                     from: top,
@@ -275,6 +276,7 @@ pub fn update(
                     tension: 1.0 - slack,
                     width: 0.020,
                     colour: wire,
+                    stiff: true,
                 }
             }
             Kind::MainSheet => Span {
@@ -285,6 +287,7 @@ pub fn update(
                 tension: main_load * (1.0 - t.main.coeffs.luffing as f32),
                 width: 0.030,
                 colour: sheet_blue,
+                stiff: false,
             },
             Kind::Vang => Span {
                 from: Vec3::new(
@@ -298,6 +301,7 @@ pub fn update(
                 tension: 0.12 + 0.88 * sim.controls.vang as f32,
                 width: 0.025,
                 colour: vang_green,
+                stiff: false,
             },
             Kind::JibSheet(starboard) => {
                 let side = if starboard { 1.0 } else { -1.0 };
@@ -336,6 +340,7 @@ pub fn update(
                         // Fades out with the sail as it rolls away.
                         (1.0 - furled).clamp(0.0, 1.0),
                     ],
+                    stiff: false,
                 }
             }
         })
@@ -364,7 +369,7 @@ pub fn update(
         let length = (to - from).length().max(0.01);
         // Slack rope sags; taut rope does not. The scale is the span's own length, so
         // a long sheet droops further than a short vang at the same slackness.
-        let sag = (1.0 - span.tension).powf(1.4) * length * 0.16;
+        let sag = line_sag(length, span.tension, span.stiff);
 
         for i in 0..SEGMENTS {
             let f = i as f32 / (SEGMENTS - 1) as f32;
@@ -406,6 +411,37 @@ pub fn update(
 /// A point along a sagging line. Parabolic, which over a four-metre span is
 /// indistinguishable from a catenary and far cheaper to evaluate.
 #[inline]
-fn curve(from: Vec3, to: Vec3, sag: f32, f: f32) -> Vec3 {
+/// How slack the leeward shroud has gone.
+///
+/// The mast leans away from it and the windward one takes the load, and watching this
+/// happen is one of the ways you know you are overpowered. Shared with the sails,
+/// which have to lean on the wire where it actually is.
+pub fn shroud_slack(starboard: bool, heel: f32, lee: f32) -> f32 {
+    let side = if starboard { 1.0 } else { -1.0 };
+    if side * lee > 0.0 {
+        (heel.abs() / 28.0_f32.to_radians()).clamp(0.0, 0.85)
+    } else {
+        0.0
+    }
+}
+
+/// How far the middle of a span hangs below the straight line between its ends.
+///
+/// Scaled by the span's own length, so a long sheet droops further than a short vang
+/// at the same slackness — and capped hard for standing rigging, because wire is not
+/// rope. A slack shroud goes soft and rattles; it does not bow. The uncapped figure
+/// put a metre and a half of belly into a leeward cap shroud at nineteen degrees of
+/// heel, which is both absurd and the reason the wire appeared to cut through a sail
+/// that was being held clear of the straight line between its ends.
+pub fn line_sag(length: f32, tension: f32, stiff: bool) -> f32 {
+    let soft = (1.0 - tension).clamp(0.0, 1.0).powf(1.4) * length * 0.16;
+    if stiff {
+        soft.min(0.09)
+    } else {
+        soft
+    }
+}
+
+pub fn curve(from: Vec3, to: Vec3, sag: f32, f: f32) -> Vec3 {
     from.lerp(to, f) - Vec3::Y * (sag * 4.0 * f * (1.0 - f))
 }
