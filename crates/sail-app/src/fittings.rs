@@ -126,11 +126,12 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     let drum = w.meshes.add(Cylinder::new(0.105, 0.20));
     let top = w.meshes.add(Cylinder::new(0.125, 0.035));
     for side in [-1.0_f32, 1.0] {
-        let z = 1.9;
-        // Just outboard of the coaming, where a hand already on a winch handle is
-        // also inside the cockpit. Keyed to the well's own width rather than to the
-        // beam, so they stay beside it whatever shape the well is.
-        let x = side * (deck::cockpit_half_beam(z) + 0.26);
+        // Abaft the headsail track, so the sheet runs forward to its lead and back to
+        // the drum without the two fittings fouling each other — and far enough aft
+        // that the person grinding is sitting in the cockpit rather than kneeling on
+        // the side deck.
+        let z = 2.9;
+        let x = side * (crate::boat::track_x(z) + 0.02);
         let y = deck::deck_height(z) + 0.10;
         b.spawn((
             Mesh3d(drum.clone()),
@@ -148,7 +149,7 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     b.spawn((
         Mesh3d(drum.clone()),
         MeshMaterial3d(metal.clone()),
-        Transform::from_xyz(0.46, deck::deck_height(0.2) + 0.10, 0.2),
+        Transform::from_xyz(0.52, deck::deck_height(0.55) + 0.10, 0.55),
     ));
 
     // --- Companionway --------------------------------------------------------
@@ -156,7 +157,9 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     // A flush sliding hatch, because there is no trunk for it to stand on any more.
     // On a working boat this is all there is: a hatch in the deck, and everything you
     // live in underneath it.
-    let hatch = deck::cockpit_fwd() - 0.9;
+    // Between the mast and the forward coaming, which is the only clear run of deck
+    // on a boat laid out like this.
+    let hatch = deck::cockpit_fwd() - 1.05;
     b.spawn((
         Mesh3d(w.meshes.add(Cuboid::new(0.74, 0.10, 0.86))),
         MeshMaterial3d(varnish.clone()),
@@ -175,19 +178,27 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     // Either side of the hatch, which is what you hold on the way forward. On a flush
     // deck they matter more than they did on a trunk: there is nothing else up there
     // to get a hand to.
-    let rail = w.meshes.add(Cuboid::new(0.05, 0.09, 3.2));
+    // Either side of the hatch, where a hand actually goes, and not out in the middle
+    // of the foredeck where the first pair ended up.
+    let rail = w.meshes.add(Cuboid::new(0.045, 0.085, 1.5));
     for side in [-1.0_f32, 1.0] {
-        let z = -1.6;
         b.spawn((
             Mesh3d(rail.clone()),
             MeshMaterial3d(varnish.clone()),
-            Transform::from_xyz(
-                side * deck::deck_half_beam(z) * 0.40,
-                deck::deck_height(z) + 0.05,
-                z,
-            ),
+            Transform::from_xyz(side * 0.58, deck::deck_height(hatch) + 0.05, hatch),
         ));
     }
+
+    // --- Samson post ---------------------------------------------------------
+    //
+    // On the foredeck, for the anchor and for warps. A bow with nothing on it is the
+    // mark of a boat nobody has ever had to tie up.
+    let post = -loa * 0.38;
+    b.spawn((
+        Mesh3d(w.meshes.add(Cuboid::new(0.11, 0.34, 0.11))),
+        MeshMaterial3d(varnish.clone()),
+        Transform::from_xyz(0.0, deck::deck_height(post) + 0.17, post),
+    ));
 }
 
 /// A flat disc with radial texture coordinates, for the compass card.

@@ -37,11 +37,15 @@ pub struct GenoaCar {
 
 /// Where the genoa track runs, in the hull's frame: inboard of the rail on the side
 /// deck, from abreast the mast back to the forward end of the cockpit.
-/// Where the headsail tracks lie, as a fraction of beam.
+/// How far outboard of the cockpit coaming the headsail track is laid, metres.
 ///
-/// Out near the rail. This is an open boat with no side deck to speak of, so a track
-/// set well inboard leaves the cars hanging over the bilge with nothing under them.
-pub const TRACK_X: f32 = 0.43;
+/// Keyed to the coaming rather than to a fraction of beam, which is what it was and
+/// which put the track *inside the cockpit opening*: at the after end the car sat at
+/// 0.69 m from the centreline and the coaming at 0.83, so the whole track and both
+/// cars were hanging in the hole. A sheet lead has to be on the side deck, between
+/// the coaming and the toerail, because that is the only part of the boat that is
+/// there to walk on and to bolt things to.
+const TRACK_OUTBOARD: f32 = 0.22;
 pub const TRACK_FORWARD: f32 = -0.80;
 pub const TRACK_AFT: f32 = 2.20;
 
@@ -53,13 +57,24 @@ pub const TRACK_AFT: f32 = 2.20;
 /// to compute its own — a flat deck at a fixed beam fraction — so the sheet ran to a
 /// point a hand's breadth from the car it was supposed to be turning through.
 pub fn genoa_car_at(car: f32, starboard: bool) -> Vec3 {
-    let z = car_position(car);
     let side = if starboard { 1.0 } else { -1.0 };
     Vec3::new(
-        side * crate::deck::deck_half_beam(z) * TRACK_X,
-        crate::deck::deck_height(z) + 0.06,
-        z,
+        side * track_x(car_position(car)),
+        lead_height(car_position(car)),
+        car_position(car),
     )
+}
+
+/// Where the track lies at a station: outboard of the coaming, inboard of the toerail.
+pub fn track_x(z: f32) -> f32 {
+    let rail = crate::deck::deck_half_beam(z) - 0.20;
+    (crate::deck::coaming_half_beam(z) + TRACK_OUTBOARD)
+        .min(rail)
+        .max(0.25)
+}
+
+fn lead_height(z: f32) -> f32 {
+    crate::deck::deck_height(z) + 0.06
 }
 
 /// The outboard end of the bowsprit.
@@ -367,11 +382,14 @@ pub fn setup(
             for starboard in [false, true] {
                 let side = if starboard { 1.0 } else { -1.0 };
                 let mid = (TRACK_FORWARD + TRACK_AFT) * 0.5;
-                let x = side * crate::deck::deck_half_beam(mid) * TRACK_X;
                 b.spawn((
                     Mesh3d(track_mesh.clone()),
                     MeshMaterial3d(spar_mat.clone()),
-                    Transform::from_xyz(x, crate::deck::deck_height(mid) + 0.02, mid),
+                    Transform::from_xyz(
+                        side * track_x(mid),
+                        crate::deck::deck_height(mid) + 0.02,
+                        mid,
+                    ),
                 ));
                 b.spawn((
                     GenoaCar { starboard },
@@ -544,11 +562,10 @@ pub fn update_sails(
                 let angle = side * t_.jib.chord_angle as f32;
                 let tack = genoa_tack(cfg.loa as f32);
                 let head = Vec3::new(0.0, DECK + 13.4, MAST_FOOT_Z);
-                let car = Vec3::new(
-                    side * cfg.beam as f32 * TRACK_X,
-                    DECK + 0.09,
-                    car_position(sim.controls.genoa_car as f32),
-                );
+                // The car the clew is solved against, which must be the one the
+                // fitting is drawn at — the fourth place in this file where the same
+                // geometry had been derived twice.
+                let car = genoa_car_at(sim.controls.genoa_car as f32, side > 0.0);
                 (
                     t_.jib,
                     SailGeometry {

@@ -108,8 +108,12 @@ fn opening(z: f32) -> (f32, f32) {
     (half * COCKPIT_WIDTH * t, -COCKPIT_DEPTH * t)
 }
 
-/// Where the cockpit sole sits below the sheer, metres.
-const SOLE_DROP: f32 = 0.62;
+/// Where the bottom boards sit below the deck, metres.
+///
+/// Not a built sole any more — the cockpit is open to the hull — but the helmsman
+/// still stands on something, and on an open boat that is the bottom boards over the
+/// bilge. This is what the eye height is measured from.
+const SOLE_DROP: f32 = 0.78;
 
 /// The section from the centreline out to the sheer, as `(x, y)` going outwards.
 ///
@@ -125,14 +129,13 @@ fn half_section(z: f32) -> Vec<(f32, f32)> {
         // Plain deck, closed to the centreline.
         out.push((0.0, sheer + camber(0.0, half)));
     } else {
-        // Cockpit: a flat sole, vertical sides, and a lip at deck level.
+        // Cockpit: a hole straight through the deck.
         //
-        // It used to be a shallow V meeting at the centreline, which is a bilge, not
-        // a sole. You stand in a cockpit.
-        let sole = sheer - SOLE_DROP;
-        out.push((0.0, sole));
-        out.push((inner * 0.92, sole));
-        out.push((inner, sole + 0.06));
+        // There is no sole and no well. The deck simply stops, and what you are
+        // standing in is the inside of the hull — the scanned planking, which is the
+        // best surface on the boat and was being hidden under a fabricated floor. An
+        // open boat with her ends decked over is what she is; this is what that looks
+        // like from the tiller.
         out.push((inner, sheer));
     }
     out.push((half, sheer));
@@ -170,7 +173,7 @@ pub fn structure_mesh() -> (Mesh, Mesh) {
 
     // Each station contributes a ring of points: sheer edge, deck inner edge, then up
     // the cabin side (or down into the cockpit) and in across its top.
-    let mut rings: Vec<Vec<Vec3>> = Vec::with_capacity(steps + 1);
+    let mut rings: Vec<(Vec<Vec3>, usize)> = Vec::with_capacity(steps + 1);
     for i in 0..=steps {
         let z = z0 + (z1 - z0) * (i as f32 / steps as f32);
         // One continuous section across the boat: port sheer, in across the side
@@ -185,19 +188,28 @@ pub fn structure_mesh() -> (Mesh, Mesh) {
         // it was a grey wall filling the view. A cross-section has to be a path, not
         // two paths in a list.
         let half_section = half_section(z);
+        // True where the section reaches the centreline, false where it is cut by the
+        // cockpit opening — which has to be known, because a path that does not close
+        // across the middle must not be stitched across it either. That bridging quad
+        // is exactly the grey wall this file has already been caught by once.
+        let closed = half_section[0].0 <= 1e-4;
         let mut ring = Vec::with_capacity(half_section.len() * 2);
         for (i, (x, y)) in half_section.iter().enumerate() {
-            // Skip the duplicated centreline point on the way back out.
-            if i > 0 || *x > 1e-4 {
+            if i > 0 || closed {
                 ring.push(Vec3::new(-x, *y, z));
             }
         }
         for (x, y) in half_section.iter().rev() {
-            if *x > 1e-4 {
+            if *x > 1e-4 || !closed {
                 ring.push(Vec3::new(*x, *y, z));
             }
         }
-        rings.push(ring);
+        let gap = if closed {
+            usize::MAX
+        } else {
+            half_section.len() - 1
+        };
+        rings.push((ring, gap));
     }
 
     // Stitch neighbouring rings, sorting each quad by which way it faces. Rings only
@@ -207,11 +219,15 @@ pub fn structure_mesh() -> (Mesh, Mesh) {
     let mut deck = Surface::default();
     let mut sides = Surface::default();
     for i in 0..steps {
-        let (a, b) = (&rings[i], &rings[i + 1]);
+        let ((a, gap_a), (b, gap_b)) = (&rings[i], &rings[i + 1]);
         if a.len() != b.len() {
             continue;
         }
         for k in 0..a.len() - 1 {
+            // Do not lay deck across the cockpit opening.
+            if k == *gap_a || k == *gap_b {
+                continue;
+            }
             let quad = [a[k], b[k], b[k + 1], a[k + 1]];
             let normal = (quad[1] - quad[0])
                 .cross(quad[3] - quad[0])
@@ -280,23 +296,34 @@ pub fn cockpit_sole() -> f32 {
     deck_height(2.6) - SOLE_DROP
 }
 
+/// Half-beam of the cockpit opening at a station, outside the coaming.
+pub fn coaming_half_beam(z: f32) -> f32 {
+    let (inner, _) = opening(z);
+    if inner > 0.02 {
+        inner + COAMING_THICK
+    } else {
+        inner
+    }
+}
+
 /// The forward end of the cockpit, which is where its coaming runs across.
 pub fn cockpit_fwd() -> f32 {
     COCKPIT_FWD
 }
 
-/// Half-beam of the cockpit well at a station.
-pub fn cockpit_half_beam(z: f32) -> f32 {
-    opening(z).0
-}
-
 /// Height of the cockpit coaming above the deck, metres.
 ///
-/// Taller now that she is flush-decked and it is the only structure above the deck at
-/// all: it is the thing you sit with your back to and brace a foot against, and on a
-/// boat with no cabin trunk it is also the only thing keeping water that comes aboard
-/// out of the well.
-const COAMING: f32 = 0.30;
+/// Low. The first one stood thirty centimetres proud, which on an eleven-metre flush
+/// deck is a fence: it reads as something bolted on rather than as part of the boat,
+/// and it was the only thing in the way of the view forward once the coachroof went.
+const COAMING: f32 = 0.16;
+/// And how thick it is.
+///
+/// It was a single ribbon of surface with no thickness at all, which is why it looked
+/// like paper standing on edge. A coaming is a piece of timber: it has an inside
+/// face, a top you can sit on, and an outside face, and the top is what the eye reads
+/// to judge that it is wood rather than a line drawn on the deck.
+const COAMING_THICK: f32 = 0.055;
 /// Height of the toerail above the deck.
 const TOERAIL: f32 = 0.09;
 
@@ -330,11 +357,18 @@ pub fn trim_mesh() -> Mesh {
             high.push(Vec3::new(side * half, sheer + TOERAIL, z));
         }
         // Coaming, following the edge of the well all the way round — including
-        // across the ends, where the eased opening carries it.
+        // across the ends, where the eased opening carries it. Built as a real rim:
+        // up the inside face, across the top, and down the outside.
         if inner > 0.02 {
             for side in [1.0_f32, -1.0] {
-                low.push(Vec3::new(side * inner, sheer, z));
-                high.push(Vec3::new(side * inner, sheer + COAMING, z));
+                let edge = side * inner;
+                let out = side * (inner + COAMING_THICK);
+                low.push(Vec3::new(edge, sheer, z));
+                high.push(Vec3::new(edge, sheer + COAMING, z));
+                low.push(Vec3::new(edge, sheer + COAMING, z));
+                high.push(Vec3::new(out, sheer + COAMING, z));
+                low.push(Vec3::new(out, sheer + COAMING, z));
+                high.push(Vec3::new(out, sheer, z));
             }
         }
         if let Some((plow, phigh)) = previous.take() {
