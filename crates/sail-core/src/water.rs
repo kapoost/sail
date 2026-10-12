@@ -233,14 +233,36 @@ impl WindSea {
         // direction the wind is quoted in.
         let run = direction + std::f64::consts::PI;
 
-        // Five components: the peak, two longer, two shorter, fanned either side of
-        // the mean direction. Enough to stop the surface looking like corduroy,
+        // Five components: the peak, a long pair and a short pair, fanned either side
+        // of the mean direction. Enough to stop the surface looking like corduroy,
         // cheap enough to sample a dozen times a frame.
+        //
+        // The pairing is the part that had to be fixed, and the fault is worth keeping
+        // written down because it was invisible in every number and obvious from the
+        // deck. The components used to run
+        //
+        //     peak 0°, longer −24°, shorter +24°, longest −41°, shortest +41°
+        //
+        // which ties direction to period: every long wave went one side of the wind
+        // and every short wave the other. Energy-weighted, the whole long band ran
+        // 27.8° to port of the wind and stayed there. A real sea has no such
+        // correlation — long and short waves are spread about the same mean — and the
+        // eye reads a seaway by its longest waves, so what it saw was a swell
+        // marching permanently across the wind. Reported as foam moving at an angle to
+        // the wind the boat was sailing in, which is exactly what it was.
+        //
+        // Now both members of a pair sit on the same side of the peak in period and on
+        // opposite sides of it in direction, so there is nothing left to correlate.
+        // The widths follow the physics they were always meant to: spreading is
+        // narrowest at the spectral peak and opens up away from it, more on the short
+        // side than the long, which is the Mitsuyasu result. The two members of a pair
+        // are given slightly different periods and amplitudes so they cannot lock into
+        // a perfectly regular diamond.
         let mut rng = crate::rng::Pcg32::new(seed);
-        let spread = [0.0_f64, -0.42, 0.42, -0.72, 0.72];
-        let period_ratio = [1.0_f64, 1.26, 0.82, 1.52, 0.66];
+        let spread = [0.0_f64, -0.38, 0.38, -0.66, 0.66];
+        let period_ratio = [1.0_f64, 1.26, 1.21, 0.82, 0.78];
         // Energy-weighted so the peak dominates and the sum lands on the right Hs.
-        let weight = [1.0_f64, 0.62, 0.55, 0.34, 0.26];
+        let weight = [1.0_f64, 0.60, 0.58, 0.32, 0.30];
         let norm: f64 = weight.iter().map(|w| w * w).sum::<f64>().sqrt();
 
         let components = (0..5)

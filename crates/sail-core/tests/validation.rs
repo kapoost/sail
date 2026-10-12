@@ -1922,3 +1922,52 @@ fn a_rendered_frame_lands_between_substeps() {
         last_substep * 100.0
     );
 }
+
+/// The sea runs with the wind, and so does every band in it.
+///
+/// Not a style check. The spectrum used to tie direction to period — long waves one
+/// side of the wind, short waves the other — and the energy-weighted mean direction of
+/// the long band sat 27.8° off the wind permanently. Every scalar in the model was
+/// right while the sea was visibly wrong, which is the case a test like this exists
+/// for: it asserts about the *set* of components, not about any one of them.
+#[test]
+fn every_wave_band_runs_with_the_wind() {
+    use sail_core::units::rad;
+    for wind_from in [0.0, rad(37.0), rad(180.0), rad(284.0)] {
+        let sea = sail_core::water::WindSea::new(9.0, 40_000.0, wind_from, 7);
+        let run = wind_from + std::f64::consts::PI;
+        let expected = glam::DVec2::new(run.sin(), run.cos());
+
+        let peak = sea.peak_period();
+        // Three bands: everything, the waves longer than the peak, the waves shorter.
+        // The long band is the one the eye reads, and the one that was wrong.
+        for (name, pick) in [
+            ("all", Box::new(|_: f64| true) as Box<dyn Fn(f64) -> bool>),
+            ("long", Box::new(move |p: f64| p > peak * 1.02)),
+            ("short", Box::new(move |p: f64| p < peak * 0.98)),
+        ] {
+            let mut sum = glam::DVec2::ZERO;
+            let mut energy = 0.0;
+            for c in sea.components() {
+                let period = std::f64::consts::TAU / c.omega;
+                if !pick(period) {
+                    continue;
+                }
+                // Energy goes as amplitude squared, which is what decides what a sea
+                // looks like — weighting by amplitude alone flatters the small stuff.
+                let e = c.amplitude * c.amplitude;
+                sum += c.direction * e;
+                energy += e;
+            }
+            assert!(energy > 0.0, "{name} band is empty");
+            let mean = sum / energy;
+            let off = mean.y.atan2(mean.x) - expected.y.atan2(expected.x);
+            let off = off.to_degrees().abs();
+            assert!(
+                off < 3.0,
+                "{name} band runs {off:.1}° off the wind (wind from {:.0}°)",
+                wind_from.to_degrees()
+            );
+        }
+    }
+}
