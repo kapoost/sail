@@ -698,6 +698,7 @@ pub fn update_sails(
 
     for (surface, mut visibility) in &mut q {
         *visibility = match surface.which {
+            Sail::Main if sim.controls.reef >= sail_core::boat::DROPPED => Visibility::Hidden,
             Sail::Headsail if sim.controls.furl > 0.985 => Visibility::Hidden,
             Sail::Staysail if sim.controls.staysail < 0.02 => Visibility::Hidden,
             _ => Visibility::Inherited,
@@ -855,18 +856,20 @@ pub fn headsail_shape(
             cfg.genoa.area as f32,
             head - tack,
             Vec3::new(angle.sin(), 0.0, angle.cos()),
+            1.15,
         ) * out;
         // The car the clew is solved against, which must be the one the fitting is
         // drawn at.
         let hoisted = tack.lerp(head, 0.35 + 0.65 * out);
-        let cloth = Cloth::cut(tack, hoisted, foot);
+        let cloth = Cloth::cut(tack, hoisted, foot, 0.42);
         // The car is the headsail's shape control: forward for a deep sail, aft for a
         // flat one. That depth is what moves the ring the clew rides.
         let belly = 1.0 - controls.genoa_car as f32;
+        let car = genoa_car_at(controls.genoa_car as f32, side > 0.0);
         return SailGeometry {
             tack,
             head: hoisted,
-            clew: clew_on_cloth(tack, hoisted, &cloth, belly, angle),
+            clew: clew_on_cloth(tack, hoisted, &cloth, belly, angle, car),
         };
     }
     // A sail set flying: tacked out on the sprit end, hoisted to the masthead, clew
@@ -881,20 +884,31 @@ pub fn headsail_shape(
     // very top of the spar — above the forestay, which is where its extra hoist comes
     // from and half the reason it is worth setting.
     let head = Vec3::new(0.0, crate::rig::MAST_HEAD - 0.12, MAST_FOOT_Z);
+    // A gennaker's area is cloth, not triangle, and there is a great deal of cloth in
+    // it; a Code 0 is flatter and sits between the two.
+    let fullness = if gennaker { 1.80 } else { 1.35 };
     let foot = foot_for_area(
         cfg.headsail(kind).area as f32,
         head - tack,
         Vec3::new(angle.sin(), 0.0, angle.cos()),
+        fullness,
     ) * out;
     let hoisted = tack.lerp(head, 0.3 + 0.7 * out);
-    let cloth = Cloth::cut(tack, hoisted, foot);
+    let cloth = Cloth::cut(tack, hoisted, foot, 0.45);
     // A gennaker is cut deep and a Code 0 nearly flat, and neither has a car to change
     // it: the depth is the sailmaker's, not the trimmer's.
     let belly = if gennaker { 1.0 } else { 0.25 };
+    // A sail set flying sheets to a block on the quarter, right aft — the same point the
+    // sheet is drawn to, so the cloth and the rope agree about where they meet.
+    let block = Vec3::new(
+        side * 1.15,
+        crate::deck::deck_height(3.9) + 0.07,
+        3.9,
+    );
     SailGeometry {
         tack,
         head: hoisted,
-        clew: clew_on_cloth(tack, hoisted, &cloth, belly, angle),
+        clew: clew_on_cloth(tack, hoisted, &cloth, belly, angle, block),
     }
 }
 
@@ -922,6 +936,7 @@ pub fn staysail_boom_length(area: f32) -> f32 {
         area,
         staysail_head() - staysail_tack(),
         Vec3::new(0.5, 0.0, 0.866),
+        1.15,
     )
 }
 
@@ -943,15 +958,18 @@ pub fn staysail_boom_end(angle: f32, length: f32) -> Vec3 {
 ///
 /// A sail is not flat, so the cloth is larger than the triangle between its three
 /// corners — roach on a main, camber and a round leech on a headsail. Fifteen percent
-/// covers it for everything here.
-fn foot_for_area(area: f32, luff: Vec3, foot_dir: Vec3) -> f32 {
-    const CLOTH_OVER_TRIANGLE: f32 = 1.15;
+/// covers a working sail. A spinnaker-cut sail is a different matter and the caller says
+/// so: a gennaker's quoted area is the cloth in it, which is most of twice the flat
+/// triangle it spans, and taking it for a triangle gave the sail a ten-metre foot and a
+/// clew out beyond the spreaders.
+fn foot_for_area(area: f32, luff: Vec3, foot_dir: Vec3, cloth_over_triangle: f32) -> f32 {
+    let cloth_over_triangle = cloth_over_triangle.max(1.0);
     let dir = foot_dir.normalize_or_zero();
     // Area of a triangle is half the cross product, so the foot that gives the wanted
     // area falls straight out of it — and it grows when the sail is sheeted in hard,
     // which is correct: at a small angle between luff and foot the triangle is narrow.
     let across = luff.cross(dir).length().max(0.15);
-    (2.0 * area / CLOTH_OVER_TRIANGLE / across).clamp(1.0, 16.0)
+    (2.0 * area / cloth_over_triangle / across).clamp(1.0, 16.0)
 }
 
 /// Where a cap shroud runs, in the boat's own frame.
@@ -1093,8 +1111,8 @@ impl Cloth {
     /// The leech is not a free number: given the luff and the foot it falls out of where
     /// the clew is meant to sit, and sitting it a little above the tack is what makes a
     /// headsail's clew ride where a headsail's clew rides rather than on the deck.
-    pub fn cut(tack: Vec3, head: Vec3, foot: f32) -> Self {
-        let aft = Vec3::new(0.0, 0.42, 1.0).normalize();
+    pub fn cut(tack: Vec3, head: Vec3, foot: f32, rise: f32) -> Self {
+        let aft = Vec3::new(0.0, rise, 1.0).normalize();
         let design = tack + aft * foot;
         Self {
             foot,
@@ -1105,11 +1123,27 @@ impl Cloth {
 
 /// Where on that ring the clew has been pulled to.
 ///
-/// The sheet decides, and the force model has already decided what the sheet means: it
-/// gives a chord angle. So the clew goes to the point on the ring whose bearing from the
-/// tack matches that angle — or to the nearest the cloth allows, which is the whole
-/// point. One description of where the sail is, shared by the physics and the picture.
-pub fn clew_on_cloth(tack: Vec3, head: Vec3, cloth: &Cloth, belly: f32, chord: f32) -> Vec3 {
+/// Two things decide it and the first attempt used only one. The force model has already
+/// said what the sheet means — a chord angle — so the clew wants the point on the ring
+/// whose bearing from the tack matches it. But a bearing is a direction on the water and
+/// the ring stands up out of it: on a gennaker the ring is eight metres across, and
+/// every height from the deck to the spreaders has a point on it at the right bearing.
+/// Matching the bearing alone left the clew to pick one at random, and it picked high —
+/// the sail came out as a tall sliver with its clew up by the masthead.
+///
+/// What settles the height is the thing that is actually pulling: the sheet, which runs
+/// to a block on the deck. Of the points at the right bearing the clew takes the one
+/// nearest that block, because that is the direction the sheet hauls it. Which is also
+/// why a sail set flying stands up tall when it is eased and flattens down when it is
+/// sheeted hard, without anybody having to say so.
+pub fn clew_on_cloth(
+    tack: Vec3,
+    head: Vec3,
+    cloth: &Cloth,
+    belly: f32,
+    chord: f32,
+    block: Vec3,
+) -> Vec3 {
     // Camber takes up cloth, so the straight-line lengths shrink.
     let b = belly.clamp(0.0, 1.0);
     let foot = cloth.foot * (1.0 - 0.11 * b);
@@ -1135,15 +1169,22 @@ pub fn clew_on_cloth(tack: Vec3, head: Vec3, cloth: &Cloth, belly: f32, chord: f
     // three dimensions and the bearing along it is not monotonic once the luff is raked.
     let want = chord.abs();
     let mut best = centre + e1 * radius;
-    let mut best_err = f32::MAX;
-    for i in 0..=72 {
-        let phi = std::f32::consts::PI * i as f32 / 72.0;
+    let mut best_cost = f32::MAX;
+    // The whole ring, not half of it: the clew of an eased sail can be forward of
+    // abeam, and on a gennaker tacked out on the sprit it usually is.
+    for i in 0..144 {
+        let phi = std::f32::consts::TAU * i as f32 / 144.0;
         let p = centre + e1 * (radius * phi.cos()) + e2 * (radius * phi.sin());
         let from_tack = p - tack;
-        let bearing = from_tack.x.abs().atan2(from_tack.z.max(0.01));
-        let err = (bearing - want).abs();
-        if err < best_err {
-            best_err = err;
+        // The full half-turn, not a quadrant: `max(z, 0.01)` folded everything forward
+        // of the tack onto ninety degrees, and the clew of an eased sail is often
+        // forward of its tack — on a gennaker set from the sprit, usually.
+        let bearing = from_tack.x.abs().atan2(from_tack.z);
+        // The bearing is what the trim says, so it dominates; the sheet decides between
+        // the points that satisfy it.
+        let cost = 20.0 * (bearing - want).powi(2) + (p - block).length() / cloth.foot.max(0.5);
+        if cost < best_cost {
+            best_cost = cost;
             best = p;
         }
     }

@@ -418,13 +418,17 @@ pub fn update(
                     .optimal_sheet(t.awa, sail_core::sail::CAMBER_REFERENCE);
                 let club = lee * cfg.staysail.profile.chord_angle(sheet_angle) as f32;
                 let length = crate::boat::staysail_boom_length(cfg.staysail.area as f32);
-                let at = crate::boat::staysail_boom_end(club, length * 0.72);
+                // From the boom end, not part way along it: a club boom's sheet is made
+                // fast at the end where the leverage is, and the earlier attachment at
+                // seven tenths left a stub of rope half a metre long that was hidden
+                // under the sail and might as well not have been drawn.
+                let at = crate::boat::staysail_boom_end(club, length);
                 Span {
                     from: at,
                     to: Vec3::new(
                         0.0,
-                        crate::deck::deck_height(MAST_FOOT_Z - 2.1) + 0.06,
-                        MAST_FOOT_Z - 2.1,
+                        crate::deck::deck_height(MAST_FOOT_Z - 0.55) + 0.06,
+                        MAST_FOOT_Z - 0.55,
                     ),
                     // Bar taut whenever the sail is up, because on a club-footed
                     // staysail this one rope holds the boom against the whole force of

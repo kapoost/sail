@@ -650,6 +650,17 @@ pub fn sail_forces(
 /// Real and worth modelling even in a proof of concept: it is the whole reason a boat
 /// poles out a genoa or gybes downwind instead of running dead. Below 120 degrees of
 /// apparent wind the headsail is in clear air; by 180 it is almost entirely dead.
-pub fn headsail_blanketing(awa: f64) -> f64 {
-    0.85 * smoothstep(rad(120.0), rad(175.0), awa.abs())
+pub fn headsail_blanketing(awa: f64, boom_angle: f64) -> f64 {
+    // The shadow is cast by the mainsail, so where it falls depends on where the
+    // mainsail *is*. The fixed hundred and twenty degrees this used to start at happened
+    // to be right for a boom squared off against the shrouds and was wrong everywhere
+    // else: sheeted in on a reach the main cannot shade a headsail set ahead of it at
+    // any angle, and the old curve had it doing so the moment the apparent wind went
+    // aft of a hundred and twenty.
+    //
+    // The headsail is forward of the main, so it is in the lee of it once the wind comes
+    // from behind the mainsail — which is the boom's angle plus the width of the sail's
+    // own wake, and not before.
+    let from = boom_angle.abs() + rad(40.0);
+    0.85 * smoothstep(from, from + rad(55.0), awa.abs())
 }

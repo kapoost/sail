@@ -385,12 +385,12 @@ impl Simulation {
         let shadow = if flying.flying() {
             0.0
         } else {
-            headsail_blanketing(jib_awa)
+            headsail_blanketing(jib_awa, boom_angle)
         };
         let shadow_upper = if flying.flying() {
             0.0
         } else {
-            headsail_blanketing(jib_upper_awa)
+            headsail_blanketing(jib_upper_awa, boom_angle)
         };
         let jib = sail_forces(
             &head.profile,
@@ -450,7 +450,7 @@ impl Simulation {
                 sheet,
                 sail.area * stay_set * covered,
                 st.heel,
-                headsail_blanketing(stay_awa),
+                headsail_blanketing(stay_awa, boom_angle),
                 crate::sail::CAMBER_REFERENCE,
             ))
         } else {

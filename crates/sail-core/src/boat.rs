@@ -147,6 +147,9 @@ pub struct BoatConfig {
 
 }
 
+/// Where on the reef control the mainsail stops being set at all.
+pub const DROPPED: f64 = 0.98;
+
 impl BoatConfig {
     /// Production charter sloop, about 34 feet.
     pub fn charter_sloop_34() -> Self {
@@ -476,6 +479,13 @@ impl BoatConfig {
     /// centre of effort as well as shrinking it, which is why a reefed boat stands up
     /// rather than merely slowing down.
     pub fn reefed_main(&self, reef: f64) -> (f64, f64) {
+        // The last position on the halyard is not a third reef. It is the sail coming
+        // down: full, first, second, handed. A boat this size carries two slabs and then
+        // you take it off her, and "sailing under headsail alone" is a real way to get
+        // home rather than an edge case.
+        if reef >= DROPPED {
+            return (0.0, self.main.z_ce * 0.3);
+        }
         let r = reef.clamp(0.0, 1.0) * self.max_reef;
         (
             self.main.area * (1.0 - r),

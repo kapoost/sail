@@ -201,6 +201,7 @@ pub fn draw(
                 // Slabs, not a fraction: a sailor says "second reef", never "0.67".
                 match (c.reef * 3.0).round() as i32 {
                     0 => "full".to_string(),
+                    3 => "handed".to_string(),
                     n => format!("reef {n}"),
                 },
                 c.headsail.name(),
