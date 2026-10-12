@@ -194,15 +194,21 @@ pub fn structure_mesh() -> (Mesh, Mesh) {
         // is exactly the grey wall this file has already been caught by once.
         let closed = half_section[0].0 <= 1e-4;
         let mut ring = Vec::with_capacity(half_section.len() * 2);
-        for (i, (x, y)) in half_section.iter().enumerate() {
-            if i > 0 || closed {
-                ring.push(Vec3::new(-x, *y, z));
-            }
-        }
+        // `half_section` runs from the centreline outwards, so the port half is it
+        // reversed and mirrored — sheer first, working in — and the starboard half is
+        // it forwards. Written the other way round the path came out as centreline,
+        // port sheer, starboard sheer: a scrambled order in which the recorded gap
+        // index pointed at the wrong segment, so the deck was still laid straight
+        // across the cockpit opening.
         for (x, y) in half_section.iter().rev() {
-            if *x > 1e-4 || !closed {
-                ring.push(Vec3::new(*x, *y, z));
+            ring.push(Vec3::new(-x, *y, z));
+        }
+        for (i, (x, y)) in half_section.iter().enumerate() {
+            // On a closed section the centreline point has just been pushed.
+            if i == 0 && closed {
+                continue;
             }
+            ring.push(Vec3::new(*x, *y, z));
         }
         let gap = if closed {
             usize::MAX

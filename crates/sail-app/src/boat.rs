@@ -601,6 +601,7 @@ pub fn update_sails(
                     draft: forces.camber as f32,
                     now,
                     shrouds: &shrouds,
+                    clear_mast: surface.which == Sail::Genoa,
                 },
             );
         }
@@ -675,6 +676,38 @@ fn clear_of_shrouds(point: Vec3, normal: Vec3, shrouds: &[Vec3]) -> Vec3 {
         }
     }
     p
+}
+
+/// Radius the cloth is kept outside the mast, metres. The spar plus a hand's width.
+const MAST_CLEARANCE: f32 = 0.16;
+
+/// Push a point of sailcloth out of the mast.
+///
+/// Radially, which is the one unambiguous answer: a cylinder has no windward or
+/// leeward side, and whichever way the sail has already gone round it is the way it
+/// should keep going. The shroud constraint cannot be reused here — it asks "is the
+/// cloth to leeward of the wire", and for a spar standing in the middle of the sail
+/// plan that question has no correct answer.
+///
+/// Only the headsail is held off. The mainsail's luff is bent *on* the mast; pushing
+/// it clear would tear the sail off the spar it is attached to.
+fn clear_of_mast(point: Vec3) -> Vec3 {
+    let radial = Vec2::new(point.x, point.z - MAST_FOOT_Z);
+    let d = radial.length();
+    if d >= MAST_CLEARANCE || point.y < DECK || point.y > crate::rig::MAST_HEAD {
+        return point;
+    }
+    // Dead on the axis: nothing to push along, so nudge it forward out of the spar.
+    let out = if d < 1e-4 {
+        Vec2::new(0.0, -1.0)
+    } else {
+        radial / d
+    };
+    Vec3::new(
+        out.x * MAST_CLEARANCE,
+        point.y,
+        MAST_FOOT_Z + out.y * MAST_CLEARANCE,
+    )
 }
 
 /// Sheet length from the clew to the car for a given sheet setting.
@@ -797,6 +830,9 @@ struct SailTrim<'a> {
     now: f32,
     /// Standing rigging the cloth is not allowed through, as a polyline.
     shrouds: &'a [Vec3],
+    /// Whether this sail has to keep clear of the mast. The main does not: its luff
+    /// is bent on to it.
+    clear_mast: bool,
 }
 
 fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
@@ -807,6 +843,7 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         draft,
         now,
         shrouds,
+        clear_mast,
     } = *trim;
     let mut positions = Vec::with_capacity(SAIL_U * SAIL_V);
     let mut uvs = Vec::with_capacity(SAIL_U * SAIL_V);
@@ -886,6 +923,19 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
                 * chord_length.max(0.4);
             let point = luff.lerp(leech, v) + normal * (belly + flap + crease);
             let point = clear_of_shrouds(point, normal, shrouds);
+            let point = if clear_mast {
+                clear_of_mast(point)
+            } else {
+                point
+            };
+            // And never below the deck. A headsail flogging head to wind swept down
+            // through the planking and across the companionway hatch, which no amount
+            // of cloth can do: it lies *on* the deck.
+            let point = Vec3::new(
+                point.x,
+                point.y.max(crate::deck::deck_height(point.z) + 0.05),
+                point.z,
+            );
             positions.push(point);
             // Metres, not a normalised zero to one. A panel of sailcloth is a metre
             // wide whatever sail it is in, so the seams have to be laid out in the
