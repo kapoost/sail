@@ -35,7 +35,7 @@ use crate::sim::Sim;
 /// Nine hundred, which is a great deal, and deliberately so. They cost one quad each
 /// and nothing at all in the physics, and the alternative — a true photographic amount
 /// of white water — is a few grey pixels at the resolution this is played at.
-const COUNT: usize = 900;
+const COUNT: usize = 1600;
 /// Seconds one lives.
 const LIFE: f32 = 3.4;
 /// How fast foam spreads outward from where it was thrown, m/s.
@@ -47,6 +47,12 @@ struct Speck {
     age: f32,
     /// Varies, or a hundred identical blobs read as a texture rather than as water.
     scale: f32,
+    /// Its own phase, so the shimmer is a thousand separate sparkles rather than one
+    /// field of foam pulsing in time with itself.
+    phase: f32,
+    /// How blue this one is to begin with, 0 white and 1 the colour of the sea it came
+    /// out of.
+    tint: f32,
 }
 
 #[derive(Resource)]
@@ -183,6 +189,8 @@ pub fn update(
             drift,
             age: 0.0,
             scale: 0.55 + 0.9 * r.next_f64() as f32,
+            phase: r.next_f64() as f32 * std::f32::consts::TAU,
+            tint: r.next_f64() as f32,
         });
     }
     *owed = owed.min(8.0);
@@ -210,8 +218,25 @@ pub fn update(
         // Thrown up bright, spreading and thinning as it settles. The brightness falls
         // faster than the size grows, which is what foam does: it goes from white to a
         // patch of bubbles to nothing, getting wider the whole time.
-        let alpha = (1.0 - life).powf(1.7) * 0.95;
-        let size = (0.30 + 0.75 * life) * s.scale;
+        // Pixels, not blobs. Each speck is a few centimetres across, so what reads is
+        // the *texture* of broken water — hundreds of separate bright points — rather
+        // than a handful of white splodges. At this resolution a speck is one or two
+        // pixels, which is what foam is on a screen this size.
+        let size = (0.055 + 0.085 * life) * s.scale;
+        // And every one of them twinkles. Real broken water does not glow steadily: a
+        // bubble catches the sky, turns, and goes out, and what the eye picks up from a
+        // bow wave is that seething rather than any single bright patch. Two beats, not
+        // one, and both prime-ish so a thousand specks never fall into step.
+        let twinkle = 0.62
+            + 0.38
+                * (0.6 * (s.age * 17.0 + s.phase).sin() + 0.4 * (s.age * 9.3 + s.phase * 2.1).sin());
+        let alpha = (1.0 - life).powf(1.7) * 0.95 * twinkle.clamp(0.0, 1.4);
+        // Foam is not white. It starts as the sea with air beaten into it and whitens as
+        // the bubbles rise, so a fresh speck carries the water's own colour and an old
+        // one is nearly white — and between them is the whole range you see along a bow
+        // wave at once.
+        let sea = Vec3::new(0.62, 0.78, 0.92);
+        let colour = sea.lerp(Vec3::ONE, (life * 1.4 + (1.0 - s.tint) * 0.5).clamp(0.0, 1.0));
         let height = sim.sim.water.height(s.at, t) + 0.06;
         let centre = origin.to_bevy(s.at, height as f32);
         // Facing the eye, so a speck is a speck from everywhere rather than a flake
@@ -221,7 +246,7 @@ pub fn update(
         let up = right.cross(to_eye).normalize_or_zero();
         for (u, v) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
             positions.push(centre + right * (size * u) + up * (size * v));
-            colours.push([1.0, 1.0, 1.0, alpha]);
+            colours.push([colour.x, colour.y, colour.z, alpha]);
             uvs.push(Vec2::new(u * 0.5 + 0.5, v * 0.5 + 0.5));
         }
     }
