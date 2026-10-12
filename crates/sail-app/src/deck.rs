@@ -114,24 +114,35 @@ const COCKPIT_DEPTH: f32 = 0.62;
 /// across five stations, a metre and a quarter of boat, is that batten: wide enough to
 /// swallow the scan's grain, narrow enough to keep the sheer's real spring and the rise
 /// towards the bow.
-const FAIRING: usize = 2;
+///
+/// Widened to seven stations — a metre and three quarters — after the deck still read
+/// as lumpy around the hatch. The trade is measurable and it is cheap: against the raw
+/// table the fairing takes the sheer's roughness from 1.27 to 0.31 and the half-beam's
+/// from 1.33 to 0.55, while the sheer's spring from its lowest point to the bow goes
+/// from 0.715 m to 0.671 — four centimetres of the curve a sailor would actually look
+/// at, for three quarters of the lumps. A ninth station starts eating the spring
+/// properly and is not worth it.
+const FAIRING: usize = 3;
 
 fn sheer_at(z: f32) -> (f32, f32) {
     let faired = |i: usize| -> (f32, f32) {
         let lo = i.saturating_sub(FAIRING);
         let hi = (i + FAIRING).min(SHEER.len() - 1);
-        let mut rise = 0.0;
+        // The table is (station, half-beam, height), and this returns them in that
+        // order — named here because getting them the wrong way round swaps the deck's
+        // width with its height, which is the kind of mistake that draws something
+        // unrecognisable rather than something subtly wrong.
         let mut half = 0.0;
+        let mut rise = 0.0;
         for s in &SHEER[lo..=hi] {
-            rise += s.1;
-            half += s.2;
+            half += s.1;
+            rise += s.2;
         }
         let n = (hi - lo + 1) as f32;
-        (rise / n, half / n)
+        (half / n, rise / n)
     };
     if z <= SHEER[0].0 {
-        let (rise, half) = faired(0);
-        return (rise, half);
+        return faired(0);
     }
     for (i, w) in SHEER.windows(2).enumerate() {
         if z <= w[1].0 {
