@@ -1481,14 +1481,28 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
             } else {
                 point
             };
-            // And never below the deck. A headsail flogging head to wind swept down
-            // through the planking and across the companionway hatch, which no amount
-            // of cloth can do: it lies *on* the deck.
-            let point = Vec3::new(
-                point.x,
-                point.y.max(crate::deck::deck_height(point.z) + 0.05),
-                point.z,
-            );
+            // And never below the deck — but gently. A headsail flogging head to wind
+            // swept down through the planking and across the companionway hatch, which
+            // no amount of cloth can do: it lies *on* the deck.
+            //
+            // Clamping it with a maximum did stop that and left a crease: everything
+            // below the line was flattened onto one plane, everything above it was not,
+            // and the join between them was a fold straight across the sail. Cloth does
+            // not fold like that when it meets a surface — it comes down to the deck and
+            // flattens out *into* it over a hand's breadth.
+            //
+            // A softplus is that: it is the maximum, rounded off over a band, and it has
+            // no corner in it anywhere. Twenty-five centimetres of band, which is about
+            // how far up a sail you can see the deck pushing back.
+            let floor = crate::deck::deck_height(point.z) + 0.05;
+            const BAND: f32 = 0.25;
+            let above = (point.y - floor) / BAND;
+            let eased = if above > 8.0 {
+                point.y
+            } else {
+                floor + BAND * (1.0 + above.exp()).ln()
+            };
+            let point = Vec3::new(point.x, eased, point.z);
             positions.push(point);
             // Metres, not a normalised zero to one. A panel of sailcloth is a metre
             // wide whatever sail it is in, so the seams have to be laid out in the
