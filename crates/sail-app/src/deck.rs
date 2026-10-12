@@ -296,32 +296,36 @@ pub fn structure_mesh() -> (Mesh, Mesh) {
         for (x, y) in half_section.iter().rev() {
             ring.push(Vec3::new(-x, *y, z));
         }
-        for (i, (x, y)) in half_section.iter().enumerate() {
-            // On a closed section the centreline point has just been pushed.
-            if i == 0 && closed {
-                continue;
-            }
+        // Every point, including the centreline one twice over on a closed section.
+        //
+        // Skipping the duplicate was the tidy thing to do and it is what put a hole
+        // across the boat. A closed ring came out with seven points and an open one with
+        // eight, the stitching between neighbouring rings refuses to work when the
+        // counts differ, and so the single step where the cockpit opening begins was
+        // never drawn: a five-centimetre slot straight across the deck, through which
+        // you can see the inside of the hull. The comment above that `continue` said a
+        // seam of one step was there and that no one would find it. Somebody found it,
+        // from the foredeck, twice.
+        //
+        // Doubling a point costs one degenerate quad with no area, which draws nothing
+        // and cannot be seen. Every ring is the same length now, so nothing is skipped.
+        for (x, y) in half_section.iter() {
             ring.push(Vec3::new(*x, *y, z));
         }
-        let gap = if closed {
-            usize::MAX
-        } else {
-            half_section.len() - 1
-        };
+        // The segment between the two centreline points: the cockpit opening where
+        // there is one, and a pair of coincident points where there is not.
+        let _ = closed;
+        let gap = half_section.len() - 1;
         rings.push((ring, gap));
     }
 
-    // Stitch neighbouring rings, sorting each quad by which way it faces. Rings only
-    // have the same length where the opening is present or absent in both, so the
-    // transitions are skipped — a seam of one step at the ends of the cabin and the
-    // cockpit, which no one will find.
+    // Stitch neighbouring rings, sorting each quad by which way it faces. Every ring is
+    // the same length by construction, so nothing is ever skipped.
     let mut deck = Surface::default();
     let mut sides = Surface::default();
     for i in 0..steps {
         let ((a, gap_a), (b, gap_b)) = (&rings[i], &rings[i + 1]);
-        if a.len() != b.len() {
-            continue;
-        }
+        debug_assert_eq!(a.len(), b.len(), "deck rings must match");
         for k in 0..a.len() - 1 {
             // Do not lay deck across the cockpit opening.
             if k == *gap_a || k == *gap_b {
