@@ -17,8 +17,10 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
+use crate::camera;
 use crate::frame;
 use crate::sea_texture;
+use crate::sky;
 use crate::sim::Sim;
 
 /// Vertices across the grid. Odd, so one sits under the boat.
@@ -202,20 +204,107 @@ pub struct SurfaceDrift {
     offset: glam::DVec2,
 }
 
+/// How many tones the drawn sea is allowed.
+///
+/// Four. Three is a poster and six is a photograph with a fault in it; four is what an
+/// inker uses for water, and it is enough to carry a wave's shape and not enough to
+/// suggest a gradient.
+const INK_BANDS: usize = 4;
+
+/// How nearly a facet must mirror the sun to be struck as a highlight.
+///
+/// The cosine of the angle between the surface normal and the half-vector between eye
+/// and sun — which is the mirror condition, so the glitter path is where it actually
+/// falls rather than where it would be convenient. Tuned by counting: at 0.985 a
+/// fifteen-knot sea lights about a tenth of a per cent of the resolved vertices, which
+/// is a path and not a sheet.
+const GLINT_COS: f32 = 0.985;
+
+/// Fraction of eligible facets that are actually struck.
+///
+/// Not every facet on the path gets a mark. A continuous band of white is a lens flare;
+/// what a sea does — and what an inker draws — is a scatter of separate dashes. The
+/// choice is a hash of the water parcel, so each dash belongs to a piece of water and
+/// rides the wave through instead of flickering as the grid slides underneath.
+const GLINT_STIPPLE: f32 = 0.42;
+
+/// Stable per-parcel hash, used to decide which facets catch the light.
+fn stipple(parcel: glam::DVec2) -> f32 {
+    let x = (parcel.x * 0.37).floor() as i64;
+    let y = (parcel.y * 0.37).floor() as i64;
+    let mut h = (x.wrapping_mul(0x27d4_eb2d) ^ y.wrapping_mul(0x1656_67b1)) as u64;
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 29;
+    (h >> 40) as f32 / 16_777_216.0
+}
+
+/// Whether the sea is drawn rather than lit.
+#[derive(Resource, Default)]
+pub struct Ink(pub bool);
+
+impl Ink {
+    /// `SAIL_INK=1` starts in the drawn sea, the same way `SAIL_PIXELS` starts in a
+    /// chosen resolution: a look you have settled on should not need a keypress every
+    /// time the boat is launched.
+    pub fn from_env() -> Self {
+        Self(std::env::var("SAIL_INK").is_ok_and(|v| v != "0"))
+    }
+}
+
+/// `B` for the drawn sea.
+pub fn toggle_ink(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut ink: ResMut<Ink>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    q: Query<&MeshMaterial3d<StandardMaterial>, With<SeaSurface>>,
+) {
+    if !keys.just_pressed(KeyCode::KeyB) {
+        return;
+    }
+    ink.0 = !ink.0;
+    // The lighting has to be taken off the water as well, or the bands are drowned in
+    // a specular sheen that has no edges in it — flat tones and a glossy highlight are
+    // two different pictures and the sheen wins.
+    for handle in &q {
+        if let Some(m) = materials.get_mut(&handle.0).as_deref_mut() {
+            if ink.0 {
+                m.perceptual_roughness = 1.0;
+                m.reflectance = 0.02;
+            } else {
+                m.perceptual_roughness = 1.0;
+                m.reflectance = 0.25;
+            }
+        }
+    }
+    info!("sea: {}", if ink.0 { "drawn" } else { "lit" });
+}
+
+// A Bevy system's parameters are its dependency list, not an argument list; the eighth
+// one is the camera, and the alternative is a struct that exists only to satisfy a lint.
+#[allow(clippy::too_many_arguments)]
 pub fn update_sea(
+    ink: Res<Ink>,
     origin: Res<frame::RenderOrigin>,
     time: Res<Time>,
     mut drift: ResMut<SurfaceDrift>,
     sim: Res<Sim>,
     mut meshes: ResMut<Assets<Mesh>>,
+    chase: Res<camera::ChaseState>,
     mut q: Query<(&SeaSurface, &mut Transform)>,
 ) {
+    let ink = ink.0;
+    let sun = sky::SUN.normalize();
     let st = &sim.render_state();
     let centre = origin.to_bevy(st.pos, 0.0);
     let t = st.time;
 
     for (sea, mut transform) in &mut q {
         transform.translation = Vec3::new(centre.x, 0.0, centre.z);
+        // The eye in the sea's own frame: the grid's vertices are offsets from the
+        // boat, and a mirror condition has to be evaluated in one frame or the other,
+        // not half in each.
+        let eye = chase.eye() - transform.translation;
         let Some(mut mesh) = meshes.get_mut(&sea.mesh) else {
             continue;
         };
@@ -306,8 +395,10 @@ pub fn update_sea(
             let slope = sim.sim.water.slope_resolved(world, t, min_wavelength);
             let (sx, sz) = (slope.x as f32, -slope.y as f32);
 
-            positions.push(Vec3::new(offset.x, height, offset.y));
-            normals.push(Vec3::new(-sx, 1.0, -sz).normalize());
+            let point = Vec3::new(offset.x, height, offset.y);
+            let normal = Vec3::new(-sx, 1.0, -sz).normalize();
+            positions.push(point);
+            normals.push(normal);
 
             // World-locked UVs, so the detail stays with the sea rather than with the
             // boat: the grid recentres every frame and the texture must not. On top of
@@ -332,15 +423,64 @@ pub fn update_sea(
             let lift = (height / hs).clamp(-1.0, 1.0);
             let deep = Vec3::new(0.035, 0.095, 0.150);
             let shallow = Vec3::new(0.090, 0.210, 0.260);
-            let base = deep.lerp(shallow, (lift * 0.5 + 0.5).clamp(0.0, 1.0));
+            let mut tone = (lift * 0.5 + 0.5).clamp(0.0, 1.0);
+            if ink {
+                // Drawn water, not photographed water.
+                //
+                // The whole difference is that a painter does not shade a gradient; a
+                // painter picks three or four tones and puts a hard edge between them,
+                // and the eye reads the shape of that edge as the shape of the wave.
+                // So the gradient is quantised, and the step is the drawing.
+                //
+                // It is the right place for it, too: this colour is already computed
+                // per vertex on the processor every frame, so a style that would
+                // normally want a shader costs one rounding here.
+                tone = (tone * INK_BANDS as f32).floor() / (INK_BANDS - 1) as f32;
+                tone = tone.clamp(0.0, 1.0);
+            }
+            let base = deep.lerp(shallow, tone);
             // Foam judged against this sea's own typical slope rather than a fixed
             // number. A long swell and a short chop of the same height are nothing
             // alike in steepness, so a threshold tuned on one gives either no foam at
             // all — which is what was happening, since the fixed 0.16 sat almost at
             // this sea's maximum — or a sea of milk on the other.
             let steepness = (sx * sx + sz * sz).sqrt() / typical;
-            let foam = ((steepness - 1.25) / 0.75).clamp(0.0, 1.0) * crest_weight(lift);
-            let colour = base.lerp(Vec3::new(0.82, 0.88, 0.92), foam);
+            let mut foam = ((steepness - 1.25) / 0.75).clamp(0.0, 1.0) * crest_weight(lift);
+            if ink {
+                // Foam becomes ink: on or off, no half measures, because a drawn
+                // whitecap is a shape with an outline rather than a soft bloom. And
+                // thrown earlier, since a hard-edged mark has to be large enough to
+                // read as a mark.
+                foam = if foam > 0.18 { 1.0 } else { 0.0 };
+            }
+            let mut colour = base.lerp(
+                if ink {
+                    Vec3::new(0.95, 0.97, 1.0)
+                } else {
+                    Vec3::new(0.82, 0.88, 0.92)
+                },
+                foam,
+            );
+            if ink {
+                // Glints off the wave faces.
+                //
+                // The sheen was taken off the water to let the flat tones read, and
+                // that took the sun off it as well — a drawn sea without highlights
+                // looks like a painted floor. So they go back on deliberately, as
+                // marks rather than as a sheen: struck where the facet actually
+                // mirrors the sun towards the eye, and only on the facets the stipple
+                // picks, which is how you get a scatter of dashes along the glitter
+                // path instead of a continuous smear of white.
+                //
+                // Done here rather than by the renderer because this is the one place
+                // that knows the true surface normal. The lit sea gets its highlights
+                // from the material and does not want a second set fighting them.
+                let view = (eye - point).normalize_or_zero();
+                let half = (view + sun).normalize_or_zero();
+                if normal.dot(half) > GLINT_COS && stipple(parcel) < GLINT_STIPPLE {
+                    colour = Vec3::new(1.0, 1.0, 0.97);
+                }
+            }
             colours.push([colour.x, colour.y, colour.z, 1.0]);
         }
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);

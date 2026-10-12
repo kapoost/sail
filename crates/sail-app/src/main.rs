@@ -107,6 +107,7 @@ fn main() {
         .init_resource::<input::Pilot>()
         .init_resource::<frame::RenderOrigin>()
         .insert_resource(retro::Retro::from_env())
+        .insert_resource(world::Ink::from_env())
         .init_resource::<chart::Chart>()
         .init_resource::<chart::Track>()
         .init_resource::<world::SurfaceDrift>()
@@ -171,6 +172,7 @@ fn main() {
                     course::restart,
                     chart::toggle,
                     retro::toggle,
+                    world::toggle_ink,
                     retro::apply,
                 ),
             )

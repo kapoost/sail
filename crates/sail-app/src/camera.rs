@@ -137,6 +137,16 @@ pub struct ChaseState {
 }
 
 impl ChaseState {
+    /// Where the eye is, in render-origin space.
+    ///
+    /// Exposed because the sea's glitter path depends on it: a highlight is a mirror,
+    /// so where it lies is a fact about where you are standing. Reading the camera's
+    /// own `Transform` instead would be a frame behind, and a highlight that lags the
+    /// view by a frame shears across the water when you look around.
+    pub fn eye(&self) -> Vec3 {
+        self.position
+    }
+
     /// Carry the stored camera position across a change of render origin.
     pub fn shift(&mut self, by: Vec3) {
         self.position += by;

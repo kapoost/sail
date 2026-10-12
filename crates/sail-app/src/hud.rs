@@ -319,6 +319,7 @@ pub fn draw(
                  M       chart on / off      [ ]  zoom it out and in\n\
                  mouse   hold the right button to look around; Space looks ahead\n\
                  V       picture: sharp, 960, 720, 480 across\n\
+                 B       sea: lit or drawn\n\
                  T  snap to trim   C  camera   L  new consignment   K  mute   \
 Tab  hide panel",
             );
