@@ -38,6 +38,7 @@ pub mod autopilot;
 pub mod boat;
 pub mod hull;
 pub mod hydrostatics;
+pub mod land;
 pub mod rng;
 pub mod sail;
 pub mod sim;

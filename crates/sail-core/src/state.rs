@@ -196,6 +196,10 @@ impl Controls {
 /// built from `vmg` and `speed` is the single most useful development instrument.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Telemetry {
+    /// Water under the keel's deepest point, metres. Negative means she is on it.
+    pub under_keel: f64,
+    /// Depth of water, metres, as a sounder reads it.
+    pub depth: f64,
     /// True wind speed and direction at reference height.
     pub tws: f64,
     pub twd: f64,

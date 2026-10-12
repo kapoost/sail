@@ -106,6 +106,10 @@ pub fn draw(
                         // metre or two is the difference between carrying on and
                         // bearing away.
                         gauge(ui, "SEA", sim.weather.hs, 0.0, 4.0, "m");
+                        // The sounder. The one instrument that turns a shoal from an
+                        // ambush into a decision, which is the whole difference
+                        // between land being a hazard and land being a wall.
+                        gauge(ui, "DEPTH", telemetry.depth, 0.0, 40.0, "m");
                     });
                 });
 

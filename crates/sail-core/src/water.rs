@@ -106,6 +106,18 @@ pub trait WaterSurface: Send + Sync {
         0.0
     }
 
+    /// Tell the surface how much of the open sea reaches here, 0 to 1.
+    ///
+    /// Waves need a fetch to build, so the water under the lee of an island is flatter
+    /// than the water a mile outside it. Set once a substep from the boat's own
+    /// position rather than evaluated per query: the shelter varies over a kilometre
+    /// and the boat is eleven metres long, so one figure describes the whole of the
+    /// local sea and the alternative is tracing rays a hundred times a substep.
+    ///
+    /// The default ignores it, which is right for flat water and for any sea that has
+    /// no land to be sheltered by.
+    fn set_shelter(&mut self, _shelter: f64) {}
+
     /// Longest wavelength present, metres.
     ///
     /// A presentation layer that band-limits by vertex spacing can ask this and skip
@@ -208,6 +220,8 @@ impl WaveComponent {
 pub struct WindSea {
     components: Vec<WaveComponent>,
     hs: f64,
+    /// How much of the open sea reaches here; 1 in clear water, less in a lee.
+    shelter: f64,
 }
 
 impl WindSea {
@@ -244,7 +258,11 @@ impl WindSea {
             })
             .collect();
 
-        Self { components, hs }
+        Self {
+            components,
+            hs,
+            shelter: 1.0,
+        }
     }
 
     pub fn components(&self) -> &[WaveComponent] {
@@ -259,17 +277,21 @@ impl WindSea {
 
 impl WaterSurface for WindSea {
     fn height(&self, pos: DVec2, t: f64) -> f64 {
-        self.components
-            .iter()
-            .map(|c| c.amplitude * c.theta(pos, t).cos())
-            .sum()
+        self.shelter
+            * self
+                .components
+                .iter()
+                .map(|c| c.amplitude * c.theta(pos, t).cos())
+                .sum::<f64>()
     }
 
     fn height_resolved(&self, pos: DVec2, t: f64, min_wavelength: f64) -> f64 {
-        self.components
-            .iter()
-            .map(|c| c.amplitude * c.resolved(min_wavelength) * c.theta(pos, t).cos())
-            .sum()
+        self.shelter
+            * self
+                .components
+                .iter()
+                .map(|c| c.amplitude * c.resolved(min_wavelength) * c.theta(pos, t).cos())
+                .sum::<f64>()
     }
 
     fn slope_resolved(&self, pos: DVec2, t: f64, min_wavelength: f64) -> DVec2 {
@@ -278,7 +300,11 @@ impl WaterSurface for WindSea {
             let d = -c.amplitude * c.resolved(min_wavelength) * c.k * c.theta(pos, t).sin();
             s += c.direction * d;
         }
-        s
+        // Scaled whole, which drops the term in the *gradient* of the shelter. That
+        // term is bounded by the wave height over the shelter's own length scale —
+        // a metre over a kilometre, a thousandth of a radian — against slopes that
+        // run to a tenth. Two orders down, and named rather than ignored.
+        s * self.shelter
     }
 
     fn velocity(&self, pos: DVec2, t: f64) -> DVec3 {
@@ -292,7 +318,7 @@ impl WaterSurface for WindSea {
             v.y += orbital * theta.cos() * c.direction.y;
             v.z += orbital * theta.sin();
         }
-        v
+        v * self.shelter
     }
 
     fn slope(&self, pos: DVec2, t: f64) -> DVec2 {
@@ -301,7 +327,7 @@ impl WaterSurface for WindSea {
             let d = -c.amplitude * c.k * c.theta(pos, t).sin();
             s += c.direction * d;
         }
-        s
+        s * self.shelter
     }
 
     fn velocity_at_depth(&self, pos: DVec2, depth: f64, t: f64) -> DVec3 {
@@ -316,7 +342,7 @@ impl WaterSurface for WindSea {
             v.y += orbital * theta.cos() * c.direction.y;
             v.z += orbital * theta.sin();
         }
-        v
+        v * self.shelter
     }
 
     fn characteristic_slope(&self) -> f64 {
@@ -342,6 +368,10 @@ impl WaterSurface for WindSea {
             d -= c.direction * (c.amplitude * c.theta(pos, t).sin());
         }
         d
+    }
+
+    fn set_shelter(&mut self, shelter: f64) {
+        self.shelter = shelter.clamp(0.0, 1.0);
     }
 
     fn longest_wavelength(&self) -> f64 {

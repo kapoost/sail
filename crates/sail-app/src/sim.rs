@@ -39,7 +39,13 @@ impl Sim {
             weather.wind_from,
             weather.seed ^ 0xC0FFEE,
         );
-        let mut sim = Simulation::new(cfg, state, Box::new(wind)).with_water(Box::new(sea));
+        // The archipelago, and a wind that knows it is there. The land goes in before
+        // the first substep so the boat is never started on a rock.
+        let land = std::sync::Arc::new(crate::islands::generate(weather.seed));
+        let wind = sail_core::land::ShelteredWind::new(Box::new(wind), land.clone());
+        let mut sim = Simulation::new(cfg, state, Box::new(wind))
+            .with_water(Box::new(sea))
+            .with_land(land);
 
         // Sheets hard in is the wrong place to start. At three knots close-hauled the
         // apparent wind is well forward of where it settles, so block-to-block sheets

@@ -15,6 +15,7 @@ mod deck_texture;
 mod frame;
 mod hud;
 mod input;
+mod islands;
 mod panel;
 mod rig;
 mod sea_texture;
@@ -100,6 +101,7 @@ fn main() {
             (
                 world::setup,
                 boat::setup,
+                islands::setup,
                 camera::setup,
                 hud::build_polar,
                 sound::setup,
@@ -123,6 +125,7 @@ fn main() {
                 // so the whole frame agrees on one mark.
                 frame::rebase_origin,
                 world::report_frame_times,
+                islands::follow_origin,
                 (
                     boat::update_hull,
                     boat::update_rudder,

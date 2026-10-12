@@ -40,6 +40,9 @@ pub struct Simulation {
     /// a head one.
     prev_slope_along: f64,
     prev_slope_athwart: f64,
+    /// The land, if there is any. Shared, because the presentation layer draws the
+    /// same islands the physics runs aground on.
+    pub land: Option<std::sync::Arc<crate::land::Archipelago>>,
     /// Whether the slope history above is real yet.
     ///
     /// It has to be asked. Differencing against an unset zero on the very first
@@ -62,6 +65,7 @@ impl Simulation {
             telemetry: Telemetry::default(),
             accumulator: 0.0,
             prev_state: state,
+            land: None,
             prev_slope_along: 0.0,
             prev_slope_athwart: 0.0,
             slopes_primed: false,
@@ -144,9 +148,29 @@ impl Simulation {
         }
     }
 
+    /// Put an archipelago in the water.
+    pub fn with_land(mut self, land: std::sync::Arc<crate::land::Archipelago>) -> Self {
+        self.land = Some(land);
+        self
+    }
+
     fn substep(&mut self, dt: f64, controls: &Controls) {
         let cfg = self.config;
         let st = self.state;
+
+        // What the land is doing here. Both of these vary over a kilometre while the
+        // boat is eleven metres long, so one reading at the boat's own position
+        // describes the whole of the local water — and the alternative, asking per
+        // query, would trace rays a hundred times a substep for an answer that does
+        // not change across the hull.
+        let (depth, shelter) = match &self.land {
+            Some(land) => {
+                let from = direction_of(self.wind.sample(st.pos, st.time));
+                (land.depth(st.pos), land.shelter(st.pos, from))
+            }
+            None => (crate::land::OPEN_WATER, 1.0),
+        };
+        self.water.set_shelter(shelter);
 
         self.wind.step(dt);
         let wind_ref = self.wind.sample(st.pos, st.time);
@@ -557,6 +581,17 @@ impl Simulation {
         s.heave += s.heave_rate * dt;
         s.pitch += s.pitch_rate * dt;
         s.pitch = s.pitch.clamp(-0.6, 0.6);
+        // Aground. Not a collision model — a keel in the mud is a boat that stops
+        // going forwards and starts going sideways with the wind on her, which is
+        // exactly how it feels and is enough to make the sounder worth watching.
+        // Steerage goes first, because a rudder needs flow over it and there is none.
+        if depth < cfg.draft {
+            let bite = ((cfg.draft - depth) / cfg.draft).clamp(0.0, 1.0);
+            s.surge *= 1.0 - bite * 0.92 * (dt / SUBSTEP);
+            s.sway *= 1.0 - bite * 0.55 * (dt / SUBSTEP);
+            s.yaw_rate *= 1.0 - bite * 0.80 * (dt / SUBSTEP);
+        }
+
         s.pos += s.velocity_world() * dt;
         s.time += dt;
 
@@ -565,6 +600,8 @@ impl Simulation {
         let wind_body = self.state.to_body(to_wind);
         let v = self.state.velocity_world();
         self.telemetry = Telemetry {
+            depth,
+            under_keel: depth - cfg.draft,
             tws,
             twd,
             twa: wrap_pi(wind_body.y.atan2(wind_body.x)),
