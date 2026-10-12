@@ -474,6 +474,16 @@ impl Simulation {
         } else {
             None
         };
+        // Cloth on cloth: the inner sail eased out into the back of the outer one.
+        let fouling = if stay_set > 1e-3 {
+            crate::sail::cloth_on_cloth(
+                cfg.staysail.profile.chord_angle(controls.staysail_sheet),
+                jib_chord,
+            )
+        } else {
+            0.0
+        };
+
         // What the others give up for the company.
         //
         // The outer sail always pays a little. The mainsail pays only when the staysail
@@ -486,12 +496,16 @@ impl Simulation {
         // was no reason not to carry it always, which is not what a boat does and not
         // what the sail is for. It belongs under the big reaching sails, or on its own
         // with the genoa rolled away in a blow. Upwind, inside the genoa, it costs.
-        let slot_cost = 1.0 - 0.04 * stay_set;
+        let slot_cost = 1.0 - 0.04 * stay_set - 0.18 * fouling;
         let main_cost = if flying.flying() {
             1.0
         } else {
             1.0 - 0.055 * stay_set
         };
+        // Two sails pressed together are two sails flogging. The inner one takes most
+        // of it — it is the one whose leech has nowhere to go — and the outer one loses
+        // the back of its slot.
+        let stay = stay.map(|f| f.scaled(1.0 - 0.75 * fouling, 1.0 + 0.5 * fouling));
         let stay_drive = stay.map(|f| f.drive).unwrap_or(0.0);
         let stay_side = stay.map(|f| f.side).unwrap_or(0.0);
 

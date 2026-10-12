@@ -1268,9 +1268,14 @@ pub fn clew_on_cloth(
         // of the tack onto ninety degrees, and the clew of an eased sail is often
         // forward of its tack — on a gennaker set from the sprit, usually.
         let bearing = from_tack.x.abs().atan2(from_tack.z);
-        // The bearing is what the trim says, so it dominates; the sheet decides between
-        // the points that satisfy it.
-        let cost = 20.0 * (bearing - want).powi(2) + (p - block).length() / cloth.foot.max(0.5);
+        // The bearing is what the trim says, so it dominates. What settles the rest is
+        // which way the wind is pushing, and it is pushing *out*: a filling sail carries
+        // its clew away from the boat, and the sheet only says how far. Choosing the
+        // point nearest the sheet block instead — which is what this did — walked the
+        // corner in towards the centreline as the sail filled, which is the one
+        // direction it never goes.
+        let cost = 20.0 * (bearing - want).powi(2) - 0.5 * p.x.abs() / cloth.foot.max(0.5)
+            + 0.1 * (p - block).length() / cloth.foot.max(0.5);
         if cost < best_cost {
             best_cost = cost;
             best = p;
@@ -1355,7 +1360,21 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
     let mut uvs = Vec::with_capacity(SAIL_U * SAIL_V);
 
     let reference = sail_core::sail::CAMBER_REFERENCE as f32;
-    let deviation = draft * (1.0 - luffing) - reference;
+    // A sail cannot be flat and a luffing sail is not a flat sail.
+    //
+    // Sails are cut with their shape built in: broadseam in the panels, round in the
+    // luff, more cloth round the edges than a plane between the corners would need.
+    // That is why you cannot spread one out on a lawn — it stands up in a curve, and it
+    // keeps that curve whatever is being done to it. The drawing had the depth collapse
+    // to nothing as the sail luffed, which drew a flat sheet of cloth: the one shape a
+    // sail physically cannot take.
+    //
+    // A luffing sail loses its *working* shape, not its built-in one. It goes soft, the
+    // draft wanders aft and the whole thing shakes — and the shaking is already drawn,
+    // on top of this.
+    const CUT_IN: f32 = 0.06;
+    let draft = draft.max(CUT_IN) * (1.0 - 0.45 * luffing) + CUT_IN * 0.45 * luffing;
+    let deviation = draft - reference;
 
     for ui_ in 0..SAIL_U {
         let u = ui_ as f32 / (SAIL_U - 1) as f32;

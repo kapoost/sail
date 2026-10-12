@@ -512,10 +512,21 @@ pub fn update(
                     // the sail itself is tacked a metre and a half ahead of the stem
                     // precisely so that it can fly clear of all of that.
                     let side = if starboard { 1.0 } else { -1.0 };
+                    let z = MAST_FOOT_Z + 0.4;
+                    // Outboard of the shrouds *or* of the straight run, whichever is
+                    // further out — and that second half is the correction. A fixed
+                    // waypoint abeam the mast sits inside the line from a clew flying
+                    // three metres off the boat, so the rope bent in towards the
+                    // centreline and then back out again, which no sheet does. A lead
+                    // point can hold a rope out. It cannot pull it in.
+                    let straight = {
+                        let f = ((z - clew.z) / (car_at.z - clew.z)).clamp(0.0, 1.0);
+                        clew.x + (car_at.x - clew.x) * f
+                    };
                     Vec3::new(
-                        side * (cfg.beam as f32 * 0.5 + 0.18),
-                        crate::deck::deck_height(MAST_FOOT_Z + 0.4) + 0.35,
-                        MAST_FOOT_Z + 0.4,
+                        side * (cfg.beam as f32 * 0.5 + 0.18).max(straight.abs()),
+                        crate::deck::deck_height(z) + 0.35,
+                        z,
                     )
                 } else {
                     let spar = boom_end - gooseneck;

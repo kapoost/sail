@@ -133,6 +133,22 @@ pub fn rig_interference(chord_angle: f64, bears_at: f64) -> (f64, f64) {
     (1.0 - 0.08 * t, 1.0 + 0.15 * t)
 }
 
+/// How hard two sails are lying on each other, 0 to 1.
+///
+/// A double head rig puts two sails a metre apart on the same bow, and nothing in the
+/// model stopped the inner one being eased straight into the outer one. On the water
+/// that is not a geometric curiosity, it is a noise: the staysail's leech fetches up
+/// against the back of the genoa, both of them stop having a clean side and a dirty
+/// side, and they flog. The cure is on the sheet — ease the outer or harden the inner
+/// until the slot opens.
+///
+/// Measured off the one quantity that decides it: how much further out the inner sail
+/// is sheeted than the outer. While it is inside, there is a gap and clean air through
+/// it. Once it swings past, there is cloth where the gap was.
+pub fn cloth_on_cloth(inner_chord: f64, outer_chord: f64) -> f64 {
+    smoothstep(0.0, rad(14.0), inner_chord.abs() - outer_chord.abs())
+}
+
 /// How the two sails bend the wind for each other.
 ///
 /// They are not two sails in the same breeze. Each one's circulation turns the flow the
