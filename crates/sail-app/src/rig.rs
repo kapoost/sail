@@ -316,7 +316,7 @@ pub fn update(
                 // it shortens as the clew goes out to the nock.
                 from: Vec3::new(0.0, BOOM_HEIGHT - 0.07, MAST_FOOT_Z),
                 to: {
-                    let reach = crate::boat::main_foot(&sim.controls);
+                    let reach = crate::boat::main_foot(&cfg, &sim.controls);
                     Vec3::new(
                         boom.sin() * reach,
                         BOOM_HEIGHT - 0.07,

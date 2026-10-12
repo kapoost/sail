@@ -725,16 +725,15 @@ pub fn update_sails(
         };
         let (forces, geometry) = match surface.which {
             Sail::Main => {
-                let reef = sim.controls.reef as f32;
                 // A slab reef takes the luff down and leaves the foot where it was: the
                 // pennant runs through a cheek block at the *end* of the boom, so the
                 // new clew lands within a hand's breadth of the old one. What you lose
                 // is hoist.
-                let foot = main_foot(&sim.controls);
+                let foot = main_foot(&cfg, &sim.controls);
                 let (_, lift) = boom_attitude(t_);
-                // And the hoist comes down by exactly the area the rig is losing, so
-                // the drawn triangle stays the size the force model is pulling with.
-                let shrink = 1.0 - reef * cfg.max_reef as f32;
+                // And the hoist comes down by the same scale, because the reef band is
+                // cut parallel to the foot and takes the sail in both ways at once.
+                let shrink = main_reef_scale(&cfg, &sim.controls);
                 let boom = side * t_.main.chord_angle as f32;
                 let tack = Vec3::new(0.0, BOOM_HEIGHT, MAST_FOOT_Z);
                 (
@@ -870,7 +869,26 @@ pub fn update_sails(
 /// little inboard of the one below it, so when the first reef goes in the whole
 /// argument moves forward along the spar and starts again from there: the pennant hauls
 /// the new clew out towards the same boom end, with the same small travel in hand.
-pub fn main_foot(controls: &sail_core::state::Controls) -> f32 {
+/// How much smaller the reefed sail is, as a scale on both of its edges.
+///
+/// A slab reef is cut *parallel to the foot*, so it takes the sail in in both
+/// directions at once: the hoist comes down and the foot comes in with it, and the
+/// reefed sail is the same triangle smaller. Which is why the reefed clew sits well
+/// forward of the boom end, however far out the pennant hauls it — reported from the
+/// deck, and the model had the whole of the area coming out of the hoist with the foot
+/// moving sixteen centimetres. Measured against what the configuration says the reefs
+/// are worth: 5.80 m of foot becomes 5.10 at the first reef and 4.29 at the second,
+/// not 5.64 and 5.48.
+///
+/// Area goes as luff times foot, so each edge scales as the square root of what is
+/// left.
+pub fn main_reef_scale(cfg: &sail_core::boat::BoatConfig, controls: &sail_core::state::Controls) -> f32 {
+    let slab = (controls.reef as f32 * 3.0).round();
+    let taken = cfg.max_reef as f32 * slab / 3.0;
+    (1.0 - taken).max(0.0).sqrt()
+}
+
+pub fn main_foot(cfg: &sail_core::boat::BoatConfig, controls: &sail_core::state::Controls) -> f32 {
     /// What the outhaul can move the clew by, metres.
     ///
     /// Twenty-two centimetres on a full sail — which is what an outhaul's travel is on a
@@ -881,12 +899,10 @@ pub fn main_foot(controls: &sail_core::state::Controls) -> f32 {
     /// you can see the corner move along the spar as you winch it.
     const TRAVEL: f32 = 0.22;
     const TRAVEL_REEFED: f32 = 0.48;
-    /// How far forward each slab's clew cringle is cut.
-    const PER_SLAB: f32 = 0.16;
     let slab = (controls.reef as f32 * 3.0).round();
     let hauled = controls.outhaul as f32;
     let travel = if slab > 0.5 { TRAVEL_REEFED } else { TRAVEL };
-    crate::rig::BOOM_LENGTH - PER_SLAB * slab - travel * (1.0 - hauled)
+    crate::rig::BOOM_LENGTH * main_reef_scale(cfg, controls) - travel * (1.0 - hauled)
 }
 
 /// The three corners of whichever sail is up forward.
