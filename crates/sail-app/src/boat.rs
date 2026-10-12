@@ -844,11 +844,15 @@ pub fn update_sails(
                     } else {
                         &shrouds
                     },
-                    // Only a sail on the stay has to be kept off the mast and the
-                    // shrouds. A sail flown from the sprit is ahead of both, and a
-                    // staysail is inside everything and small enough to clear it.
-                    clear_mast: surface.which == Sail::Headsail
-                        && sim.controls.headsail == sail_core::state::Headsail::Genoa,
+                    // Every sail forward of the mast has to be kept out of the mast.
+                    //
+                    // This used to be the genoa alone, on the reasoning that a sail set
+                    // flying is tacked ahead of the whole rig and therefore clear of it.
+                    // Its *tack* is. Its leech is not: eased on a reach the cloth sweeps
+                    // aft past the spar, and a gennaker was being drawn straight through
+                    // it. A sail may lie against a mast — they do, and that is where
+                    // they chafe — but it may not pass through one.
+                    clear_mast: surface.which != Sail::Main,
                 },
             );
         }
