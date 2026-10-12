@@ -16,7 +16,7 @@ use crate::sail::{
     twist_for_lead, twist_for_vang,
 };
 use crate::state::{BoatState, Controls, Telemetry};
-use crate::units::{rad, wrap_pi, wrap_tau, GRAVITY, RHO_SEA};
+use crate::units::{rad, smoothstep, wrap_pi, wrap_tau, GRAVITY, RHO_SEA};
 use crate::water::{FlatWater, WaterSurface};
 use crate::wind::{direction_of, shear_factor, WindField};
 use glam::DVec2;
@@ -206,8 +206,10 @@ impl Simulation {
         // some twist in the leech is correct rather than sloppy, and it is what gives
         // the vang a job it can be done well or badly.
         let ((lower_area, lower_z), (upper_area, upper_z)) = cfg.main_sections(controls.reef);
+        let flying = controls.headsail;
+        let head = cfg.headsail(flying);
         let ((jib_lower_area, jib_lower_z), (jib_upper_area, jib_upper_z)) =
-            cfg.genoa_sections(controls.furl);
+            cfg.headsail_sections(flying, controls.furl);
         let (lower_awa, lower_aws) = apparent_wind(&st, wind_ref, lower_z * heel_cos, velocity);
         let (upper_awa, upper_aws) = apparent_wind(&st, wind_ref, upper_z * heel_cos, velocity);
         let (jib_awa, jib_aws) = apparent_wind(&st, wind_ref, jib_lower_z * heel_cos, velocity);
@@ -245,45 +247,142 @@ impl Simulation {
         // outhaul and vang in one fitting, which is why it has neither separately.
         let jib_camber = camber_for_lead(controls.genoa_car);
         let jib_twist = twist_for_lead(controls.genoa_car);
-        let jib_chord = cfg.genoa.profile.chord_angle(controls.jib_sheet);
-        let jib_upper_sheet = cfg
-            .genoa
-            .profile
-            .sheet_for_chord_angle(jib_chord + jib_twist);
+        let jib_chord = head.profile.chord_angle(controls.jib_sheet);
+        let jib_upper_sheet = head.profile.sheet_for_chord_angle(jib_chord + jib_twist);
 
         // What the headsail loses from lying on the shrouds and the spreader. Only
         // the headsail: the mainsail's own contact with the rigging is the boom
         // against the cap shroud, which is already a hard limit on its chord angle.
-        let (jib_lift, jib_drag) = rig_interference(jib_chord, cfg.headsail_bears_at);
+        //
+        // And only a headsail on the stay. A sail set flying is tacked out on the sprit
+        // ahead of everything, so there is nothing for it to lie against — which is a
+        // large part of why it is worth the trouble of setting one.
+        let (jib_lift, jib_drag) = if flying.flying() {
+            (1.0, 1.0)
+        } else {
+            rig_interference(jib_chord, cfg.headsail_bears_at)
+        };
         // The upper section bears harder: the spreader reaches further inboard than the
         // shroud does at deck level, so the sail meets it sooner going up.
-        let (jib_upper_lift, jib_upper_drag) =
-            rig_interference(jib_chord + jib_twist, cfg.headsail_bears_at * 0.8);
+        let (jib_upper_lift, jib_upper_drag) = if flying.flying() {
+            (1.0, 1.0)
+        } else {
+            rig_interference(jib_chord + jib_twist, cfg.headsail_bears_at * 0.8)
+        };
+
+        // Whether it is staying full at all.
+        //
+        // A sail on a stay luffs along the stay and goes quiet. A sail set flying has
+        // nothing holding its luff, so when the apparent wind comes too far forward the
+        // luff folds in and the sail collapses into the lee of the main — it stops being
+        // a sail and becomes a flag. The band is narrow on purpose: it is what makes
+        // choosing the sail a decision rather than a menu, and it is why you hand the
+        // gennaker before you harden up, not after.
+        let fill = if flying.flying() {
+            let limit = flying.fills_above();
+            smoothstep(limit - rad(8.0), limit + rad(8.0), jib_awa.abs())
+        } else {
+            1.0
+        };
+        // Deep downwind the main takes the wind from a headsail on the stay. It does not
+        // take it from a sail squared out on the sprit — getting clear of that shadow is
+        // the whole reason the sprit is there.
+        let shadow = if flying.flying() {
+            0.0
+        } else {
+            headsail_blanketing(jib_awa)
+        };
+        let shadow_upper = if flying.flying() {
+            0.0
+        } else {
+            headsail_blanketing(jib_upper_awa)
+        };
         let jib = sail_forces(
-            &cfg.genoa.profile,
+            &head.profile,
             jib_awa,
             jib_aws,
             controls.jib_sheet,
-            jib_lower_area,
+            jib_lower_area * fill,
             st.heel,
-            headsail_blanketing(jib_awa),
+            shadow,
             jib_camber,
         )
         .scaled(jib_lift, jib_drag);
         let jib_upper = sail_forces(
-            &cfg.genoa.profile,
+            &head.profile,
             jib_upper_awa,
             jib_upper_aws,
             jib_upper_sheet,
-            jib_upper_area,
+            jib_upper_area * fill,
             st.heel,
-            headsail_blanketing(jib_upper_awa),
+            shadow_upper,
             jib_camber,
         )
         .scaled(jib_upper_lift, jib_upper_drag);
 
-        let drive = main.drive + main_upper.drive + jib.drive + jib_upper.drive;
-        let sail_side = main.side + main_upper.side + jib.side + jib_upper.side;
+        // --- Staysail: the inner sail of a double head rig ------------------------
+        //
+        // Three things happen when it goes up, and only one of them is its own area.
+        //
+        // It works in disturbed air. Behind a genoa it is nearly pointless — a
+        // hundred-and-five percent genoa covers it completely and what reaches it is
+        // the genoa's wake — which is why on a boat like this the staysail is an
+        // *alternative* to the genoa in heavy weather rather than an addition to it.
+        // Under a sail set flying from the sprit there is a real gap between the two,
+        // and what comes through it is fast, clean air.
+        //
+        // And it takes a little from the sail outside it, because the slot works both
+        // ways. The net is positive — this is why double head rigs exist — but it is
+        // much less than the staysail's area suggests, and a model that just added the
+        // square metres would make it the obvious choice everywhere, which it is not.
+        let stay_set = controls.staysail.clamp(0.0, 1.0);
+        let stay = if stay_set > 1e-3 {
+            let sail = &cfg.staysail;
+            let (stay_awa, stay_aws) =
+                apparent_wind(&st, wind_ref, sail.z_ce * heel_cos, velocity);
+            // Self-tacking: it finds its own best angle, limited by its track.
+            let sheet = sail.profile.optimal_sheet(stay_awa, crate::sail::CAMBER_REFERENCE);
+            let covered = if flying.flying() { 0.80 } else { 0.35 };
+            Some(sail_forces(
+                &sail.profile,
+                stay_awa,
+                stay_aws,
+                sheet,
+                sail.area * stay_set * covered,
+                st.heel,
+                headsail_blanketing(stay_awa),
+                crate::sail::CAMBER_REFERENCE,
+            ))
+        } else {
+            None
+        };
+        // What the others give up for the company.
+        //
+        // The outer sail always pays a little. The mainsail pays only when the staysail
+        // is set inside a genoa, and that is the case that decides whether this rig is
+        // worth having: a genoa already overlaps the staysail completely, so the inner
+        // sail adds almost nothing of its own and backwinds the main's luff for it.
+        // Under a sail set flying there is a real gap and the main is left alone.
+        //
+        // Without this the staysail was worth a fraction of a knot everywhere and there
+        // was no reason not to carry it always, which is not what a boat does and not
+        // what the sail is for. It belongs under the big reaching sails, or on its own
+        // with the genoa rolled away in a blow. Upwind, inside the genoa, it costs.
+        let slot_cost = 1.0 - 0.04 * stay_set;
+        let main_cost = if flying.flying() {
+            1.0
+        } else {
+            1.0 - 0.055 * stay_set
+        };
+        let stay_drive = stay.map(|f| f.drive).unwrap_or(0.0);
+        let stay_side = stay.map(|f| f.side).unwrap_or(0.0);
+
+        let drive = (main.drive + main_upper.drive) * main_cost
+            + (jib.drive + jib_upper.drive) * slot_cost
+            + stay_drive;
+        let sail_side = (main.side + main_upper.side) * main_cost
+            + (jib.side + jib_upper.side) * slot_cost
+            + stay_side;
 
         // --- Hull velocity direction in the body frame ----------------------------
         // Everything hydrodynamic resolves against this. Getting it wrong means
@@ -433,11 +532,8 @@ impl Simulation {
         let resistance =
             r_friction + r_residuary + r_heel + r_waves + lp.drag + lp_induced + rud.drag;
 
-        // --- Engine ---------------------------------------------------------------
-        let thrust = controls.throttle.clamp(-1.0, 1.0) * cfg.max_thrust;
-
         // --- Body-frame forces ----------------------------------------------------
-        let fx = drive + thrust + hull_fx + lp_fx + rud_fx;
+        let fx = drive + hull_fx + lp_fx + rud_fx;
         let fy = sail_side + hull_fy + lp_fy + rud_fy;
 
         // --- Yaw moment -----------------------------------------------------------
@@ -445,7 +541,8 @@ impl Simulation {
         // centre of effort ahead of the centre of lateral resistance is a lee-helm
         // term; heel pays it back with interest.
         let mut mz = cfg.main.x_ce * (main.side + main_upper.side)
-            + cfg.genoa.x_ce * (jib.side + jib_upper.side);
+            + head.x_ce * (jib.side + jib_upper.side) * slot_cost
+            + cfg.staysail.x_ce * stay_side;
         // Heel swings the centre of effort out to leeward, so the driving force now
         // acts on a lever arm and luffs the boat up. This is weather helm.
         let y_lower = lower_z * st.heel.sin();
@@ -467,8 +564,6 @@ impl Simulation {
             * speed;
         // Appendages.
         mz += cfg.x_clr * lp_fy + cfg.x_rudder * rud_fy;
-        // Prop walk: thrust acting off the centreline.
-        mz += cfg.prop_walk * thrust;
         // Residual bare-hull yaw damping, on top of what the appendages already give.
         mz -= cfg.yaw_damping * st.yaw_rate * (speed + 0.5);
 
@@ -503,7 +598,8 @@ impl Simulation {
         let mut mx = main.side * (lower_z * heel_cos + cfg.z_clr)
             + main_upper.side * (upper_z * heel_cos + cfg.z_clr)
             + jib.side * (jib_lower_z * heel_cos + cfg.z_clr)
-            + jib_upper.side * (jib_upper_z * heel_cos + cfg.z_clr);
+            + jib_upper.side * (jib_upper_z * heel_cos + cfg.z_clr)
+            + stay_side * (cfg.staysail.z_ce * heel_cos + cfg.z_clr);
         // The righting curve restores towards the local vertical, and in a wave the
         // local vertical is tilted. Evaluating GZ at the heel *relative to the wave
         // slope* is the whole of wave-induced rolling, to first order, and it keeps

@@ -21,7 +21,9 @@
 //! you have to throw, but a boat that fights your hand is worse than one that lets go.
 
 use bevy::prelude::*;
+use sail_core::autopilot::optimal_sheets_with;
 use sail_core::prelude::*;
+use sail_core::state::Headsail;
 
 use crate::sim::Sim;
 
@@ -264,24 +266,37 @@ pub fn gather(
             (sim.controls.jib_sheet + winch.clamp(-1.0, 1.0) * sheet_rate * dt).clamp(0.0, 1.0);
     }
 
-    // --- Auxiliary engine ------------------------------------------------------
-    let mut throttle_step = 0.0;
+    // --- The sail wardrobe ---------------------------------------------------
+    // Z and X walk through it: genoa, Code 0, gennaker. They used to be the engine's
+    // throttle, which is a fair trade — the boat has no engine and the thing you
+    // actually change on a passage is which sail is up.
+    //
+    // Only with the sail rolled away, because that is the only way it happens on a
+    // boat: you furl what is up, change it, and set the new one. A sail that teleports
+    // into a different sail while drawing would be the one piece of this rig that
+    // nobody could believe.
+    let mut step = 0i32;
     if keys.just_pressed(KeyCode::KeyX) {
-        throttle_step += 0.25;
+        step += 1;
     }
     if keys.just_pressed(KeyCode::KeyZ) {
-        throttle_step -= 0.25;
+        step -= 1;
     }
-    if let Some(p) = pad {
-        if p.just_pressed(GamepadButton::DPadRight) {
-            throttle_step += 0.25;
+    if step != 0 {
+        if sim.controls.furl > 0.9 {
+            let order = [Headsail::Genoa, Headsail::Code0, Headsail::Gennaker];
+            let at = order
+                .iter()
+                .position(|h| *h == sim.controls.headsail)
+                .unwrap_or(0) as i32;
+            let next = (at + step).clamp(0, order.len() as i32 - 1) as usize;
+            if order[next] != sim.controls.headsail {
+                sim.controls.headsail = order[next];
+                info!("bent on the {}", order[next].name());
+            }
+        } else {
+            info!("roll the headsail away first — furling line is on the bank");
         }
-        if p.just_pressed(GamepadButton::DPadLeft) {
-            throttle_step -= 0.25;
-        }
-    }
-    if throttle_step != 0.0 {
-        sim.controls.throttle = (sim.controls.throttle + throttle_step).clamp(-1.0, 1.0);
     }
 
     // --- Trim assist: show me the line a good trimmer would be on -------------
@@ -293,7 +308,8 @@ pub fn gather(
             sim.sim.telemetry.heel,
             sail_core::autopilot::OVERPOWERED_HEEL,
         );
-        let (m, j) = optimal_sheets(&cfg, awa, sim.controls.outhaul);
+        let (m, j) =
+            optimal_sheets_with(&cfg, awa, sim.controls.outhaul, sim.controls.headsail);
         sim.controls.main_sheet = m;
         sim.controls.jib_sheet = j;
     }

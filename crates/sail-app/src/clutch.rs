@@ -29,14 +29,16 @@ pub enum Line {
     GenoaCar,
     Reef,
     Furl,
+    Staysail,
 }
 
-pub const BANK: [Line; 5] = [
+pub const BANK: [Line; 6] = [
     Line::Outhaul,
     Line::Vang,
     Line::GenoaCar,
     Line::Reef,
     Line::Furl,
+    Line::Staysail,
 ];
 
 impl Line {
@@ -47,6 +49,7 @@ impl Line {
             Line::GenoaCar => "genoa car",
             Line::Reef => "reef",
             Line::Furl => "furling line",
+            Line::Staysail => "staysail",
         }
     }
 
@@ -59,6 +62,7 @@ impl Line {
             Line::GenoaCar => "car aft: flat, open leech",
             Line::Reef => "shortens the main",
             Line::Furl => "rolls the genoa away",
+            Line::Staysail => "sets the inner sail",
         }
     }
 
@@ -69,6 +73,7 @@ impl Line {
             Line::GenoaCar => c.genoa_car,
             Line::Reef => c.reef,
             Line::Furl => c.furl,
+            Line::Staysail => c.staysail,
         }
     }
 
@@ -86,6 +91,7 @@ impl Line {
             Line::GenoaCar => c.genoa_car = v,
             Line::Reef => c.reef = v,
             Line::Furl => c.furl = v,
+            Line::Staysail => c.staysail = v,
         }
     }
 
@@ -102,6 +108,10 @@ impl Line {
             Line::GenoaCar => 0.28,
             Line::Reef => 0.085,
             Line::Furl => 0.14,
+            // A halyard, by hand. Slower than anything else on the bank, because that
+            // is what setting a sail is — and because the decision to put it up ought
+            // to be made before you need it rather than while you do.
+            Line::Staysail => 0.11,
         }
     }
 }

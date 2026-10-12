@@ -22,6 +22,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use sail_core::prelude::*;
+use sail_core::state::Headsail;
 
 use crate::camera::View;
 use crate::clutch::{Bank, BANK};
@@ -261,11 +262,42 @@ pub fn draw(
                     separator(ui);
                     ui.add_space(10.0);
 
-                    // Engine and the pilot.
+                    // The sail wardrobe, and the pilot.
                     ui.vertical(|ui| {
-                        let mut throttle = sim.controls.throttle;
-                        if throttle_lever(ui, &mut throttle) {
-                            sim.controls.throttle = throttle;
+                        ui.label(
+                            egui::RichText::new("HEADSAIL")
+                                .color(paint::LABEL)
+                                .monospace().size(10.0),
+                        );
+                        ui.add_space(4.0);
+                        let rolled = sim.controls.furl > 0.9;
+                        for sail in [Headsail::Genoa, Headsail::Code0, Headsail::Gennaker] {
+                            let up = sim.controls.headsail == sail;
+                            let label = egui::RichText::new(sail.name().to_uppercase())
+                                .monospace().size(10.0)
+                                .color(if up {
+                                    egui::Color32::BLACK
+                                } else if rolled {
+                                    paint::LABEL
+                                } else {
+                                    egui::Color32::from_gray(90)
+                                });
+                            let button = egui::Button::new(label).fill(if up {
+                                paint::LIVE
+                            } else {
+                                egui::Color32::from_gray(26)
+                            });
+                            // Only with the sail rolled away: you furl, change, and set.
+                            if ui.add_enabled(rolled, button).clicked() {
+                                sim.controls.headsail = sail;
+                            }
+                        }
+                        if !rolled {
+                            ui.label(
+                                egui::RichText::new("roll it away first")
+                                    .monospace().size(10.0)
+                                    .color(egui::Color32::from_gray(90)),
+                            );
                         }
                     });
 
@@ -749,63 +781,6 @@ fn clutch(ui: &mut egui::Ui, label: &str, value: &mut f64, selected: bool) -> (b
     .inner
 }
 
-/// Engine telegraph: ahead, stop, astern, with a detent at stop.
-fn throttle_lever(ui: &mut egui::Ui, throttle: &mut f64) -> bool {
-    ui.label(
-        egui::RichText::new("ENGINE")
-            .color(paint::LABEL)
-            .monospace()
-            .size(10.0),
-    );
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(56.0, 108.0), egui::Sense::click_and_drag());
-    let p = ui.painter();
-    p.rect_filled(rect, 3.0, paint::TRACK);
-    let changed = if response.dragged() {
-        if let Some(pos) = response.interact_pointer_pos() {
-            let f = ((rect.center().y - pos.y) / (rect.height() * 0.42)).clamp(-1.0, 1.0);
-            // A detent at stop, because finding neutral by eye on a drag is hopeless
-            // and every real telegraph has one.
-            *throttle = if f.abs() < 0.12 { 0.0 } else { f as f64 };
-        }
-        true
-    } else {
-        false
-    };
-    let y = rect.center().y - (*throttle as f32) * rect.height() * 0.42;
-    p.line_segment(
-        [
-            egui::pos2(rect.left() + 6.0, rect.center().y),
-            egui::pos2(rect.right() - 6.0, rect.center().y),
-        ],
-        egui::Stroke::new(1.0, paint::LABEL),
-    );
-    let knob = egui::Rect::from_center_size(
-        egui::pos2(rect.center().x, y),
-        egui::vec2(rect.width() - 10.0, 14.0),
-    );
-    p.rect_filled(knob, 2.0, paint::BEZEL);
-    p.rect_stroke(
-        knob,
-        2.0,
-        egui::Stroke::new(1.0, paint::FACE),
-        egui::StrokeKind::Inside,
-    );
-    p.text(
-        rect.center_bottom() + egui::vec2(0.0, -2.0),
-        egui::Align2::CENTER_BOTTOM,
-        if *throttle > 0.01 {
-            "AHEAD"
-        } else if *throttle < -0.01 {
-            "ASTERN"
-        } else {
-            "STOP"
-        },
-        egui::FontId::monospace(9.0),
-        paint::FACE,
-    );
-    changed
-}
 
 fn small_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add(

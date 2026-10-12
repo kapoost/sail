@@ -141,14 +141,16 @@ fn wind_on_starboard_heels_the_boat_to_port() {
 #[test]
 fn positive_rudder_turns_the_bow_to_starboard() {
     let cfg = BoatConfig::charter_sloop_34();
-    // Reaching under power so the rudder has flow but the rig is not steering.
+    // Carrying way with no wind, so the rudder has flow over it but the rig is not
+    // steering. This used to motor; the boat has no engine now, and starting her with
+    // speed on is the better test anyway — it isolates the rudder from everything,
+    // including a propeller.
     let wind = SteadyWind::new(0.0, 0.0);
-    let mut sim = Simulation::new(cfg, BoatState::at_rest(0.0), Box::new(wind));
-    let ahead = Controls {
-        throttle: 0.6,
-        ..Default::default()
-    };
-    sim.run(40.0, &ahead);
+    let mut state = BoatState::at_rest(0.0);
+    state.surge = sail_core::units::kn_to_ms(4.5);
+    let mut sim = Simulation::new(cfg, state, Box::new(wind));
+    let ahead = Controls::default();
+    sim.run(4.0, &ahead);
     let start = sim.state.heading;
 
     let turning = Controls {

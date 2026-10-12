@@ -83,7 +83,22 @@ pub fn twist_for_vang(vang: f64, chord_angle: f64) -> f64 {
 /// the effect is felt rather than guessed at precisely — and recorded as a number to
 /// argue with rather than a shrug.
 pub fn rig_interference(chord_angle: f64, bears_at: f64) -> (f64, f64) {
-    let t = smoothstep(bears_at, bears_at + rad(40.0), chord_angle.abs());
+    // It builds, and then it goes away again.
+    //
+    // The first version only built, which is wrong past a close reach and wrong in a
+    // way any sailor sees at once: ease far enough and the genoa does not press harder
+    // on the shrouds, it goes *outside* them. The clew swings out past the cap shroud,
+    // the belly follows, and the whole sail is flying clear of the rig with nothing
+    // touching it. That is the ordinary state of a genoa on a beam reach, and the model
+    // was charging it for a contact that had already ended.
+    //
+    // So the penalty is a hump. It starts where the leech first reaches the wire, peaks
+    // about twenty-five degrees later with the sail pressed hardest into the spreader,
+    // and is gone by sixty, by which point the sail is sheeted outboard of everything.
+    let past = (chord_angle.abs() - bears_at).max(0.0);
+    let on = smoothstep(0.0, rad(25.0), past);
+    let off = smoothstep(rad(30.0), rad(60.0), past);
+    let t = on * (1.0 - off);
     (1.0 - 0.08 * t, 1.0 + 0.15 * t)
 }
 
@@ -194,6 +209,86 @@ impl SailProfile {
             cn_separated: 1.45,
             max_chord_angle: rad(85.0),
             min_chord_angle: rad(12.0),
+        }
+    }
+
+    /// A staysail: small, flat, set on an inner stay well abaft the stem.
+    ///
+    /// The sail that makes a double head rig work. On its own it is a heavy-weather
+    /// sail — genoa rolled away, main reefed, and this left drawing low down where its
+    /// heeling moment is least. Under a Code 0 or a gennaker it is doing something
+    /// different: it sits in the slot inside the big sail, adds a few square metres of
+    /// its own and steadies the boat, and the gap between the two does more than either
+    /// sail does alone.
+    ///
+    /// Self-tacking on a boom, which is how a cruising staysail of this size is nearly
+    /// always rigged, so it has no sheet of its own to play — it finds its own angle and
+    /// its track limits how far out it can go. That is why its chord is capped well
+    /// short of a genoa's: a self-tacker cannot be squared off.
+    pub fn staysail(area: f64, luff_height: f64) -> Self {
+        Self {
+            cl_max: 1.50,
+            alpha_opt: rad(16.0),
+            alpha_stall: rad(30.0),
+            cd0: 0.050,
+            aspect_ratio: luff_height * luff_height / area,
+            luff_margin: rad(3.5),
+            cn_separated: 1.45,
+            max_chord_angle: rad(62.0),
+            min_chord_angle: rad(8.0),
+        }
+    }
+
+    /// A Code 0: a reaching sail, which is a genoa's shape taken as far as it will go.
+    ///
+    /// Flat, which is the point and also the rating rule — a Code 0 is a spinnaker on
+    /// paper and a headsail in behaviour, and it gets there by being cut with barely
+    /// more depth than a genoa over an enormous area. Flat means it holds an attached
+    /// flow to a small angle of attack, so it peaks early and stalls early, and it means
+    /// it will sheet in hard: there is no mast in front of it and no shroud behind it,
+    /// so the limit on how far it can be eased is the sail itself rather than the rig.
+    ///
+    /// The clean leading edge of a sail set flying is worth real lift. There is no
+    /// forestay in its luff and no mast turbulence over it, which is why a Code 0 out-
+    /// points its own area: it is the most efficient sail on the boat on a close reach.
+    pub fn code_zero(area: f64, luff_height: f64) -> Self {
+        Self {
+            cl_max: 1.62,
+            alpha_opt: rad(14.0),
+            alpha_stall: rad(27.0),
+            cd0: 0.040,
+            aspect_ratio: luff_height * luff_height / area,
+            luff_margin: rad(3.0),
+            cn_separated: 1.45,
+            max_chord_angle: rad(92.0),
+            min_chord_angle: rad(10.0),
+        }
+    }
+
+    /// A gennaker: the running sail, and a different animal.
+    ///
+    /// Deep. A sail with twenty percent camber in it generates more lift than anything
+    /// else on the boat and pays for it in drag, which is the correct trade downwind,
+    /// where drag *is* drive. It peaks late, at an angle of attack that would have a
+    /// genoa long stalled, and it stalls gently — and well past the stall it is still
+    /// working, because a parachute does not care that its flow has separated. That is
+    /// what `cn_separated` is for and why this sail's is the highest in the rig.
+    ///
+    /// It eases past the beam. On a sprit, tacked out ahead of the bow, the clew can be
+    /// squared right out beyond anything a genoa could reach, which is how it gets clear
+    /// of the mainsail's wind shadow deep downwind — and why, unlike a genoa, it does
+    /// not die behind the main.
+    pub fn gennaker(area: f64, luff_height: f64) -> Self {
+        Self {
+            cl_max: 1.78,
+            alpha_opt: rad(22.0),
+            alpha_stall: rad(42.0),
+            cd0: 0.075,
+            aspect_ratio: luff_height * luff_height / area,
+            luff_margin: rad(5.0),
+            cn_separated: 1.62,
+            max_chord_angle: rad(108.0),
+            min_chord_angle: rad(22.0),
         }
     }
 

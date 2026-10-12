@@ -122,7 +122,11 @@ pub struct SailSurface {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Sail {
     Main,
-    Genoa,
+    /// Whichever sail is up forward: genoa, Code 0 or gennaker. One entity, because
+    /// they are one slot on the boat — you roll one away and set the next in its place.
+    Headsail,
+    /// The inner sail of the double head rig.
+    Staysail,
 }
 
 /// A ribbon on the sail. `along_luff` is its height up the sail, 0 at the foot.
@@ -218,6 +222,7 @@ pub fn setup(
 
     let main_mesh = meshes.add(empty_sail_mesh());
     let genoa_mesh = meshes.add(empty_sail_mesh());
+    let staysail_mesh = meshes.add(empty_sail_mesh());
 
     commands
         .spawn((
@@ -428,10 +433,19 @@ pub fn setup(
             ));
             b.spawn((
                 SailSurface {
-                    which: Sail::Genoa,
+                    which: Sail::Headsail,
                     mesh: genoa_mesh.clone(),
                 },
                 Mesh3d(genoa_mesh.clone()),
+                MeshMaterial3d(sail_mat.clone()),
+                Transform::default(),
+            ));
+            b.spawn((
+                SailSurface {
+                    which: Sail::Staysail,
+                    mesh: staysail_mesh.clone(),
+                },
+                Mesh3d(staysail_mesh.clone()),
                 MeshMaterial3d(sail_mat.clone()),
                 Transform::default(),
             ));
@@ -651,10 +665,10 @@ pub fn update_sails(
     let shrouds = shroud_polyline(cfg.beam as f32, side > 0.0, t_.heel as f32, side);
 
     for (surface, mut visibility) in &mut q {
-        *visibility = if surface.which == Sail::Genoa && sim.controls.furl > 0.985 {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
+        *visibility = match surface.which {
+            Sail::Headsail if sim.controls.furl > 0.985 => Visibility::Hidden,
+            Sail::Staysail if sim.controls.staysail < 0.02 => Visibility::Hidden,
+            _ => Visibility::Inherited,
         };
         let (forces, geometry) = match surface.which {
             Sail::Main => {
@@ -679,7 +693,58 @@ pub fn update_sails(
                     },
                 )
             }
-            Sail::Genoa => {
+            Sail::Staysail => {
+                // Small, low, and set on its own stay a third of the way aft from the
+                // stem. Self-tacking, so its angle is not a control: it finds the best
+                // one its track allows, which is the same number the force model uses.
+                let set = sim.controls.staysail as f32;
+                let sheet = cfg
+                    .staysail
+                    .profile
+                    .optimal_sheet(t_.awa, sail_core::sail::CAMBER_REFERENCE);
+                let angle = side * cfg.staysail.profile.chord_angle(sheet) as f32;
+                let tack = Vec3::new(0.0, DECK + 0.12, MAST_FOOT_Z - 3.3);
+                let head = Vec3::new(0.0, DECK + 8.4, MAST_FOOT_Z - 0.15);
+                let foot = 3.1;
+                // Hoisted, not furled: it climbs its stay as the halyard goes up.
+                (
+                    t_.jib,
+                    SailGeometry {
+                        tack,
+                        head: tack.lerp(head, 0.18 + 0.82 * set),
+                        clew: tack
+                            + Vec3::new(angle.sin() * foot, 0.30, angle.cos() * foot * 0.55),
+                    },
+                )
+            }
+            Sail::Headsail if sim.controls.headsail != sail_core::state::Headsail::Genoa => {
+                // A sail set flying: tacked out on the sprit end, hoisted to the
+                // masthead, clew sheeted away aft. Nothing holds its luff but its own
+                // tension, which is why it is drawn from three corners and a curve
+                // rather than hung on a wire.
+                let gennaker = sim.controls.headsail == sail_core::state::Headsail::Gennaker;
+                let out = 1.0 - sim.controls.furl as f32;
+                let foot = if gennaker { 7.4 } else { 6.0 } * out;
+                let angle = side * t_.jib.chord_angle as f32;
+                let tack = sprit_end(cfg.loa as f32);
+                let head = Vec3::new(0.0, DECK + if gennaker { 14.0 } else { 14.8 }, MAST_FOOT_Z);
+                (
+                    t_.jib,
+                    SailGeometry {
+                        tack,
+                        head: tack.lerp(head, 0.3 + 0.7 * out),
+                        // Flown free: the clew swings on the arc of its own foot, out
+                        // to leeward and lifting, with no lead car to pull it down.
+                        clew: tack
+                            + Vec3::new(
+                                angle.sin() * foot,
+                                if gennaker { 1.35 } else { 0.85 },
+                                angle.cos() * foot,
+                            ),
+                    },
+                )
+            }
+            Sail::Headsail => {
                 // A rolling genoa loses area from its foot and leech as the drum
                 // turns, so it visibly shrinks on the stay rather than vanishing.
                 let out = 1.0 - sim.controls.furl as f32;
@@ -714,7 +779,8 @@ pub fn update_sails(
             let twist = side
                 * match surface.which {
                     Sail::Main => t_.twist as f32,
-                    Sail::Genoa => t_.jib_twist as f32,
+                    Sail::Headsail => t_.jib_twist as f32,
+                    Sail::Staysail => t_.jib_twist as f32 * 0.4,
                 };
             build_sail(
                 &mut mesh,
@@ -726,7 +792,11 @@ pub fn update_sails(
                     draft: forces.camber as f32,
                     now,
                     shrouds: &shrouds,
-                    clear_mast: surface.which == Sail::Genoa,
+                    // Only a sail on the stay has to be kept off the mast and the
+                    // shrouds. A sail flown from the sprit is ahead of both, and a
+                    // staysail is inside everything and small enough to clear it.
+                    clear_mast: surface.which == Sail::Headsail
+                        && sim.controls.headsail == sail_core::state::Headsail::Genoa,
                 },
             );
         }

@@ -197,11 +197,12 @@ pub fn draw(
                 }
             ));
             ui.label(format!(
-                "main reef {:.2}    genoa furl {:.2}{}    engine {:+.2}    rudder {}",
+                "main reef {:.2}    {} furl {:.2}{}    stays'l {:.2}    rudder {}",
                 c.reef,
+                c.headsail.name(),
                 c.furl,
                 if c.furl > 0.985 { " (rolled away)" } else { "" },
-                c.throttle,
+                c.staysail,
                 if t.rudder_stalled > 0.4 {
                     "STALLED"
                 } else {
@@ -315,7 +316,7 @@ pub fn draw(
                  A / D   ease / haul in the chosen line (Shift for fine)\n\
                  P       pilot on / off      O  course or wind angle\n\
                  , / .   nudge the pilot's target (Shift for five)\n\
-                 Z / X   engine astern / ahead\n\
+                 Z / X   headsail: genoa, code 0, gennaker (roll it away first)\n\
                  M       chart on / off      [ ]  zoom it out and in\n\
                  mouse   hold the right button to look around; Space looks ahead\n\
                  V       picture: sharp, 960, 720, 480 across\n\

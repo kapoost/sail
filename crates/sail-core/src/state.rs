@@ -161,8 +161,13 @@ pub struct Controls {
     /// genoa is a separate piece of gear from the main's reef, and rolling it is
     /// usually the first thing anyone does — so it gets its own control.
     pub furl: f64,
-    /// Engine, -1 astern to 1 ahead.
-    pub throttle: f64,
+    /// Which sail is set forward of the mast.
+    pub headsail: Headsail,
+    /// How much of the staysail is set: 0 handed, 1 drawing.
+    ///
+    /// No sheet, because it is on a self-tacking boom. The only decision is whether it
+    /// is up, which is the only decision a staysail usually offers.
+    pub staysail: f64,
 }
 
 /// Hand-written rather than derived, because a derived default would put the outhaul
@@ -180,7 +185,71 @@ impl Default for Controls {
             genoa_car: 0.4,
             reef: 0.0,
             furl: 0.0,
-            throttle: 0.0,
+            headsail: Headsail::Genoa,
+            staysail: 0.0,
+        }
+    }
+}
+
+/// What is set on the stay, or flying from the sprit.
+///
+/// One slot, not three, because that is how a boat with one bow works: the genoa rolls
+/// away and the reaching sail goes up in its place. They are alternatives in the gear
+/// as well as in the model.
+///
+/// The spread between them is the whole reason to have them. A genoa is the sail that
+/// goes upwind. A Code 0 is a flat, enormous reaching sail — set flying on its own
+/// luff rope ahead of the forestay, it carries from about fifty degrees of apparent
+/// wind out to a beam reach and it is the sail that turns a light-air passage from four
+/// knots into seven. A gennaker is the running sail: far bigger, far deeper, and
+/// useless anywhere near the wind, because a sail with that much shape in it cannot be
+/// flattened and will not stay full with the apparent wind forward.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Headsail {
+    #[default]
+    Genoa,
+    Code0,
+    Gennaker,
+}
+
+impl Headsail {
+    /// Set flying from the sprit rather than hanked to the forestay.
+    ///
+    /// Which decides two things at once: a flying sail is tacked well forward of the
+    /// stem, and it is clear of the mast and the shrouds, so none of the rig
+    /// interference a genoa suffers applies to it.
+    pub fn flying(self) -> bool {
+        !matches!(self, Headsail::Genoa)
+    }
+
+    /// The apparent wind angle below which it stops staying full, radians.
+    ///
+    /// A headsail on a stay has its luff held by the stay and simply luffs along it
+    /// when you point too high. A sail set flying has nothing holding its luff but its
+    /// own tension and the wind in it, so with the apparent wind too far forward the
+    /// luff falls in and the sail collapses — not a soft loss of drive but a sail
+    /// flogging in the lee of the main. That limit, and not area, is what decides which
+    /// sail you have up.
+    /// Measured against the boat, not guessed. The first numbers here were 48 and 70
+    /// degrees, taken from how these sails are talked about rather than from anything,
+    /// and the sweep showed what that costs: this boat is fast enough that a beam reach
+    /// in eight knots of breeze puts the apparent wind at 46 degrees, so a Code 0 — the
+    /// one sail that exists for exactly that condition — was collapsing in it. A limit
+    /// expressed in apparent wind has to be set where the apparent wind actually is.
+    pub fn fills_above(self) -> f64 {
+        match self {
+            Headsail::Genoa => 0.0,
+            Headsail::Code0 => crate::units::rad(32.0),
+            Headsail::Gennaker => crate::units::rad(52.0),
+        }
+    }
+
+    /// The name on the sail bag.
+    pub fn name(self) -> &'static str {
+        match self {
+            Headsail::Genoa => "genoa",
+            Headsail::Code0 => "code 0",
+            Headsail::Gennaker => "gennaker",
         }
     }
 }

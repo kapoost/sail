@@ -16,11 +16,25 @@ use glam::DVec2;
 /// Sheet positions that put both sails at their best angle of attack for the given
 /// apparent wind angle.
 pub fn optimal_sheets(cfg: &BoatConfig, awa: f64, outhaul: f64) -> (f64, f64) {
+    optimal_sheets_with(cfg, awa, outhaul, crate::state::Headsail::Genoa)
+}
+
+/// The same, for whichever sail is set forward of the mast.
+///
+/// A Code 0 and a gennaker have their own chord-angle limits, so the sheet position
+/// that puts them at their best angle of attack is not the genoa's. Trimming a gennaker
+/// to a genoa's numbers sheets it far too hard and chokes it.
+pub fn optimal_sheets_with(
+    cfg: &BoatConfig,
+    awa: f64,
+    outhaul: f64,
+    head: crate::state::Headsail,
+) -> (f64, f64) {
     (
         cfg.main
             .profile
             .optimal_sheet(awa, crate::sail::camber_for_outhaul(outhaul)),
-        cfg.genoa
+        cfg.headsail(head)
             .profile
             .optimal_sheet(awa, crate::sail::CAMBER_REFERENCE),
     )
@@ -132,6 +146,44 @@ pub fn steady_state<F>(cfg: BoatConfig, make_wind: F, twa: f64, seconds: f64, re
 where
     F: Fn() -> Box<dyn WindField>,
 {
+    steady_state_with(
+        cfg,
+        make_wind,
+        twa,
+        seconds,
+        reef,
+        crate::state::Headsail::Genoa,
+    )
+}
+
+/// The same, with a chosen headsail.
+pub fn steady_state_with<F>(
+    cfg: BoatConfig,
+    make_wind: F,
+    twa: f64,
+    seconds: f64,
+    reef: f64,
+    head: crate::state::Headsail,
+) -> Steady
+where
+    F: Fn() -> Box<dyn WindField>,
+{
+    steady_state_rigged(cfg, make_wind, twa, seconds, reef, head, 0.0)
+}
+
+/// The same again, with the staysail set or handed.
+pub fn steady_state_rigged<F>(
+    cfg: BoatConfig,
+    make_wind: F,
+    twa: f64,
+    seconds: f64,
+    reef: f64,
+    head: crate::state::Headsail,
+    staysail: f64,
+) -> Steady
+where
+    F: Fn() -> Box<dyn WindField>,
+{
     let wind = make_wind();
     let sample = wind.sample(DVec2::ZERO, 0.0);
     let wind_direction = direction_of(sample);
@@ -150,6 +202,8 @@ where
         outhaul: 0.0,
         reef,
         furl: (reef * 0.85).clamp(0.0, 1.0),
+        headsail: head,
+        staysail,
         ..Default::default()
     };
     let mut pilot = TillerPilot::new();
@@ -166,7 +220,7 @@ where
         let step = (want - controls.outhaul).clamp(-0.25 * SUBSTEP, 0.25 * SUBSTEP);
         controls.outhaul = (controls.outhaul + step).clamp(0.0, 1.0);
 
-        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        let (m, j) = optimal_sheets_with(&cfg, sim.telemetry.awa, controls.outhaul, head);
         controls.main_sheet = m;
         controls.jib_sheet = j;
         controls.rudder = pilot.rudder(&cfg, &sim.state, heading, SUBSTEP);
@@ -201,14 +255,36 @@ pub fn reef_for_heel<F>(
 where
     F: Fn() -> Box<dyn WindField>,
 {
-    let mut best = steady_state(cfg, make_wind, twa, seconds, 0.0);
+    reef_for_heel_with(
+        cfg,
+        make_wind,
+        twa,
+        seconds,
+        max_heel,
+        crate::state::Headsail::Genoa,
+    )
+}
+
+/// The same, with a chosen headsail.
+pub fn reef_for_heel_with<F>(
+    cfg: BoatConfig,
+    make_wind: &F,
+    twa: f64,
+    seconds: f64,
+    max_heel: f64,
+    head: crate::state::Headsail,
+) -> (f64, Steady)
+where
+    F: Fn() -> Box<dyn WindField>,
+{
+    let mut best = steady_state_with(cfg, make_wind, twa, seconds, 0.0, head);
     if best.state.heel.abs() <= max_heel {
         return (0.0, best);
     }
     let mut chosen = 0.0;
     for step in 1..=8 {
         let reef = step as f64 / 8.0;
-        let trial = steady_state(cfg, make_wind, twa, seconds, reef);
+        let trial = steady_state_with(cfg, make_wind, twa, seconds, reef, head);
         chosen = reef;
         let within = trial.state.heel.abs() <= max_heel;
         best = trial;

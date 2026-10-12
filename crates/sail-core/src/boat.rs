@@ -121,6 +121,12 @@ pub struct BoatConfig {
     // --- Rig ---
     pub main: RiggedSail,
     pub genoa: RiggedSail,
+    /// The flat reaching sail, set flying from the sprit.
+    pub code_zero: RiggedSail,
+    /// The running sail.
+    pub gennaker: RiggedSail,
+    /// The inner headsail of a double head rig.
+    pub staysail: RiggedSail,
     /// Chord angle at which the headsail starts to lie on the standing rigging.
     ///
     /// Derived from where the cap shroud stands at the sail's own mid-height, not
@@ -130,10 +136,6 @@ pub struct BoatConfig {
     /// has no equivalent limit: a roller genoa rolls all the way away.
     pub max_reef: f64,
 
-    // --- Auxiliary engine ---
-    pub max_thrust: f64,
-    /// Thrust acts below and aft of the centre of gravity; the offset gives prop walk.
-    pub prop_walk: f64,
 }
 
 impl BoatConfig {
@@ -220,11 +222,32 @@ impl BoatConfig {
                 z_ce: 4.60,
                 x_ce: 1.90,
             },
+            code_zero: RiggedSail {
+                // Fifty-five square metres against the genoa's twenty-six, which is not
+                // a typo: a Code 0 is measured as a spinnaker and cut like one, and the
+                // genoa on this boat is a small working jib. The sail is the size of the
+                // mainsail and then some.
+                profile: SailProfile::code_zero(genoa_area * 2.1, genoa_luff * 1.05),
+                area: genoa_area * 2.1,
+                z_ce: 5.60,
+                x_ce: 2.45,
+            },
+            gennaker: RiggedSail {
+                // Eighty-eight. Twice the mainsail, which is what a running sail is.
+                profile: SailProfile::gennaker(genoa_area * 3.4, genoa_luff * 1.02),
+                area: genoa_area * 3.4,
+                z_ce: 6.00,
+                x_ce: 2.80,
+            },
+            staysail: RiggedSail {
+                profile: SailProfile::staysail(genoa_area * 0.54, genoa_luff * 0.62),
+                area: genoa_area * 0.54,
+                z_ce: 3.60,
+                x_ce: 1.05,
+            },
             headsail_bears_at: rad(19.0),
             max_reef: 0.55,
 
-            max_thrust: 2200.0,
-            prop_walk: 0.08,
         }
     }
 
@@ -412,11 +435,27 @@ impl BoatConfig {
                 z_ce: 4.40,
                 x_ce: 1.95,
             },
+            code_zero: RiggedSail {
+                profile: SailProfile::code_zero(genoa_area * 1.5, genoa_luff * 1.05),
+                area: genoa_area * 1.5,
+                z_ce: 4.97,
+                x_ce: 2.50,
+            },
+            gennaker: RiggedSail {
+                profile: SailProfile::gennaker(genoa_area * 2.3, genoa_luff * 1.02),
+                area: genoa_area * 2.3,
+                z_ce: 5.37,
+                x_ce: 2.83,
+            },
+            staysail: RiggedSail {
+                profile: SailProfile::staysail(genoa_area * 0.54, genoa_luff * 0.62),
+                area: genoa_area * 0.54,
+                z_ce: 3.60,
+                x_ce: 1.05,
+            },
             headsail_bears_at: rad(17.0),
             max_reef: 0.68,
 
-            max_thrust: 1600.0,
-            prop_walk: 0.08,
         }
     }
 
@@ -443,10 +482,40 @@ impl BoatConfig {
         ((area * 0.62, z_ce * 0.74), (area * 0.38, z_ce * 1.42))
     }
 
+    /// Whichever sail is set forward of the mast.
+    pub fn headsail(&self, which: crate::state::Headsail) -> &RiggedSail {
+        match which {
+            crate::state::Headsail::Genoa => &self.genoa,
+            crate::state::Headsail::Code0 => &self.code_zero,
+            crate::state::Headsail::Gennaker => &self.gennaker,
+        }
+    }
+
     /// The headsail split the same way, so the lead car's twist has somewhere to act.
     pub fn genoa_sections(&self, furl: f64) -> ((f64, f64), (f64, f64)) {
-        let (area, z_ce) = self.furled_genoa(furl);
-        ((area * 0.60, z_ce * 0.72), (area * 0.40, z_ce * 1.44))
+        self.headsail_sections(crate::state::Headsail::Genoa, furl)
+    }
+
+    /// The sections of whichever headsail is up.
+    ///
+    /// A flying sail is split lower than a genoa. Its area is carried in the middle of
+    /// a deep curve rather than up a straight luff, so more of it sits in the lower
+    /// band — which also puts its centre of effort where it belongs and keeps a
+    /// gennaker from heeling the boat like a genoa twice its size would.
+    pub fn headsail_sections(
+        &self,
+        which: crate::state::Headsail,
+        furl: f64,
+    ) -> ((f64, f64), (f64, f64)) {
+        let sail = self.headsail(which);
+        let f = furl.clamp(0.0, 1.0);
+        let area = sail.area * (1.0 - f);
+        let z_ce = sail.z_ce * (1.0 - 0.25 * f);
+        if which.flying() {
+            ((area * 0.66, z_ce * 0.78), (area * 0.34, z_ce * 1.38))
+        } else {
+            ((area * 0.60, z_ce * 0.72), (area * 0.40, z_ce * 1.44))
+        }
     }
 
     /// Headsail area and centre of effort after furling. A rolled genoa loses area
@@ -599,11 +668,27 @@ impl BoatConfig {
                 z_ce: 6.40,
                 x_ce: 2.90,
             },
+            code_zero: RiggedSail {
+                profile: SailProfile::code_zero(genoa_area * 1.5, genoa_luff * 1.05),
+                area: genoa_area * 1.5,
+                z_ce: 7.23,
+                x_ce: 3.71,
+            },
+            gennaker: RiggedSail {
+                profile: SailProfile::gennaker(genoa_area * 2.3, genoa_luff * 1.02),
+                area: genoa_area * 2.3,
+                z_ce: 7.81,
+                x_ce: 4.21,
+            },
+            staysail: RiggedSail {
+                profile: SailProfile::staysail(genoa_area * 0.54, genoa_luff * 0.62),
+                area: genoa_area * 0.54,
+                z_ce: 3.60,
+                x_ce: 1.05,
+            },
             headsail_bears_at: rad(19.0),
             max_reef: 0.55,
 
-            max_thrust: 5500.0,
-            prop_walk: 0.08,
         }
     }
 }

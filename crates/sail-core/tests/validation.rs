@@ -653,44 +653,6 @@ fn bearing_away_with_way_on_gets_the_boat_sailing() {
     );
 }
 
-#[test]
-fn the_engine_gets_you_out_of_the_marina() {
-    let cfg = BoatConfig::charter_sloop_34();
-    // No wind, no sails, just the auxiliary: the manoeuvre every passage starts with.
-    let mut sim = Simulation::new(
-        cfg,
-        BoatState::at_rest(0.0),
-        Box::new(SteadyWind::new(0.0, 0.0)),
-    );
-    let ahead = Controls {
-        throttle: 1.0,
-        ..Default::default()
-    };
-    sim.run(90.0, &ahead);
-    let cruise = ms_to_kn(sim.telemetry.stw);
-    assert!(
-        (5.5..=8.0).contains(&cruise),
-        "a 20-odd horsepower auxiliary should push this hull at 5.5-8 kn, got {cruise:.2}"
-    );
-
-    // And astern is slower, as a propeller in reverse always is.
-    let mut sim = Simulation::new(
-        cfg,
-        BoatState::at_rest(0.0),
-        Box::new(SteadyWind::new(0.0, 0.0)),
-    );
-    sim.run(
-        90.0,
-        &Controls {
-            throttle: -1.0,
-            ..Default::default()
-        },
-    );
-    assert!(
-        sim.telemetry.stw < 0.0 || sim.state.surge < 0.0,
-        "should make sternway"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Outhaul: mainsail depth, and the trade it buys
@@ -1970,4 +1932,113 @@ fn every_wave_band_runs_with_the_wind() {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// The sail wardrobe
+// ---------------------------------------------------------------------------
+
+/// The running sail is worth having, and the sweep says where.
+#[test]
+fn the_gennaker_wins_downwind_and_the_genoa_wins_upwind() {
+    use sail_core::autopilot::steady_state_with;
+    use sail_core::state::Headsail;
+    let cfg = BoatConfig::archipelago_packet();
+    let wind = || -> Box<dyn WindField> { Box::new(SteadyWind::new(0.0, kn_to_ms(12.0))) };
+
+    let deep_genoa = steady_state_with(cfg, wind, rad(150.0), 420.0, 0.0, Headsail::Genoa);
+    let deep_kite = steady_state_with(cfg, wind, rad(150.0), 420.0, 0.0, Headsail::Gennaker);
+    let gain = ms_to_kn(deep_kite.telemetry.stw - deep_genoa.telemetry.stw);
+    assert!(
+        gain > 0.5,
+        "a gennaker at 150 degrees should be worth half a knot at least, got {gain:+.2}"
+    );
+
+    let beat_genoa = steady_state_with(cfg, wind, rad(45.0), 420.0, 0.0, Headsail::Genoa);
+    let beat_kite = steady_state_with(cfg, wind, rad(45.0), 420.0, 0.0, Headsail::Gennaker);
+    assert!(
+        beat_kite.telemetry.stw < beat_genoa.telemetry.stw,
+        "and it must be the wrong sail upwind"
+    );
+}
+
+/// A sail set flying collapses when the apparent wind comes forward, and the collapse
+/// has to be a collapse — not a gentle loss of a sail three times the genoa's size.
+#[test]
+fn a_flying_sail_collapses_close_hauled() {
+    use sail_core::autopilot::steady_state_with;
+    use sail_core::state::Headsail;
+    let cfg = BoatConfig::archipelago_packet();
+    let wind = || -> Box<dyn WindField> { Box::new(SteadyWind::new(0.0, kn_to_ms(12.0))) };
+
+    // Close-hauled with the gennaker up, against the same boat with nothing forward of
+    // the mast at all. If the collapse works, they are nearly the same boat.
+    let kite = steady_state_with(cfg, wind, rad(42.0), 420.0, 0.0, Headsail::Gennaker);
+    let mut bare = sail_core::sim::Simulation::new(
+        cfg,
+        {
+            let mut st = BoatState::at_rest(wrap_tau(-rad(42.0)));
+            st.surge = 0.6 * cfg.hull_speed();
+            st
+        },
+        wind(),
+    );
+    let mut controls = Controls {
+        furl: 1.0,
+        ..Default::default()
+    };
+    let mut pilot = sail_core::autopilot::TillerPilot::new();
+    let heading = wrap_tau(-rad(42.0));
+    for _ in 0..(420.0 / SUBSTEP) as u64 {
+        let (m, _) = sail_core::autopilot::optimal_sheets(&cfg, bare.telemetry.awa, 0.0);
+        controls.main_sheet = m;
+        controls.rudder = pilot.rudder(&cfg, &bare.state, heading, SUBSTEP);
+        bare.run(SUBSTEP, &controls);
+    }
+    let difference = ms_to_kn((kite.telemetry.stw - bare.telemetry.stw).abs());
+    assert!(
+        difference < 0.6,
+        "a collapsed gennaker should leave the boat sailing on her main: {difference:.2} kn apart"
+    );
+}
+
+/// The staysail belongs under the big reaching sails, and nowhere else.
+///
+/// This is the test that keeps the double head rig honest. A model that simply adds the
+/// inner sail's area makes it free speed everywhere and there is no reason ever to hand
+/// it, which is not how the rig works: inside a genoa it is covered and it backwinds
+/// the main, and what it costs there is about what it gives.
+#[test]
+fn the_staysail_earns_its_place_only_under_a_flying_sail() {
+    use sail_core::autopilot::steady_state_rigged;
+    use sail_core::state::Headsail;
+    let cfg = BoatConfig::archipelago_packet();
+    let wind = || -> Box<dyn WindField> { Box::new(SteadyWind::new(0.0, kn_to_ms(12.0))) };
+
+    let twa = rad(110.0);
+    let under_kite = [0.0, 1.0].map(|stay| {
+        ms_to_kn(
+            steady_state_rigged(cfg, wind, twa, 420.0, 0.0, Headsail::Gennaker, stay)
+                .telemetry
+                .stw,
+        )
+    });
+    assert!(
+        under_kite[1] - under_kite[0] > 0.02,
+        "a staysail under a gennaker should add something: {:+.3} kn",
+        under_kite[1] - under_kite[0]
+    );
+
+    let upwind = [0.0, 1.0].map(|stay| {
+        ms_to_kn(
+            steady_state_rigged(cfg, wind, rad(45.0), 420.0, 0.0, Headsail::Genoa, stay)
+                .telemetry
+                .stw,
+        )
+    });
+    assert!(
+        upwind[1] <= upwind[0] + 0.02,
+        "and it must not be free speed inside a genoa: {:+.3} kn",
+        upwind[1] - upwind[0]
+    );
 }
