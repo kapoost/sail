@@ -240,6 +240,26 @@ pub struct SurfaceDrift {
 /// suggest a gradient.
 const INK_BANDS: usize = 4;
 
+/// Spacing of the hatching, metres on the water.
+///
+/// Manga shades with line, not with grey: a tone is a field of parallel strokes, and
+/// how dark it reads is how close together they are. Three quarters of a metre at the
+/// boat, which at this resolution puts a stroke every few pixels close in and lets them
+/// merge into an even tone further out — which is what happens on the page too, and why
+/// a screentone looks like shading rather than like stripes.
+const HATCH_SPACING: f32 = 0.75;
+
+/// How dark a stroke is.
+const HATCH_DEPTH: f32 = 0.5;
+
+/// How far the hatching leans off the wind, radians.
+///
+/// Not aligned with anything in the scene. Hatching that runs square to the waves reads
+/// as corduroy, and hatching that runs square to the screen reads as a screen-door; a
+/// draughtsman lays strokes across the form at an angle to it, and that is the one
+/// direction that does not fight what it is shading.
+const HATCH_LEAN: f32 = 0.6;
+
 /// How wide the contour line on the water is, as a fraction of a tone band.
 ///
 /// The sea gets no silhouette, because it has nothing to be a silhouette against — it
@@ -527,8 +547,25 @@ pub fn update_sea(
             // surface is steep enough to be breaking. That is the depth shading and
             // the whitecaps, without a shader having to be written for either.
             let lift = (height / hs).clamp(-1.0, 1.0);
-            let deep = Vec3::new(0.035, 0.095, 0.150);
-            let shallow = Vec3::new(0.090, 0.210, 0.260);
+            // The lit sea's own colours, and a lighter pair for the drawn one.
+            //
+            // A photograph of deep water really is nearly black, and the drawn sea
+            // inherited that and then had hatching laid on top of it — two darkenings on
+            // the same water, which put the bottom of the range somewhere no ink drawing
+            // goes. A manga sea is a mid tone with white in it: the darkest thing on the
+            // page is the *line*, not the field it is drawn on, and the field has to stay
+            // light enough for a black stroke to show against it.
+            let (deep, shallow) = if ink {
+                (
+                    Vec3::new(0.150, 0.250, 0.330),
+                    Vec3::new(0.330, 0.470, 0.540),
+                )
+            } else {
+                (
+                    Vec3::new(0.035, 0.095, 0.150),
+                    Vec3::new(0.090, 0.210, 0.260),
+                )
+            };
             let mut tone = (lift * 0.5 + 0.5).clamp(0.0, 1.0);
             let mut edge = 1.0;
             if ink {
@@ -571,6 +608,27 @@ pub fn update_sea(
                 },
                 foam,
             );
+            // Hatching: the shading is made of strokes, and the darker the water the
+            // more of it they cover. A stroke is wide where the tone is dark and thins
+            // to nothing where it is light, so the three bands of the drawn sea come out
+            // as three densities of line rather than three greys — which is what a
+            // manga page does and the reason it reads as drawn rather than rendered.
+            //
+            // Laid in world metres on the surface, so the strokes belong to the water
+            // and travel with it rather than crawling across it as the camera moves.
+            if ink {
+                let lean = tm.twd as f32 + HATCH_LEAN;
+                let along = world.x as f32 * lean.sin() + world.y as f32 * lean.cos();
+                let phase = (along / HATCH_SPACING).fract().abs();
+                // Dark water gets a wide stroke, light water none at all.
+                let width = (1.0 - tone) * 0.55;
+                if phase < width {
+                    // Softened at the stroke's own edge by a hair, or the lines crawl
+                    // with the vertex grid instead of lying still on the water.
+                    let bite = ((width - phase) / 0.08).clamp(0.0, 1.0);
+                    colour *= 1.0 - HATCH_DEPTH * bite;
+                }
+            }
             if ink && edge < CONTOUR {
                 // The contour line along the step between two tones.
                 colour = colour.lerp(Vec3::new(0.97, 0.99, 1.0), CONTOUR_INK);
