@@ -30,16 +30,25 @@ use sail_core::water::fetch_limited_sea;
 
 /// Mean wind speed of the draw, knots.
 ///
-/// Fourteen is a good sailing breeze: enough that trim matters, not so much that every
-/// session is survival. The spread around it does the work.
-const MEAN_WIND_KN: f64 = 14.0;
+/// Seventeen, up from fourteen. The spread around it does the work: the median comes
+/// out at sixteen knots, a solid force five, with a force seven in the top decile and
+/// a metre of sea at the median against three quarters before.
+const MEAN_WIND_KN: f64 = 17.0;
 /// Weibull shape. Two is the Rayleigh case, which is the standard description of wind
 /// speed statistics and gives the long tail that makes a hard day feel earned.
 const WIND_SHAPE: f64 = 2.0;
-/// Sailable band, knots. Below the floor nothing happens; above the ceiling a
-/// thirty-four footer is not out there by choice.
-const WIND_MIN_KN: f64 = 5.0;
-const WIND_MAX_KN: f64 = 32.0;
+/// Sailable band, knots.
+///
+/// The floor is nine rather than five, and that is half taste and half a measurement.
+/// A ghosting day is a real day, but it is also the one regime where the model is
+/// known to be wrong: `examples/delivery.rs` shows the sea costing far too much speed
+/// in light air — thirty-one percent at eight knots where ten would be generous — so
+/// a drawn calm spends the player's time in the only conditions the physics mishandles
+/// badly. The floor comes back down when frequency-dependent radiation damping does.
+///
+/// The ceiling is where a boat this size is out by mistake rather than by choice.
+const WIND_MIN_KN: f64 = 9.0;
+const WIND_MAX_KN: f64 = 34.0;
 
 /// Fetch band, metres: a sheltered bay at one end, a long open coast at the other.
 ///
