@@ -118,6 +118,7 @@ pub fn setup(
 
 pub fn update(
     origin: Res<frame::RenderOrigin>,
+    ink: Res<crate::world::Ink>,
     sim: Res<Sim>,
     time: Res<Time>,
     mut wake: ResMut<Wake>,
@@ -198,7 +199,19 @@ pub fn update(
             // the wake had a hard rim, which is the other half of why it read as a
             // sheet of something rather than as foam.
             let across_fade = 1.0 - (u * u) as f32;
-            colours.push([1.0, 1.0, 1.0, alpha * across_fade * across_fade]);
+            let mut a = alpha * across_fade * across_fade;
+            if ink.0 {
+                // The drawn sea has four tones in it and a hard edge between them, and a
+                // wake smeared smoothly across that is the one soft thing left in the
+                // picture. Three steps and nothing between: the white of the break, the
+                // paler water behind it, and the sea.
+                a = match a {
+                    x if x > 0.34 => 0.62,
+                    x if x > 0.12 => 0.26,
+                    _ => 0.0,
+                };
+            }
+            colours.push([1.0, 1.0, 1.0, a]);
             uvs.push(Vec2::new(
                 (u as f32 * 0.5 + 0.5).clamp(0.0, 1.0),
                 index as f32,

@@ -114,8 +114,10 @@ pub fn setup(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     origin: Res<frame::RenderOrigin>,
+    ink: Res<crate::world::Ink>,
     sim: Res<Sim>,
     time: Res<Time>,
     mut spray: ResMut<Spray>,
@@ -287,7 +289,19 @@ pub fn update(
         // one is nearly white — and between them is the whole range you see along a bow
         // wave at once.
         let sea = Vec3::new(0.62, 0.78, 0.92);
-        let colour = sea.lerp(Vec3::ONE, (life * 1.4 + (1.0 - s.tint) * 0.5).clamp(0.0, 1.0));
+        let mut colour =
+            sea.lerp(Vec3::ONE, (life * 1.4 + (1.0 - s.tint) * 0.5).clamp(0.0, 1.0));
+        let mut alpha = alpha;
+        if ink.0 {
+            // Drawn foam is ink, not airbrush. An inker does not fade a speck out over
+            // two seconds — the mark is there at full strength or it is not there, and
+            // what makes the water seethe is marks appearing and vanishing rather than
+            // dimming. So the twinkle becomes the switch: above the line it is a white
+            // dot, below it there is nothing, and the sparkle comes out of the same
+            // phases that were only shading it before.
+            alpha = if alpha > 0.22 { 0.95 } else { 0.0 };
+            colour = Vec3::new(0.97, 0.99, 1.0);
+        }
         let height = sim.sim.water.height(s.at, t) + 0.06;
         let centre = origin.to_bevy(s.at, height as f32);
         // Facing the eye, so a speck is a speck from everywhere rather than a flake
