@@ -160,6 +160,19 @@ pub fn update(
     let starboard = st.starboard();
     let lee = -sim.sim.telemetry.awa.signum();
 
+    // Riding a crest. The top of a wave is where the water is already breaking — it is
+    // the steepest part of it and the part with the least support under it — so a hull
+    // driving through one tears up far more than the same hull in the trough. It is also
+    // the moment a sailor sees: she lifts, the whole length of her goes white, and then
+    // she settles and it goes quiet again.
+    //
+    // Measured against the sea's own significant height rather than an absolute, so a
+    // crest in a one-metre sea counts as a crest and a one-metre swell on a flat day
+    // does not drown the boat in foam.
+    let hs = sim.sim.telemetry.significant_height.max(0.05);
+    let at_crest = ((sim.sim.water.height(st.pos, t) / hs - 0.2) / 0.6).clamp(0.0, 1.0);
+    spray.owed += 320.0 * (at_crest * at_crest) as f32 * fraction as f32 * dt;
+
     // And the stem cutting a wave, which is a different thing from a bow wave and looks
     // it: not a steady moustache but a burst, thrown when she drives her forefoot into
     // the back of the next one. It is the sound a boat makes as much as the sight, and

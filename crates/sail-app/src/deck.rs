@@ -204,18 +204,27 @@ fn half_section(z: f32) -> Vec<(f32, f32)> {
     let (inner, _) = opening(z);
     let mut out: Vec<(f32, f32)> = Vec::with_capacity(8);
 
-    if inner <= 1e-4 {
-        // Plain deck, closed to the centreline.
-        out.push((0.0, sheer + camber(0.0, half)));
-    } else {
-        // Cockpit: a hole straight through the deck.
-        //
-        // There is no sole and no well. The deck simply stops, and what you are
-        // standing in is the inside of the hull — the scanned planking, which is the
-        // best surface on the boat and was being hidden under a fabricated floor. An
-        // open boat with her ends decked over is what she is; this is what that looks
-        // like from the tiller.
-        out.push((inner, sheer));
+    // The inboard edge: the centreline on plain deck, the lip of the well where the
+    // cockpit is cut through it.
+    //
+    // There is no sole and no well under the opening. The deck simply stops, and what
+    // you are standing in is the inside of the hull — the scanned planking, which is the
+    // best surface on the boat.
+    let start = if inner <= 1e-4 { 0.0 } else { inner };
+    out.push((start, sheer + camber(start, half)));
+    // And three stations across the deck between there and the sheer.
+    //
+    // There used to be none: an inboard point and an edge point, which makes a crowned
+    // deck out of two flat triangles meeting in a ridge down the middle. A crown is a
+    // curve — that is the whole of what the word means — and at this width the
+    // difference between a curve and a tent is four centimetres of ridge running the
+    // length of the boat, with a hard shading break along it that reads as a crease in
+    // the planking.
+    const ACROSS: usize = 3;
+    for k in 1..=ACROSS {
+        let f = k as f32 / (ACROSS + 1) as f32;
+        let x = start + (half - start) * f;
+        out.push((x, sheer + camber(x, half)));
     }
     out.push((half, sheer));
     // And a skirt, tucked down inside the planking.
@@ -236,12 +245,17 @@ fn half_section(z: f32) -> Vec<(f32, f32)> {
 }
 
 /// Camber: a deck and a coachroof are both crowned, or they hold water.
+///
+/// Flattened from 0.055 of the half-beam to 0.035, which on a 1.7 m half-beam takes the
+/// crown from 94 mm to 60 mm. The first number is a coachroof's camber and this is a
+/// deck's: a working boat's foredeck is nearly flat, because people stand on it and
+/// work there, and the crown only has to shed water.
 fn camber(across: f32, half: f32) -> f32 {
     if half <= 1e-4 {
         return 0.0;
     }
     let u = (across / half).clamp(-1.0, 1.0);
-    0.055 * half * (1.0 - u * u)
+    0.035 * half * (1.0 - u * u)
 }
 
 /// Build the structure above the sheer as two meshes: what you walk on, and what you
