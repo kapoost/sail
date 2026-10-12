@@ -273,6 +273,21 @@ pub fn setup(
                 MeshMaterial3d(painted_mat.clone()),
                 Transform::default(),
             ));
+            // Bottom boards over the bilge, planked like the deck because that is
+            // what they are. Without them the open cockpit looks straight through the
+            // hull at the sea, which is a thing no boat does for long.
+            b.spawn((
+                Mesh3d(meshes.add(crate::deck::sole_mesh())),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.62, 0.58, 0.50),
+                    base_color_texture: Some(images.add(crate::deck_texture::planking())),
+                    perceptual_roughness: 0.80,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                })),
+                Transform::default(),
+            ));
             // Toerail along the sheer and coaming round the cockpit: varnished, so
             // they read as trim rather than as more deck.
             let varnish = materials.add(StandardMaterial {

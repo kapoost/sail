@@ -110,10 +110,13 @@ fn opening(z: f32) -> (f32, f32) {
 
 /// Where the bottom boards sit below the deck, metres.
 ///
-/// Not a built sole any more — the cockpit is open to the hull — but the helmsman
-/// still stands on something, and on an open boat that is the bottom boards over the
-/// bilge. This is what the eye height is measured from.
-const SOLE_DROP: f32 = 0.78;
+/// Low enough that you are standing *in* the hull and looking at her planking, high
+/// enough to be above the waterline — which is the whole point of them. Opening the
+/// cockpit through the deck meant you could see the sea inside the boat, because the
+/// sea surface runs straight through the hull and there was nothing in the way. The
+/// answer is not to cut a hole in the ocean; it is that a boat has a floor over her
+/// bilge, and this one had none.
+const SOLE_DROP: f32 = 0.68;
 
 /// The section from the centreline out to the sheer, as `(x, y)` going outwards.
 ///
@@ -385,6 +388,31 @@ pub fn trim_mesh() -> Mesh {
             }
         }
         previous = Some((low, high));
+    }
+    surface.build()
+}
+
+/// The bottom boards: a planked floor over the bilge, seen down through the cockpit.
+///
+/// Wider than the opening so no gap shows at its edges, and narrower than the hull so
+/// it sits inside her rather than through her sides. It runs a little beyond the
+/// cockpit at both ends for the same reason — you can see further forward and aft
+/// through a hole than the hole itself is long.
+pub fn sole_mesh() -> Mesh {
+    let mut surface = Surface::default();
+    let (z0, z1) = (COCKPIT_FWD - 0.8, COCKPIT_AFT + 0.8);
+    let steps = 60;
+    let mut previous: Option<[Vec3; 2]> = None;
+    for i in 0..=steps {
+        let z = z0 + (z1 - z0) * (i as f32 / steps as f32);
+        let (half, sheer) = sheer_at(z);
+        let y = sheer - SOLE_DROP;
+        let x = half * 0.70;
+        let edge = [Vec3::new(-x, y, z), Vec3::new(x, y, z)];
+        if let Some(p) = previous {
+            surface.quad([p[0], edge[0], edge[1], p[1]], true);
+        }
+        previous = Some(edge);
     }
     surface.build()
 }
