@@ -20,39 +20,70 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
-/// Her sheer, station by station: `(z, half-beam, height above the waterline)`.
+/// Her gunwale, station by station: `(z, half-beam, height above the waterline)`.
 ///
-/// Measured off the scan's vertices at half-metre stations, in the boat's own frame —
-/// bow at -Z, which is where the waterline shape says it is. The hull is fine forward
-/// and full aft, which is the only test that actually distinguishes the ends of a
-/// double-ender; the stem being *lower* than the sternpost here is a quirk of this
-/// boat and led the first attempt to put her bow at the wrong end.
+/// Measured as a **point on the hull** — at each station, both sides, the topmost
+/// vertex, and its height and its offset taken together. That pairing is the whole
+/// correction. The first version measured the two separately: the greatest half-beam
+/// anywhere on the station, and a smoothed sheer height. They are not the same point.
+/// A hull's widest place is below its rail, so the deck came out wider than the boat
+/// by twenty to twenty-five centimetres over most of her length — and forward, where
+/// the real gunwale falls away sharply, the smoothed height was above the hull
+/// altogether and the deck overhung by as much as 1.47 m, floating in the air.
 ///
-/// The heights are smoothed. Raw, they jump a hand's breadth between neighbouring
-/// stations, because the scan is of a real boat with thwarts, a rubbing strake and a
-/// century of wear, and a deck laid on that reads as a mistake rather than as detail.
-const SHEER: [(f32, f32, f32); 21] = [
-    (-5.50, 0.16, 1.10),
-    (-5.00, 0.26, 1.06),
-    (-4.50, 0.42, 1.02),
-    (-4.00, 0.75, 0.97),
-    (-3.50, 1.00, 0.91),
-    (-3.00, 1.18, 0.85),
-    (-2.50, 1.35, 0.80),
-    (-2.00, 1.47, 0.76),
-    (-1.50, 1.56, 0.74),
-    (-1.00, 1.63, 0.73),
-    (-0.50, 1.68, 0.73),
-    (0.00, 1.70, 0.74),
-    (0.50, 1.70, 0.76),
-    (1.00, 1.69, 0.79),
-    (1.50, 1.65, 0.82),
-    (2.00, 1.59, 0.86),
-    (2.50, 1.53, 0.90),
-    (3.00, 1.44, 0.95),
-    (3.50, 1.32, 1.01),
-    (4.50, 0.93, 1.16),
-    (5.50, 0.29, 1.35),
+/// Measured at quarter-metre stations rather than half, which is what lets the pairs
+/// be used nearly raw: a dense true curve needs no smoothing, where a sparse one does
+/// and smoothing is exactly what took the points off the hull. Only a three-station
+/// mean is applied, and to both coordinates together, so the result stays near the
+/// surface it came from.
+///
+/// It also says the freeboard amidships is 0.59 m, not the 0.79 the deck was being
+/// built at. She is a lower boat than she has been drawn as.
+const SHEER: [(f32, f32, f32); 44] = [
+    (-5.50, 0.030, 1.100),
+    (-5.25, 0.063, 1.014),
+    (-4.75, 0.075, 1.003),
+    (-4.50, 0.072, 0.979),
+    (-4.25, 0.057, 1.003),
+    (-4.00, 0.031, 1.029),
+    (-3.75, 0.242, 0.952),
+    (-3.50, 0.486, 0.830),
+    (-3.25, 0.773, 0.701),
+    (-3.00, 0.871, 0.675),
+    (-2.75, 0.964, 0.652),
+    (-2.50, 1.056, 0.633),
+    (-2.25, 1.149, 0.618),
+    (-2.00, 1.217, 0.606),
+    (-1.75, 1.271, 0.596),
+    (-1.50, 1.314, 0.665),
+    (-1.25, 1.353, 0.662),
+    (-1.00, 1.402, 0.660),
+    (-0.75, 1.420, 0.585),
+    (-0.50, 1.468, 0.589),
+    (-0.25, 1.483, 0.594),
+    (0.00, 1.506, 0.602),
+    (0.25, 1.501, 0.612),
+    (0.50, 1.489, 0.625),
+    (0.75, 1.458, 0.642),
+    (1.00, 1.451, 0.733),
+    (1.25, 1.429, 0.751),
+    (1.50, 1.401, 0.768),
+    (1.75, 1.361, 0.713),
+    (2.00, 1.328, 0.736),
+    (2.25, 1.292, 0.758),
+    (2.50, 1.269, 0.779),
+    (2.75, 1.224, 0.807),
+    (3.00, 1.163, 0.837),
+    (3.25, 1.081, 0.871),
+    (3.50, 1.005, 0.906),
+    (3.75, 0.913, 0.947),
+    (4.00, 0.800, 1.017),
+    (4.25, 0.585, 1.128),
+    (4.50, 0.394, 1.224),
+    (4.75, 0.212, 1.267),
+    (5.00, 0.148, 1.273),
+    (5.25, 0.125, 1.270),
+    (5.50, 0.040, 1.300),
 ];
 
 /// Where the cockpit begins and ends.
@@ -161,8 +192,8 @@ fn half_section(z: f32) -> Vec<(f32, f32)> {
     // the way the topsides tumble home, far enough to cover the worst of the scatter.
     // Which is also how a deck is really built: it lands on a shelf inside the
     // planking rather than butting against its top edge.
-    out.push((half - 0.04, sheer - 0.14));
-    out.push((half - 0.14, sheer - 0.34));
+    out.push((half - 0.02, sheer - 0.07));
+    out.push((half - 0.07, sheer - 0.18));
     out
 }
 

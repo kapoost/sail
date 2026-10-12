@@ -332,10 +332,15 @@ impl BoatConfig {
                 lwl,
                 waterline_beam: 2.60,
                 canoe_draft: 1.00,
-                // The rail amidships, 0.79 m up — not the 1.45 m top of the bounding
-                // box, which is the stem head. Freeboard sets reserve buoyancy, so
-                // taking the stem for the deck gives her twice the reserve she has.
-                freeboard: 0.79,
+                // The rail amidships, 0.59 m up.
+                //
+                // Measured three times and wrong twice. The bounding box said 1.45 m,
+                // which is the stem head. Reading the sheer height separately from the
+                // beam said 0.79. Taking the gunwale as a single point on the hull —
+                // the topmost vertex of each station, its height and its offset
+                // together — says 0.59, and that is the one that is a place on the
+                // boat rather than a statistic about her.
+                freeboard: 0.59,
                 // Calibrated so she floats at the waterline the scan says she floats
                 // at, and asserted by `the_boat_floats_at_its_design_waterline`. Far
                 // finer than the charter boat's 0.452, because the hull is: a deep,
