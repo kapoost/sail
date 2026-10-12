@@ -121,6 +121,11 @@ pub struct BoatConfig {
     // --- Rig ---
     pub main: RiggedSail,
     pub genoa: RiggedSail,
+    /// Chord angle at which the headsail starts to lie on the standing rigging.
+    ///
+    /// Derived from where the cap shroud stands at the sail's own mid-height, not
+    /// chosen: see [`crate::sail::rig_interference`].
+    pub headsail_bears_at: f64,
     /// Largest mainsail reduction available, as a fraction of its area. The headsail
     /// has no equivalent limit: a roller genoa rolls all the way away.
     pub max_reef: f64,
@@ -215,6 +220,7 @@ impl BoatConfig {
                 z_ce: 4.60,
                 x_ce: 1.90,
             },
+            headsail_bears_at: rad(19.0),
             max_reef: 0.55,
 
             max_thrust: 2200.0,
@@ -401,6 +407,7 @@ impl BoatConfig {
                 z_ce: 4.40,
                 x_ce: 1.95,
             },
+            headsail_bears_at: rad(17.0),
             max_reef: 0.68,
 
             max_thrust: 1600.0,
@@ -587,6 +594,7 @@ impl BoatConfig {
                 z_ce: 6.40,
                 x_ce: 2.90,
             },
+            headsail_bears_at: rad(19.0),
             max_reef: 0.55,
 
             max_thrust: 5500.0,

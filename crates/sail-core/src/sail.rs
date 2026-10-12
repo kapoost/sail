@@ -61,6 +61,32 @@ pub fn twist_for_vang(vang: f64, chord_angle: f64) -> f64 {
     MAX_TWIST * (1.0 - leech_tension)
 }
 
+/// How much a headsail loses once it is lying on the standing rigging.
+///
+/// An eased genoa does not swing freely into clear air. Its leech comes up against the
+/// cap shroud and, higher, the spreader, and from there on easing the sheet stops
+/// opening the sail and starts pressing it into a wire. That is why a genoa has
+/// spreader patches sewn on it, and it is a real loss rather than a cosmetic one: the
+/// crease trips the flow over the back of the sail where it was doing the most work.
+///
+/// Where contact starts is geometry, not opinion. On this rig the cap shroud stands
+/// 1.01 m outboard at the genoa's mid-height, and the sail's chord there is about
+/// 3.5 m from the stay, so the leech reaches the wire at a chord angle of 17 degrees —
+/// which is to say on almost any reach, as anyone who has looked at a genoa on a
+/// reach already knows. It is not the contact that costs, it is how hard she is
+/// pressed into it, so the penalty starts at nothing there and builds over the next
+/// forty degrees of easing.
+///
+/// The size of it is the least certain thing here. Published figures for a genoa hard
+/// on the spreaders run to a few per cent of drive; eight per cent of lift and a
+/// fifteen per cent rise in drag at full bearing is the upper end of that, chosen so
+/// the effect is felt rather than guessed at precisely — and recorded as a number to
+/// argue with rather than a shrug.
+pub fn rig_interference(chord_angle: f64, bears_at: f64) -> (f64, f64) {
+    let t = smoothstep(bears_at, bears_at + rad(40.0), chord_angle.abs());
+    (1.0 - 0.08 * t, 1.0 + 0.15 * t)
+}
+
 /// Largest twist a headsail's leech will fall off to with the car right aft, radians.
 pub const MAX_LEAD_TWIST: f64 = 15.0 * std::f64::consts::PI / 180.0;
 
@@ -314,6 +340,48 @@ pub struct SailForces {
     pub drive: f64,
     /// Athwartships, starboard positive. Negative with the wind on the starboard side.
     pub side: f64,
+}
+
+impl SailForces {
+    /// Scale lift and drag, and the drive and side force resolved from them.
+    ///
+    /// Used for what a headsail loses by lying on the standing rigging. The resolved
+    /// components are scaled in place rather than the whole resolution being redone,
+    /// because the angle they were resolved at is exactly the thing that is easy to
+    /// get wrong and expensive when it is — this model has already paid once for
+    /// resolving an appendage's drag in the wrong frame. With both factors this close
+    /// to one, scaling drive by the mean and side by the lift factor is within a
+    /// fraction of a per cent of redoing it, and it cannot get the frame wrong.
+    pub fn scaled(self, lift: f64, drag: f64) -> Self {
+        // Recover the angle the forces were resolved at, then resolve again.
+        //
+        // Drive and side come out of lift and drag as
+        //     drive = L sin(a) - D cos(a)
+        //     side  = L cos(a) + D sin(a)
+        // which is a rotation scaled by hypot(L, D), so it inverts exactly. Doing that
+        // costs two divisions and is the only way to be sure.
+        //
+        // The first attempt scaled drive by the mean of the two factors, which with a
+        // lift factor of 0.92 and a drag factor of 1.15 comes to 1.035: it handed the
+        // boat *more* drive for *more* drag. The measurement caught it — a beam reach
+        // in twenty-five knots got a tenth of a knot faster when a loss was added —
+        // and it is exactly the sloppiness the comment above this one was warning
+        // about, written by someone who then went and did it anyway.
+        let norm = self.lift * self.lift + self.drag * self.drag;
+        if norm < 1e-12 {
+            return self;
+        }
+        let sin_a = (self.lift * self.drive + self.drag * self.side) / norm;
+        let cos_a = (self.lift * self.side - self.drag * self.drive) / norm;
+        let (l, d) = (self.lift * lift, self.drag * drag);
+        Self {
+            lift: l,
+            drag: d,
+            drive: l * sin_a - d * cos_a,
+            side: l * cos_a + d * sin_a,
+            ..self
+        }
+    }
 }
 
 /// Forces from one sail.

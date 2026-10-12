@@ -12,8 +12,8 @@ use crate::boat::BoatConfig;
 use crate::hull::{frictional_resistance, induced_resistance, residuary_resistance, righting_arm};
 use crate::hydrostatics;
 use crate::sail::{
-    camber_for_lead, camber_for_outhaul, headsail_blanketing, sail_forces, twist_for_lead,
-    twist_for_vang,
+    camber_for_lead, camber_for_outhaul, headsail_blanketing, rig_interference, sail_forces,
+    twist_for_lead, twist_for_vang,
 };
 use crate::state::{BoatState, Controls, Telemetry};
 use crate::units::{rad, wrap_pi, wrap_tau, GRAVITY, RHO_SEA};
@@ -251,6 +251,14 @@ impl Simulation {
             .profile
             .sheet_for_chord_angle(jib_chord + jib_twist);
 
+        // What the headsail loses from lying on the shrouds and the spreader. Only
+        // the headsail: the mainsail's own contact with the rigging is the boom
+        // against the cap shroud, which is already a hard limit on its chord angle.
+        let (jib_lift, jib_drag) = rig_interference(jib_chord, cfg.headsail_bears_at);
+        // The upper section bears harder: the spreader reaches further inboard than the
+        // shroud does at deck level, so the sail meets it sooner going up.
+        let (jib_upper_lift, jib_upper_drag) =
+            rig_interference(jib_chord + jib_twist, cfg.headsail_bears_at * 0.8);
         let jib = sail_forces(
             &cfg.genoa.profile,
             jib_awa,
@@ -260,7 +268,8 @@ impl Simulation {
             st.heel,
             headsail_blanketing(jib_awa),
             jib_camber,
-        );
+        )
+        .scaled(jib_lift, jib_drag);
         let jib_upper = sail_forces(
             &cfg.genoa.profile,
             jib_upper_awa,
@@ -270,7 +279,8 @@ impl Simulation {
             st.heel,
             headsail_blanketing(jib_upper_awa),
             jib_camber,
-        );
+        )
+        .scaled(jib_upper_lift, jib_upper_drag);
 
         let drive = main.drive + main_upper.drive + jib.drive + jib_upper.drive;
         let sail_side = main.side + main_upper.side + jib.side + jib_upper.side;
