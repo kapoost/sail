@@ -510,6 +510,13 @@ pub fn update(
                 // it is the thing that catches.
                 let gooseneck = Vec3::new(0.0, BOOM_HEIGHT, MAST_FOOT_Z);
                 let flying = sim.controls.headsail != sail_core::state::Headsail::Genoa;
+                // Whether there is actually something for the rope to be led round. If
+                // there is not, the sheet is *one* rope and has to be drawn as one:
+                // splitting a straight run in half and sagging each half about its own
+                // chord puts a kink at the join, because two catenaries of different
+                // lengths do not meet at the same angle. The fix is not to bend the
+                // rope better; it is not to cut it in two.
+                let mut led = true;
                 let join = if flying {
                     // A sail set flying sheets *outside* everything — outside the cap
                     // shrouds, outside the lifelines, aft to a block on the quarter.
@@ -535,8 +542,8 @@ pub fn update(
                     let straight = clew.lerp(car_at, f);
                     let clears = cfg.beam as f32 * 0.5 + 0.18;
                     if straight.x.abs() >= clears {
-                        // Already outboard of the wire: nothing to lead it round, and
-                        // the join sits on the line where it cannot be seen.
+                        // Already outboard of the wire: nothing to lead it round.
+                        led = false;
                         straight
                     } else {
                         Vec3::new(
@@ -564,13 +571,18 @@ pub fn update(
                     if best.0 < 0.30 && best.1 > 0.05 && best.1 < 0.95 {
                         best.2 + Vec3::Y * 0.09
                     } else {
+                        led = false;
                         clew.lerp(car_at, 0.5)
                     }
                 };
-                let (a, b) = if part == 0 {
-                    (clew, join)
-                } else {
-                    (join, car_at)
+                let (a, b) = match (part, led) {
+                    // Led round something: two ropes, two sags, a real bend at the block.
+                    (0, true) => (clew, join),
+                    (_, true) => (join, car_at),
+                    // Nothing in the way: the whole run is the second part and the first
+                    // collapses onto the clew, so one curve is drawn and it has no corner.
+                    (0, false) => (clew, clew),
+                    _ => (clew, car_at),
                 };
                 Span {
                     // Only the working sheet is drawn at all now. The lazy one used to

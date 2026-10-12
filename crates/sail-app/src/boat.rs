@@ -850,13 +850,14 @@ pub fn update_sails(
                     // aft past the spar, and a gennaker was being drawn straight through
                     // it.
                     //
-                    // The staysail is the exception and it is not an oversight. Its own
-                    // stay lands on the mast, so its head is already there and its cloth
-                    // hangs within arm's reach of the spar for its whole hoist — a
-                    // clearance radius does not keep it off the mast, it shoves the
-                    // whole sail sideways every frame. It works forward of the shrouds
-                    // on its own boom and wants nothing in its way.
-                    clear_mast: surface.which == Sail::Headsail,
+                    // Including the staysail. It was excepted while its stay landed
+                    // fifteen centimetres forward of the spar's axis — inside the
+                    // clearance radius, so the constraint shoved the whole sail sideways
+                    // from the head down. The stay has been moved forward to where an
+                    // inner stay's tang actually is, which leaves the head clear and the
+                    // constraint free to do its one job: stop the cloth being drawn
+                    // through the mast, which is what it was doing.
+                    clear_mast: surface.which != Sail::Main,
                 },
             );
         }
@@ -1010,8 +1011,15 @@ pub fn staysail_tack() -> Vec3 {
 }
 
 /// The head of it, where the inner stay meets the mast.
+///
+/// Forty centimetres forward of the spar's axis, not fifteen. At fifteen the head sat
+/// *inside* the mast's own clearance radius, so the sail could not be given the mast
+/// constraint at all without the constraint shoving the whole sail sideways from the
+/// head down — which is why it was excepted from it, and why it was then drawn straight
+/// through the mast. An inner stay lands on a tang bolted to the front of the spar
+/// anyway; it has never been on the centreline of it.
 pub fn staysail_head() -> Vec3 {
-    Vec3::new(0.0, DECK + 8.4, MAST_FOOT_Z - 0.15)
+    Vec3::new(0.0, DECK + 8.4, MAST_FOOT_Z - 0.40)
 }
 
 /// The club boom's length, which is the sail's foot and therefore not a free choice.
