@@ -19,6 +19,7 @@ mod hud;
 mod input;
 mod islands;
 mod panel;
+mod retro;
 mod rig;
 mod sail_texture;
 mod sea_texture;
@@ -97,6 +98,7 @@ fn main() {
         .init_resource::<clutch::Bank>()
         .init_resource::<input::Pilot>()
         .init_resource::<frame::RenderOrigin>()
+        .init_resource::<retro::Retro>()
         .init_resource::<chart::Chart>()
         .init_resource::<chart::Track>()
         .init_resource::<world::SurfaceDrift>()
@@ -157,6 +159,8 @@ fn main() {
                     hud::toggle,
                     course::restart,
                     chart::toggle,
+                    retro::toggle,
+                    retro::apply,
                 ),
             )
                 .chain(),

@@ -318,6 +318,7 @@ pub fn draw(
                  Z / X   engine astern / ahead\n\
                  M       chart on / off      [ ]  zoom it out and in\n\
                  mouse   hold the right button to look around; Space looks ahead\n\
+                 V       picture: sharp, 960, 720, 480 across\n\
                  T  snap to trim   C  camera   L  new consignment   K  mute   \
 Tab  hide panel",
             );
