@@ -420,6 +420,12 @@ impl Simulation {
             jib_camber,
         )
         .scaled(jib_lift, jib_drag);
+        // A sail that has collapsed is not a sail quietly making less force: it is cloth
+        // flogging. The force model already took its area away through `fill`; this is
+        // what says so out loud, so the picture shakes and the instruments read LUFFING
+        // rather than showing a serene triangle doing nothing.
+        let mut jib = jib;
+        jib.coeffs.luffing = jib.coeffs.luffing.max(1.0 - fill);
         let jib_upper = sail_forces(
             &head.profile,
             jib_upper_awa,
@@ -431,6 +437,8 @@ impl Simulation {
             jib_camber,
         )
         .scaled(jib_upper_lift, jib_upper_drag);
+        let mut jib_upper = jib_upper;
+        jib_upper.coeffs.luffing = jib_upper.coeffs.luffing.max(1.0 - fill);
 
         // --- Staysail: the inner sail of a double head rig ------------------------
         //

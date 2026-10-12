@@ -519,15 +519,26 @@ pub fn update(
                     // three metres off the boat, so the rope bent in towards the
                     // centreline and then back out again, which no sheet does. A lead
                     // point can hold a rope out. It cannot pull it in.
-                    let straight = {
-                        let f = ((z - clew.z) / (car_at.z - clew.z)).clamp(0.0, 1.0);
-                        clew.x + (car_at.x - clew.x) * f
-                    };
-                    Vec3::new(
-                        side * (cfg.beam as f32 * 0.5 + 0.18).max(straight.abs()),
-                        crate::deck::deck_height(z) + 0.35,
-                        z,
-                    )
+                    // Only if the straight run would cut through the shrouds. A lead
+                    // point is a thing a rope is pulled *around*; it has no business
+                    // existing when the rope already passes outside everything, and
+                    // putting one there anyway kinked the sheet in towards the
+                    // centreline on the way to the sail and out again — reported from
+                    // the deck, twice, and right both times.
+                    let f = ((z - clew.z) / (car_at.z - clew.z)).clamp(0.0, 1.0);
+                    let straight = clew.lerp(car_at, f);
+                    let clears = cfg.beam as f32 * 0.5 + 0.18;
+                    if straight.x.abs() >= clears {
+                        // Already outboard of the wire: nothing to lead it round, and
+                        // the join sits on the line where it cannot be seen.
+                        straight
+                    } else {
+                        Vec3::new(
+                            side * clears,
+                            crate::deck::deck_height(z) + 0.35,
+                            z,
+                        )
+                    }
                 } else {
                     let spar = boom_end - gooseneck;
                     let run = car_at - clew;

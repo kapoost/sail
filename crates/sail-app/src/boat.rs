@@ -974,7 +974,7 @@ pub fn headsail_shape(
     let head = Vec3::new(0.0, crate::rig::MAST_HEAD - 0.12, MAST_FOOT_Z);
     // A gennaker's area is cloth, not triangle, and there is a great deal of cloth in
     // it; a Code 0 is flatter and sits between the two.
-    let fullness = if gennaker { 1.80 } else { 1.35 };
+    let fullness = if gennaker { 1.45 } else { 1.25 };
     let foot = foot_for_area(
         cfg.headsail(kind).area as f32,
         head - tack,
@@ -982,7 +982,7 @@ pub fn headsail_shape(
         fullness,
     ) * out;
     let hoisted = tack.lerp(head, 0.3 + 0.7 * out);
-    let cloth = Cloth::cut(tack, hoisted, foot, if gennaker { 0.62 } else { 0.52 });
+    let cloth = Cloth::flying(tack, hoisted, foot, if gennaker { 0.90 } else { 0.93 });
     // A gennaker is cut deep and a Code 0 nearly flat, and neither has a car to change
     // it: the depth is the sailmaker's, not the trimmer's.
     let belly = if gennaker { 1.0 } else { 0.25 };
@@ -1199,6 +1199,26 @@ impl Cloth {
     /// The leech is not a free number: given the luff and the foot it falls out of where
     /// the clew is meant to sit, and sitting it a little above the tack is what makes a
     /// headsail's clew ride where a headsail's clew rides rather than on the deck.
+    /// A sail cut from the rig's own proportions rather than from a designed clew.
+    ///
+    /// For the sails set flying this is the only way to get it right, and the design-
+    /// clew method was putting them badly wrong: a leech worked out from a nominal clew
+    /// position came out nearly as long as the luff, which shrinks the ring the clew
+    /// rides until the corner cannot get aft of its own tack. Measured, the gennaker's
+    /// clew was landing two metres abeam the sprit with the sail a narrow deep sliver —
+    /// every bit of belly the numbers promised and nowhere for it to be.
+    ///
+    /// A sailmaker does not work that way round. An asymmetric is cut to proportions of
+    /// the hoist: leech about nine tenths of the luff, foot a little over half. Give it
+    /// those and the clew flies where a gennaker's flies — four to five metres off the
+    /// boat, three to five up, and well aft of the tack.
+    pub fn flying(tack: Vec3, head: Vec3, foot: f32, leech_of_luff: f32) -> Self {
+        Self {
+            foot,
+            leech: (head - tack).length() * leech_of_luff,
+        }
+    }
+
     pub fn cut(tack: Vec3, head: Vec3, foot: f32, rise: f32) -> Self {
         let aft = Vec3::new(0.0, rise, 1.0).normalize();
         let design = tack + aft * foot;
@@ -1274,7 +1294,7 @@ pub fn clew_on_cloth(
         // point nearest the sheet block instead — which is what this did — walked the
         // corner in towards the centreline as the sail filled, which is the one
         // direction it never goes.
-        let cost = 20.0 * (bearing - want).powi(2) - 0.5 * p.x.abs() / cloth.foot.max(0.5)
+        let cost = 20.0 * (bearing - want).powi(2) - 0.3 * p.x.abs() / cloth.foot.max(0.5)
             + 0.1 * (p - block).length() / cloth.foot.max(0.5);
         if cost < best_cost {
             best_cost = cost;
