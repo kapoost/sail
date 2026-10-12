@@ -46,6 +46,28 @@ pub const TRACK_FORWARD: f32 = -0.80;
 pub const TRACK_AFT: f32 = 2.20;
 
 /// Fore-and-aft position of the car for a given control setting.
+/// Where a headsail lead car actually stands, in the boat's own frame.
+///
+/// One definition, for the same reason the shroud has one: the fitting is drawn here,
+/// the sheet is drawn to here, and the clew is solved against here. The rigging used
+/// to compute its own — a flat deck at a fixed beam fraction — so the sheet ran to a
+/// point a hand's breadth from the car it was supposed to be turning through.
+pub fn genoa_car_at(car: f32, starboard: bool) -> Vec3 {
+    let z = car_position(car);
+    let side = if starboard { 1.0 } else { -1.0 };
+    Vec3::new(
+        side * crate::deck::deck_half_beam(z) * TRACK_X,
+        crate::deck::deck_height(z) + 0.06,
+        z,
+    )
+}
+
+/// Where the headsail is made fast at the stem.
+pub fn genoa_tack(loa: f32) -> Vec3 {
+    let z = -loa * 0.46;
+    Vec3::new(0.0, crate::deck::deck_height(z) + 0.12, z)
+}
+
 pub fn car_position(car: f32) -> f32 {
     TRACK_FORWARD + car.clamp(0.0, 1.0) * (TRACK_AFT - TRACK_FORWARD)
 }
@@ -328,11 +350,7 @@ pub fn setup(
                     GenoaCar { starboard },
                     Mesh3d(car_mesh.clone()),
                     MeshMaterial3d(underwater_mat.clone()),
-                    Transform::from_xyz(
-                        x,
-                        crate::deck::deck_height(car_position(0.4)) + 0.06,
-                        car_position(0.4),
-                    ),
+                    Transform::from_translation(genoa_car_at(0.4, starboard)),
                 ))
                 .with_children(|car| {
                     // The sheave. The sheet does not end at the car, it turns through
@@ -396,14 +414,10 @@ pub fn update_boom(sim: Res<Sim>, mut q: Query<&mut Transform, With<Boom>>) {
 
 /// Slide the cars to wherever the control says they are.
 pub fn update_genoa_cars(sim: Res<Sim>, mut q: Query<(&GenoaCar, &mut Transform)>) {
-    let z = car_position(sim.controls.genoa_car as f32);
     // The side deck curves, so the car rides up and inboard as it goes forward. That
     // is a real track on a real sheer rather than a straight rail in mid-air.
-    let x = crate::deck::deck_half_beam(z) * TRACK_X;
-    let y = crate::deck::deck_height(z) + 0.06;
     for (car, mut transform) in &mut q {
-        let side = if car.starboard { 1.0 } else { -1.0 };
-        transform.translation = Vec3::new(side * x, y, z);
+        transform.translation = genoa_car_at(sim.controls.genoa_car as f32, car.starboard);
     }
 }
 
@@ -456,6 +470,10 @@ pub fn update_sails(
     let cfg = sim.config();
     let side = -t_.awa.signum() as f32;
     let now = time.elapsed_secs();
+    let shrouds = [
+        shroud(cfg.beam as f32, false),
+        shroud(cfg.beam as f32, true),
+    ];
 
     for (surface, mut visibility) in &mut q {
         *visibility = if surface.which == Sail::Genoa && sim.controls.furl > 0.985 {
@@ -492,7 +510,7 @@ pub fn update_sails(
                 let out = 1.0 - sim.controls.furl as f32;
                 let foot = 4.9 * out;
                 let angle = side * t_.jib.chord_angle as f32;
-                let tack = Vec3::new(0.0, DECK + 0.25, -(cfg.loa as f32) * 0.46);
+                let tack = genoa_tack(cfg.loa as f32);
                 let head = Vec3::new(0.0, DECK + 13.4, MAST_FOOT_Z);
                 let car = Vec3::new(
                     side * cfg.beam as f32 * TRACK_X,
@@ -527,14 +545,70 @@ pub fn update_sails(
             build_sail(
                 &mut mesh,
                 &geometry,
-                side,
-                twist,
-                forces.coeffs.luffing as f32,
-                forces.camber as f32,
-                now,
+                &SailTrim {
+                    lee: side,
+                    twist,
+                    luffing: forces.coeffs.luffing as f32,
+                    draft: forces.camber as f32,
+                    now,
+                    shrouds: &shrouds,
+                },
             );
         }
     }
+}
+
+/// Where a cap shroud runs, in the boat's own frame.
+///
+/// Defined once, because two things need it and they must not disagree: the rigging
+/// draws it, and the sails lean on it. A sail leaning on a wire that is drawn
+/// somewhere else is worse than no constraint at all.
+pub fn shroud(beam: f32, starboard: bool) -> (Vec3, Vec3) {
+    let side = if starboard { 1.0 } else { -1.0 };
+    (
+        Vec3::new(0.0, crate::rig::MAST_HEAD, MAST_FOOT_Z),
+        Vec3::new(side * beam * 0.45, DECK, MAST_FOOT_Z + 0.4),
+    )
+}
+
+/// How close the cloth may come to the wire, metres.
+const SHROUD_RADIUS: f32 = 0.05;
+/// How far either side of the wire the sail is dragged into the crease, metres.
+const SHROUD_INFLUENCE: f32 = 0.9;
+
+/// Hold a point of sailcloth off the standing rigging.
+///
+/// An eased headsail does not pass through the shrouds. It lies *against* them, and
+/// what you see is a crease running up the sail from each wire — which is also the
+/// thing that limits how far a genoa can be eased on a reach, and the reason the sail
+/// chafes where it does.
+///
+/// Formulated as "the cloth may not be further to leeward than the wire", because that
+/// is the direction the wind is pressing it: find the nearest point on the shroud,
+/// split the offset into a component along the sail's own leeward normal and one
+/// across it, and clamp the first. The second drives a smooth falloff, so the crease
+/// spreads either side of the wire rather than being a dimple where they touch.
+fn clear_of_shrouds(point: Vec3, normal: Vec3, shrouds: &[(Vec3, Vec3)]) -> Vec3 {
+    let mut p = point;
+    for (a, b) in shrouds {
+        let run = *b - *a;
+        let len2 = run.length_squared().max(1e-6);
+        let t = ((p - *a).dot(run) / len2).clamp(0.0, 1.0);
+        let nearest = *a + run * t;
+        let v = p - nearest;
+        let along = v.dot(normal);
+        let lateral = (v - normal * along).length();
+        if lateral >= SHROUD_INFLUENCE {
+            continue;
+        }
+        // Windward of the wire is `along <= -radius`; anything else has gone through.
+        if along > -SHROUD_RADIUS {
+            let u = 1.0 - lateral / SHROUD_INFLUENCE;
+            let weight = u * u * (3.0 - 2.0 * u);
+            p -= normal * (along + SHROUD_RADIUS) * weight;
+        }
+    }
+    p
 }
 
 /// Sheet length from the clew to the car for a given sheet setting.
@@ -646,15 +720,28 @@ fn sail_indices() -> Vec<u32> {
     idx
 }
 
-fn build_sail(
-    mesh: &mut Mesh,
-    g: &SailGeometry,
+/// How the cloth is behaving this frame, as opposed to where its corners are.
+struct SailTrim<'a> {
+    /// Which way is leeward: the only side a sail can belly towards.
     lee: f32,
     twist: f32,
     luffing: f32,
     draft: f32,
+    /// Seconds, for the flogging.
     now: f32,
-) {
+    /// Standing rigging the cloth is not allowed through.
+    shrouds: &'a [(Vec3, Vec3)],
+}
+
+fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
+    let SailTrim {
+        lee,
+        twist,
+        luffing,
+        draft,
+        now,
+        shrouds,
+    } = *trim;
     let mut positions = Vec::with_capacity(SAIL_U * SAIL_V);
     let mut uvs = Vec::with_capacity(SAIL_U * SAIL_V);
 
@@ -732,6 +819,7 @@ fn build_sail(
                 * free_edge
                 * chord_length.max(0.4);
             let point = luff.lerp(leech, v) + normal * (belly + flap + crease);
+            let point = clear_of_shrouds(point, normal, shrouds);
             positions.push(point);
             // Metres, not a normalised zero to one. A panel of sailcloth is a metre
             // wide whatever sail it is in, so the seams have to be laid out in the

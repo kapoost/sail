@@ -27,7 +27,7 @@ const SEGMENTS: usize = 14;
 
 const DECK: f32 = 0.95;
 const MAST_FOOT_Z: f32 = -1.8;
-const MAST_HEAD: f32 = DECK + 15.2;
+pub const MAST_HEAD: f32 = DECK + 15.2;
 /// The boom, high enough to stand under.
 ///
 /// It was a quarter of a metre *below* the helmsman's eye, which put it across the
@@ -213,8 +213,18 @@ pub fn update(
         BOOM_HEIGHT,
         MAST_FOOT_Z + boom.cos() * BOOM_LENGTH,
     );
-    let wire = [0.86_f32, 0.88, 0.90, 1.0];
-    let rope_colour = [0.93_f32, 0.90, 0.80, 1.0];
+    // Standing rigging is wire and running rigging is rope, and they do not look
+    // remotely alike. Everything was the same bright near-white, which read as fishing
+    // line strung round the boat.
+    //
+    // The running lines are also colour-coded, which is not decoration: every boat
+    // does it, for exactly the reason it helps here — in a hurry you grab the line by
+    // its colour, not by tracing where it goes.
+    let wire = [0.62_f32, 0.65, 0.68, 1.0];
+    let sheet_blue = [0.34_f32, 0.38, 0.50, 1.0];
+    let sheet_sand = [0.76_f32, 0.62, 0.44, 1.0];
+    let vang_green = [0.40_f32, 0.52, 0.42, 1.0];
+    let outhaul_red = [0.66_f32, 0.40, 0.36, 1.0];
 
     let spans: Vec<Span> = LINES
         .iter()
@@ -230,8 +240,8 @@ pub fn update(
                     MAST_FOOT_Z + boom.cos() * BOOM_LENGTH,
                 ),
                 tension: 0.35 + 0.65 * sim.controls.outhaul as f32,
-                width: 0.024,
-                colour: rope_colour,
+                width: 0.022,
+                colour: outhaul_red,
             },
             Kind::Forestay => Span {
                 from: masthead,
@@ -258,9 +268,10 @@ pub fn update(
                 } else {
                     0.0
                 };
+                let (top, foot) = crate::boat::shroud(cfg.beam as f32, starboard);
                 Span {
-                    from: masthead,
-                    to: Vec3::new(side * cfg.beam as f32 * 0.45, DECK, MAST_FOOT_Z + 0.4),
+                    from: top,
+                    to: foot,
                     tension: 1.0 - slack,
                     width: 0.020,
                     colour: wire,
@@ -272,8 +283,8 @@ pub fn update(
                 // A luffing main pulls on nothing, and the sheet says so before the
                 // telltales have finished.
                 tension: main_load * (1.0 - t.main.coeffs.luffing as f32),
-                width: 0.034,
-                colour: rope_colour,
+                width: 0.030,
+                colour: sheet_blue,
             },
             Kind::Vang => Span {
                 from: Vec3::new(
@@ -285,8 +296,8 @@ pub fn update(
                 // Its own setting, not the sail's load. A vang hauled on is bar taut
                 // whether or not the main is pulling, and an eased one hangs.
                 tension: 0.12 + 0.88 * sim.controls.vang as f32,
-                width: 0.028,
-                colour: rope_colour,
+                width: 0.025,
+                colour: vang_green,
             },
             Kind::JibSheet(starboard) => {
                 let side = if starboard { 1.0 } else { -1.0 };
@@ -296,12 +307,8 @@ pub fn update(
                 // The same solve the sail uses, so the rope ends where the sail's
                 // corner is rather than near it.
                 let out = 1.0 - furled;
-                let tack = Vec3::new(0.0, DECK + 0.25, -(cfg.loa as f32) * 0.46);
-                let car_at = Vec3::new(
-                    side * cfg.beam as f32 * crate::boat::TRACK_X,
-                    DECK + 0.09,
-                    crate::boat::car_position(sim.controls.genoa_car as f32),
-                );
+                let tack = crate::boat::genoa_tack(cfg.loa as f32);
+                let car_at = crate::boat::genoa_car_at(sim.controls.genoa_car as f32, starboard);
                 let clew = crate::boat::genoa_clew(
                     tack,
                     jib_angle,
@@ -321,11 +328,11 @@ pub fn update(
                     } else {
                         0.0
                     },
-                    width: 0.030,
+                    width: 0.027,
                     colour: [
-                        rope_colour[0],
-                        rope_colour[1],
-                        rope_colour[2],
+                        sheet_sand[0],
+                        sheet_sand[1],
+                        sheet_sand[2],
                         // Fades out with the sail as it rolls away.
                         (1.0 - furled).clamp(0.0, 1.0),
                     ],
