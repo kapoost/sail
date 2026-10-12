@@ -551,11 +551,11 @@ pub fn update_staysail_boom(
     let t_ = &sim.sim.telemetry;
     let cfg = sim.config();
     let side = -t_.awa.signum() as f32;
-    let sheet = cfg
-        .staysail
-        .profile
-        .optimal_sheet(t_.awa, sail_core::sail::CAMBER_REFERENCE);
-    let angle = side * cfg.staysail.profile.chord_angle(sheet) as f32;
+    let angle = side
+        * cfg
+            .staysail
+            .profile
+            .chord_angle(sim.controls.staysail_sheet) as f32;
     for (mut tr, mut vis) in &mut q {
         tr.rotation = Quat::from_rotation_y(angle);
         *vis = if sim.controls.staysail < 0.02 {
@@ -566,12 +566,32 @@ pub fn update_staysail_boom(
     }
 }
 
+/// How far the boom end lifts per radian of leech twist.
+///
+/// The boom swings sideways on its sheet and it also rides up and down, and the second
+/// one is not decoration: a mainsheet tackle and a vang exist to stop it, and what they
+/// are stopping is the leech of the sail pulling the end of the spar skyward. Which is
+/// exactly the twist the force model already computes — the leech falls off aloft
+/// *because* the boom has lifted — so the two are the same number seen from two ends,
+/// and tying them together is the only way they can stay honest.
+///
+/// A third of the twist angle, so the full twenty degrees of twist with the vang right
+/// off lifts the end of a six-metre boom by two thirds of a metre, and hardening the
+/// vang puts it back down.
+const BOOM_LIFT_PER_TWIST: f32 = 0.34;
+
+/// Where the boom is: swung out on its sheet, and lifted by its leech.
+pub fn boom_attitude(t: &sail_core::state::Telemetry) -> (f32, f32) {
+    let swing = -t.awa.signum() as f32 * t.main.chord_angle as f32;
+    (swing, t.twist as f32 * BOOM_LIFT_PER_TWIST)
+}
+
 pub fn update_boom(sim: Res<Sim>, mut q: Query<&mut Transform, With<Boom>>) {
-    let t_ = &sim.sim.telemetry;
-    // The boom goes out to leeward, so its sign is opposite the apparent wind side.
-    let angle = -t_.awa.signum() as f32 * t_.main.chord_angle as f32;
+    let (swing, lift) = boom_attitude(&sim.sim.telemetry);
     for mut tr in &mut q {
-        tr.rotation = Quat::from_rotation_y(angle);
+        // Swung about the mast first, then lifted about the gooseneck, which is the
+        // order the two joints come in on the boat.
+        tr.rotation = Quat::from_rotation_y(swing) * Quat::from_rotation_x(-lift);
     }
 }
 
@@ -711,6 +731,7 @@ pub fn update_sails(
                 // new clew lands within a hand's breadth of the old one. What you lose
                 // is hoist.
                 let foot = main_foot(&sim.controls);
+                let (_, lift) = boom_attitude(t_);
                 // And the hoist comes down by exactly the area the rig is losing, so
                 // the drawn triangle stays the size the force model is pulling with.
                 let shrink = 1.0 - reef * cfg.max_reef as f32;
@@ -729,7 +750,16 @@ pub fn update_sails(
                         // The clew is the boom end: level with the tack, because the
                         // boom is level. That is what made the horizontal-chord
                         // shortcut look right until a headsail turned up.
-                        clew: tack + Vec3::new(boom.sin() * foot, 0.0, boom.cos() * foot),
+                        // On the boom end, lifted with it: the clew of a mainsail is
+                        // shackled to the spar, so if the spar's end rises the corner
+                        // rises with it. Drawing the sail flat while the boom lifted
+                        // would put the cloth through the spar.
+                        clew: tack
+                            + Vec3::new(
+                                boom.sin() * foot * lift.cos(),
+                                foot * lift.sin(),
+                                boom.cos() * foot * lift.cos(),
+                            ),
                     },
                 )
             }
@@ -738,11 +768,11 @@ pub fn update_sails(
                 // stem. Self-tacking, so its angle is not a control: it finds the best
                 // one its track allows, which is the same number the force model uses.
                 let set = sim.controls.staysail as f32;
-                let sheet = cfg
-                    .staysail
-                    .profile
-                    .optimal_sheet(t_.awa, sail_core::sail::CAMBER_REFERENCE);
-                let angle = side * cfg.staysail.profile.chord_angle(sheet) as f32;
+                let angle = side
+                    * cfg
+                        .staysail
+                        .profile
+                        .chord_angle(sim.controls.staysail_sheet) as f32;
                 let tack = staysail_tack();
                 let head = staysail_head();
                 let foot = staysail_boom_length(cfg.staysail.area as f32);

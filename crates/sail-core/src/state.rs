@@ -177,10 +177,13 @@ pub struct Controls {
     /// Which sail is set forward of the mast.
     pub headsail: Headsail,
     /// How much of the staysail is set: 0 handed, 1 drawing.
-    ///
-    /// No sheet, because it is on a self-tacking boom. The only decision is whether it
-    /// is up, which is the only decision a staysail usually offers.
     pub staysail: f64,
+    /// Its sheet, which is a tackle on the end of the club boom: 0 hauled flat, 1 eased.
+    ///
+    /// It does not change sides — that is what the boom is for — but it is still a line
+    /// somebody pulls, and it is the only shape control the sail has. Hauled, the boom
+    /// comes in and the leech tightens; eased, the boom swings out and the sail opens.
+    pub staysail_sheet: f64,
 }
 
 /// Hand-written rather than derived, because a derived default would put the outhaul
@@ -200,6 +203,7 @@ impl Default for Controls {
             furl: 0.0,
             headsail: Headsail::Genoa,
             staysail: 0.0,
+            staysail_sheet: 0.35,
         }
     }
 }

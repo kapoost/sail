@@ -94,14 +94,21 @@ enum Kind {
     Shroud(bool),
     MainSheet,
     Vang,
-    JibSheet(bool),
-    /// The staysail's sheet. One of them, because a club-footed staysail tacks itself:
-    /// the boom crosses, the sheet never does.
-    StaysailSheet,
+    /// The headsail's sheet, in two parts: clew to wherever it is lying on the boom,
+    /// and on to the car. With nothing in the way the join sits on the straight line
+    /// between the ends and cannot be seen.
+    JibSheet(bool, u8),
+    /// The staysail's sheet, and the two further parts of the tackle it runs in.
+    ///
+    /// Drawn as the three parts it has rather than as one rope, because that is what is
+    /// there and because one short line between a boom and a deck eye is invisible — it
+    /// was, and was reported missing twice. A club boom's sheet is a tackle: it has to
+    /// hold the whole force of the sail with nobody's hands on it.
+    StaysailSheet(u8),
 }
 
 /// All the lines, in the order they are packed into the mesh.
-const LINES: [Kind; 13] = [
+const LINES: [Kind; 17] = [
     Kind::Outhaul,
     Kind::Bobstay,
     Kind::SpritShroud(false),
@@ -114,9 +121,13 @@ const LINES: [Kind; 13] = [
     Kind::Vang,
     // Both genoa sheets. Only one is ever working; the other lies across the deck with
     // a loop in it, and seeing which is which is half of knowing what tack you are on.
-    Kind::JibSheet(false),
-    Kind::JibSheet(true),
-    Kind::StaysailSheet,
+    Kind::JibSheet(false, 0),
+    Kind::JibSheet(false, 1),
+    Kind::JibSheet(true, 0),
+    Kind::JibSheet(true, 1),
+    Kind::StaysailSheet(0),
+    Kind::StaysailSheet(1),
+    Kind::StaysailSheet(2),
 ];
 
 /// How long a line stays lit after the control that moves it is touched.
@@ -223,15 +234,19 @@ pub fn update(
         if moved(now.main_sheet, was.main_sheet) {
             light(Kind::MainSheet);
         }
-        if moved(now.staysail, was.staysail) {
-            light(Kind::StaysailSheet);
+        if moved(now.staysail, was.staysail) || moved(now.staysail_sheet, was.staysail_sheet) {
+            for part in 0..3 {
+                light(Kind::StaysailSheet(part));
+            }
         }
         if moved(now.jib_sheet, was.jib_sheet)
             || moved(now.furl, was.furl)
             || moved(now.genoa_car, was.genoa_car)
         {
-            light(Kind::JibSheet(false));
-            light(Kind::JibSheet(true));
+            for part in 0..2 {
+                light(Kind::JibSheet(false, part));
+                light(Kind::JibSheet(true, part));
+            }
         }
         if moved(now.outhaul, was.outhaul) {
             light(Kind::Outhaul);
@@ -269,10 +284,14 @@ pub fn update(
     let furled = sim.controls.furl as f32;
 
     let masthead = Vec3::new(0.0, MAST_HEAD, MAST_FOOT_Z);
+    // Swung and lifted, from the one function that knows the spar's attitude — the
+    // mainsheet is attached to the end of it, so a sheet drawn to a boom that is not
+    // where the boom is would be the same fault this rig keeps finding.
+    let (_, boom_lift) = crate::boat::boom_attitude(t);
     let boom_end = Vec3::new(
-        boom.sin() * BOOM_LENGTH,
-        BOOM_HEIGHT,
-        MAST_FOOT_Z + boom.cos() * BOOM_LENGTH,
+        boom.sin() * BOOM_LENGTH * boom_lift.cos(),
+        BOOM_HEIGHT + BOOM_LENGTH * boom_lift.sin(),
+        MAST_FOOT_Z + boom.cos() * BOOM_LENGTH * boom_lift.cos(),
     );
     // Standing rigging is wire and running rigging is rope, and they do not look
     // remotely alike. Everything was the same bright near-white, which read as fishing
@@ -391,9 +410,9 @@ pub fn update(
             },
             Kind::Vang => Span {
                 from: Vec3::new(
-                    boom.sin() * BOOM_LENGTH * VANG_ALONG_BOOM,
-                    BOOM_HEIGHT - 0.115,
-                    MAST_FOOT_Z + boom.cos() * BOOM_LENGTH * VANG_ALONG_BOOM,
+                    boom.sin() * BOOM_LENGTH * VANG_ALONG_BOOM * boom_lift.cos(),
+                    BOOM_HEIGHT - 0.115 + BOOM_LENGTH * VANG_ALONG_BOOM * boom_lift.sin(),
+                    MAST_FOOT_Z + boom.cos() * BOOM_LENGTH * VANG_ALONG_BOOM * boom_lift.cos(),
                 ),
                 to: Vec3::new(
                     0.0,
@@ -407,29 +426,34 @@ pub fn update(
                 colour: vang_green,
                 stiff: false,
             },
-            Kind::StaysailSheet => {
+            Kind::StaysailSheet(part) => {
                 // From a point part way out along the club boom down to a deck eye on
                 // the centreline. That is the whole of a self-tacker's rigging: nothing
                 // leads aft, nothing is handed across, and tacking takes no hands.
                 let set = sim.controls.staysail as f32;
-                let sheet_angle = cfg
-                    .staysail
-                    .profile
-                    .optimal_sheet(t.awa, sail_core::sail::CAMBER_REFERENCE);
-                let club = lee * cfg.staysail.profile.chord_angle(sheet_angle) as f32;
+                let club = lee
+                    * cfg
+                        .staysail
+                        .profile
+                        .chord_angle(sim.controls.staysail_sheet) as f32;
                 let length = crate::boat::staysail_boom_length(cfg.staysail.area as f32);
                 // From the boom end, not part way along it: a club boom's sheet is made
                 // fast at the end where the leverage is, and the earlier attachment at
                 // seven tenths left a stub of rope half a metre long that was hidden
                 // under the sail and might as well not have been drawn.
                 let at = crate::boat::staysail_boom_end(club, length);
+                let eye = Vec3::new(
+                    0.0,
+                    crate::deck::deck_height(MAST_FOOT_Z - 0.55) + 0.06,
+                    MAST_FOOT_Z - 0.55,
+                );
+                // Three parts between the same two blocks, spread a little so they read
+                // as a tackle and not as one rope drawn three times.
+                let across = (at - eye).cross(Vec3::Y).normalize_or_zero() * 0.035;
+                let spread = across * (part as f32 - 1.0);
                 Span {
-                    from: at,
-                    to: Vec3::new(
-                        0.0,
-                        crate::deck::deck_height(MAST_FOOT_Z - 0.55) + 0.06,
-                        MAST_FOOT_Z - 0.55,
-                    ),
+                    from: at + spread,
+                    to: eye + spread,
                     // Bar taut whenever the sail is up, because on a club-footed
                     // staysail this one rope holds the boom against the whole force of
                     // the sail — there is no second sheet and no tackle to share it.
@@ -442,7 +466,7 @@ pub fn update(
                     stiff: false,
                 }
             }
-            Kind::JibSheet(starboard) => {
+            Kind::JibSheet(starboard, part) => {
                 let side = if starboard { 1.0 } else { -1.0 };
                 let working = side * lee > 0.0;
                 // Only the working sheet is drawn taut from the clew; a furled genoa
@@ -471,6 +495,55 @@ pub fn update(
                         3.9,
                     )
                 };
+                // The boom lies across the sheet's path on any sort of reach, and a sheet
+                // that goes through a spar is the one thing on this boat nobody would
+                // forgive. So the rope is routed over it: find where the straight run
+                // passes the boom, and if it passes close enough to be touching, lift
+                // the join onto the top of the spar. Which is where it sits on a real
+                // boat — the sheet rides over the boom and chafes there, and on a gybe
+                // it is the thing that catches.
+                let gooseneck = Vec3::new(0.0, BOOM_HEIGHT, MAST_FOOT_Z);
+                let flying = sim.controls.headsail != sail_core::state::Headsail::Genoa;
+                let join = if flying {
+                    // A sail set flying sheets *outside* everything — outside the cap
+                    // shrouds, outside the lifelines, aft to a block on the quarter.
+                    // There is no other way to lead it: inside the shrouds the sheet
+                    // would be hard against the wire the moment the sail was eased, and
+                    // the sail itself is tacked a metre and a half ahead of the stem
+                    // precisely so that it can fly clear of all of that.
+                    let side = if starboard { 1.0 } else { -1.0 };
+                    Vec3::new(
+                        side * (cfg.beam as f32 * 0.5 + 0.18),
+                        crate::deck::deck_height(MAST_FOOT_Z + 0.4) + 0.35,
+                        MAST_FOOT_Z + 0.4,
+                    )
+                } else {
+                    let spar = boom_end - gooseneck;
+                    let run = car_at - clew;
+                    // Closest approach between the two segments, the cheap way: walk the
+                    // sheet and take the point nearest the spar.
+                    let mut best = (f32::MAX, 0.5_f32, Vec3::ZERO);
+                    for i in 0..=12 {
+                        let f = i as f32 / 12.0;
+                        let p = clew + run * f;
+                        let t = ((p - gooseneck).dot(spar) / spar.length_squared()).clamp(0.0, 1.0);
+                        let on_spar = gooseneck + spar * t;
+                        let d = (p - on_spar).length();
+                        if d < best.0 {
+                            best = (d, f, on_spar);
+                        }
+                    }
+                    if best.0 < 0.30 && best.1 > 0.05 && best.1 < 0.95 {
+                        best.2 + Vec3::Y * 0.09
+                    } else {
+                        clew.lerp(car_at, 0.5)
+                    }
+                };
+                let (a, b) = if part == 0 {
+                    (clew, join)
+                } else {
+                    (join, car_at)
+                };
                 Span {
                     // Only the working sheet is drawn at all now. The lazy one used to
                     // be shown lying across the foredeck in a bight — which is true of a
@@ -478,10 +551,10 @@ pub fn update(
                     // drawn beside a straining one looks like the straining one has gone
                     // slack too. Asked for from the deck, and the deck is right: show
                     // what is working.
-                    from: if working { clew } else { car_at },
+                    from: if working { a } else { car_at },
                     // Led through the car itself, so the rope and the fitting cannot
                     // disagree about where the sheet is being turned.
-                    to: car_at,
+                    to: if working { b } else { car_at },
                     tension: if working {
                         jib_load * (1.0 - t.jib.coeffs.luffing as f32) * (1.0 - furled)
                     } else {
@@ -514,8 +587,8 @@ pub fn update(
             (bank.line(), LINES[index]),
             (crate::clutch::Line::Outhaul, Kind::Outhaul)
                 | (crate::clutch::Line::Vang, Kind::Vang)
-                | (crate::clutch::Line::GenoaCar, Kind::JibSheet(_))
-                | (crate::clutch::Line::Furl, Kind::JibSheet(_))
+                | (crate::clutch::Line::GenoaCar, Kind::JibSheet(..))
+                | (crate::clutch::Line::Furl, Kind::JibSheet(..))
                 | (crate::clutch::Line::Reef, Kind::MainSheet)
         );
         let lit = flash.max(if on_the_winch { 0.34 } else { 0.0 });

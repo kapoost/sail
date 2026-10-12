@@ -30,15 +30,17 @@ pub enum Line {
     Reef,
     Furl,
     Staysail,
+    StaysailSheet,
 }
 
-pub const BANK: [Line; 6] = [
+pub const BANK: [Line; 7] = [
     Line::Outhaul,
     Line::Vang,
     Line::GenoaCar,
     Line::Reef,
     Line::Furl,
     Line::Staysail,
+    Line::StaysailSheet,
 ];
 
 impl Line {
@@ -96,6 +98,7 @@ impl Line {
             Line::Reef => "reef",
             Line::Furl => "furling line",
             Line::Staysail => "staysail",
+            Line::StaysailSheet => "stays'l sheet",
         }
     }
 
@@ -119,6 +122,7 @@ impl Line {
             Line::Reef => "shortens the main",
             Line::Furl => "rolls the headsail away",
             Line::Staysail => "sets the inner sail",
+            Line::StaysailSheet => "brings the club boom in",
         }
     }
 
@@ -130,6 +134,9 @@ impl Line {
             Line::Reef => c.reef,
             Line::Furl => c.furl,
             Line::Staysail => c.staysail,
+            // Backwards, like the other sheets on the bank: hauling in is a smaller
+            // number, because what the line does is shorten.
+            Line::StaysailSheet => 1.0 - c.staysail_sheet,
         }
     }
 
@@ -148,6 +155,7 @@ impl Line {
             Line::Reef => c.reef = v,
             Line::Furl => c.furl = v,
             Line::Staysail => c.staysail = v,
+            Line::StaysailSheet => c.staysail_sheet = 1.0 - v,
         }
     }
 
@@ -171,6 +179,7 @@ impl Line {
             // is what setting a sail is — and because the decision to put it up ought
             // to be made before you need it rather than while you do.
             Line::Staysail => 0.11,
+            Line::StaysailSheet => 0.26,
         }
     }
 }

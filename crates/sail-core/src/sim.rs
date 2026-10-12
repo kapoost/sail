@@ -457,8 +457,9 @@ impl Simulation {
                 velocity,
                 st.roll_rate * sail.z_ce * heel_cos,
             );
-            // Self-tacking: it finds its own best angle, limited by its track.
-            let sheet = sail.profile.optimal_sheet(stay_awa, crate::sail::CAMBER_REFERENCE);
+            // Trimmed by its own tackle. Self-tacking means the boom crosses by itself,
+            // not that nobody trims it.
+            let sheet = controls.staysail_sheet.clamp(0.0, 1.0);
             let covered = if flying.flying() { 0.80 } else { 0.35 };
             Some(sail_forces(
                 &sail.profile,

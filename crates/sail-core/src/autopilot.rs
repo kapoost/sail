@@ -292,6 +292,13 @@ where
         let step = (want - controls.outhaul).clamp(-0.25 * SUBSTEP, 0.25 * SUBSTEP);
         controls.outhaul = (controls.outhaul + step).clamp(0.0, 1.0);
 
+        // The inner sail has a sheet of its own now, so a crew that trims everything
+        // else and leaves it where it was is not a crew. Its own best angle, for the
+        // wind at its own height.
+        controls.staysail_sheet = cfg
+            .staysail
+            .profile
+            .optimal_sheet(sim.telemetry.awa, crate::sail::CAMBER_REFERENCE);
         let (m, j) = optimal_sheets_bent(
             &cfg,
             sim.telemetry.awa,

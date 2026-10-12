@@ -402,7 +402,7 @@ impl SailProfile {
             aspect_ratio: luff_height * luff_height / area,
             luff_margin: rad(3.0),
             cn_separated: 1.45,
-            max_chord_angle: rad(92.0),
+            max_chord_angle: rad(86.0),
             min_chord_angle: rad(10.0),
         }
     }
@@ -429,7 +429,19 @@ impl SailProfile {
             aspect_ratio: luff_height * luff_height / area,
             luff_margin: rad(5.0),
             cn_separated: 1.62,
-            max_chord_angle: rad(108.0),
+            // Eighty-eight degrees, not the hundred and eight this had.
+            //
+            // The chord angle is measured from the centreline *aft*, so ninety degrees
+            // is the foot square across the boat and anything beyond it has the foot
+            // pointing forward of abeam — the sail set back to front, leech ahead of
+            // luff. Which is what it looked like: reported from the deck as the gennaker
+            // appearing to work backwards, and it was, for every trim past ninety.
+            //
+            // A sail sheeted to a block on the quarter cannot get its clew forward of
+            // abeam however far it is eased; what does go forward of abeam is a
+            // symmetric spinnaker on a pole, which is a different sail with a different
+            // spar holding its other corner.
+            max_chord_angle: rad(88.0),
             min_chord_angle: rad(22.0),
         }
     }
