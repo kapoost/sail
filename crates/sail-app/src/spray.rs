@@ -169,11 +169,11 @@ pub fn update(
             // At the stem: a touch ahead of the bow, scattered either side of it.
             (0.46 + 0.04 * r.next_f64(), (r.next_f64() - 0.5) * 0.5)
         } else if where_ < 0.88 {
-            // The lee bow, from the stem back to amidships.
-            (0.12 + 0.3 * r.next_f64(), lee * (0.55 + 0.5 * r.next_f64()))
+            // The lee bow, from the stem back to amidships — and *outside* the planking.
+            (0.12 + 0.3 * r.next_f64(), lee * (1.05 + 0.5 * r.next_f64()))
         } else {
             // The quarter, feeding the wake.
-            (-0.3 - 0.15 * r.next_f64(), lee * (0.3 + 0.5 * r.next_f64()))
+            (-0.3 - 0.15 * r.next_f64(), lee * (1.0 + 0.5 * r.next_f64()))
         };
         let at = st.pos + forward * (cfg.loa * along) + starboard * (cfg.beam * 0.5 * across);
         // Thrown outward and a little forward of where it was made, then left behind.
@@ -214,6 +214,26 @@ pub fn update(
             }
             continue;
         };
+        // Nothing inside the boat. Foam blowing over the rail from outside is right and
+        // is what a lee bow does in a seaway; foam rising through the deck from
+        // underneath is a hull with no bottom in it. The specks drift, and a drift of
+        // half a metre a second across a three-metre beam puts them inside her in a
+        // couple of seconds — so the test is at drawing time, every frame, rather than
+        // once at birth.
+        let local = st.to_body(s.at - st.pos);
+        let half = cfg.beam * 0.5;
+        let ends = cfg.loa * 0.5;
+        let inside = local.x.abs() < ends
+            && local.y.abs() < half * (1.0 - (local.x / ends).powi(2)).max(0.0).sqrt();
+        if inside {
+            let here = origin.to_bevy(st.pos, 0.0);
+            for _ in 0..4 {
+                positions.push(here);
+                colours.push([1.0, 1.0, 1.0, 0.0]);
+                uvs.push(Vec2::ZERO);
+            }
+            continue;
+        }
         let life = (s.age / LIFE).clamp(0.0, 1.0);
         // Thrown up bright, spreading and thinning as it settles. The brightness falls
         // faster than the size grows, which is what foam does: it goes from white to a
