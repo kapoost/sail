@@ -133,6 +133,31 @@ pub fn rig_interference(chord_angle: f64, bears_at: f64) -> (f64, f64) {
     (1.0 - 0.08 * t, 1.0 + 0.15 * t)
 }
 
+/// Where along the chord the force actually acts, as a fraction back from the luff.
+///
+/// Until now every sail's force was applied at a point fixed in the configuration, as
+/// though a sail's centre of pressure were a property of the boat rather than of what
+/// the sail is doing. It is not. Thin-aerofoil theory puts an attached section's load at
+/// the quarter chord; camber carries it a little further forward than that, because the
+/// deepest part of a cambered section does the most work and it is forward of the
+/// middle; and separation walks it aft towards the half chord, because a stalled sail is
+/// a plate with its load spread over the whole of it.
+///
+/// That walk is worth having. A mainsail eased on a reach and stalling moves its load
+/// aft along a three-metre chord by a quarter of a metre or so — and the same movement
+/// takes it further out to leeward, since the chord is lying across the boat. Both of
+/// those turn the boat, both grow with exactly the conditions that overpower her, and
+/// together they are a part of why a boat gripes up as she is pressed rather than
+/// merely heeling further.
+pub fn centre_of_pressure(camber: f64, stalled: f64) -> f64 {
+    let cambered = 0.26 - 0.30 * (camber - CAMBER_REFERENCE);
+    (cambered + 0.22 * stalled.clamp(0.0, 1.0)).clamp(0.18, 0.55)
+}
+
+/// The centre of pressure the fixed `x_ce` in the configuration already stands for, so
+/// only the movement away from it is applied.
+pub const COP_NOMINAL: f64 = 0.28;
+
 /// How far to leeward a sail's own centre of effort sits once it is eased, metres.
 ///
 /// The piece that was missing, and it is the piece a broach is made of.
@@ -154,10 +179,25 @@ pub fn rig_interference(chord_angle: f64, bears_at: f64) -> (f64, f64) {
 /// the aspect ratio without anyone having to measure a sail twice. A sail set flying
 /// gets the larger fraction: it has no stay holding its luff in and nothing between it
 /// and the water, so it bellies out where a genoa is held against the shrouds.
-pub fn lateral_offset(profile: &SailProfile, area: f64, chord_angle: f64, flying: bool) -> f64 {
+pub fn lateral_offset(
+    profile: &SailProfile,
+    area: f64,
+    chord_angle: f64,
+    flying: bool,
+    cop: f64,
+) -> f64 {
     let mean_chord = (area / profile.aspect_ratio.max(0.2)).sqrt();
-    let fraction = if flying { 0.55 } else { 0.35 };
-    fraction * mean_chord * chord_angle.abs().sin()
+    // Where the load sits along the chord, and a sail set flying sits further out again:
+    // it is tacked a metre and a half ahead of the stem and bellies out with nothing to
+    // hold it in, so its chord does not start on the centreline the way a genoa's does.
+    let out = if flying { 0.45 } else { 0.0 };
+    (cop + out) * mean_chord * chord_angle.abs().sin()
+}
+
+/// How far aft the load has moved from where the configuration assumes it is, metres.
+pub fn chordwise_shift(profile: &SailProfile, area: f64, chord_angle: f64, cop: f64) -> f64 {
+    let mean_chord = (area / profile.aspect_ratio.max(0.2)).sqrt();
+    (cop - COP_NOMINAL) * mean_chord * chord_angle.abs().cos()
 }
 
 /// Largest twist a headsail's leech will fall off to with the car right aft, radians.

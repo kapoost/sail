@@ -477,6 +477,10 @@ impl Simulation {
         let stay_drive = stay.map(|f| f.drive).unwrap_or(0.0);
         let stay_side = stay.map(|f| f.side).unwrap_or(0.0);
 
+        // Where the load sits on each sail, which is not a constant: see
+        // [`crate::sail::centre_of_pressure`].
+        let main_cop = crate::sail::centre_of_pressure(main_camber, main.coeffs.stalled);
+        let jib_cop = crate::sail::centre_of_pressure(jib_camber, jib.coeffs.stalled);
         let drive = (main.drive + main_upper.drive) * main_cost
             + (jib.drive + jib_upper.drive) * slot_cost
             + stay_drive;
@@ -640,8 +644,15 @@ impl Simulation {
         // Rig side force acting at its fore-and-aft centre of effort. The lead of the
         // centre of effort ahead of the centre of lateral resistance is a lee-helm
         // term; heel pays it back with interest.
-        let mut mz = cfg.main.x_ce * (main.side + main_upper.side)
-            + head.x_ce * (jib.side + jib_upper.side) * slot_cost
+        // The fore-and-aft lever each sail works on, with the load's own movement along
+        // the chord included: a stalling sail carries its force aft, and aft of the
+        // centre of lateral resistance is weather helm.
+        let main_x = cfg.main.x_ce
+            - crate::sail::chordwise_shift(&cfg.main.profile, cfg.main.area, boom_angle, main_cop);
+        let jib_x = head.x_ce
+            - crate::sail::chordwise_shift(&head.profile, head.area, jib_chord, jib_cop);
+        let mut mz = main_x * (main.side + main_upper.side)
+            + jib_x * (jib.side + jib_upper.side) * slot_cost
             + cfg.staysail.x_ce * stay_side;
         // Heel swings the centre of effort out to leeward, so the driving force now
         // acts on a lever arm and luffs the boat up. This is weather helm.
@@ -650,9 +661,21 @@ impl Simulation {
         // easing the sheet carries it out. See [`crate::sail::lateral_offset`].
         let to_leeward = -lower_awa.signum();
         let main_out = to_leeward
-            * crate::sail::lateral_offset(&cfg.main.profile, cfg.main.area, boom_angle, false);
+            * crate::sail::lateral_offset(
+                &cfg.main.profile,
+                cfg.main.area,
+                boom_angle,
+                false,
+                main_cop,
+            );
         let jib_out = to_leeward
-            * crate::sail::lateral_offset(&head.profile, head.area, jib_chord, flying.flying());
+            * crate::sail::lateral_offset(
+                &head.profile,
+                head.area,
+                jib_chord,
+                flying.flying(),
+                jib_cop,
+            );
         let y_lower = lower_z * st.heel.sin() + main_out;
         let y_upper = upper_z * st.heel.sin() + main_out;
         let y_jib = jib_lower_z * st.heel.sin() + jib_out;
