@@ -39,6 +39,11 @@ const BOOM_LENGTH: f32 = 4.2;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Outhaul,
+    /// Holds the bowsprit down against the pull of everything set from its end. A
+    /// sprit without one is a lever waiting to break the stem.
+    Bobstay,
+    /// And the pair that stop it swinging sideways.
+    SpritShroud(bool),
     Forestay,
     Backstay,
     Shroud(bool),
@@ -48,8 +53,11 @@ enum Kind {
 }
 
 /// All the lines, in the order they are packed into the mesh.
-const LINES: [Kind; 9] = [
+const LINES: [Kind; 12] = [
     Kind::Outhaul,
+    Kind::Bobstay,
+    Kind::SpritShroud(false),
+    Kind::SpritShroud(true),
     Kind::Forestay,
     Kind::Backstay,
     Kind::Shroud(false),
@@ -246,6 +254,32 @@ pub fn update(
                 colour: outhaul_red,
                 stiff: false,
             },
+            Kind::Bobstay => Span {
+                from: crate::boat::sprit_end(cfg.loa as f32),
+                // Down to the stem at the waterline, which is the only place that can
+                // take the load without levering the deck up.
+                to: Vec3::new(0.0, -0.15, -(cfg.loa as f32) * 0.495),
+                tension: 1.0,
+                width: 0.018,
+                colour: wire,
+                stiff: true,
+            },
+            Kind::SpritShroud(starboard) => {
+                let side = if starboard { 1.0 } else { -1.0 };
+                let z = -(cfg.loa as f32) * 0.42;
+                Span {
+                    from: crate::boat::sprit_end(cfg.loa as f32),
+                    to: Vec3::new(
+                        side * crate::deck::deck_half_beam(z),
+                        crate::deck::deck_height(z),
+                        z,
+                    ),
+                    tension: 1.0,
+                    width: 0.015,
+                    colour: wire,
+                    stiff: true,
+                }
+            }
             Kind::Forestay => Span {
                 from: masthead,
                 to: Vec3::new(0.0, DECK + 0.25, -(cfg.loa as f32) * 0.46),

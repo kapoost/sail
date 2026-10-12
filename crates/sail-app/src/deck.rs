@@ -120,6 +120,59 @@ fn opening(z: f32) -> (f32, f32) {
     }
 }
 
+/// Radius of the coachroof's top corner, metres.
+///
+/// A cabin side meeting a cabin top at a right angle is a packing crate. Every boat
+/// rounds it, partly because that is how a laminate or a bent plank wants to go and
+/// partly because it is what you grab when the deck tips — a sharp edge there is
+/// something you cut your hand on.
+const CABIN_CORNER: f32 = 0.11;
+/// Where the cockpit sole sits below the sheer, metres.
+const SOLE_DROP: f32 = 0.62;
+
+/// The section from the centreline out to the sheer, as `(x, y)` going outwards.
+///
+/// Returned rather than inlined because it is three different shapes depending on
+/// where along the boat you cut — foredeck, coachroof, cockpit — and keeping them in
+/// one list of points is what lets the stitching treat them all the same.
+fn half_section(z: f32) -> Vec<(f32, f32)> {
+    let (half, sheer) = sheer_at(z);
+    let (inner, rise) = opening(z);
+    let mut out: Vec<(f32, f32)> = Vec::with_capacity(10);
+
+    if inner <= 1e-4 {
+        // Plain deck, closed to the centreline.
+        out.push((0.0, sheer + camber(0.0, half)));
+    } else if rise > 0.0 {
+        // Coachroof: crowned top, then a rounded corner down onto the side.
+        let top = sheer + rise;
+        out.push((0.0, top + camber(0.0, inner)));
+        let flat = (inner - CABIN_CORNER).max(0.0);
+        out.push((flat, top + camber(flat, inner)));
+        // A quarter round, so the top rolls into the side instead of breaking at it.
+        for k in 1..=3 {
+            let a = (k as f32 / 4.0) * std::f32::consts::FRAC_PI_2;
+            out.push((
+                flat + CABIN_CORNER * a.sin(),
+                top - CABIN_CORNER * (1.0 - a.cos()),
+            ));
+        }
+        out.push((inner, sheer));
+    } else {
+        // Cockpit: a flat sole, vertical sides, and a lip at deck level.
+        //
+        // It used to be a shallow V meeting at the centreline, which is a bilge, not
+        // a sole. You stand in a cockpit.
+        let sole = sheer - SOLE_DROP;
+        out.push((0.0, sole));
+        out.push((inner * 0.92, sole));
+        out.push((inner, sole + 0.06));
+        out.push((inner, sheer));
+    }
+    out.push((half, sheer));
+    out
+}
+
 /// Camber: a deck and a coachroof are both crowned, or they hold water.
 fn camber(across: f32, half: f32) -> f32 {
     if half <= 1e-4 {
@@ -154,8 +207,6 @@ pub fn structure_mesh() -> (Mesh, Mesh) {
     let mut rings: Vec<Vec<Vec3>> = Vec::with_capacity(steps + 1);
     for i in 0..=steps {
         let z = z0 + (z1 - z0) * (i as f32 / steps as f32);
-        let (half, sheer) = sheer_at(z);
-        let (inner, rise) = opening(z);
         // One continuous section across the boat: port sheer, in across the side
         // deck, up the cabin side or down into the cockpit, over the centreline and
         // back out to starboard.
@@ -167,33 +218,17 @@ pub fn structure_mesh() -> (Mesh, Mesh) {
         // across the cockpit, through the cabin and out the other side. From the helm
         // it was a grey wall filling the view. A cross-section has to be a path, not
         // two paths in a list.
-        let mut ring = Vec::with_capacity(11);
-        let open = inner > 1e-4;
-        for side in [-1.0_f32, 1.0] {
-            let x_out = side * half;
-            let x_in = side * inner;
-            let outward = [
-                Vec3::new(x_out, sheer, z),
-                Vec3::new(x_in, sheer + camber(x_in, half) * 0.6, z),
-            ];
-            let upward = [
-                Vec3::new(x_in, sheer + rise, z),
-                Vec3::new(x_in * 0.5, sheer + rise + camber(x_in * 0.5, inner), z),
-            ];
-            if side < 0.0 {
-                ring.extend_from_slice(&outward);
-                if open {
-                    ring.extend_from_slice(&upward);
-                }
-                ring.push(Vec3::new(0.0, sheer + rise, z));
-            } else {
-                // Back out again, so the path crosses the boat exactly once.
-                if open {
-                    ring.push(upward[1]);
-                    ring.push(upward[0]);
-                }
-                ring.push(outward[1]);
-                ring.push(outward[0]);
+        let half_section = half_section(z);
+        let mut ring = Vec::with_capacity(half_section.len() * 2);
+        for (i, (x, y)) in half_section.iter().enumerate() {
+            // Skip the duplicated centreline point on the way back out.
+            if i > 0 || *x > 1e-4 {
+                ring.push(Vec3::new(-x, *y, z));
+            }
+        }
+        for (x, y) in half_section.iter().rev() {
+            if *x > 1e-4 {
+                ring.push(Vec3::new(*x, *y, z));
             }
         }
         rings.push(ring);
@@ -276,7 +311,7 @@ pub fn deck_half_beam(z: f32) -> f32 {
 
 /// Where the cockpit sole is, which is where the helmsman is standing.
 pub fn cockpit_sole() -> f32 {
-    deck_height(2.6) - COCKPIT_DEPTH
+    deck_height(2.6) - SOLE_DROP
 }
 
 /// Where the aft face of the coachroof is.

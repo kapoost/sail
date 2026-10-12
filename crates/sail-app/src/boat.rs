@@ -62,6 +62,23 @@ pub fn genoa_car_at(car: f32, starboard: bool) -> Vec3 {
     )
 }
 
+/// The outboard end of the bowsprit.
+///
+/// Where a gennaker will be tacked. It is there now because the spar has to be drawn,
+/// stayed and lived with before anything is set from it — and because a sprit is the
+/// single most characteristic thing about the bow of a boat of this kind.
+pub fn sprit_end(loa: f32) -> Vec3 {
+    let stem = -loa * 0.49;
+    Vec3::new(
+        0.0,
+        crate::deck::deck_height(stem) + 0.32,
+        stem - SPRIT_LENGTH,
+    )
+}
+
+/// How far the sprit reaches beyond the stem, metres.
+pub const SPRIT_LENGTH: f32 = 1.9;
+
 /// Where the headsail is made fast at the stem.
 pub fn genoa_tack(loa: f32) -> Vec3 {
     let z = -loa * 0.46;
@@ -262,7 +279,18 @@ pub fn setup(
                 MeshMaterial3d(varnish.clone()),
                 Transform::default(),
             ));
-            crate::fittings::spawn(b, &mut meshes, &varnish, &metal, &painted_mat);
+            crate::fittings::spawn(
+                b,
+                &mut crate::fittings::Workshop {
+                    meshes: &mut meshes,
+                    images: &mut images,
+                    materials: &mut materials,
+                    varnish: varnish.clone(),
+                    metal: metal.clone(),
+                    painted: painted_mat.clone(),
+                    loa: cfg.loa as f32,
+                },
+            );
 
             // Keel fin.
             b.spawn((
