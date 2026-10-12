@@ -19,8 +19,22 @@ use sail_core::wind::{SteadyWind, WindField};
 const SETTLE: f64 = 420.0;
 
 fn main() {
-    let cfg = BoatConfig::charter_sloop_34();
-    println!("best upwind VMG by outhaul, TWA 45, reef 0\n");
+    // Both boats. The charter sloop is the calibration reference the whole model is
+    // anchored to; the packet is the one actually being sailed, and a rule that is
+    // right for one and wrong for the other would be worth knowing about.
+    for cfg in [
+        BoatConfig::archipelago_packet(),
+        BoatConfig::charter_sloop_34(),
+    ] {
+        sweep(cfg);
+    }
+}
+
+fn sweep(cfg: BoatConfig) {
+    println!(
+        "\n{} — best upwind VMG by outhaul, TWA 45, reef 0\n",
+        cfg.name
+    );
     print!("{:>7}", "TWS");
     for o in 0..=5 {
         print!("{:>9}", format!("{:.1}", o as f64 / 5.0));
@@ -49,7 +63,7 @@ fn main() {
             deg(heel_at(cfg, tws, best.0))
         );
     }
-    println!("\n`cost` is the VMG the recommendation gives away against the sweep's best.");
+    println!("`cost` is the VMG the recommendation gives away against the sweep's best.");
 }
 
 /// Heel at a given outhaul, for working out where the model actually turns over.
