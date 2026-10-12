@@ -316,7 +316,7 @@ pub fn update(sound: Res<SoundHandle>, sim: Res<Sim>, keys: Res<ButtonInput<KeyC
     let p = &sound.0;
     let t = &sim.sim.telemetry;
 
-    if keys.just_pressed(KeyCode::KeyM) {
+    if keys.just_pressed(KeyCode::KeyK) {
         p.set_muted(!p.muted());
     }
 

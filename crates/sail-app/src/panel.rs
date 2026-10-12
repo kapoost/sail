@@ -111,7 +111,19 @@ pub fn draw(
                         // The sounder. The one instrument that turns a shoal from an
                         // ambush into a decision, which is the whole difference
                         // between land being a hazard and land being a wall.
-                        gauge(ui, "DEPTH", telemetry.depth, 0.0, 40.0, "m");
+                        // Scaled to ten metres, not forty: a sounder reading thirty
+                        // is a sounder with nothing to say, and compressing the whole
+                        // useful range into the bottom quarter of the bar is how a
+                        // gauge gets ignored.
+                        gauge_alarmed(
+                            ui,
+                            "DEPTH",
+                            telemetry.depth,
+                            0.0,
+                            10.0,
+                            "m",
+                            telemetry.under_keel < 1.5,
+                        );
                     });
                 });
 
@@ -431,6 +443,56 @@ fn needle(p: &egui::Painter, c: egui::Pos2, len: f32, angle: f32, width: f32, co
 }
 
 /// A linear gauge: a bar against its scale, which reads faster than a number.
+/// A gauge that can sound an alarm.
+///
+/// `alarm` turns the bar and the reading red. One gauge on this panel needs it and
+/// only one: a sounder that merely *displays* the depth is a gauge you have to
+/// remember to look at, and an island coming over the horizon while you are trimming
+/// is precisely the moment nobody is looking. Every boat's sounder has an alarm, and
+/// this is why.
+fn gauge_alarmed(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: f64,
+    lo: f64,
+    hi: f64,
+    unit: &str,
+    alarm: bool,
+) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(86.0, 42.0), egui::Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, 2.0, paint::TRACK);
+    let f = ((value - lo) / (hi - lo)).clamp(0.0, 1.0) as f32;
+    let bar = egui::Rect::from_min_size(
+        rect.left_bottom() + egui::vec2(3.0, -13.0),
+        egui::vec2((rect.width() - 6.0) * f.max(0.02), 10.0),
+    );
+    let colour = if alarm { paint::BAD } else { paint::LIVE };
+    p.rect_filled(bar, 1.0, colour);
+    if alarm {
+        p.rect_stroke(
+            rect,
+            2.0,
+            egui::Stroke::new(1.5, paint::BAD),
+            egui::StrokeKind::Inside,
+        );
+    }
+    p.text(
+        rect.left_top() + egui::vec2(4.0, 3.0),
+        egui::Align2::LEFT_TOP,
+        label,
+        egui::FontId::monospace(9.0),
+        if alarm { paint::BAD } else { paint::LABEL },
+    );
+    p.text(
+        rect.right_top() + egui::vec2(-4.0, 2.0),
+        egui::Align2::RIGHT_TOP,
+        format!("{value:.1}{unit}"),
+        egui::FontId::monospace(12.0),
+        if alarm { paint::BAD } else { paint::FACE },
+    );
+}
+
 fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &str) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(86.0, 42.0), egui::Sense::hover());
     let p = ui.painter();

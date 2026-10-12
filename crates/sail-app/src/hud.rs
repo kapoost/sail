@@ -316,7 +316,10 @@ pub fn draw(
                  P       pilot on / off      O  course or wind angle\n\
                  , / .   nudge the pilot's target (Shift for five)\n\
                  Z / X   engine astern / ahead\n\
-                 T  snap to trim   C  camera   L  new lap   M  mute   Tab  hide panel",
+                 M       chart on / off      [ ]  zoom it out and in\n\
+                 mouse   hold the right button to look around; Space looks ahead\n\
+                 T  snap to trim   C  camera   L  new consignment   K  mute   \
+Tab  hide panel",
             );
         });
     Ok(())

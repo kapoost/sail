@@ -79,6 +79,57 @@ impl HeadMotion {
     }
 }
 
+/// Where the eye is pointed, relative to straight ahead.
+///
+/// A fixed view forward is the one thing a boat never gives you. Half of sailing is
+/// looking somewhere else: up at the burgee, out to leeward at the next gust on the
+/// water, over your shoulder at the boat coming up behind, down at the telltales. A
+/// simulator that bolts your head to the centreline has removed the sense that makes
+/// the rest of it work.
+///
+/// Held on the right mouse button rather than always-on, so the left button stays the
+/// console's and a hand that lets go gets its course back. Drifts back to centre on
+/// its own, the way a head does.
+#[derive(Resource, Default)]
+pub struct ViewAim {
+    yaw: f32,
+    pitch: f32,
+}
+
+/// How far round you can look, radians. Most of the way, but not through your own neck.
+const AIM_YAW: f32 = 2.6;
+const AIM_PITCH_UP: f32 = 1.15;
+const AIM_PITCH_DOWN: f32 = 0.65;
+/// Radians per pixel of mouse.
+const AIM_RATE: f32 = 0.0042;
+/// How quickly an untouched view comes back to centre, per second.
+const AIM_RECENTRE: f32 = 0.9;
+
+/// Swing the view with the right mouse button held.
+pub fn aim(
+    buttons: Res<ButtonInput<MouseButton>>,
+    motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
+    keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut aim: ResMut<ViewAim>,
+) {
+    if buttons.pressed(MouseButton::Right) {
+        aim.yaw = (aim.yaw - motion.delta.x * AIM_RATE).clamp(-AIM_YAW, AIM_YAW);
+        aim.pitch = (aim.pitch - motion.delta.y * AIM_RATE).clamp(-AIM_PITCH_DOWN, AIM_PITCH_UP);
+        return;
+    }
+    // Space already means "put the helm amidships"; it means "look ahead" too, which
+    // is the same instinct.
+    let home = keys.pressed(KeyCode::Space);
+    let k = if home {
+        1.0 - (-6.0 * time.delta_secs()).exp()
+    } else {
+        1.0 - (-AIM_RECENTRE * time.delta_secs()).exp()
+    };
+    aim.yaw -= aim.yaw * k;
+    aim.pitch -= aim.pitch * k;
+}
+
 #[derive(Resource, Default)]
 pub struct ChaseState {
     position: Vec3,
@@ -161,15 +212,29 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>, mut view: 
     }
 }
 
+/// Everything the camera reads but does not change.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct Eye<'w> {
+    sim: Res<'w, Sim>,
+    origin: Res<'w, frame::RenderOrigin>,
+    aim: Res<'w, ViewAim>,
+    view: Res<'w, View>,
+    time: Res<'w, Time>,
+}
+
 pub fn follow(
-    sim: Res<Sim>,
-    origin: Res<frame::RenderOrigin>,
-    view: Res<View>,
-    time: Res<Time>,
+    eye: Eye,
     mut chase: ResMut<ChaseState>,
     mut head: ResMut<HeadMotion>,
     mut q: Query<&mut Transform, With<MainCamera>>,
 ) {
+    let Eye {
+        sim,
+        origin,
+        aim,
+        view,
+        time,
+    } = eye;
     let st = &sim.render_state();
     let hull = origin.hull_translation(st);
     head.follow(
@@ -184,7 +249,12 @@ pub fn follow(
             View::Cockpit => {
                 // Standing at the helm. The eye sits where the hull puts it, but it
                 // does not take the hull's full attitude — see HeadMotion.
-                let eye = head.attitude(st.heading as f32);
+                // The head turns on the body: the aim is applied inside the hull's
+                // own attitude, so looking to leeward on a heeled boat looks *down*
+                // the heel the way it does in life, rather than along a level horizon.
+                let eye = head.attitude(st.heading as f32)
+                    * Quat::from_rotation_y(aim.yaw)
+                    * Quat::from_rotation_x(aim.pitch);
                 // Standing in the cockpit well, which is a real place now: the sole
                 // is below the sheer, so the eye is lower than it was when the deck
                 // was a number. Far enough aft to be at the helm and to see the whole
@@ -199,8 +269,13 @@ pub fn follow(
             }
             View::Chase => {
                 let heading = frame::heading_only(st);
-                let target =
-                    Vec3::new(hull.x, head.heave, hull.z) + heading * Vec3::new(0.0, 9.0, 21.0);
+                // Orbit. The chase camera swings round the boat rather than turning
+                // on the spot, because what you want from outside is to look *at* her
+                // from somewhere else, not to look away from her.
+                let swing =
+                    Quat::from_rotation_y(aim.yaw) * Quat::from_rotation_x(-aim.pitch * 0.6);
+                let target = Vec3::new(hull.x, head.heave, hull.z)
+                    + heading * swing * Vec3::new(0.0, 9.0, 21.0);
                 if !chase.initialised {
                     chase.position = target;
                     chase.initialised = true;

@@ -8,6 +8,7 @@
 
 mod boat;
 mod camera;
+mod chart;
 mod clutch;
 mod course;
 mod deck;
@@ -96,8 +97,11 @@ fn main() {
         .init_resource::<clutch::Bank>()
         .init_resource::<input::Pilot>()
         .init_resource::<frame::RenderOrigin>()
+        .init_resource::<chart::Chart>()
+        .init_resource::<chart::Track>()
         .init_resource::<world::SurfaceDrift>()
         .init_resource::<camera::ChaseState>()
+        .init_resource::<camera::ViewAim>()
         .add_systems(
             Startup,
             (
@@ -127,6 +131,7 @@ fn main() {
                 // so the whole frame agrees on one mark.
                 frame::rebase_origin,
                 world::report_frame_times,
+                chart::record,
                 islands::follow_origin,
                 (
                     boat::update_hull,
@@ -146,10 +151,19 @@ fn main() {
                     camera::follow,
                     sound::update,
                 ),
-                (camera::toggle, hud::toggle, course::restart),
+                (
+                    camera::toggle,
+                    camera::aim,
+                    hud::toggle,
+                    course::restart,
+                    chart::toggle,
+                ),
             )
                 .chain(),
         )
-        .add_systems(EguiPrimaryContextPass, (panel::draw, hud::draw).chain())
+        .add_systems(
+            EguiPrimaryContextPass,
+            (panel::draw, chart::draw, hud::draw).chain(),
+        )
         .run();
 }
