@@ -828,8 +828,26 @@ pub fn update_sails(
                     // that in deliberately — the broadseam is there to put a belly in
                     // exactly this condition — so a reaching sail drawn with its upwind
                     // section looks starved, which is what it looked like.
+                    // How much a sail bags out when it is eased is not the same for all
+                    // of them, and treating it as one number made the mainsail wrong.
+                    //
+                    // A main has a boom holding its foot straight and a leech the vang
+                    // and the sheet are both pulling on: eased on a reach it gets
+                    // fuller, but it is still a sail stretched between two spars and it
+                    // never goes anywhere near a bag. A sail set flying has nothing on
+                    // any edge except its own tension, and that is the one that balloons.
                     draft: forces.camber as f32
-                        * (1.0 + 1.9 * forces.chord_angle.abs().sin() as f32),
+                        * (1.0
+                            + if surface.which == Sail::Main { 0.55 } else { 1.9 }
+                                * forces.chord_angle.abs().sin() as f32),
+                    // Where the deepest part of the sail sits, measured from the luff.
+                    //
+                    // Forty-two percent for a working sail, and it moves aft as the sail
+                    // is loaded and deepened — which is what a trimmer is watching when
+                    // he looks at the draft stripes, and the reason the outhaul and the
+                    // vang exist: both of them pull it forward again. The drawing had it
+                    // at the exact middle of the chord, which is a shape no sail takes.
+                    draft_at: 0.42 + 0.14 * (forces.camber as f32 / 0.15).clamp(0.0, 1.0),
                     now,
                     // Once the sail is eased far enough it is sheeted outboard of the
                     // cap shroud and flying clear of the rig, so the wire stops being
@@ -1389,6 +1407,9 @@ struct SailTrim<'a> {
     /// Standing rigging the cloth is not allowed through, as a polyline.
     /// How far the foot hangs below the straight line from tack to clew, metres.
     foot_sag: f32,
+    /// Where the deepest point of the section is, as a fraction of the chord from the
+    /// luff.
+    draft_at: f32,
     shrouds: &'a [Vec3],
     /// Whether this sail has to keep clear of the mast. The main does not: its luff
     /// is bent on to it.
@@ -1403,6 +1424,7 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         draft,
         now,
         foot_sag,
+        draft_at,
         shrouds,
         clear_mast,
     } = *trim;
@@ -1476,8 +1498,19 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
 
         for vi in 0..SAIL_V {
             let v = vi as f32 / (SAIL_V - 1) as f32;
-            let belly = (std::f32::consts::PI * v).sin() * local_camber * chord_length;
-            let droop = (std::f32::consts::PI * v).sin() * hang;
+            // The section, with its deepest point where the sailmaker put it rather
+            // than in the middle of the chord. The chord is warped so that `draft_at`
+            // lands at the top of the curve: steeper entry ahead of it, long flat run
+            // behind — which is the shape of every working sail ever cut, and the
+            // difference between a sail and a sack.
+            let d = draft_at.clamp(0.12, 0.88);
+            let warped = if v < d {
+                v / (2.0 * d)
+            } else {
+                0.5 + (v - d) / (2.0 * (1.0 - d))
+            };
+            let belly = (std::f32::consts::PI * warped).sin() * local_camber * chord_length;
+            let droop = (std::f32::consts::PI * warped).sin() * hang;
             // Creases, radiating from the clew.
             //
             // Not decoration and not something a tiling texture can do, because they
