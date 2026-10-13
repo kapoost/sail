@@ -429,6 +429,24 @@ pub struct Telemetry {
     ///   speed and the sine of the heel, and it is the one that reefing cures.
     /// * **The hull**, meaning the lateral plane and what is left of the bare-hull
     ///   damping.
+    /// The surge ledger: what pushes her along her own axis and what holds her back,
+    /// newtons, signed so that forward is positive and the three of them sum to the net.
+    ///
+    /// Put here because the question "why is she doing more than the wind speed" has no
+    /// answer in a model that reports only a total, and because the obvious ledger — the
+    /// drive against `resistance` — is not a ledger at all: `resistance` is a sum of drag
+    /// *magnitudes* measured along several different directions, and the surge equation
+    /// is a sum of *components* along one. Comparing them leaves a fifth of the force
+    /// unaccounted for and it looks exactly like a leak.
+    ///
+    /// What is actually in that fifth is the foils. A keel at a leeway angle makes lift
+    /// perpendicular to the flow, and the flow is not along the hull, so some of that
+    /// lift points forward — the same mechanism as a sail, working in the other fluid,
+    /// and the reason a boat with a good keel goes to windward at all. It belongs in the
+    /// books as thrust, not hidden inside a word that means drag.
+    pub surge_from_sails: f64,
+    pub surge_from_hull: f64,
+    pub surge_from_foils: f64,
     pub yaw_from_rig: f64,
     pub yaw_from_heel: f64,
     pub yaw_from_hull: f64,

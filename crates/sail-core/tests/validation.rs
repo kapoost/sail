@@ -2956,6 +2956,152 @@ fn a_backed_headsail_pushes_her_head_round_and_a_sheeted_one_cannot() {
 }
 
 // ---------------------------------------------------------------------------
+// The energy audit: nothing may be got for nothing
+// ---------------------------------------------------------------------------
+//
+// Every force in this model was built and calibrated on its own, and they are multiplied
+// together: camber times heel times blanketing times the slot times separation times the
+// rigging. Each is defensible alone. The *product* has never been asked whether it
+// conserves anything, and the symptom that it might not is a boat seen three times doing
+// more than the true wind speed on a broad reach at two degrees of heel — two degrees
+// being almost no side force, which on a reach means almost no force at all.
+//
+// So: the ledger has to balance, and nothing may push.
+
+#[test]
+fn in_a_steady_state_the_drive_equals_the_drag() {
+    // The definition of a steady state, and therefore the one thing that cannot be
+    // approximately true. If the sum is not zero she is still accelerating, and if she
+    // is not accelerating but the sum is not zero, something is adding momentum without
+    // appearing in the books.
+    let cfg = BoatConfig::archipelago_packet();
+    for tws in [6.0, 12.0, 22.0] {
+        let make = wind(tws);
+        for twa in [45.0, 90.0, 135.0, 170.0] {
+            let s = steady_state(cfg, &make, rad(twa), SETTLE, 0.0);
+            if !s.converged {
+                continue;
+            }
+            let t = s.telemetry;
+            let net = t.surge_from_sails + t.surge_from_hull + t.surge_from_foils;
+            let scale = t
+                .surge_from_sails
+                .abs()
+                .max(t.surge_from_hull.abs())
+                .max(50.0);
+            assert!(
+                (net / scale).abs() < 0.06,
+                "at {tws:.0} kn and {twa:.0} deg she is settled and her books are not: \
+                 sails {:+.0} N, hull {:+.0}, foils {:+.0}, net {:+.0}",
+                t.surge_from_sails,
+                t.surge_from_hull,
+                t.surge_from_foils,
+                net
+            );
+
+            // And the shape of the ledger, which is the part worth being able to see.
+            // The sails push and the hull holds back, always. The foils may do either —
+            // thrust when she is making leeway and has a keel to make lift with, drag
+            // when she is not — and that is the entry that was missing and that made the
+            // obvious ledger look twenty per cent short.
+            assert!(
+                t.surge_from_hull <= 1.0,
+                "the hull is pushing her: {:+.0} N",
+                t.surge_from_hull
+            );
+        }
+    }
+}
+
+#[test]
+fn no_part_of_the_resistance_ever_pushes() {
+    // A drag term with the wrong sign is the classic way a simulation gets something for
+    // nothing, and it hides perfectly: the boat is simply a little fast and every
+    // explanation sounds plausible.
+    let cfg = BoatConfig::archipelago_packet();
+    for tws in [6.0, 14.0, 26.0] {
+        let make = wind(tws);
+        for twa in [40.0, 70.0, 110.0, 150.0, 180.0] {
+            let t = steady_state(cfg, &make, rad(twa), SETTLE, 0.0).telemetry;
+            for (name, part) in [
+                ("friction", t.resistance_friction),
+                ("residuary", t.resistance_residuary),
+                ("induced", t.resistance_induced),
+                ("waves", t.resistance_waves),
+            ] {
+                assert!(
+                    part >= -1.0,
+                    "at {tws:.0} kn and {twa:.0} deg the {name} resistance is {part:.0} N, \
+                     which is a drag that drives her"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn with_no_wind_she_only_ever_slows_down() {
+    // The hardest statement to argue with: take the wind away, give her way on, and
+    // watch. Flat water first, which isolates the hull; then a seaway, which is where a
+    // leak would actually live — orbital flow does push a boat about, and a model of it
+    // that pushes *on average* is a perpetual motion machine with waves painted on it.
+    let cfg = BoatConfig::archipelago_packet();
+    for sea in [None, Some(1.6_f64)] {
+        let mut sim = Simulation::new(
+            cfg,
+            {
+                let mut st = BoatState::at_rest(rad(40.0));
+                st.surge = kn_to_ms(6.0);
+                st
+            },
+            Box::new(SteadyWind::new(0.0, 0.0)) as Box<dyn WindField>,
+        );
+        if let Some(height) = sea {
+            // A sea left over from a blow that has died: the one condition in which a
+            // hull is pushed about by water and not at all by air.
+            sim = sim.with_water(Box::new(WindSea::new(
+                kn_to_ms(24.0),
+                120_000.0,
+                0.0,
+                0x5EA,
+            )));
+            let _ = height;
+        }
+        let controls = Controls {
+            reef: 1.0,
+            furl: 1.0,
+            staysail: 0.0,
+            rudder: 0.0,
+            ..Default::default()
+        };
+        // Mean speed over each ten seconds, which is longer than a wave period, so a
+        // surf up and a stall down inside one cycle cancel and only the *trend* is left.
+        let mut windows = Vec::new();
+        for _ in 0..6 {
+            let mut total = 0.0;
+            let mut n = 0.0;
+            for _ in 0..(10.0 / SUBSTEP) as u64 {
+                sim.run(SUBSTEP, &controls);
+                total += sim.telemetry.stw;
+                n += 1.0;
+            }
+            windows.push(ms_to_kn(total / n));
+        }
+        let where_ = if sea.is_some() { "in a seaway" } else { "on flat water" };
+        for pair in windows.windows(2) {
+            assert!(
+                pair[1] <= pair[0] + 0.05,
+                "{where_}, with no wind and no sail, she went from {:.2} kn to {:.2}: \
+                 {:?}",
+                pair[0],
+                pair[1],
+                windows
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Balance: what makes her gripe, and what actually cures it
 // ---------------------------------------------------------------------------
 

@@ -1065,6 +1065,9 @@ impl Simulation {
                 * (1.0 - 0.85 * rud.stalled))
                 .clamp(0.0, 1.0),
             weather_helm: mz - cfg.x_rudder * rud_fy,
+            surge_from_sails: drive,
+            surge_from_hull: hull_fx,
+            surge_from_foils: lp_fx + rud_fx,
             yaw_from_rig,
             yaw_from_heel,
             yaw_from_hull,
