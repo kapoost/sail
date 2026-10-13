@@ -377,7 +377,7 @@ pub fn setup(
     let boat = sim.sim.state.pos;
     let mut cells = Vec::with_capacity(CELLS);
     for _ in 0..CELLS {
-        cells.push(seeded_cell(&mut seed, boat, None));
+        cells.push(seeded_cell(&mut seed, boat, None, &|_| 0.0));
     }
 
     let mut puffs = Vec::with_capacity(COUNT);
@@ -467,12 +467,32 @@ fn seeded_cell(
     seed: &mut sail_core::rng::Pcg32,
     boat: glam::DVec2,
     drift: Option<glam::DVec2>,
+    gust: &dyn Fn(glam::DVec2) -> f64,
 ) -> Cell {
     let at = match drift {
         Some(d) if d.length_squared() > 1e-6 => {
             let upwind = -d.normalize();
             let across = glam::DVec2::new(-upwind.y, upwind.x);
-            boat + upwind * RANGE * 0.92 + across * (seed.next_f64() * 2.0 - 1.0) * RANGE
+            // Over a gust. A cumulus is the visible top of a column of rising air, and
+            // what comes back down beside it is the gust you feel on the water — so the
+            // cloud and the dark patch and the extra pressure in the sails are one
+            // event. The wind field knows where its gusts are, so the cloud is placed by
+            // asking it rather than by either of them guessing.
+            //
+            // They separate afterwards, and that is right too: the patch runs over the
+            // water at about four fifths of the surface wind while the cloud is carried
+            // by the gradient wind above it, a quarter faster. The gust arrives first and
+            // the cloud follows, which is the order you see it in.
+            let mut best = (boat, f64::NEG_INFINITY);
+            for _ in 0..6 {
+                let candidate =
+                    boat + upwind * RANGE * 0.92 + across * (seed.next_f64() * 2.0 - 1.0) * RANGE;
+                let strength = gust(candidate);
+                if strength > best.1 {
+                    best = (candidate, strength);
+                }
+            }
+            best.0
         }
         _ => {
             let a = seed.next_f64() * std::f64::consts::TAU;
@@ -529,7 +549,9 @@ pub fn update(
     for cell in &mut clouds.cells {
         cell.at += drift * dt;
         if (cell.at - boat).length() > RANGE {
-            *cell = seeded_cell(&mut seed, boat, Some(drift));
+            *cell = seeded_cell(&mut seed, boat, Some(drift), &|at| {
+                sim.sim.wind.gust_at(at, t)
+            });
         }
     }
 

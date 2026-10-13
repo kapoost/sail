@@ -299,6 +299,13 @@ impl ShelteredWind {
 }
 
 impl crate::wind::WindField for ShelteredWind {
+    /// Forwarded, and reduced by the shelter: in the lee of an island there is less
+    /// wind, and the gusts that do get there are what is left of the ones outside.
+    fn gust_at(&self, pos: DVec2, t: f64) -> f64 {
+        let from = crate::wind::direction_of(self.inner.sample(pos, t));
+        self.inner.gust_at(pos, t) * (0.2 + 0.8 * self.land.shelter(pos, from))
+    }
+
     fn sample(&self, pos: DVec2, t: f64) -> DVec2 {
         let flow = self.inner.sample(pos, t);
         let speed = flow.length();

@@ -534,9 +534,16 @@ fn gusts_are_gusty_but_not_noise() {
     use glam::DVec2;
     let mut w = SyntheticWind::new(0.0, kn_to_ms(14.0), 42);
     let mut samples = Vec::new();
+    // At a fixed point, with the clock running. That is the whole claim now: the gusts
+    // are a pattern in space, and a mooring buoy feels them because the wind carries
+    // them past it. The old version of this test held `t` at zero and leaned on
+    // `step()` to make the weather happen, which a spatial field will not do — and
+    // which was already wrong, since it stepped a wind whose clock never moved.
+    let mut t = 0.0;
     for _ in 0..(600.0 / SUBSTEP) as u32 {
         w.step(SUBSTEP);
-        samples.push(w.sample(DVec2::ZERO, 0.0).length());
+        t += SUBSTEP;
+        samples.push(w.sample(DVec2::ZERO, t).length());
     }
     let mean = samples.iter().sum::<f64>() / samples.len() as f64;
     let var = samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / samples.len() as f64;
