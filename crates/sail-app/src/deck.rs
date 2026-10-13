@@ -146,7 +146,17 @@ fn sheer_at(z: f32) -> (f32, f32) {
     }
     for (i, w) in SHEER.windows(2).enumerate() {
         if z <= w[1].0 {
-            let t = (z - w[0].0) / (w[1].0 - w[0].0);
+            // Eased between the stations rather than run straight between them.
+            //
+            // A sheer line is the most looked-at curve on a boat and it was a polygon:
+            // continuous, and with a corner at every station where the slope jumped.
+            // Nothing showed it until a sail's foot was laid along it — a hard-sheeted
+            // genoa runs a hand's breadth above the deck and is held off it, so the
+            // cloth copied the kink and put a twenty-eight degree crease in itself where
+            // the rest of the sail was turning one. Found by the fold sweep, which is
+            // the second real fault that measure has found since it learnt to tell a
+            // crease from a curve, and neither was in the sails at all.
+            let t = ease((z - w[0].0) / (w[1].0 - w[0].0));
             let a = faired(i);
             let b = faired(i + 1);
             return (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
