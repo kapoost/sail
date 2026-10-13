@@ -125,6 +125,14 @@ pub fn setup(
         // The live image starts as the first key frame, mip chain and all, so the very
         // first frame drawn is already the right shape.
         live = sea_texture::normal_map_at_size(sea_texture::ANIM_SIZE, 0.0);
+        // And it has to keep its bytes on this side of the fence. Every other texture
+        // here is `RENDER_WORLD` — built once, uploaded, and the processor's copy
+        // dropped, which is right for something that never changes. This one is written
+        // every frame, and with that usage Bevy had thrown the data away by the second
+        // frame, so the blend wrote nothing and the ripples stood still on frame zero
+        // while the log cheerfully reported thirty-six frames at twelve a second.
+        live.asset_usage = bevy::asset::RenderAssetUsages::MAIN_WORLD
+            | bevy::asset::RenderAssetUsages::RENDER_WORLD;
     }
     let first = images.add(live);
     let water = materials.add(StandardMaterial {
@@ -142,6 +150,8 @@ pub fn setup(
         keys,
         live: Some(first),
         blended: None,
+        writes: 0,
+        reported: 0.0,
     });
 
     // Spacing chosen from what the sea is, not from a convenient curve.
@@ -356,6 +366,9 @@ pub struct SeaFilm {
     live: Option<Handle<Image>>,
     /// Which pair was last written, so an unchanged blend is not written again.
     blended: Option<(usize, u16)>,
+    /// Blends written since the last report, and when that was.
+    writes: u32,
+    reported: f32,
 }
 
 /// Show the frame the clock is on.
@@ -394,6 +407,11 @@ pub fn roll_sea_film(
         return;
     };
     let Some(out) = target.data.as_mut() else {
+        // Loudly, once. A missing buffer here means the image is not keeping its
+        // processor-side copy, and the symptom is water that has simply stopped — which
+        // is indistinguishable from a tuning choice until somebody says so.
+        warn!("water: the live ripple map has no data on this side; animation is dead");
+        film.keys.clear();
         return;
     };
     let a = &film.keys[i];
@@ -414,6 +432,23 @@ pub fn roll_sea_film(
     let mix = (f * 256.0) as u32;
     for ((o, &x), &y) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
         *o = (((x as u32) * (256 - mix) + (y as u32) * mix) >> 8) as u8;
+    }
+
+    // A pulse, so a stopped animation says so instead of looking like a decision. The
+    // first version of this wrote into an image Bevy had already taken the bytes away
+    // from, so the water froze on frame zero while the startup line went on reporting
+    // thirty-six frames at twelve a second — a log that described the intention and not
+    // the result, which is the same fault as a diagnostic that reads a constant.
+    let sample: u32 = out.iter().take(32).map(|&b| b as u32).sum();
+    film.writes += 1;
+    let now = time.elapsed_secs();
+    if now - film.reported > 2.0 {
+        film.reported = now;
+        debug!(
+            "water: {} blends in {:.0} s, first texels sum {sample}",
+            film.writes, 2.0
+        );
+        film.writes = 0;
     }
 }
 
