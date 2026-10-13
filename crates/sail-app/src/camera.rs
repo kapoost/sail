@@ -17,8 +17,15 @@ pub struct MainCamera;
 
 #[derive(Resource, Default, PartialEq, Eq, Clone, Copy)]
 pub enum View {
-    #[default]
     Cockpit,
+    /// The default, which is not where the helmsman is.
+    ///
+    /// From the helm you cannot see the thing you are steering: the sails are above and
+    /// behind the mast from there, the heel is hard to read, and the hull's attitude —
+    /// which is most of what tells you she is overpressed — is under your feet. From
+    /// astern all three are in front of you at once. It is the view every sailing
+    /// photograph is taken from and for the same reason.
+    #[default]
     Chase,
 }
 

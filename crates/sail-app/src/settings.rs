@@ -48,15 +48,18 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             open: false,
-            // Where these sit after somebody has spent an evening listening to them.
-            // The sea is the ground and wants to be well under everything else — it is a
-            // continuous noise, and a continuous noise at the same level as the things
-            // that happen is just loudness. The boat's own sounds are events and can sit
-            // up where you hear them.
-            volume: 0.75,
-            music: 0.45,
-            sea: 0.25,
-            boat: 0.75,
+            // Where these sit after an evening of listening, and the sea is much lower
+            // than anybody would guess from a mixing desk.
+            //
+            // It is a continuous noise, and a continuous noise at the level of the things
+            // that *happen* is not atmosphere, it is loudness — it masks the sounds you
+            // are supposed to be sailing by. Pushed right down it stops being something
+            // you hear and becomes something you are in, which is what the sea is, and
+            // the gear and the music come up over it where they can be made out.
+            volume: 0.70,
+            music: 0.70,
+            sea: 0.13,
+            boat: 0.70,
             weather_touched: false,
         }
     }
