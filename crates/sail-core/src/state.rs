@@ -429,8 +429,8 @@ pub struct Telemetry {
     ///   speed and the sine of the heel, and it is the one that reefing cures.
     /// * **The hull**, meaning the lateral plane and what is left of the bare-hull
     ///   damping.
-    /// The surge ledger: what pushes her along her own axis and what holds her back,
-    /// newtons, signed so that forward is positive and the three of them sum to the net.
+    /// The surge ledger, in newtons: what pushes her along her own axis and what holds
+    /// her back, signed so forward is positive and the three of them sum to the net.
     ///
     /// Put here because the question "why is she doing more than the wind speed" has no
     /// answer in a model that reports only a total, and because the obvious ledger — the
