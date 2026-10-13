@@ -837,6 +837,12 @@ pub fn update_sails(
                     shake: (t_.aws as f32 / 15.4).clamp(0.0, 1.0),
                     flying: surface.which == Sail::Headsail
                         && sim.controls.headsail != sail_core::state::Headsail::Genoa,
+                    // The staysail is club-footed: its foot is laced along a spar that
+                    // swings on the tack fitting, so that edge is held straight and
+                    // cannot bag. Drawn with the same belly as every other sail its foot
+                    // bulged past the end of its own boom, which is a sail hanging off
+                    // the spar that is supposed to be holding it.
+                    footed: surface.which == Sail::Staysail,
                     // What the sail is cut to, plus what the wind puts into it.
                     //
                     // The camber in the trim is the designed shape — what the outhaul
@@ -1763,6 +1769,8 @@ struct SailTrim<'a> {
     shake: f32,
     /// Set flying: three corners on ropes and nothing holding any edge.
     flying: bool,
+    /// A spar along the foot, which therefore has no belly in it at all.
+    footed: bool,
 }
 
 fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
@@ -1778,6 +1786,7 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         clear_mast,
         shake,
         flying,
+        footed,
     } = *trim;
     let mut positions = Vec::with_capacity(SAIL_U * SAIL_V);
     let mut uvs = Vec::with_capacity(SAIL_U * SAIL_V);
@@ -1870,6 +1879,14 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         // its shoulders up by the head, because the tack is pinned down on the sprit and
         // the head is free to fly. That is why the sail looks like it is lifting away
         // from the boat — it is, and the lift is the shape.
+        if footed {
+            // The spar holds the bottom of the sail flat and the shape comes in above
+            // it, over about a fifth of the hoist — which is what cloth does over a boom
+            // and why a club-footed sail looks board-like along its foot. Drawn with the
+            // same belly as every other sail, the staysail's foot bulged past the end of
+            // its own boom: a sail hanging off the spar that is supposed to hold it.
+            local_camber *= crate::curve::smoothstep(0.0, 0.2, u);
+        }
         if flying {
             // The widest part is *high*, and higher than the first attempt put it. A
             // power of 0.8 peaks at four tenths of the hoist, which is still a genoa's
@@ -2213,6 +2230,7 @@ mod cloth_stays_cloth {
             // of the flogging caught at the wrong moment.
             shake: 0.0,
             flying: kind != Headsail::Genoa,
+            footed: false,
         };
         let mut mesh = Mesh::new(
             bevy::mesh::PrimitiveTopology::TriangleList,

@@ -67,6 +67,7 @@ pub fn draw(
     mut course: ResMut<Course>,
     keys: Res<ButtonInput<KeyCode>>,
 ) -> Result {
+
     if keys.just_pressed(KeyCode::KeyH) {
         console.hidden = !console.hidden;
     }
@@ -189,6 +190,23 @@ pub fn draw(
         .interactable(true)
         .show(ctx, |ui| {
             frame.show(ui, |ui| {
+                // Fixed, so the bar cannot move.
+                //
+                // It is anchored on its middle, so anything that changes its width slides
+                // the whole console sideways — measured, it breathed between 1144 and
+                // 1176 points as the clutch hint and the pilot's reason changed. On its
+                // own that is a twitch you would blame on your eyes.
+                //
+                // What made it a fault is egui's multipass: about once in a thousand
+                // frames a widget asks for a second layout pass, the console is drawn
+                // twice, and with different content the two passes had different widths —
+                // so the centre anchor put them in different places and both ended up on
+                // the screen. Reported from the deck as stacked consoles, and that
+                // rarity is exactly why it could be seen and not found.
+                //
+                // A fixed width makes the second pass land on top of the first, which is
+                // what a discarded pass should look like.
+                ui.set_min_width(CONSOLE_WIDTH);
                 ui.horizontal_top(|ui| {
                     // Helm. A tiller is a position your hand holds, so it is a bar you
                     // drag and it stays where you leave it.
@@ -322,12 +340,16 @@ pub fn draw(
                             }
                         });
                         ui.label(
-                            egui::RichText::new(if bank.line().rigged_for(&sim.controls) {
-                                format!("hauling in {}", bank.line().hauled_now(&sim.controls))
-                            } else {
-                                format!("{} is not led to this sail", bank.line().name())
-                            })
+                            egui::RichText::new(fit(
+                                &if bank.line().rigged_for(&sim.controls) {
+                                    format!("hauling in {}", bank.line().hauled_now(&sim.controls))
+                                } else {
+                                    format!("{} is not led to this sail", bank.line().name())
+                                },
+                                44,
+                            ))
                             .color(paint::LABEL)
+                            .monospace()
                             .size(9.0),
                         );
                     });
@@ -394,7 +416,7 @@ pub fn draw(
                         if let Some(reason) = pilot.last_reason {
                             if pilot.since_reason < 30.0 && !pilot.engaged() {
                                 ui.label(
-                                    egui::RichText::new(reason)
+                                    egui::RichText::new(fit(reason, 30))
                                         .color(paint::BAD)
                                         .monospace()
                                         .size(10.0),
@@ -502,6 +524,34 @@ pub fn draw(
             });
         });
     Ok(())
+}
+
+/// How wide the console is, in points, whatever is written in it.
+const CONSOLE_WIDTH: f32 = 1180.0;
+
+/// A line of monospace text of a fixed width, whatever it says.
+///
+/// Because the console is anchored on its *middle*, so anything that changes its width
+/// moves the whole bar sideways — and two of the lines in it are sentences that change:
+/// the clutch bank's hint and the pilot's reason for letting go. Measured, the bar
+/// breathed between 1144 and 1176 points as those two changed.
+///
+/// On its own that is a twitch. What made it a fault was egui's multipass: a frame in
+/// which a widget asks for a second layout pass draws the console twice, and because the
+/// two passes had different *content* they had different widths, so the centre anchor
+/// put them in different places and both ended up on the screen. Reported from the deck
+/// as stacked consoles, and it happened about once in a thousand frames, which is why it
+/// could be seen and not found.
+///
+/// A monospace line of n characters is n characters wide. Padding and truncating is the
+/// whole fix: the content cannot change the layout, so the two passes land on top of
+/// each other and the second is invisible — which is what a discarded pass should be.
+fn fit(text: &str, columns: usize) -> String {
+    let mut out: String = text.chars().take(columns).collect();
+    while out.chars().count() < columns {
+        out.push(' ');
+    }
+    out
 }
 
 /// What a sail is doing, in one word.
