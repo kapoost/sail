@@ -1901,6 +1901,25 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
             let shoulders = (std::f32::consts::PI * u.powf(1.6)).sin();
             local_camber *= 0.75 + 1.45 * shoulders;
         }
+        // No sail is deeper than this much of its own chord, and the number is not a
+        // safety margin — it is what a sail *is*.
+        //
+        // A spinnaker is cut at about a quarter of its chord and a reaching kite nearer
+        // a third; a working sail is a tenth. What was happening is that two reasonable
+        // multipliers were stacking: the generic "eased sails get fuller" term is
+        // `1 + 1.9 sin(chord angle)`, which on a broad reach is nearly three, and the
+        // flying sail's own shoulders are another two and a bit on top of that. Twenty
+        // per cent of camber came out at a hundred and forty, which is a sail bellying
+        // further than it is wide — reported from the deck as the gennaker filling the
+        // screen the moment the trim came good, because good trim is exactly when the
+        // chord angle is large and both terms are at their biggest.
+        //
+        // Clamped rather than rebalanced because the two terms are each right about
+        // their own thing and wrong only about each other. A cap says the thing that is
+        // actually true: cloth cannot hold a shape deeper than this, whatever the
+        // arithmetic upstream believes.
+        let deepest = if flying { 0.34 } else { 0.20 };
+        local_camber = local_camber.min(deepest);
         // And an eased foot does not merely get deeper, it *hangs*. The foot is the one
         // edge an outhaul has its hands on: hauled, it is a straight tight line from
         // tack to clew; eased, the cloth between them bags down under its own weight.
