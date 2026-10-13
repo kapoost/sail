@@ -102,8 +102,10 @@ fn deadzone(v: f32) -> f32 {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn gather(
     mut sim: ResMut<Sim>,
+    sound: Res<crate::sound::SoundHandle>,
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
@@ -181,9 +183,15 @@ pub fn gather(
         *helm_source = HelmSource::Keyboard;
     }
 
-    // A pilot that has been on the stops for six seconds is braking, not steering.
+    // A pilot that has been on the stops for six seconds is braking, not steering. This
+    // is the one dropout that is *not* your doing, so it is the one that alarms: you
+    // switched it off, you took the helm, you centred it — those you already know about,
+    // and a machine that beeps at you for doing what you meant to do gets ignored within
+    // the hour. Losing the course is the one you need telling about, usually because you
+    // are below and the boat is now steering herself.
     if pilot.engaged() && pilot.struggling() {
         pilot.drop_out("it could not hold the course — rudder was hard over");
+        sound.0.alarm();
     }
     // Touching the helm throws the pilot out, and says so.
     if pilot.engaged() {

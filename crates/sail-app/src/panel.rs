@@ -384,6 +384,21 @@ pub fn draw(
                                 .monospace()
                                 .size(9.0),
                         );
+                        // Why it last let go, for half a minute after it did. The
+                        // diagnostic panel has carried this since it was written, which
+                        // is the wrong place: the question "why did it switch off?" is
+                        // asked by somebody who was not watching, and they are looking
+                        // at the console because that is what is on the screen.
+                        if let Some(reason) = pilot.last_reason {
+                            if pilot.since_reason < 30.0 && !pilot.engaged() {
+                                ui.label(
+                                    egui::RichText::new(reason)
+                                        .color(paint::BAD)
+                                        .monospace()
+                                        .size(10.0),
+                                );
+                            }
+                        }
                         let engaged = pilot.engaged();
                         if lamp_button(ui, if engaged { "ENGAGED" } else { "STANDBY" }, engaged)
                             .clicked()

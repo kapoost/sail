@@ -72,6 +72,8 @@ pub struct SeaParams {
     /// A one-shot. The app sets it; the audio thread takes it and leaves zero, so a
     /// single event makes a single sound however the two threads happen to interleave.
     clack: AtomicU32,
+    /// The autopilot's alarm, taken the same way.
+    alarm: AtomicU32,
     muted: AtomicU32,
 }
 
@@ -109,6 +111,15 @@ impl SeaParams {
         if strength > pending {
             store(&self.clack, strength);
         }
+    }
+
+    /// The pilot has given up. Three beeps, which is what a tiller pilot does when it
+    /// loses the course — and the reason it does it is that the person it is steering
+    /// for is usually below, making tea, with no idea that the boat is now steering
+    /// herself. A dropout you have to be watching the screen to notice is a dropout
+    /// that happens to you rather than one you are told about.
+    pub fn alarm(&self) {
+        store(&self.alarm, 1.0);
     }
 
     pub fn set_muted(&self, muted: bool) {
@@ -174,6 +185,9 @@ pub struct SeaStream {
     pawl_ring: f32,
     clack_env: f32,
     clack_phase: f32,
+    alarm_left: u8,
+    alarm_clock: f32,
+    alarm_phase: f32,
     smooth: Smoothed,
     rig_phase: f32,
     rig_phase2: f32,
@@ -225,6 +239,9 @@ impl SeaStream {
             pawl_ring: 0.0,
             clack_env: 0.0,
             clack_phase: 0.0,
+            alarm_left: 0,
+            alarm_clock: 0.0,
+            alarm_phase: 0.0,
             smooth: Smoothed {
                 wind_cutoff: 400.0,
                 water_cutoff: 500.0,
@@ -272,6 +289,7 @@ impl Iterator for SeaStream {
             t_gear,
             gear_hz,
             clack,
+            alarm,
             t_mute,
         ) = {
             let p = &self.params;
@@ -290,6 +308,7 @@ impl Iterator for SeaStream {
                 load(&p.gear_hz),
                 // Taken, not read: swapping zero in is what makes a one-shot fire once.
                 f32::from_bits(p.clack.swap(0, Ordering::Relaxed)),
+                f32::from_bits(p.alarm.swap(0, Ordering::Relaxed)),
                 if p.muted() { 0.0 } else { 1.0 },
             )
         };
@@ -390,6 +409,33 @@ impl Iterator for SeaStream {
         // ground in quieter than a sail shaking two boat-lengths forward.
         let gear = (tooth * 1.15 + rasp * 0.62) * self.smooth.gear + clack_out;
 
+        // --- The pilot's alarm ------------------------------------------------------
+        //
+        // Three beeps, square-ish and deliberately unpleasant: this is the one sound in
+        // the mix that is a *machine* rather than the sea, and it has to cut through a
+        // gale because that is the weather in which the pilot gives up. Not filtered,
+        // not pretty, and it ignores nothing — a soft alarm is a decoration.
+        if alarm > 0.0 {
+            self.alarm_left = 3;
+            self.alarm_clock = 0.0;
+        }
+        let mut beep = 0.0;
+        if self.alarm_left > 0 {
+            self.alarm_clock += dt;
+            // A fifth of a second on, a fifth off.
+            let on = self.alarm_clock % 0.4 < 0.2;
+            if self.alarm_clock >= 0.4 {
+                self.alarm_clock -= 0.4;
+                self.alarm_left -= 1;
+            }
+            if on && self.alarm_left > 0 {
+                self.alarm_phase = (self.alarm_phase + 2_200.0 * dt).fract();
+                // Square, because a piezo is a square, and because a sine disappears
+                // into wind noise at the one moment it must not.
+                beep = if self.alarm_phase < 0.5 { 0.22 } else { -0.22 };
+            }
+        }
+
         // --- Flogging canvas: gated bursts with a hard attack ----------------------
         let flog_hz = flog_hz.clamp(0.5, 14.0);
         self.flog_phase += flog_hz * dt;
@@ -401,7 +447,12 @@ impl Iterator for SeaStream {
         let n3 = self.noise();
         let flog = n3 * self.flog_env * self.flog_env * self.smooth.flog * 0.9;
 
-        let mix = (wind + rig + water + flog + rain + gear) * MASTER * t_master * self.smooth.mute;
+        // The alarm sits outside the master gain and inside only the mute: it is a
+        // warning rather than part of the picture, and a volume turned down because the
+        // sea was loud must not be the reason nobody heard the pilot let go.
+        let mix =
+            (wind + rig + water + flog + rain + gear) * MASTER * t_master + beep * MASTER * 2.0;
+        let mix = mix * self.smooth.mute;
         // Soft clip. A gust plus a flogging genoa can stack up, and a hard clip is a
         // much worse sound than a little compression.
         Some(mix.tanh())
