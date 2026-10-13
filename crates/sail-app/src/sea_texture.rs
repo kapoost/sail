@@ -263,6 +263,98 @@ pub fn roughness_map() -> Image {
     image
 }
 
+/// How dark a stroke is, as a multiplier on the water under it.
+pub const HATCH_DEPTH: f32 = 0.5;
+
+/// The hatching, as a tonal art map: across is the stroke, down is how dark the water.
+///
+/// The drawn sea's strokes were drawn per *vertex* — a test of whether each vertex sat
+/// inside a stroke, laid out in world metres. That cannot work and never could: the
+/// strokes are three quarters of a metre apart and the vertices are one and three tenths
+/// apart under the boat, so the pattern was being sampled at half a sample per period,
+/// a seventh of what it needs. It was not hatching that shimmered, it was noise at the
+/// grid's own frequency that happened to look like hatching while it stood still. The
+/// same file states the rule it was breaking — `resolutions` holds the wave field to
+/// four samples per wavelength, "not twice; twice is the Nyquist limit, at which a
+/// moving sea visibly beats".
+///
+/// A mesh of that spacing cannot carry a stroke finer than two vertices, which is two
+/// and a half metres of sea, so vertex colours are simply the wrong instrument. A
+/// texture is the right one, and the whole apparatus is already here and already proven
+/// on exactly this complaint: `build_mipmaps` exists because a 512-texel tile at a
+/// grazing angle "aliases, and the aliasing crawls as the boat moves". Strokes in a
+/// mipmapped, anisotropically-filtered texture are filtered by the card, at the pixel,
+/// correctly, and they stop dead.
+///
+/// Two axes, which is what makes it a tonal art map rather than a pattern. **U** is the
+/// stroke phase, addressed in world metres so the strokes belong to the water and ride
+/// its orbital motion. **V** is the tone: each row carries a stroke of a different
+/// width, none at all at the top and better than half the period at the bottom, so
+/// "darker water, wider stroke" survives — that relation is the whole of why this reads
+/// as shading rather than as stripes. A vertex picks its row by how dark it is.
+///
+/// Linear, not sRGB, because this multiplies the water rather than being a colour: half
+/// here must mean half of what is under it, and an sRGB texture would decode 0.5 to
+/// 0.21 and put the sea in a coal cellar. Mipping a multiplier in linear space is also
+/// the correct average rather than merely the convenient one.
+pub fn hatch_map() -> Image {
+    /// Across one stroke period.
+    const W: u32 = 128;
+    /// Tone rows, lightest first.
+    const H: u32 = 64;
+    let mut data = Vec::with_capacity((W * H * 4) as usize);
+    for y in 0..H {
+        let dark = y as f32 / (H - 1) as f32;
+        // No stroke at all on the lightest water: on a page that tone is blank paper,
+        // and a stroke that never goes away is a texture rather than shading. The
+        // exponent puts most of the growth early, so the second tone already reads as
+        // hatched and the darkest is nearly solid.
+        let width = 0.62 * dark.powf(0.75);
+        for x in 0..W {
+            let u = (x as f32 + 0.5) / W as f32;
+            // Centred in the tile, so the softened edges never straddle the wrap.
+            let from_centre = (u - 0.5).abs();
+            let half = width * 0.5;
+            // One texel of soft edge, which is what keeps the texture itself clean at
+            // mip zero. Everything coarser is the card's business.
+            let edge = 1.0 / W as f32;
+            let inside = 1.0 - smoothstep(half - edge, half + edge, from_centre);
+            let value = 1.0 - (1.0 - HATCH_DEPTH) * inside;
+            let byte = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+            data.extend_from_slice(&[byte, byte, byte, 255]);
+        }
+    }
+    let mut image = Image::new(
+        Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    build_mipmaps(&mut image, false);
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        // Round the stroke, clamped down the tone: U is a repeating phase and V is a
+        // position in a range. Repeating V would put the blackest hatching next to the
+        // blank paper and draw a seam along it.
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        address_mode_w: ImageAddressMode::Repeat,
+        mipmap_filter: ImageFilterMode::Linear,
+        anisotropy_clamp: 4,
+        ..ImageSamplerDescriptor::linear()
+    });
+    image
+}
+
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// The tile has to repeat, and the mesh's UVs run to hundreds of tiles across.
 fn repeating() -> ImageSampler {
     ImageSampler::Descriptor(ImageSamplerDescriptor {

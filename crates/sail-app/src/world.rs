@@ -146,6 +146,7 @@ pub fn setup(
         cull_mode: None,
         ..default()
     });
+    commands.insert_resource(Hatching(images.add(sea_texture::hatch_map())));
     commands.insert_resource(SeaFilm {
         keys,
         live: Some(first),
@@ -292,16 +293,20 @@ const INK_BANDS: usize = 4;
 /// a screentone looks like shading rather than like stripes.
 const HATCH_SPACING: f32 = 0.75;
 
-/// How dark a stroke is.
-const HATCH_DEPTH: f32 = 0.5;
-
-/// How far the hatching leans off the wind, radians.
+/// Which way the strokes run, as a bearing in the world, radians.
 ///
 /// Not aligned with anything in the scene. Hatching that runs square to the waves reads
 /// as corduroy, and hatching that runs square to the screen reads as a screen-door; a
 /// draughtsman lays strokes across the form at an angle to it, and that is the one
 /// direction that does not fight what it is shading.
-const HATCH_LEAN: f32 = 0.6;
+///
+/// Fixed in the world rather than taken off the wind, which is what it used to be. A
+/// direction that rotates turns the whole pattern about the world's origin, and a boat
+/// a kilometre out with the wind veering twenty degrees would watch the strokes sweep
+/// three hundred metres across the sea under her. The wind's own direction is not worth
+/// that: what the lean has to avoid is the waves and the screen, and a fixed bearing
+/// avoids both except by coincidence.
+const HATCH_BEARING: f32 = 0.62;
 
 /// How wide the contour line on the water is, as a fraction of a tone band.
 ///
@@ -523,6 +528,10 @@ const BLEND_STEPS: u16 = 64;
 #[derive(Resource, Default)]
 pub struct Ink(pub bool);
 
+/// The hatching, held so the sea's material can be given it and taken off it.
+#[derive(Resource)]
+pub struct Hatching(pub Handle<Image>);
+
 impl Ink {
     /// `SAIL_INK=1` starts in the drawn sea, the same way `SAIL_PIXELS` starts in a
     /// chosen resolution: a look you have settled on should not need a keypress every
@@ -547,6 +556,8 @@ pub fn toggle_ink(keys: Res<ButtonInput<KeyCode>>, mut ink: ResMut<Ink>) {
 /// Take the lighting off the water, or put it back, whenever the flag moves.
 pub fn apply_ink(
     ink: Res<Ink>,
+    hatching: Res<Hatching>,
+    film: Res<SeaFilm>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     q: Query<&MeshMaterial3d<StandardMaterial>, With<SeaSurface>>,
 ) {
@@ -561,9 +572,20 @@ pub fn apply_ink(
             if ink.0 {
                 m.perceptual_roughness = 1.0;
                 m.reflectance = 0.02;
+                // The strokes go on the base colour, which is free: what the ripple
+                // film has always been is a *normal* map. And it comes off, because the
+                // two want the same UVs and cannot both have them — in the drawn sea
+                // the coordinates address the hatching, and a normal map read through
+                // them would be ripples sampled along a stroke. No loss: the drawn sea
+                // has had its lighting taken off it two lines above, and ripple detail
+                // is the one thing flat tones are a deliberate refusal of.
+                m.base_color_texture = Some(hatching.0.clone());
+                m.normal_map_texture = None;
             } else {
                 m.perceptual_roughness = 1.0;
                 m.reflectance = 0.25;
+                m.base_color_texture = None;
+                m.normal_map_texture = film.live.clone();
             }
         }
     }
@@ -671,6 +693,17 @@ pub fn update_sea(
             (anchor.x / tile).round() * tile,
             (anchor.y / tile).round() * tile,
         );
+        // The hatching is rebased with everything else, and whole tiles of the ripple
+        // texture are not whole strokes: twenty-four metres across the lean is not a
+        // multiple of three quarters of a metre, so every rebase would have shifted the
+        // strokes — a jump across the whole sea every ten seconds of sailing. Putting
+        // the base's own phase back and keeping only its fraction cancels it exactly,
+        // because the stroke texture repeats with period one and an integer shift of a
+        // repeating coordinate is no shift at all.
+        let hatch_base = ((uv_base.x as f32 * HATCH_BEARING.sin()
+            - uv_base.y as f32 * HATCH_BEARING.cos())
+            / HATCH_SPACING)
+            .rem_euclid(1.0);
 
         // Where every cloud shadow falls, worked out once for the frame rather than per
         // vertex. Forty thousand vertices times twenty clouds is a number that has to be
@@ -690,10 +723,16 @@ pub fn update_sea(
                 normals.push(Vec3::Y);
                 tangents.push(Vec4::new(1.0, 0.0, 0.0, -1.0));
                 let flat = st.pos + glam::DVec2::new(offset.x as f64, -offset.y as f64) - uv_base;
-                uvs.push(Vec2::new(
-                    flat.x as f32 / sea_texture::TILE_METRES,
-                    -flat.y as f32 / sea_texture::TILE_METRES,
-                ));
+                uvs.push(if ink {
+                    // Past the near field there is no wave to shade and nothing to
+                    // hatch: the top row of the map is blank paper.
+                    Vec2::ZERO
+                } else {
+                    Vec2::new(
+                        flat.x as f32 / sea_texture::TILE_METRES,
+                        -flat.y as f32 / sea_texture::TILE_METRES,
+                    )
+                });
                 colours.push([DEEP.x, DEEP.y, DEEP.z, 1.0]);
                 continue;
             }
@@ -832,25 +871,17 @@ pub fn update_sea(
                 },
                 foam,
             );
-            // Hatching: the shading is made of strokes, and the darker the water the
-            // more of it they cover. A stroke is wide where the tone is dark and thins
-            // to nothing where it is light, so the three bands of the drawn sea come out
-            // as three densities of line rather than three greys — which is what a
-            // manga page does and the reason it reads as drawn rather than rendered.
-            //
-            // Laid in world metres on the surface, so the strokes belong to the water
-            // and travel with it rather than crawling across it as the camera moves.
             if ink {
-                let lean = tm.twd as f32 + HATCH_LEAN;
-                let along = world.x as f32 * lean.sin() + world.y as f32 * lean.cos();
-                let phase = (along / HATCH_SPACING).fract().abs();
-                // Dark water gets a wide stroke, light water none at all.
-                let width = (1.0 - tone) * 0.55;
-                if phase < width {
-                    // Softened at the stroke's own edge by a hair, or the lines crawl
-                    // with the vertex grid instead of lying still on the water.
-                    let bite = ((width - phase) / 0.08).clamp(0.0, 1.0);
-                    colour *= 1.0 - HATCH_DEPTH * bite;
+                // The hatching's coordinates, now that this vertex knows how dark it
+                // is. Across the stroke in world metres, so the strokes lie on the
+                // water and ride its orbital motion with the ripples they replace;
+                // down the tone, which is what picks the width of the stroke out of
+                // the tonal art map. Written over the ripple coordinates pushed above,
+                // because the tone is not known until here and a vertex gets one UV.
+                let along = parcel.x as f32 * HATCH_BEARING.sin()
+                    - parcel.y as f32 * HATCH_BEARING.cos();
+                if let Some(uv) = uvs.last_mut() {
+                    *uv = Vec2::new(along / HATCH_SPACING + hatch_base, 1.0 - tone);
                 }
             }
             if ink && edge > 0.0 {
