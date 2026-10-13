@@ -747,8 +747,10 @@ fn crest_weight(lift: f32) -> f32 {
 /// climb steadily across a long passage, the leak is ours and the log says which kind.
 /// If they sit flat and the picture stops anyway, it is not ours, and that is worth
 /// knowing before a day is spent looking.
+#[allow(clippy::too_many_arguments)]
 pub fn report_vitals(
     sim: Res<Sim>,
+    rain: Res<crate::rain::Rain>,
     time: Res<Time>,
     meshes: Res<Assets<Mesh>>,
     images: Res<Assets<Image>>,
@@ -767,7 +769,8 @@ pub fn report_vitals(
     let (building, turning) = sim.sim.wind.outlook();
     info!(
         "vitals at {:.0} min: {} entities, {} meshes, {} images, {} materials; \
-         {:.0} kn, sea {:.2} m at {:.1} s, outlook {:+.1} kn/h {:+.0} deg/h",
+         {:.0} kn, sea {:.2} m at {:.1} s, outlook {:+.1} kn/h {:+.0} deg/h, \
+         {} squalls, rain {:.0}%",
         time.elapsed_secs() / 60.0,
         entities.iter().count(),
         meshes.len(),
@@ -778,6 +781,8 @@ pub fn report_vitals(
         sim.sim.water.peak_period_or(0.0),
         sail_core::units::ms_to_kn(building),
         sail_core::units::deg(turning),
+        sim.sim.wind.squalls().len(),
+        rain.fall * 100.0,
     );
 }
 

@@ -21,6 +21,7 @@ mod ink;
 mod input;
 mod islands;
 mod panel;
+mod rain;
 mod retro;
 mod rig;
 mod sail_texture;
@@ -132,6 +133,7 @@ fn main() {
                 course::setup,
                 wake::setup,
                 spray::setup,
+                rain::setup,
                 rig::setup,
                 panel::setup,
                 windstreaks::setup,
@@ -177,6 +179,9 @@ fn main() {
                     clouds::update,
                 ),
                 (
+                    // The weather you can see, after everything that places it.
+                    rain::update,
+                    rain::shroud,
                     camera::toggle,
                     camera::aim,
                     hud::toggle,

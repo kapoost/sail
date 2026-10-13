@@ -99,6 +99,12 @@ pub struct Weather {
     /// the three above, kept here so the forecast can be stated without recomputing.
     pub hs: f64,
     pub tp: f64,
+    /// Mean interval between squalls, seconds, or infinite for a day with none.
+    ///
+    /// A property of the day rather than of the wind model. Some days are a procession
+    /// of them and most are not, and which kind of day it is, is exactly the thing a
+    /// skipper wants out of a forecast — it decides whether you keep the reef handy.
+    pub squall_interval: f64,
     /// True wind angle to start on, radians, signed.
     pub start_twa: f64,
     /// Reef already in before casting off.
@@ -152,6 +158,17 @@ impl Weather {
             OVERPOWERED_HEEL,
         );
 
+        // How squally. Three kinds of day, in roughly the proportion a coast hands them
+        // out: most are clear of them, some have one or two go by, and a few are one
+        // after another. Drawn last on purpose — a new call anywhere earlier shifts
+        // every draw after it, and every seeded day anyone has sailed becomes a
+        // different day. Which it did once, between writing this and reading it back.
+        let squall_interval = match rng.next_f64() {
+            u if u < 0.55 => f64::INFINITY,
+            u if u < 0.88 => 2_400.0,
+            _ => 900.0,
+        };
+
         Self {
             seed,
             tws,
@@ -159,6 +176,7 @@ impl Weather {
             fetch,
             hs,
             tp,
+            squall_interval,
             start_twa,
             start_reef,
         }
@@ -168,7 +186,7 @@ impl Weather {
     pub fn report(&self) -> String {
         format!(
             "{:.0} kn from {:03.0}, {} — sea {:.1} m at {:.1} s over {:.0} km of fetch; \
-             starting {} on {} tack{} [seed {}]",
+             starting {} on {} tack{}{} [seed {}]",
             ms_to_kn(self.tws),
             deg(self.wind_from),
             beaufort(ms_to_kn(self.tws)),
@@ -185,6 +203,11 @@ impl Weather {
                 format!(", {:.0}% reef already tied in", self.start_reef * 100.0)
             } else {
                 String::new()
+            },
+            match self.squall_interval {
+                i if i.is_infinite() => "",
+                i if i <= 1_200.0 => ", squally",
+                _ => ", the odd squall about",
             },
             self.seed,
         )

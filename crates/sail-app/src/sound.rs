@@ -54,6 +54,7 @@ pub struct SeaParams {
     water_cutoff: AtomicU32,
     flog_level: AtomicU32,
     flog_hz: AtomicU32,
+    rain_level: AtomicU32,
     muted: AtomicU32,
 }
 
@@ -121,6 +122,7 @@ pub struct SeaStream {
     wind_b: OnePole,
     water_lp: OnePole,
     water_hp: OnePole,
+    rain_lp: OnePole,
     smooth: Smoothed,
     rig_phase: f32,
     rig_phase2: f32,
@@ -143,6 +145,7 @@ struct Smoothed {
     water: f32,
     water_cutoff: f32,
     flog: f32,
+    rain: f32,
     mute: f32,
 }
 
@@ -162,6 +165,7 @@ impl SeaStream {
             wind_b: OnePole::default(),
             water_lp: OnePole::default(),
             water_hp: OnePole::default(),
+            rain_lp: OnePole::default(),
             smooth: Smoothed {
                 wind_cutoff: 400.0,
                 water_cutoff: 500.0,
@@ -195,7 +199,18 @@ impl Iterator for SeaStream {
         // `self.params` across the body conflicts with the noise generator, and
         // cloning the Arc per sample would bump an atomic refcount inside the audio
         // callback for nothing.
-        let (t_wind, t_wind_cut, t_rig, t_rig_hz, t_water, t_water_cut, t_flog, flog_hz, t_mute) = {
+        let (
+            t_wind,
+            t_wind_cut,
+            t_rig,
+            t_rig_hz,
+            t_water,
+            t_water_cut,
+            t_flog,
+            flog_hz,
+            t_rain,
+            t_mute,
+        ) = {
             let p = &self.params;
             (
                 load(&p.wind_level),
@@ -206,6 +221,7 @@ impl Iterator for SeaStream {
                 load(&p.water_cutoff),
                 load(&p.flog_level),
                 load(&p.flog_hz),
+                load(&p.rain_level),
                 if p.muted() { 0.0 } else { 1.0 },
             )
         };
@@ -222,6 +238,7 @@ impl Iterator for SeaStream {
         Smoothed::towards(&mut self.smooth.water, t_water, SLEW);
         Smoothed::towards(&mut self.smooth.water_cutoff, t_water_cut, SLEW);
         Smoothed::towards(&mut self.smooth.flog, t_flog, SLEW);
+        Smoothed::towards(&mut self.smooth.rain, t_rain, SLEW);
         Smoothed::towards(&mut self.smooth.mute, t_mute, 0.0004);
 
         let dt = 1.0 / SAMPLE_RATE as f32;
@@ -247,6 +264,17 @@ impl Iterator for SeaStream {
         let dc = self.water_hp.run(low, 110.0);
         let water = (low - dc) * self.smooth.water * surge * 3.4;
 
+        // --- Rain on the deck ------------------------------------------------------
+        //
+        // Nearly unfiltered noise, and that is the whole character: rain on a coachroof
+        // is a hiss with no pitch in it, which is exactly what white noise is and why it
+        // is the one sound here that needs no shaping. A gentle lift at the bottom for
+        // the drumming on the deck, and nothing else — reach for a filter and it turns
+        // into wind.
+        let n4 = self.noise();
+        let drum = self.rain_lp.run(n4, 180.0);
+        let rain = (n4 * 0.72 + drum * 1.6) * self.smooth.rain * 0.5;
+
         // --- Flogging canvas: gated bursts with a hard attack ----------------------
         let flog_hz = flog_hz.clamp(0.5, 14.0);
         self.flog_phase += flog_hz * dt;
@@ -258,7 +286,7 @@ impl Iterator for SeaStream {
         let n3 = self.noise();
         let flog = n3 * self.flog_env * self.flog_env * self.smooth.flog * 0.9;
 
-        let mix = (wind + rig + water + flog) * MASTER * self.smooth.mute;
+        let mix = (wind + rig + water + flog + rain) * MASTER * self.smooth.mute;
         // Soft clip. A gust plus a flogging genoa can stack up, and a hard clip is a
         // much worse sound than a little compression.
         Some(mix.tanh())
@@ -312,7 +340,12 @@ const SHROUD_DIAMETER: f32 = 0.006;
 const STROUHAL: f32 = 0.2;
 
 /// Feed the synthesiser from the boat.
-pub fn update(sound: Res<SoundHandle>, sim: Res<Sim>, keys: Res<ButtonInput<KeyCode>>) {
+pub fn update(
+    sound: Res<SoundHandle>,
+    sim: Res<Sim>,
+    rain: Res<crate::rain::Rain>,
+    keys: Res<ButtonInput<KeyCode>>,
+) {
     let p = &sound.0;
     let t = &sim.sim.telemetry;
 
@@ -352,4 +385,8 @@ pub fn update(sound: Res<SoundHandle>, sim: Res<Sim>, keys: Res<ButtonInput<KeyC
         .max(t.jib.coeffs.luffing * (1.0 - sim.controls.furl)) as f32;
     store(&p.flog_level, luffing.clamp(0.0, 1.0));
     store(&p.flog_hz, 2.6 + 0.22 * aws.min(28.0));
+
+    // Rain. The one voice here driven by something other than the boat, and the first
+    // sound in the game that tells you about the weather rather than about the sailing.
+    store(&p.rain_level, rain.fall.clamp(0.0, 1.0).powf(0.8));
 }

@@ -99,6 +99,9 @@ struct Cell {
     /// Where across the cell each shaft starts, as a fraction of the spread, and how
     /// wide it is in metres. Fixed with the cell so the shafts do not crawl about.
     beams: [(f32, f32); BEAMS],
+    /// How much of a squall this cell is: 0 for fair-weather cloud, 1 for the thing
+    /// with the rain under it.
+    storm: f32,
 }
 
 /// One billboard.
@@ -514,6 +517,7 @@ fn seeded_cell(
         spread,
         rise: 90.0 + seed.next_f64() as f32 * 170.0,
         beams,
+        storm: 0.0,
     }
 }
 
@@ -555,6 +559,36 @@ pub fn update(
         }
     }
 
+    // The squall cloud. The first cells are given over to whatever squalls are about,
+    // which is the piece that makes a squall one object rather than three: the wind that
+    // hits you, the rain you are standing in and the black thing to windward are the
+    // same event, and you get to see it coming because it is drawn where it is.
+    //
+    // Low, wide and dark. A squall base is lower than fair-weather cloud — that is most
+    // of why it looks like one — and it is dark because it is thick enough to stop the
+    // light getting through rather than because of any shadow on it.
+    let squalls = sim.sim.wind.squalls();
+    for (i, cell) in clouds.cells.iter_mut().enumerate() {
+        match squalls.get(i) {
+            Some(&(at, radius, maturity)) => {
+                cell.at = at;
+                cell.base = 150.0 + 60.0 * (1.0 - maturity as f32);
+                cell.spread = radius as f32 * 0.85;
+                cell.rise = 260.0;
+                cell.storm = maturity as f32;
+            }
+            None if cell.storm > 0.0 => {
+                // Its squall has gone, so the cell goes back to being weather. Put it
+                // out of the way upwind rather than letting it fade on the spot, which
+                // would read as a cloud evaporating overhead.
+                *cell = seeded_cell(&mut seed, boat, Some(drift), &|at| {
+                    sim.sim.wind.gust_at(at, t)
+                });
+            }
+            None => {}
+        }
+    }
+
     // Back to front. One mesh means one draw call and therefore one sort order, so the
     // sort has to happen here: blended quads written in index order show their seams
     // wherever a near puff is drawn before a far one.
@@ -589,14 +623,23 @@ pub fn update(
         // what a cloud's shading is at this distance.
         let lit = (0.5 + 0.5 * p.sunward).clamp(0.0, 1.0);
         let height = p.offset.y.clamp(0.0, 1.0);
-        let light = (0.30 + 0.52 * lit + 0.34 * height).clamp(0.0, 1.0);
+        let mut light = (0.30 + 0.52 * lit + 0.34 * height).clamp(0.0, 1.0);
+        // A squall is dark underneath and bright on top, and it is one cloud: the base
+        // is in its own shadow and the top is in the sun. Keeping the top lit is what
+        // stops it reading as a grey blob and makes it read as something tall.
+        if cell.storm > 0.0 {
+            let towering = (height - 0.45).max(0.0) / 0.55;
+            light = light * (1.0 - cell.storm) + (0.04 + 0.85 * towering) * cell.storm;
+        }
         let mut colour = crate::sky::CLOUD_SHADOW.lerp(crate::sky::CLOUD_SUNLIT, light) * p.tone;
 
         // Into the haze with distance, so the near cells sit in front of the deck
         // painted on the cubemap instead of ending at a visible edge against it.
         let far = (distance / (RANGE as f32 * 0.85)).clamp(0.0, 1.0);
         colour = colour.lerp(haze, far * far * 0.6);
-        let mut alpha = 0.80 * (1.0 - far * far * 0.4);
+        // Opaque where it is a squall: you cannot see through one, which is the whole
+        // reason it takes the island away.
+        let mut alpha = (0.80 + 0.19 * cell.storm) * (1.0 - far * far * 0.4);
 
         if ink.0 {
             // Drawn cloud is flat tone and hard edges: three levels, no gradient. The

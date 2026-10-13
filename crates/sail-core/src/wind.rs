@@ -54,6 +54,22 @@ pub trait WindField: Send + Sync {
     /// Advance any internal stochastic state. A pure/analytic field may ignore this.
     fn step(&mut self, _dt: f64) {}
 
+    /// The squalls that are about, as (centre, radius, how developed). Empty for a field
+    /// without any.
+    ///
+    /// On the trait so that what you *see* is what hits you: the rain, the dark cloud
+    /// over it and the extra twenty knots are one object, and a squall drawn in one
+    /// place and felt in another is worse than no squall at all.
+    fn squalls(&self) -> Vec<(DVec2, f64, f64)> {
+        Vec::new()
+    }
+
+    /// How deep inside a squall a point is: 0 in the clear, 1 in the heart of one.
+    /// Drives the rain and the visibility.
+    fn squall_at(&self, _pos: DVec2) -> f64 {
+        0.0
+    }
+
     /// How much harder than the mean it is blowing at a point, as a fraction: 0.2 is a
     /// twenty percent gust and −0.2 a lull. Zero for a field with no structure in it.
     ///
@@ -148,6 +164,20 @@ impl Synoptic {
         wrap_tau(self.base_direction + self.direction_trend)
     }
 
+    /// Stop the weather where it is. Zeroing the swings is not enough on its own: the
+    /// trends are *drawn* at construction so the day is already under way, and a field
+    /// with the noise turned off but a trend still in it relaxes towards the base over
+    /// the next hour — so a wind asked to hold steady quietly changed by two knots and
+    /// twenty degrees on its first step, which is the sort of thing that makes a
+    /// validation suite measure the wrong boat. Found by a squall test that kept
+    /// missing: the squall was being aimed up a wind that was no longer there.
+    fn settled(&mut self) {
+        self.speed_swing = 0.0;
+        self.direction_swing = 0.0;
+        self.speed_trend = 0.0;
+        self.direction_trend = 0.0;
+    }
+
     /// Expected change over the next hour. For `dX = −X/tau dt + noise` the mean path
     /// is `X exp(−t/tau)`, so this is exact rather than an estimate.
     fn outlook(&self) -> (f64, f64) {
@@ -158,6 +188,99 @@ impl Synoptic {
         )
     }
 }
+
+/// A squall: a travelling cell of weather with its own wind in it.
+///
+/// Modelled as what one physically *is*, which turns out to be cheaper than modelling
+/// what one feels like. A squall is a column of air coming down out of a cloud and
+/// spreading out when it hits the water — so the wind in it is a radial **outflow** from
+/// the centre, added to whatever was blowing anyway. Everything a sailor knows about
+/// squalls falls out of that one vector and none of it has to be written down
+/// separately:
+///
+/// * On the leading edge the outflow runs the same way as the wind, so the gust front
+///   is where the extra twenty knots are.
+/// * On the flanks they are at right angles, so the sum is both stronger *and* shifted
+///   forty-odd degrees — the big header or lift that comes with one.
+/// * Behind it they oppose, which is the hole. The calm after a squall is not a lull in
+///   the weather, it is the outflow cancelling the gradient wind, and this gets it for
+///   nothing.
+/// * Outside the core there is a ring of weak inflow, because the air coming down has
+///   to come from somewhere. That is the lull *before* it arrives, which is the oldest
+///   warning there is and the one that makes the whole thing fair: the boat is told.
+///
+/// Sizes are at the small end of real. A squall two to four kilometres across takes five
+/// to ten minutes to pass over at these speeds, where a true ten-kilometre line would
+/// take most of an hour and be the whole session.
+#[derive(Clone, Copy, Debug)]
+pub struct Squall {
+    /// Centre, in world metres.
+    pub at: DVec2,
+    /// Radius of the core, metres.
+    pub radius: f64,
+    /// Peak outflow as a fraction of the mean wind speed.
+    pub strength: f64,
+    pub age: f64,
+    pub life: f64,
+}
+
+impl Squall {
+    /// How developed it is: nothing at birth, full in the middle of its life, gone at
+    /// the end. A squall that arrived at full strength would be a wall, and one that
+    /// vanished at full strength would leave a hole in the wind.
+    pub fn maturity(&self) -> f64 {
+        let u = (self.age / self.life).clamp(0.0, 1.0);
+        (std::f64::consts::PI * u).sin().powf(0.6)
+    }
+
+    /// How deep inside it a point is: 1 at the centre of the core, 0 at the edge and
+    /// beyond. This is what the rain and the visibility are drawn from.
+    pub fn depth(&self, pos: DVec2) -> f64 {
+        let r = (pos - self.at).length() / self.radius;
+        (1.0 - crate::units::smoothstep(0.55, 1.05, r)) * self.maturity()
+    }
+
+    /// The radial profile of the outflow, as a fraction of `strength`. Positive is air
+    /// coming out of the cell; negative is the ring of inflow feeding it.
+    fn radial(&self, r: f64) -> f64 {
+        if r < 1.0 {
+            // Strongest a little inside the edge rather than at the dead centre, which
+            // is where the downdraught actually spreads hardest.
+            let x = r.max(0.08);
+            x.min(0.75) / 0.75 * (1.0 - crate::units::smoothstep(0.75, 1.05, r))
+        } else {
+            // The inflow that feeds it: weak, wide, and the reason it goes light before
+            // a squall hits.
+            -0.22 * (1.0 - crate::units::smoothstep(1.0, 2.4, r))
+        }
+    }
+
+    /// What this squall adds to the flow at a point, in m/s.
+    pub fn outflow(&self, pos: DVec2, mean_speed: f64) -> DVec2 {
+        let offset = pos - self.at;
+        let r = offset.length() / self.radius;
+        if r > 2.4 {
+            return DVec2::ZERO;
+        }
+        let outward = if offset.length_squared() < 1.0 {
+            DVec2::ZERO
+        } else {
+            offset.normalize()
+        };
+        outward * (self.strength * mean_speed * self.radial(r) * self.maturity())
+    }
+}
+
+/// Mean interval between squalls, seconds. One every twenty-five minutes on a squally
+/// day, which is frequent for real weather and about right for a watch at the helm.
+const SQUALL_INTERVAL: f64 = 1_500.0;
+/// How many can be about at once. Two is a busy sky.
+const SQUALLS_AT_ONCE: usize = 2;
+/// How far upwind one is born, metres. Far enough that the rain and the dark cloud are
+/// a warning you can act on rather than something that happens to you.
+const SQUALL_BIRTH: f64 = 5_000.0;
+/// And how far downwind one is forgotten.
+const SQUALL_FORGET: f64 = 7_000.0;
 
 /// Gustiness as a field in space, carried over the water by the wind that makes it.
 ///
@@ -326,6 +449,14 @@ pub struct SyntheticWind {
     /// change in the wind changes where the pattern is *going* and not where it has
     /// been.
     carried: DVec2,
+    /// The squalls about, and the seconds until the next one is born.
+    squalls: Vec<Squall>,
+    /// Seconds until the next one is born.
+    pub next_squall: f64,
+    /// Mean interval between squalls, seconds. Public because how squally a day is, is
+    /// a property of the day: some are a procession of them and some have none, and the
+    /// draw in `weather.rs` is where that belongs rather than here.
+    pub squall_interval: f64,
     rng: Pcg32,
 }
 
@@ -344,8 +475,43 @@ impl SyntheticWind {
             veer_coupling: 7.0_f64.to_radians(),
             direction_anomaly: 0.0,
             carried: DVec2::ZERO,
+            squalls: Vec::new(),
+            // Drawn from the exponential the interval implies, so the first one is not
+            // always due at the same moment of the passage.
+            next_squall: -SQUALL_INTERVAL * (1.0 - rng.next_f64().max(1e-9)).ln(),
+            squall_interval: SQUALL_INTERVAL,
             rng,
         }
+    }
+
+    /// A squall, placed upwind of the origin and across it by a random offset.
+    ///
+    /// Upwind of the *world origin* rather than of the boat, which is deliberate: the
+    /// wind field does not know where the boat is and should not, or the weather starts
+    /// following the player about. The offsets are wide enough that most of them miss,
+    /// which is also how it is — you watch three go by to leeward for every one that
+    /// gets you.
+    fn born_upwind(&mut self) -> Squall {
+        let upwind = -flow_from(self.mean_direction, self.mean_speed).normalize_or_zero();
+        let across = DVec2::new(-upwind.y, upwind.x);
+        let offset = (self.rng.next_f64() * 2.0 - 1.0) * SQUALL_FORGET;
+        Squall {
+            at: upwind * SQUALL_BIRTH + across * offset,
+            radius: 700.0 + self.rng.next_f64() * 1_100.0,
+            // Half again to two and a half times the gradient wind at the core. The top
+            // of that range is a squall you reef for and the bottom is one you shrug at,
+            // and not knowing which it is until it is close is the whole decision.
+            strength: 0.5 + self.rng.next_f64() * 2.0,
+            age: 0.0,
+            life: 900.0 + self.rng.next_f64() * 900.0,
+        }
+    }
+
+    /// Put a squall in, where you want it. For the validation suite: a weather feature
+    /// that happens every twenty-five minutes at a random bearing cannot be asserted
+    /// about unless it can also be placed.
+    pub fn add_squall(&mut self, squall: Squall) {
+        self.squalls.push(squall);
     }
 
     /// Speed at a point and an instant, at the reference height.
@@ -370,20 +536,43 @@ impl SyntheticWind {
 
     /// Freeze the stochastic state. Handy for reproducing a moment while tuning.
     pub fn frozen(mut self) -> Self {
+        self.squalls.clear();
+        self.next_squall = f64::INFINITY;
         self.gusts.intensity = 0.0;
         self.direction_spread = 0.0;
         self.direction_anomaly = 0.0;
-        self.synoptic.speed_swing = 0.0;
-        self.synoptic.direction_swing = 0.0;
-        self.mean_speed = self.synoptic.base_speed;
-        self.mean_direction = self.synoptic.base_direction;
+        self.synoptic.settled();
+        self.mean_speed = self.synoptic.speed();
+        self.mean_direction = self.synoptic.direction();
         self
     }
 }
 
 impl WindField for SyntheticWind {
     fn sample(&self, pos: DVec2, t: f64) -> DVec2 {
-        flow_from(self.direction_at(pos, t), self.speed_at(pos, t))
+        let mut flow = flow_from(self.direction_at(pos, t), self.speed_at(pos, t));
+        for squall in &self.squalls {
+            // Inside the core the air is turbulent and windy all through, not only where
+            // the outflow happens to line up with the gradient wind. A third again over
+            // the whole footprint, and the outflow on top of it.
+            flow *= 1.0 + 0.35 * squall.depth(pos);
+            flow += squall.outflow(pos, self.mean_speed);
+        }
+        flow
+    }
+
+    fn squalls(&self) -> Vec<(DVec2, f64, f64)> {
+        self.squalls
+            .iter()
+            .map(|s| (s.at, s.radius, s.maturity()))
+            .collect()
+    }
+
+    fn squall_at(&self, pos: DVec2) -> f64 {
+        self.squalls
+            .iter()
+            .map(|s| s.depth(pos))
+            .fold(0.0, f64::max)
     }
 
     fn gust_at(&self, pos: DVec2, _t: f64) -> f64 {
@@ -403,8 +592,26 @@ impl WindField for SyntheticWind {
 
         // Carry the gust pattern downwind. A gust patch travels a little slower than
         // the air it is a structure in.
-        self.carried +=
-            flow_from(self.mean_direction, self.mean_speed) * (self.gusts.advection * dt);
+        let mean_flow = flow_from(self.mean_direction, self.mean_speed);
+        self.carried += mean_flow * (self.gusts.advection * dt);
+
+        // The squalls. They are carried by the wind above them, which is faster than the
+        // one on the water — so a squall overtakes you, and the fact that it catches up
+        // from astern-of-upwind is why you get a look at it first.
+        for squall in &mut self.squalls {
+            squall.age += dt;
+            squall.at += mean_flow * (1.25 * dt);
+        }
+        self.squalls.retain(|s| s.age < s.life);
+
+        self.next_squall -= dt;
+        if self.next_squall <= 0.0 {
+            self.next_squall = -self.squall_interval * (1.0 - self.rng.next_f64().max(1e-9)).ln();
+            if self.squalls.len() < SQUALLS_AT_ONCE {
+                let born = self.born_upwind();
+                self.squalls.push(born);
+            }
+        }
 
         // Only the fast wander of the direction is a process in time now. The
         // gusts are a pattern in space and need no stepping — they arrive because the

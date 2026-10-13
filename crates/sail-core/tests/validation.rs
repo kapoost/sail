@@ -2213,8 +2213,18 @@ fn the_weather_goes_somewhere_and_says_where() {
     // And the outlook has to agree with what actually happens. Not clairvoyance — the
     // expected path of a relaxing process — but the sign has to be right more often
     // than not, or the forecast on the console is a coin toss with a compass rose.
+    //
+    // The threshold is worked out rather than picked, because the first version of it
+    // was a knife edge that a change to the random stream tipped over. For a relaxing
+    // process over an hour at a forty minute time constant, the drift is 0.78 of the
+    // current trend and the noise accumulated over the same hour is 0.97 of the
+    // stationary spread — so the skill available is about 68 percent, not 100, and no
+    // amount of honest forecasting beats it. Two hundred days puts the standard error
+    // at three percent, so 58 percent is three sigma below what it should manage and
+    // still far enough above a coin toss to mean something.
     let mut right = 0;
-    for seed in 0..40u64 {
+    const DAYS: u64 = 200;
+    for seed in 0..DAYS {
         let mut w = SyntheticWind::new(rad(200.0), kn_to_ms(16.0), seed);
         let (speed_outlook, _) = w.outlook();
         let before = w.mean_speed;
@@ -2225,8 +2235,197 @@ fn the_weather_goes_somewhere_and_says_where() {
             right += 1;
         }
     }
+    let skill = right as f64 / DAYS as f64;
     assert!(
-        right >= 26,
-        "the outlook called the next hour right {right} times in 40, which is a guess"
+        skill > 0.58,
+        "the outlook called the next hour right {right} times in {DAYS} ({:.0}%), \
+         which is not far enough from a guess",
+        skill * 100.0
+    );
+}
+
+#[test]
+fn a_squall_has_a_front_a_shift_and_a_hole_behind_it() {
+    use glam::DVec2;
+    use sail_core::wind::Squall;
+
+    // Wind from the north at fifteen knots, so it flows south. A squall sitting on the
+    // origin, mature.
+    let mean = kn_to_ms(15.0);
+    let flow = sail_core::wind::flow_from(0.0, mean);
+    let squall = Squall {
+        at: DVec2::ZERO,
+        radius: 1_000.0,
+        strength: 1.2,
+        age: 900.0,
+        life: 1_800.0,
+    };
+    let at = |p: DVec2| flow + squall.outflow(p, mean);
+
+    // The leading edge is downwind of the centre: the outflow runs with the gradient
+    // wind, and that is where the extra wind is.
+    let front = at(DVec2::new(0.0, -700.0));
+    assert!(
+        front.length() > mean * 1.6,
+        "the gust front should be the windy part, got {:.1} kn against a {:.0} kn mean",
+        ms_to_kn(front.length()),
+        ms_to_kn(mean)
+    );
+
+    // Behind it the two oppose, and the hole is the thing everybody forgets. A squall
+    // that only ever adds wind is a squall nobody is ever caught out by afterwards.
+    let behind = at(DVec2::new(0.0, 700.0));
+    assert!(
+        behind.length() < mean * 0.6,
+        "there should be a hole behind it, got {:.1} kn",
+        ms_to_kn(behind.length())
+    );
+
+    // On the flank they are at right angles, so it blows harder *and* from somewhere
+    // else. The shift is what you tack on, or get rolled by.
+    let flank = at(DVec2::new(700.0, 0.0));
+    let shifted =
+        wrap_pi(sail_core::wind::direction_of(flank) - sail_core::wind::direction_of(flow));
+    assert!(
+        deg(shifted).abs() > 20.0,
+        "the flank should be a header or a lift, got {:.0} deg",
+        deg(shifted)
+    );
+    assert!(flank.length() > mean);
+
+    // And it goes light before it arrives, because the air coming down has to come from
+    // somewhere. This is the warning, and without it the whole thing is unfair.
+    //
+    // "Ahead" means ahead in its direction of travel, which is downwind — so south of
+    // it, the same side as the gust front, only further out. North of it is *behind*,
+    // and there the inflow runs the same way as the gradient wind and adds to it. Worth
+    // the note: the first version of this test looked for the lull on the wrong side and
+    // found a gust, which is a sign error in the test and not in the squall.
+    let ahead = at(DVec2::new(0.0, -1_600.0));
+    assert!(
+        ahead.length() < mean * 0.97,
+        "it should go light ahead of one, got {:.2} kn against {:.2}",
+        ms_to_kn(ahead.length()),
+        ms_to_kn(mean)
+    );
+}
+
+#[test]
+fn squalls_come_and_go_and_come_from_upwind() {
+    use sail_core::wind::{SyntheticWind, WindField};
+    let mut w = SyntheticWind::new(0.0, kn_to_ms(16.0), 4);
+    let mut seen = 0;
+    let mut most_at_once = 0;
+    let mut was = 0;
+    let mut born_upwind = 0;
+    let mut t = 0.0;
+    while t < 4.0 * 3600.0 {
+        w.step(1.0);
+        t += 1.0;
+        let now = w.squalls();
+        if now.len() > was {
+            seen += 1;
+            // Born upwind of the origin: with the wind in the north, that is to the
+            // north, so a positive northing.
+            if now.last().is_some_and(|(at, _, _)| at.y > 0.0) {
+                born_upwind += 1;
+            }
+        }
+        most_at_once = most_at_once.max(now.len());
+        was = now.len();
+    }
+    assert!(
+        (4..=20).contains(&seen),
+        "a four hour watch should see a handful of squalls, saw {seen}"
+    );
+    assert_eq!(born_upwind, seen, "every squall must come from upwind");
+    assert!(most_at_once <= 2, "{most_at_once} squalls at once is a sky");
+}
+
+#[test]
+fn a_squall_passing_over_is_light_then_hard_then_light() {
+    use glam::DVec2;
+    use sail_core::wind::{Squall, SyntheticWind, WindField};
+
+    // The sequence a boat actually experiences, which is the only test of a squall that
+    // matters. Each step of it is a decision at the helm, and getting the *order* wrong
+    // — the hole before the front, say — would feel wrong to any sailor while passing
+    // every test written about the parts in isolation.
+    //
+    // Measured, dead-on, fifteen knots of gradient wind: 15.0, then 11.4 as the inflow
+    // takes the edge off it, then 23.8 at the front, then 7.8 in the hole, then back.
+    let run = |across: f64| -> Vec<(f64, f64, f64)> {
+        let mean = kn_to_ms(15.0);
+        let mut w = SyntheticWind::new(0.0, mean, 9).frozen();
+        w.add_squall(Squall {
+            at: DVec2::new(across, 4_000.0),
+            radius: 900.0,
+            strength: 1.3,
+            age: 450.0,
+            life: 2_400.0,
+        });
+        let mut trace = Vec::new();
+        let mut t = 0.0;
+        while t < 900.0 {
+            w.step(1.0);
+            t += 1.0;
+            let f = w.sample(DVec2::ZERO, t);
+            trace.push((t, f.length(), sail_core::wind::direction_of(f)));
+        }
+        trace
+    };
+
+    let mean = kn_to_ms(15.0);
+    let trace = run(0.0);
+    let peak = trace.iter().cloned().fold(
+        (0.0, 0.0, 0.0),
+        |best, s| if s.1 > best.1 { s } else { best },
+    );
+    assert!(
+        peak.1 > mean * 1.5,
+        "the front should be a front: {:.0} kn against a {:.0} kn mean",
+        ms_to_kn(peak.1),
+        ms_to_kn(mean)
+    );
+
+    // It goes light *first*. This is the half of it the boat is given for free, and
+    // without it the whole thing is unfair.
+    let lull = trace
+        .iter()
+        .take_while(|s| s.0 < peak.0)
+        .map(|s| s.1)
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        lull < mean * 0.95,
+        "it should go light ahead of the front: {:.1} kn against {:.1}",
+        ms_to_kn(lull),
+        ms_to_kn(mean)
+    );
+
+    // And the hole behind is deeper than the lull in front, because behind it the
+    // outflow is cancelling the gradient wind rather than merely feeding the cell.
+    let hole = trace
+        .iter()
+        .skip_while(|s| s.0 <= peak.0)
+        .map(|s| s.1)
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        hole < lull,
+        "the hole behind should beat the lull in front: {:.1} kn against {:.1}",
+        ms_to_kn(hole),
+        ms_to_kn(lull)
+    );
+
+    // One that goes by to one side instead of over the top: that is where the shift is,
+    // because the outflow is across the wind there rather than along it. Measured, 420 m
+    // off the centre: the wind swings from 354 degrees through 48 and back.
+    let shift = run(420.0)
+        .iter()
+        .map(|s| wrap_pi(s.2).abs())
+        .fold(0.0, f64::max);
+    assert!(
+        deg(shift) > 25.0,
+        "a squall going by on one side should shift the wind, got {:.0} deg",
+        deg(shift)
     );
 }

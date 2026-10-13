@@ -25,7 +25,18 @@ pub struct Sim {
 impl Sim {
     pub fn new(weather: Weather) -> Self {
         let cfg = BoatConfig::archipelago_packet();
-        let wind = SyntheticWind::new(weather.wind_from, weather.tws, weather.seed ^ 0x5A11);
+        let mut wind = SyntheticWind::new(weather.wind_from, weather.tws, weather.seed ^ 0x5A11);
+        wind.squall_interval = weather.squall_interval;
+        // `SAIL_SQUALL=120` for a squall every two minutes. The same kind of switch as
+        // `SAIL_HEADSAIL`: you cannot look at a thing that happens every twenty-five
+        // minutes often enough to get it right, and a knob beats sitting and waiting.
+        if let Some(interval) = std::env::var("SAIL_SQUALL")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+        {
+            wind.squall_interval = interval.max(10.0);
+            wind.next_squall = wind.next_squall.min(interval);
+        }
         let heading = wrap_tau(weather.wind_from - weather.start_twa);
         let mut state = BoatState::at_rest(heading);
         // Start with way on, close-hauled. Dead in the water head to wind is realistic

@@ -143,6 +143,19 @@ pub fn draw(
                 // worth more than any of the ones above it.
                 let (building, turning) = sim.sim.wind.outlook();
                 readout(ui, "OUTLOOK", &outlook_words(building, turning));
+                // And the one piece of weather that is not a trend but an object. A
+                // squall is a thing with a position, a size and a time of arrival, and
+                // every one of those is a decision: reef, bear away, or carry on and
+                // find out. Shown only when there is one, because an instrument that
+                // says NO SQUALL all day is an instrument you stop reading.
+                if let Some(warning) = squall_warning(&sim) {
+                    ui.label(
+                        egui::RichText::new(warning)
+                            .color(paint::BAD)
+                            .monospace()
+                            .size(11.0),
+                    );
+                }
 
                 ui.add_space(4.0);
                 ui.separator();
@@ -664,6 +677,55 @@ fn readout(ui: &mut egui::Ui, label: &str, value: &str) {
 }
 
 /// The tiller: drag it, and it stays.
+/// The nearest squall, if one is near enough to matter.
+///
+/// Range and bearing, and whether it is going to hit — which is the question, and it is
+/// not the same as whether it is close. A squall passing two miles up to windward is a
+/// spectacle; the same squall dead upwind is twenty minutes away and means reefing now
+/// while the deck is still flat. The test is the same one a radar does: project it along
+/// its own drift and see how near it comes.
+fn squall_warning(sim: &Sim) -> Option<String> {
+    let boat = sim.sim.state.pos;
+    let drift = sim.sim.wind.sample(boat, sim.sim.state.time);
+    let (at, radius, _) = sim.sim.wind.squalls().into_iter().min_by(|a, b| {
+        (a.0 - boat)
+            .length_squared()
+            .total_cmp(&(b.0 - boat).length_squared())
+    })?;
+    let offset = at - boat;
+    let range = offset.length();
+    if range > 9_000.0 {
+        return None;
+    }
+    // Closest approach, if it keeps coming the way it is coming. The squall travels a
+    // quarter faster than the surface wind — see `wind.rs` — so that is the track used.
+    let track = drift * 1.25;
+    let speed = track.length().max(0.1);
+    let along = offset.dot(track) / speed;
+    // Behind us and going away: nothing to say.
+    if along > 0.0 {
+        return None;
+    }
+    let miss = (offset - track / speed * along).length();
+    let minutes = (-along / speed) / 60.0;
+    let bearing = sail_core::units::deg(sail_core::wind::direction_of(-offset)).rem_euclid(360.0);
+    Some(if miss < radius {
+        format!(
+            "SQUALL {:.1} nm {:03.0} — {:.0} min",
+            range / 1852.0,
+            bearing,
+            minutes
+        )
+    } else {
+        format!(
+            "squall {:.1} nm {:03.0} — passing {:.1} nm off",
+            range / 1852.0,
+            bearing,
+            miss / 1852.0
+        )
+    })
+}
+
 /// The hour ahead, in the words a forecast uses.
 ///
 /// Knots per hour and degrees per hour are not how anyone thinks about weather, and a

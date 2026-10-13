@@ -310,6 +310,17 @@ impl crate::wind::WindField for ShelteredWind {
         self.inner.outlook()
     }
 
+    fn squalls(&self) -> Vec<(DVec2, f64, f64)> {
+        self.inner.squalls()
+    }
+
+    fn squall_at(&self, pos: DVec2) -> f64 {
+        // A squall is a column of air a kilometre and more across coming down out of a
+        // cloud. An island does not shelter you from one; it only takes the gradient
+        // wind out from underneath it.
+        self.inner.squall_at(pos)
+    }
+
     fn sample(&self, pos: DVec2, t: f64) -> DVec2 {
         let flow = self.inner.sample(pos, t);
         let speed = flow.length();
