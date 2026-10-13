@@ -248,13 +248,11 @@ pub fn compose(
     sim: Res<Sim>,
     sky: Res<crate::sky::Sky>,
     ink: Res<crate::world::Ink>,
-    settings: Res<crate::settings::Settings>,
     sound: Res<SoundHandle>,
     mut music: ResMut<Music>,
 ) {
     let p = &sound.0;
     p.set_shape(if ink.0 { 1.0 } else { 0.0 });
-    p.set_music(settings.music);
 
     let want = asking(&sim, sky.hour);
     let t = &sim.sim.telemetry;

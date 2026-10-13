@@ -97,8 +97,20 @@ impl Retro {
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
         else {
-            return Self::default();
+            // Seven hundred and twenty, which is where this ends up every time somebody
+            // sits down with it. Sharp was the default on the reasoning that a new
+            // player should see the most of what is drawn; what a new player actually
+            // sees is a picture with no opinion about itself, and the whole look of this
+            // thing — the drawn horizon, the flat tones, the stepped rigging — is built
+            // for a small image. `SAIL_PIXELS=0` still asks for sharp.
+            return Self {
+                step: Some(1),
+                ..Self::default()
+            };
         };
+        if want == 0 {
+            return Self::default();
+        }
         let step = WIDTHS
             .iter()
             .enumerate()

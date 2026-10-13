@@ -285,7 +285,7 @@ fn main() {
                     sky::light,
                     rain::update,
                     rain::shroud,
-                    settings::toggle,
+                    (settings::toggle, settings::apply),
                     help::toggle,
                     camera::toggle,
                     camera::aim,

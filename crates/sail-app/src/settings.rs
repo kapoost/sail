@@ -48,13 +48,35 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             open: false,
-            volume: 0.8,
+            // Where these sit after somebody has spent an evening listening to them.
+            // The sea is the ground and wants to be well under everything else — it is a
+            // continuous noise, and a continuous noise at the same level as the things
+            // that happen is just loudness. The boat's own sounds are events and can sit
+            // up where you hear them.
+            volume: 0.75,
             music: 0.45,
-            sea: 1.0,
-            boat: 1.0,
+            sea: 0.25,
+            boat: 0.75,
             weather_touched: false,
         }
     }
+}
+
+/// Put the mix where the settings say, every frame.
+///
+/// Its own system because the panel is the wrong place for it: `draw` returns early when
+/// the panel is shut, so every level set here only reached the audio thread *once
+/// somebody had opened the settings*. Until then the mix ran on whatever the parameter
+/// block happened to hold, which is a second set of defaults in a second file — the same
+/// fault as a reader guessing at a sentinel, one layer up.
+///
+/// Four numbers a frame costs nothing and there is now one place where the settings are
+/// the settings.
+pub fn apply(settings: Res<Settings>, sound: Res<SoundHandle>) {
+    sound.0.set_master(settings.volume);
+    sound.0.set_sea(settings.sea);
+    sound.0.set_boat(settings.boat);
+    sound.0.set_music(settings.music);
 }
 
 /// Escape, which is the one key everybody tries first — and the only system allowed to
@@ -126,7 +148,6 @@ pub fn draw(
                 {
                     settings.volume = volume;
                 }
-                sound.0.set_master(settings.volume);
                 // Separate from the master, because the sea and the music are two
                 // different things to want. Somebody who sails with the wind in their
                 // ears and nothing else is not turning the game down, they are turning
@@ -147,8 +168,6 @@ pub fn draw(
                 );
                 settings.sea = sea;
                 settings.boat = boat;
-                sound.0.set_sea(sea);
-                sound.0.set_boat(boat);
                 let mut music = settings.music;
                 if ui
                     .add(
