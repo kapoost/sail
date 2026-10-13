@@ -170,6 +170,9 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
         ));
     });
 
+    // --- Wind vane -----------------------------------------------------------
+    wind_vane(w, b, varnish);
+
     // --- Winches -------------------------------------------------------------
     //
     // Two for the sheets, one each side on the coaming, and one on the coachroof for
@@ -387,6 +390,127 @@ pub fn update_tiller(sim: Res<Sim>, mut q: Query<&mut Transform, With<Tiller>>) 
         // tiller away from the wind to bear away is the oldest muscle memory in
         // sailing, and getting it backwards would be felt immediately.
         t.rotation = Quat::from_rotation_y(angle);
+    }
+}
+
+/// Marks the wind vane's turret, which turns to the angle it is set to.
+#[derive(Component)]
+pub struct VaneTurret;
+
+/// Marks the vane blade itself, which falls to leeward when she is off course.
+#[derive(Component)]
+pub struct VaneBlade;
+
+/// A wind-vane self-steering gear on the transom.
+///
+/// The thing that makes a vane gear worth drawing rather than hiding in a resource is
+/// that it is the only autopilot you can *read*. An electric pilot is a box with a light
+/// on it; a vane tells you, from the cockpit and without looking at an instrument, both
+/// what it is trying to do and how badly it is failing:
+///
+/// * **The turret** is the setting. You slacken it, turn the vane until its plane lies
+///   along the wind you want to hold, and clamp it. That angle *is* the course order —
+///   there is no number anywhere — and here it is the apparent wind angle the pilot is
+///   holding.
+/// * **The lean** is the error. On course the wind comes edge-on and the blade stands
+///   up; let her wander and the wind strikes the face of it and the blade falls to
+///   leeward, and the further she is off the further it goes over. Watching it is how a
+///   single-hander knows, from the companionway, whether the gear is coping.
+///
+/// The steering force is still the ram's, modelled in `autopilot::correct_under_load`,
+/// and this is honest about that rather than pretending to be a servo-pendulum: a real
+/// gear of this kind drives an oar that the water pushes sideways, with its own gearing,
+/// its own slop and its own failure modes. What is drawn here is the vane and its
+/// setting, driven by the same error the pilot is steering on, so what you see is what
+/// it is doing.
+fn wind_vane(w: &mut Workshop, b: &mut ChildSpawnerCommands, varnish: &Handle<StandardMaterial>) {
+    // Right aft and clear of the tiller's sweep, which is where one goes: it has to be
+    // in clean air behind the mainsail and it must not foul the helm.
+    // Abaft the rudder stock: +z is aft on this boat, the mast being stepped at −1.8.
+    let z = STOCK_Z + 0.34;
+    b.spawn((
+        VaneTurret,
+        Transform::from_xyz(0.0, deck::deck_height(z) + 0.06, z),
+        Visibility::default(),
+    ))
+    .with_children(|t| {
+        // The post it all stands on.
+        t.spawn((
+            Mesh3d(w.meshes.add(Cylinder::new(0.028, 0.52))),
+            MeshMaterial3d(varnish.clone()),
+            Transform::from_xyz(0.0, 0.26, 0.0),
+        ));
+        // The counterweight arm across the top, which is what makes a vane fall over
+        // slowly and deliberately rather than slamming: it is balanced just off
+        // vertical so gravity brings it back.
+        t.spawn((
+            Mesh3d(w.meshes.add(Cuboid::new(0.30, 0.022, 0.022))),
+            MeshMaterial3d(varnish.clone()),
+            Transform::from_xyz(0.0, 0.50, 0.0),
+        ));
+        t.spawn((
+            VaneBlade,
+            Transform::from_xyz(0.0, 0.52, 0.0),
+            Visibility::default(),
+        ))
+        .with_children(|v| {
+            // Plywood, a foot wide and twice that tall, and set *fore and aft* when the
+            // turret is at zero: a vane holds a wind angle by presenting its edge to
+            // that wind, so its plane lies along the wind it is set for.
+            v.spawn((
+                Mesh3d(w.meshes.add(Cuboid::new(0.012, 0.56, 0.30))),
+                MeshMaterial3d(varnish.clone()),
+                Transform::from_xyz(0.0, 0.28, -0.04),
+            ));
+        });
+    });
+}
+
+/// Set the vane to what the pilot is holding, and lean it by how far she is off.
+///
+/// Both of those are the same two numbers the pilot steers on, which is the point: the
+/// gear on the transom is not an illustration of the autopilot, it is the autopilot's
+/// state made visible. If it is leaning hard, the pilot is working hard.
+pub fn update_vane(
+    sim: Res<Sim>,
+    pilot: Res<crate::input::Pilot>,
+    mut turret: Query<&mut Transform, (With<VaneTurret>, Without<VaneBlade>)>,
+    mut blade: Query<&mut Transform, With<VaneBlade>>,
+) {
+    use sail_core::autopilot::PilotMode;
+    // How far over it falls at its stop, and how much wind error gets it there. A vane
+    // is near its limit at about twenty-five degrees of error: past that it is on the
+    // stops and the gear has nothing left, which is exactly when a single-hander looks
+    // aft and starts shortening sail.
+    const LEAN_LIMIT: f32 = 40.0;
+    const FULL_ERROR: f32 = 25.0;
+
+    let (set, error) = match pilot.mode {
+        PilotMode::ApparentWind(target) => (
+            target as f32,
+            sail_core::units::wrap_pi(sim.sim.telemetry.awa - target) as f32,
+        ),
+        // Not steering on the wind: the vane stands upright and keeps whatever it was
+        // last clamped at, which is what an unshipped gear looks like from the cockpit.
+        _ => (f32::NAN, 0.0),
+    };
+
+    if let Ok(mut t) = turret.single_mut() {
+        if set.is_finite() {
+            // The plane of the vane lies along the wind it is set to hold, because a
+            // vane holds an angle by presenting its *edge* to that wind. Fore and aft
+            // for a wind dead astern, athwartships for one on the beam.
+            t.rotation = Quat::from_rotation_y(set);
+        }
+    }
+    if let Ok(mut t) = blade.single_mut() {
+        // Falls to leeward: the wind has moved round to one side of the vane's plane, so
+        // it strikes that face and pushes the blade over the other way. A positive error
+        // is the wind further round to starboard, so the top goes to port.
+        let lean = (error.to_degrees() / FULL_ERROR * LEAN_LIMIT)
+            .clamp(-LEAN_LIMIT, LEAN_LIMIT)
+            .to_radians();
+        t.rotation = Quat::from_rotation_z(lean);
     }
 }
 

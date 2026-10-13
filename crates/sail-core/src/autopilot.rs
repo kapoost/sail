@@ -505,26 +505,35 @@ impl Autopilot {
             PilotMode::Standby => return None,
             PilotMode::Heading(target) => wrap_pi(target - st.heading),
             PilotMode::ApparentWind(target) => {
-                // Bearing away opens the apparent wind angle, so when the measured
-                // angle exceeds the target the boat must luff — a turn towards the
-                // wind, and therefore towards whichever side the wind is on. On the
-                // intended tack both tacks reduce to the same expression.
-                let upwind_target = target.abs() < std::f64::consts::FRAC_PI_2;
-                if tm.awa.abs() < rad(8.0) {
-                    // Head to wind, where the sign of the measurement is meaningless.
-                    // Bear away onto the intended tack.
-                    -target.signum() * rad(20.0)
-                } else if tm.awa.signum() != target.signum() {
-                    // Knocked onto the wrong tack. Which way round matters enormously:
-                    // for an upwind target the short way back is a tack, so luff up and
-                    // through the wind; for a downwind target it is a gybe, so bear
-                    // away. Getting this backwards sends the boat the long way round
-                    // and, upwind, straight through an uncontrolled gybe.
-                    let through_the_wind = if upwind_target { -1.0 } else { 1.0 };
-                    through_the_wind * target.signum() * rad(30.0)
-                } else {
-                    tm.awa - target
-                }
+                // The apparent wind angle is a *circular* quantity, and this used to
+                // subtract it like a straight line. Which is a tree of special cases
+                // waiting to happen, and one of them was a trap: dead downwind the wind
+                // wanders either side of the stern with every wave, so a target of 175
+                // degrees to starboard and a reading of 179 to port is a four-degree
+                // shift — and the old arithmetic read it as being knocked onto the other
+                // tack and answered with the helm hard over towards the gybe. Measured
+                // before the fix: forty degrees of rudder, which is the stop, for four
+                // degrees of wind. At eight knots that is how an autopilot puts you on
+                // your ear.
+                //
+                // Wrapping the difference is the whole of the fix, and the special cases
+                // fall out of it rather than having to be written:
+                //
+                // * Four degrees across the stern is four degrees of error, not a tack.
+                // * Properly gybed — the wind on the other quarter — the short way round
+                //   the circle *is* round the stern, so she bears away. Which is what
+                //   you want, and what the old code had to say explicitly.
+                // * Knocked onto the wrong tack upwind, the short way round is through
+                //   the wind, so she luffs and tacks back. Also what you want, and the
+                //   one the old code warned that getting backwards sends her the long
+                //   way round out of control.
+                // * And in irons, where the sign of the measurement means nothing, the
+                //   short way round is onto the side the target is on, which is the
+                //   same answer the old head-to-wind branch forced by hand.
+                //
+                // One subtraction and a wrap, and it is right everywhere the tree was
+                // right and right where the tree was dangerous.
+                wrap_pi(tm.awa - target)
             }
         };
         // The load the ram is working against, which is everything the rig and the

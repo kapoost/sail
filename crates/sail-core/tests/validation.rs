@@ -2502,3 +2502,80 @@ fn heel_and_speed_take_the_helm_away() {
         working
     );
 }
+
+#[test]
+fn the_vane_does_not_gybe_itself_across_the_stern() {
+    use sail_core::autopilot::{Autopilot, PilotMode};
+
+    // The apparent wind angle is a *circular* quantity and the vane was subtracting it
+    // like a straight line. Dead downwind the wind wanders either side of the stern with
+    // every wave, so a target of 175 degrees to starboard and a reading of 179 to port is
+    // a four-degree shift — and the old arithmetic read it as being knocked onto the
+    // other tack and answered with thirty degrees of helm towards the gybe. At eight
+    // knots that is how you get put on your ear by your own autopilot.
+    let cfg = BoatConfig::archipelago_packet();
+    let helm = |target_deg: f64, awa_deg: f64| {
+        let mut pilot = Autopilot::new();
+        pilot.mode = PilotMode::ApparentWind(rad(target_deg));
+        let mut state = BoatState::at_rest(0.0);
+        state.surge = kn_to_ms(8.0);
+        let tm = Telemetry {
+            awa: rad(awa_deg),
+            ..Default::default()
+        };
+        // Two seconds of it, not one step. The ram is rate limited — it swings the
+        // helm at about half a radian a second and slower under load — so a single
+        // substep can only ever move it a sixth of a degree whatever it has been asked
+        // for. Measuring one step measures the rate limit and tells you nothing about
+        // the command, which is the first version of this test's own mistake.
+        let mut last = 0.0;
+        for _ in 0..400 {
+            last = pilot.rudder(&cfg, &state, &tm, SUBSTEP).unwrap_or(0.0);
+        }
+        last
+    };
+
+    let nudge = helm(175.0, -179.0);
+    let gybed = helm(150.0, -120.0);
+    let tacked = helm(30.0, -25.0);
+    println!(
+        "vane: across the stern {:.1} deg, gybed {:.1}, wrong tack upwind {:.1}",
+        deg(nudge),
+        deg(gybed),
+        deg(tacked)
+    );
+    // Four degrees across the stern is a nudge, and the measure of that is *against a
+    // real gybe recovery* rather than against an absolute. The harness holds the error
+    // constant for two seconds with the boat not answering, which winds the integral up
+    // in a way the sea never would, so what matters is the ratio: before the fix both
+    // of these came out at forty degrees, which is the rudder stop, because both were
+    // being treated as a change of tack.
+    assert!(
+        nudge.abs() < gybed.abs() / 2.5,
+        "a four degree shift should not be answered like a gybe: {:.1} against {:.1}",
+        deg(nudge),
+        deg(gybed)
+    );
+    // And it has to be the *right* nudge. The wind has gone six degrees further aft on
+    // the starboard side, so she luffs a little — towards the wind, which is to
+    // starboard, which is positive helm.
+    assert!(nudge > 0.0, "and it should luff, not bear away");
+
+    // A real gybe, though, has to be answered as one: the wind is on the other quarter
+    // by sixty degrees and the way back is round the stern, bearing away.
+    assert!(
+        deg(gybed) > 10.0,
+        "properly gybed, it should put the helm over: got {:.1} deg",
+        deg(gybed)
+    );
+
+    // And upwind the way back is the other way round — through the wind, which is a
+    // tack. Getting this backwards sends her the long way round, downwind, out of
+    // control.
+    assert!(
+        deg(tacked) < -10.0,
+        "knocked onto the wrong tack upwind, she should luff back through the wind: \
+         got {:.1} deg",
+        deg(tacked)
+    );
+}

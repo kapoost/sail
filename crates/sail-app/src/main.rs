@@ -257,6 +257,7 @@ fn main() {
                 ),
                 (
                     // The weather you can see, after everything that places it.
+                    fittings::update_vane,
                     horizon::follow,
                     sky::drift,
                     sky::light,

@@ -137,10 +137,35 @@ impl Sky {
 
     /// And how strong it is: thinner through cloud, and weaker with a low sun for the
     /// same reason it is redder.
+    ///
+    /// **Bounded, and the bound is the camera's.** Real direct sunlight runs from a
+    /// hundred thousand lux in the clear to ten under a heavy overcast — ten to one, more
+    /// than three stops — and an eye walks that range without noticing because it adapts.
+    /// This camera cannot: `Exposure::SUNLIGHT` is a fixed setting, chosen once for a
+    /// sunny day. The first version of this function was physically respectable and
+    /// unusable for exactly that reason; on a six-okta morning it put 33 000 lux into a
+    /// scene exposed for 85 000, and the whole picture came out flat and grey with the
+    /// sails reading as sheets of cardboard.
+    ///
+    /// So the direct light moves over about one stop either side of what the scene was
+    /// built for, and the *diffuse* light carries the rest — see [`Sky::ambient`]. Which
+    /// is not a fudge but the half of the physics that was missing: cloud does not
+    /// simply remove light, it converts it from a point source into a dome. Losing the
+    /// shadows and keeping the brightness is what an overcast actually looks like.
     pub fn illuminance(&self) -> f32 {
         let height = (self.elevation() / 0.52).clamp(0.0, 1.0);
-        let clear = 32_000.0 + 70_000.0 * height;
-        clear * (1.0 - 0.62 * self.cover)
+        let clear = 91_800.0 + 40_000.0 * height;
+        clear * (1.0 - 0.33 * self.cover)
+    }
+
+    /// The sky's own light, which is the other half of it.
+    ///
+    /// Rises with cover, because that is where the direct light has gone: an overcast is
+    /// the whole dome lit evenly, and it is why a cloudy day has no shadows in it rather
+    /// than no light. Holding this constant while the sun was dimmed is what made cloudy
+    /// weather read as dusk.
+    pub fn ambient(&self) -> f32 {
+        300.0 + 700.0 * self.cover
     }
 }
 
@@ -589,6 +614,7 @@ pub fn drift(
 /// in which a shadow can be trusted to fall the way the sky says it should.
 pub fn light(
     sky: bevy::prelude::Res<Sky>,
+    mut ambient: bevy::prelude::ResMut<GlobalAmbientLight>,
     mut lamp: bevy::prelude::Query<(&mut Transform, &mut DirectionalLight)>,
 ) {
     let Ok((mut t, mut light)) = lamp.single_mut() else {
@@ -598,6 +624,11 @@ pub fn light(
     let tint = sky.sunlight();
     light.color = Color::linear_rgb(tint.x, tint.y, tint.z);
     light.illuminance = sky.illuminance();
+    ambient.brightness = sky.ambient();
+    // And the colour of it: a clear sky's diffuse light is blue because it is the sky,
+    // and an overcast's is grey because the cloud has taken the colour out of it.
+    let c = crate::sky::ZENITH.lerp(Vec3::new(0.78, 0.80, 0.84), sky.cover);
+    ambient.color = Color::linear_rgb(c.x, c.y, c.z);
 }
 
 #[cfg(test)]
@@ -650,5 +681,81 @@ mod tests {
         let morning = brightness(&Sky::at(7.0, 0.5));
         let noon = brightness(&Sky::at(12.0, 0.5));
         assert_ne!(morning, noon, "the sun moving must change the sky");
+    }
+}
+
+#[cfg(test)]
+mod lighting {
+    use super::*;
+
+    /// The one test that would have caught the grey afternoon.
+    ///
+    /// The camera has a *fixed* exposure — `Exposure::SUNLIGHT`, chosen once — so the
+    /// scene's light is not free to be physically honest across its whole range. Real
+    /// sun runs ten to one from clear to overcast; a fixed exposure holds about two
+    /// stops before the picture is either a silhouette or a sheet of white.
+    ///
+    /// So this asserts the *band*, not the formula: whatever weather the generator draws
+    /// and whatever hour the passage starts, the direct light has to land inside what
+    /// the camera can hold. A version of `illuminance` that was perfectly defensible as
+    /// physics put 33 000 lux into a scene exposed for 85 000 and the whole picture came
+    /// out flat and grey, which is a fault no test about *directions* would have seen.
+    #[test]
+    fn the_light_stays_inside_what_the_camera_can_hold() {
+        // Sixty to a hundred and forty thousand is about one stop either side of the
+        // 85 000 the scene was lit and exposed for.
+        const FLOOR: f32 = 60_000.0;
+        const CEILING: f32 = 140_000.0;
+        let mut worst = (f32::MAX, 0.0_f32, (0.0, 0.0));
+        for hour in [5.0, 6.5, 8.0, 10.0, 12.0, 15.0, 18.0] {
+            for cover in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let sky = Sky::at(hour, cover);
+                let lux = sky.illuminance();
+                if lux < worst.0 {
+                    worst = (lux, worst.1, (hour, cover));
+                }
+                worst.1 = worst.1.max(lux);
+                assert!(
+                    (FLOOR..=CEILING).contains(&lux),
+                    "at {hour:02}:00 under {:.0}% cloud the sun is {lux:.0} lux, which the \
+                     camera cannot hold",
+                    cover * 100.0
+                );
+            }
+        }
+        println!(
+            "light: {:.0} to {:.0} lux across the weather (darkest at {:02.0}:00, {:.0}% cloud)",
+            worst.0,
+            worst.1,
+            worst.2 .0,
+            worst.2 .1 * 100.0
+        );
+    }
+
+    /// And the directions, which are the physics the band is allowed to move inside.
+    #[test]
+    fn cloud_moves_light_from_the_sun_to_the_sky() {
+        let clear = Sky::at(10.0, 0.05);
+        let dull = Sky::at(10.0, 0.95);
+        assert!(
+            dull.illuminance() < clear.illuminance(),
+            "cloud has to take something off the sun"
+        );
+        assert!(
+            dull.ambient() > clear.ambient() * 1.5,
+            "and put it in the sky: that is where an overcast's light comes from, and \
+             holding the ambient still while dimming the sun is what makes cloudy \
+             weather read as dusk"
+        );
+        // Total light is roughly conserved, which is the claim: an overcast day is not
+        // a dark day, it is a day with no shadows in it.
+        let total = |s: &Sky| s.illuminance() + s.ambient() * 40.0;
+        let ratio = total(&dull) / total(&clear);
+        assert!(
+            (0.7..=1.05).contains(&ratio),
+            "an overcast should be flat, not dark: {ratio:.2} of the clear-sky total"
+        );
+        // Higher sun, more light, whatever the cloud is doing.
+        assert!(Sky::at(12.0, 0.5).illuminance() > Sky::at(6.5, 0.5).illuminance());
     }
 }
