@@ -51,7 +51,45 @@ const MASTER: f32 = 0.26;
 ///
 /// Atomics rather than a mutex: the audio callback must never block, and a torn read
 /// of a single gain is inaudible where a missed deadline is a click.
-#[derive(Debug, Default)]
+/// The levels start where they should start rather than at the zero an atomic happens
+/// to hold, which is the fix for a volume control that did not work.
+///
+/// It used to read "nought means nobody has set it, so play at full", and that is two
+/// different states sharing one value. Dragging the slider to silence stored a nought,
+/// which the reader turned back into *full volume* — so the control did the opposite of
+/// what it was asked at the bottom of its travel and jumped there from a hundredth. A
+/// default belongs in the constructor, where it says what it is, and not in a reader
+/// guessing at intent from a sentinel.
+impl Default for SeaParams {
+    fn default() -> Self {
+        let p = Self {
+            wind_level: AtomicU32::default(),
+            wind_cutoff: AtomicU32::default(),
+            rig_level: AtomicU32::default(),
+            rig_hz: AtomicU32::default(),
+            water_level: AtomicU32::default(),
+            water_cutoff: AtomicU32::default(),
+            flog_level: AtomicU32::default(),
+            flog_hz: AtomicU32::default(),
+            rain_level: AtomicU32::default(),
+            master: AtomicU32::default(),
+            gear_level: AtomicU32::default(),
+            gear_hz: AtomicU32::default(),
+            clack: AtomicU32::default(),
+            alarm: AtomicU32::default(),
+            muted: AtomicU32::default(),
+            notes: Default::default(),
+            tick: AtomicU32::default(),
+            shape: AtomicU32::default(),
+            music_level: AtomicU32::default(),
+        };
+        store(&p.master, 1.0);
+        store(&p.music_level, 0.45);
+        p
+    }
+}
+
+#[derive(Debug)]
 pub struct SeaParams {
     wind_level: AtomicU32,
     wind_cutoff: AtomicU32,
@@ -118,15 +156,7 @@ impl SeaParams {
     }
 
     pub fn master(&self) -> f32 {
-        // Zero is what an uninitialised atomic reads, and silence-by-default would look
-        // exactly like a broken audio thread. The parameter block is Default-derived, so
-        // the stream treats "never set" as "full".
-        let v = load(&self.master);
-        if v <= 0.0 {
-            1.0
-        } else {
-            v
-        }
+        load(&self.master)
     }
 
     /// Fire a one-shot clack: a clutch, a boom, a winch handle dropped on the sole.
