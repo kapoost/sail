@@ -144,9 +144,7 @@ pub struct BoatConfig {
     /// Largest mainsail reduction available, as a fraction of its area. The headsail
     /// has no equivalent limit: a roller genoa rolls all the way away.
     pub max_reef: f64,
-
 }
-
 
 /// The rig of the boat the game is sailed in, as numbers rather than as a drawing.
 ///
@@ -245,10 +243,10 @@ impl BoatConfig {
         let yaw_radius = 0.25 * loa;
 
         let genoa = RiggedSail {
-                profile: SailProfile::genoa(genoa_area, genoa_luff),
-                area: genoa_area,
-                z_ce: 4.60,
-                x_ce: 1.90,
+            profile: SailProfile::genoa(genoa_area, genoa_luff),
+            area: genoa_area,
+            z_ce: 4.60,
+            x_ce: 1.90,
         };
         let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
 
@@ -321,7 +319,6 @@ impl BoatConfig {
             boom_cg: 2.4,
             headsail_bears_at: rad(19.0),
             max_reef: 0.55,
-
         }
     }
 
@@ -418,10 +415,10 @@ impl BoatConfig {
         let yaw_radius = 0.25 * loa;
 
         let genoa = RiggedSail {
-                profile: SailProfile::genoa(genoa_area, genoa_luff),
-                area: genoa_area,
-                z_ce: 4.40,
-                x_ce: 1.95,
+            profile: SailProfile::genoa(genoa_area, genoa_luff),
+            area: genoa_area,
+            z_ce: 4.40,
+            x_ce: 1.95,
         };
         let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
 
@@ -521,7 +518,6 @@ impl BoatConfig {
             boom_cg: 2.4,
             headsail_bears_at: rad(17.0),
             max_reef: 0.68,
-
         }
     }
 
@@ -672,10 +668,10 @@ impl BoatConfig {
         let yaw_radius = 0.25 * loa;
 
         let genoa = RiggedSail {
-                profile: SailProfile::genoa(genoa_area, genoa_luff),
-                area: genoa_area,
-                z_ce: 6.40,
-                x_ce: 2.90,
+            profile: SailProfile::genoa(genoa_area, genoa_luff),
+            area: genoa_area,
+            z_ce: 6.40,
+            x_ce: 2.90,
         };
         let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
 
@@ -751,7 +747,6 @@ impl BoatConfig {
             boom_cg: 2.4,
             headsail_bears_at: rad(19.0),
             max_reef: 0.55,
-
         }
     }
 }

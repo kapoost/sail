@@ -355,4 +355,3 @@ pub fn build_mipmaps(image: &mut Image, renormalise: bool) {
 pub fn encode_normal(component: f32) -> u8 {
     (((component * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0)) as u8
 }
-

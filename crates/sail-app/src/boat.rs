@@ -380,10 +380,7 @@ pub fn setup(
                     // The spar is the foot of the sail, so it is drawn at the length
                     // the sail is cut to — the sixth thing in this file that was
                     // described in two places and had drifted apart.
-                    Mesh3d(meshes.add(Cylinder::new(
-                        0.065,
-                        crate::rig::BOOM_LENGTH,
-                    ))),
+                    Mesh3d(meshes.add(Cylinder::new(0.065, crate::rig::BOOM_LENGTH))),
                     MeshMaterial3d(spar_mat.clone()),
                     Transform::from_xyz(0.0, 0.0, crate::rig::BOOM_LENGTH * 0.5)
                         .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
@@ -848,8 +845,11 @@ pub fn update_sails(
                     // any edge except its own tension, and that is the one that balloons.
                     draft: forces.camber as f32
                         * (1.0
-                            + if surface.which == Sail::Main { 0.55 } else { 1.9 }
-                                * forces.chord_angle.abs().sin() as f32),
+                            + if surface.which == Sail::Main {
+                                0.55
+                            } else {
+                                1.9
+                            } * forces.chord_angle.abs().sin() as f32),
                     // Where the deepest part of the sail sits, measured from the luff.
                     //
                     // Forty-two percent for a working sail, and it moves aft as the sail
@@ -866,7 +866,8 @@ pub fn update_sails(
                     // have to agree about where the sail is — the fault this file keeps
                     // being caught by.
                     shrouds: if surface.which == Sail::Headsail
-                        && t_.jib.chord_angle.abs() > cfg.headsail_bears_at + sail_core::units::rad(30.0)
+                        && t_.jib.chord_angle.abs()
+                            > cfg.headsail_bears_at + sail_core::units::rad(30.0)
                     {
                         &[]
                     } else {
@@ -891,7 +892,6 @@ pub fn update_sails(
         }
     }
 }
-
 
 /// How far the clew sits from the gooseneck along the boom.
 ///
@@ -919,7 +919,10 @@ pub fn update_sails(
 ///
 /// Area goes as luff times foot, so each edge scales as the square root of what is
 /// left.
-pub fn main_reef_scale(cfg: &sail_core::boat::BoatConfig, controls: &sail_core::state::Controls) -> f32 {
+pub fn main_reef_scale(
+    cfg: &sail_core::boat::BoatConfig,
+    controls: &sail_core::state::Controls,
+) -> f32 {
     let slab = (controls.reef as f32 * 3.0).round();
     let taken = cfg.max_reef as f32 * slab / 3.0;
     (1.0 - taken).max(0.0).sqrt()
@@ -956,15 +959,20 @@ pub fn report(sim: Res<Sim>) {
     }
     let cfg = sim.config();
     let p = sail_core::boat::packet::MAST_HEAD;
-    info!("rig: mast head {p:.2} m, forestay {:.2}, boom {:.2} x {:.2} high, spreaders {:.2}",
+    info!(
+        "rig: mast head {p:.2} m, forestay {:.2}, boom {:.2} x {:.2} high, spreaders {:.2}",
         sail_core::boat::packet::FORESTAY_HEAD,
         crate::rig::BOOM_LENGTH,
         crate::rig::BOOM_HEIGHT,
-        crate::rig::SPREADER_HEIGHT);
+        crate::rig::SPREADER_HEIGHT
+    );
     let luff_main = crate::rig::MAST_HEAD - crate::rig::BOOM_HEIGHT;
     info!(
         "     mainsail: luff drawn {:.2} m against {:.2} configured, foot {:.2}, area {:.1} m2",
-        luff_main, sail_core::boat::packet::MAIN_LUFF, crate::rig::BOOM_LENGTH, cfg.main.area
+        luff_main,
+        sail_core::boat::packet::MAIN_LUFF,
+        crate::rig::BOOM_LENGTH,
+        cfg.main.area
     );
     for kind in [
         sail_core::state::Headsail::Genoa,
@@ -1054,7 +1062,12 @@ pub fn headsail_shape(
         let car = genoa_car_at(controls.genoa_car as f32, side > 0.0);
         // What the perpendicular has to be for the triangle to hold the sail's area.
         let want = 2.0 * (cfg.genoa.area as f32 / 1.15) / (hoisted - tack).length() * out;
-        let fitted = Cloth::cut(tack, hoisted, fitted_foot(tack, hoisted, &cloth, belly, angle, car, want), 0.30);
+        let fitted = Cloth::cut(
+            tack,
+            hoisted,
+            fitted_foot(tack, hoisted, &cloth, belly, angle, car, want),
+            0.30,
+        );
         return SailGeometry {
             tack,
             head: hoisted,
@@ -1066,8 +1079,7 @@ pub fn headsail_shape(
     let gennaker = kind == sail_core::state::Headsail::Gennaker;
     // The same hoist curve the force model uses: up, or away, and the sliver between is
     // the sail folding rather than a size to sail in.
-    let out =
-        1.0 - sail_core::units::smoothstep(0.10, 0.45, controls.furl) as f32;
+    let out = 1.0 - sail_core::units::smoothstep(0.10, 0.45, controls.furl) as f32;
     let tack = sprit_end(cfg.loa as f32);
     // Both go to the masthead. A sail set flying is hoisted on its own halyard to the
     // very top of the spar — above the forestay, which is where its extra hoist comes
@@ -1101,11 +1113,7 @@ pub fn headsail_shape(
     let belly = if gennaker { 1.0 } else { 0.25 };
     // A sail set flying sheets to a block on the quarter, right aft — the same point the
     // sheet is drawn to, so the cloth and the rope agree about where they meet.
-    let block = Vec3::new(
-        side * 1.15,
-        crate::deck::deck_height(3.9) + 0.07,
-        3.9,
-    );
+    let block = Vec3::new(side * 1.15, crate::deck::deck_height(3.9) + 0.07, 3.9);
     let want = 2.0 * (cfg.headsail(kind).area as f32 / fullness) / (hoisted - tack).length() * out;
     let fitted = Cloth::flying(
         tack,
@@ -1284,7 +1292,11 @@ const MAST_CLEARANCE: f32 = 0.16;
 /// clew, and it did not.
 pub fn constrained(point: Vec3, normal: Vec3, shrouds: &[Vec3], clear_mast: bool) -> Vec3 {
     let point = clear_of_shrouds(point, normal, shrouds);
-    let point = if clear_mast { clear_of_mast(point) } else { point };
+    let point = if clear_mast {
+        clear_of_mast(point)
+    } else {
+        point
+    };
     let floor = crate::deck::deck_height(point.z) + 0.05;
     const BAND: f32 = 0.25;
     let above = (point.y - floor) / BAND;
@@ -1332,8 +1344,6 @@ fn clear_of_mast(point: Vec3) -> Vec3 {
     let eased = MAST_CLEARANCE + soft_push(d - MAST_CLEARANCE, 0.12);
     Vec3::new(out.x * eased, point.y, MAST_FOOT_Z + out.y * eased)
 }
-
-
 
 /// A sail is a piece of cloth and cloth does not stretch.
 ///
@@ -1413,7 +1423,15 @@ impl Cloth {
 /// One Newton step closes it. Solve, measure the perpendicular from the clew to the
 /// luff, scale the foot by how far short it fell, solve again. Twice the work of a
 /// single solve, which is nothing, and the two descriptions agree to within a percent.
-fn fitted_foot(tack: Vec3, head: Vec3, cloth: &Cloth, belly: f32, chord: f32, block: Vec3, want: f32) -> f32 {
+fn fitted_foot(
+    tack: Vec3,
+    head: Vec3,
+    cloth: &Cloth,
+    belly: f32,
+    chord: f32,
+    block: Vec3,
+    want: f32,
+) -> f32 {
     let clew = clew_on_cloth(tack, head, cloth, belly, chord, block);
     let luff_dir = (head - tack).normalize_or_zero();
     let to_clew = clew - tack;
@@ -1498,7 +1516,6 @@ pub fn clew_on_cloth(
     }
     best
 }
-
 
 /// A sail is three corners and the surface between them.
 ///

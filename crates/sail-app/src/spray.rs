@@ -228,8 +228,8 @@ pub fn update(
         } else {
             starboard * across.signum()
         };
-        let drift = outward * SPREAD * (0.6 + 0.8 * r.next_f64())
-            + forward * speed * 0.12 * r.next_f64();
+        let drift =
+            outward * SPREAD * (0.6 + 0.8 * r.next_f64()) + forward * speed * 0.12 * r.next_f64();
         live.push(Speck {
             at,
             drift,
@@ -305,8 +305,10 @@ pub fn update(
         // one is nearly white — and between them is the whole range you see along a bow
         // wave at once.
         let sea = Vec3::new(0.62, 0.78, 0.92);
-        let mut colour =
-            sea.lerp(Vec3::ONE, (life * 1.4 + (1.0 - s.tint) * 0.5).clamp(0.0, 1.0));
+        let mut colour = sea.lerp(
+            Vec3::ONE,
+            (life * 1.4 + (1.0 - s.tint) * 0.5).clamp(0.0, 1.0),
+        );
         let mut alpha = alpha;
         if ink.0 {
             // Drawn foam is ink rather than airbrush, but ink is not a light switch.

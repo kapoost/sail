@@ -38,7 +38,8 @@ fn main() {
             print!("{twa:>5.0}");
             let mut best = (0.0, "");
             for sail in sails {
-                let make = || -> Box<dyn WindField> { Box::new(SteadyWind::new(0.0, kn_to_ms(tws))) };
+                let make =
+                    || -> Box<dyn WindField> { Box::new(SteadyWind::new(0.0, kn_to_ms(tws))) };
                 let (_, st) = reef_for_heel_with(cfg, &make, rad(twa), SETTLE, max_heel, sail);
                 let kn = ms_to_kn(st.telemetry.stw);
                 print!("{kn:>12.2}");

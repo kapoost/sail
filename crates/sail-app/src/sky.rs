@@ -277,7 +277,10 @@ fn sky_colour(dir: Vec3, sun: Vec3) -> Vec3 {
         // The low deck is the one that stays dark: it is under everything else and only
         // its edges catch the sun. This is what makes a squall line read as a squall
         // line rather than as grey weather.
-        let low = shadow.lerp(sunlit, (low_l * 0.9 + towering * 0.15).clamp(0.0, 1.0) * 0.8);
+        let low = shadow.lerp(
+            sunlit,
+            (low_l * 0.9 + towering * 0.15).clamp(0.0, 1.0) * 0.8,
+        );
         let with_storm = sky.lerp(storm, storm_d * 0.95);
         let with_high = with_storm.lerp(high, high_d * 0.8);
         with_high.lerp(low, low_d * 0.92)

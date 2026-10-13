@@ -38,7 +38,11 @@ type EdgeFaces = (Vec3, Option<Vec3>, bool, [usize; 2]);
 type InkSources<'w, 's> = Query<
     'w,
     's,
-    (Entity, &'static Mesh3d, Option<&'static MeshMaterial3d<StandardMaterial>>),
+    (
+        Entity,
+        &'static Mesh3d,
+        Option<&'static MeshMaterial3d<StandardMaterial>>,
+    ),
     (
         Without<Outline>,
         Without<Outlined>,
@@ -159,7 +163,13 @@ fn triangles(mesh: &Mesh) -> Option<Vec<[usize; 3]>> {
         Indices::U16(v) => v.iter().map(|&i| i as usize).collect(),
         Indices::U32(v) => v.iter().map(|&i| i as usize).collect(),
     };
-    Some(idx.as_chunks::<3>().0.iter().map(|c| [c[0], c[1], c[2]]).collect())
+    Some(
+        idx.as_chunks::<3>()
+            .0
+            .iter()
+            .map(|c| [c[0], c[1], c[2]])
+            .collect(),
+    )
 }
 
 /// Weld by position: for each vertex, the index of the first vertex sharing its corner.
@@ -326,10 +336,7 @@ pub fn creases(mesh: &Mesh) -> Option<(Mesh, usize)> {
     if count == 0 {
         return None;
     }
-    let mut m = Mesh::new(
-        PrimitiveTopology::LineList,
-        RenderAssetUsages::RENDER_WORLD,
-    );
+    let mut m = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::RENDER_WORLD);
     m.insert_attribute(Mesh::ATTRIBUTE_POSITION, line_pos);
     m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, line_norm);
     Some((m, count))

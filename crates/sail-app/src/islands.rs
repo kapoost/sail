@@ -180,17 +180,33 @@ fn island_mesh(island: &Island, below: bool) -> Mesh {
                     band([0.050, 0.055, 0.058], [0.095, 0.098, 0.095], up / 0.06)
                 } else if up < 0.14 {
                     // The splash zone: dry rock, lichen, the white line of the birds.
-                    band([0.095, 0.098, 0.095], [0.300, 0.300, 0.285], (up - 0.06) / 0.08)
+                    band(
+                        [0.095, 0.098, 0.095],
+                        [0.300, 0.300, 0.285],
+                        (up - 0.06) / 0.08,
+                    )
                 } else if up < 0.52 {
                     // The face. Dark stone with a little green working into the cracks
                     // as it begins to lie back.
-                    band([0.230, 0.228, 0.215], [0.165, 0.215, 0.120], (up - 0.14) / 0.38)
+                    band(
+                        [0.230, 0.228, 0.215],
+                        [0.165, 0.215, 0.120],
+                        (up - 0.14) / 0.38,
+                    )
                 } else if up < 0.80 {
                     // The green roof, and it is meant to be loud.
-                    band([0.165, 0.215, 0.120], [0.240, 0.470, 0.165], (up - 0.52) / 0.28)
+                    band(
+                        [0.165, 0.215, 0.120],
+                        [0.240, 0.470, 0.165],
+                        (up - 0.52) / 0.28,
+                    )
                 } else {
                     // Summits: cropped grass going to stone and sky-bleached rock.
-                    band([0.240, 0.470, 0.165], [0.330, 0.420, 0.270], (up - 0.80) / 0.20)
+                    band(
+                        [0.240, 0.470, 0.165],
+                        [0.330, 0.420, 0.270],
+                        (up - 0.80) / 0.20,
+                    )
                 };
                 [c[0], c[1], c[2], 1.0]
             });

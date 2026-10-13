@@ -328,7 +328,9 @@ fn compass_card() -> Image {
             // quarter turn is legible as long as it is a wedge, and three of them tell
             // you which way the card is round even when the red one is hidden by the rim.
             for cardinal in [90.0_f32, 180.0, 270.0] {
-                let off = (bearing - cardinal).abs().min(360.0 - (bearing - cardinal).abs());
+                let off = (bearing - cardinal)
+                    .abs()
+                    .min(360.0 - (bearing - cardinal).abs());
                 if r > 0.46 && r < 0.86 && off * r < 6.0 {
                     shade = Vec3::new(0.14, 0.14, 0.16);
                 }

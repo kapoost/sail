@@ -309,8 +309,7 @@ pub fn gather(
     // the boat comes round, and that is what this does now — five seconds of somebody
     // trimming, which is about as long as a gybe takes and not nearly long enough to
     // sail the boat for you.
-    if keys.just_pressed(KeyCode::KeyT)
-        || pad.is_some_and(|p| p.just_pressed(GamepadButton::North))
+    if keys.just_pressed(KeyCode::KeyT) || pad.is_some_and(|p| p.just_pressed(GamepadButton::North))
     {
         *assisting = 5.0;
     }
@@ -321,8 +320,7 @@ pub fn gather(
             sim.sim.telemetry.heel,
             sail_core::autopilot::OVERPOWERED_HEEL,
         );
-        let (m, j) =
-            optimal_sheets_with(&cfg, awa, sim.controls.outhaul, sim.controls.headsail);
+        let (m, j) = optimal_sheets_with(&cfg, awa, sim.controls.outhaul, sim.controls.headsail);
         // Hands, not servos: the sheets are hauled towards the right place at a winch's
         // pace rather than teleported to it. Through a gybe that is the difference
         // between a crew and a cheat.

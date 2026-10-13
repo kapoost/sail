@@ -20,8 +20,8 @@ use bevy::prelude::*;
 use crate::camera;
 use crate::frame;
 use crate::sea_texture;
-use crate::sky;
 use crate::sim::Sim;
+use crate::sky;
 
 /// Vertices across the grid. Odd, so one sits under the boat.
 const GRID: usize = 201;

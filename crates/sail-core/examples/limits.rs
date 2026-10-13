@@ -38,7 +38,6 @@ impl WindField for Squall {
         };
         flow_from(self.from, self.base + (self.peak - self.base) * strength)
     }
-
 }
 
 struct Run {
@@ -164,12 +163,18 @@ fn main() {
         "{:>4}{:>6}{:>8}{:>10}{:>12}{:>10}",
         "TWA", "wind", "sea", "STW", "boom swing", "slack for"
     );
-    for (twa_deg, tws) in [(42.0, 10.0), (42.0, 16.0), (135.0, 10.0), (135.0, 16.0), (150.0, 16.0)] {
+    for (twa_deg, tws) in [
+        (42.0, 10.0),
+        (42.0, 16.0),
+        (135.0, 10.0),
+        (135.0, 16.0),
+        (150.0, 16.0),
+    ] {
         for (label, hs) in [("flat", 0.0), ("sea", 1.2)] {
             let wind = || -> Box<dyn WindField> { Box::new(SteadyWind::new(0.0, kn_to_ms(tws))) };
-            let heading = wrap_tau(sail_core::wind::direction_of(
-                wind().sample(glam::DVec2::ZERO, 0.0),
-            ) - rad(twa_deg));
+            let heading = wrap_tau(
+                sail_core::wind::direction_of(wind().sample(glam::DVec2::ZERO, 0.0)) - rad(twa_deg),
+            );
             let mut state = BoatState::at_rest(heading);
             state.surge = 0.6 * cfg.hull_speed();
             let mut sim = Simulation::new(cfg, state, wind());
@@ -187,12 +192,8 @@ fn main() {
             let mut slack = 0.0;
             let steps = (240.0 / SUBSTEP) as u64;
             for i in 0..steps {
-                let (m, j) = optimal_sheets_with(
-                    &cfg,
-                    sim.telemetry.awa,
-                    controls.outhaul,
-                    Headsail::Genoa,
-                );
+                let (m, j) =
+                    optimal_sheets_with(&cfg, sim.telemetry.awa, controls.outhaul, Headsail::Genoa);
                 controls.main_sheet = m;
                 controls.jib_sheet = j;
                 controls.rudder = pilot.correct_under_load(
@@ -239,12 +240,8 @@ fn main() {
             let mut pilot = TillerPilot::new();
             let mut controls = Controls::default();
             for _ in 0..(300.0 / SUBSTEP) as u64 {
-                let (m, j) = optimal_sheets_with(
-                    &cfg,
-                    sim.telemetry.awa,
-                    controls.outhaul,
-                    Headsail::Genoa,
-                );
+                let (m, j) =
+                    optimal_sheets_with(&cfg, sim.telemetry.awa, controls.outhaul, Headsail::Genoa);
                 controls.main_sheet = m;
                 controls.jib_sheet = j;
                 controls.rudder = pilot.correct_under_load(
@@ -271,7 +268,10 @@ fn main() {
     }
 
     // --- The squall ----------------------------------------------------------
-    println!("\n-- a squall: {} kn rising to {} kn over 12 s, trimmed for the lull --", 16, 34);
+    println!(
+        "\n-- a squall: {} kn rising to {} kn over 12 s, trimmed for the lull --",
+        16, 34
+    );
     println!(
         "{:>5}{:>10}{:>7}{:>9}{:>9}{:>10}{:>9}{:>9}",
         "TWA", "sail", "reef", "max heel", "max helm", "off course", "stalled", "end spd"
@@ -333,5 +333,4 @@ fn main() {
         print!("{peak:>3.0}kn ");
         squall_row(cfg, peak, twa, head, 0.0, false);
     }
-
 }

@@ -504,12 +504,8 @@ pub fn update(
                 // pushed off the mast, the shrouds and the deck like every other point
                 // on the sail, so a rope drawn to the unpushed corner misses it by
                 // exactly the push.
-                let shrouds = crate::boat::shroud_polyline(
-                    cfg.beam as f32,
-                    lee > 0.0,
-                    st.heel as f32,
-                    lee,
-                );
+                let shrouds =
+                    crate::boat::shroud_polyline(cfg.beam as f32, lee > 0.0, st.heel as f32, lee);
                 let chord = (shape.clew - shape.tack).normalize_or_zero();
                 let mut normal = Vec3::Y.cross(chord).normalize_or_zero();
                 if normal.x * lee < 0.0 {
@@ -577,11 +573,7 @@ pub fn update(
                         led = false;
                         straight
                     } else {
-                        Vec3::new(
-                            side * clears,
-                            crate::deck::deck_height(z) + 0.35,
-                            z,
-                        )
+                        Vec3::new(side * clears, crate::deck::deck_height(z) + 0.35, z)
                     }
                 } else {
                     let spar = boom_end - gooseneck;

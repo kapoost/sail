@@ -310,8 +310,10 @@ impl Simulation {
         // Taken from the step before, which at two hundred a second is five milliseconds
         // out of date and saves computing every sail twice. The pair is a feedback loop
         // either way; a loop that is one substep behind settles to the same place.
-        let (bend_main, bend_jib) =
-            crate::sail::slot_interaction(self.telemetry.main.coeffs.cl, self.telemetry.jib.coeffs.cl);
+        let (bend_main, bend_jib) = crate::sail::slot_interaction(
+            self.telemetry.main.coeffs.cl,
+            self.telemetry.jib.coeffs.cl,
+        );
         let bent = |awa: f64, by: f64| awa.signum() * (awa.abs() + by).max(0.0);
         let lower_awa = bent(lower_awa, bend_main);
         let upper_awa = bent(upper_awa, bend_main);
@@ -696,8 +698,8 @@ impl Simulation {
         // centre of lateral resistance is weather helm.
         let main_x = cfg.main.x_ce
             - crate::sail::chordwise_shift(&cfg.main.profile, cfg.main.area, boom_angle, main_cop);
-        let jib_x = head.x_ce
-            - crate::sail::chordwise_shift(&head.profile, head.area, jib_chord, jib_cop);
+        let jib_x =
+            head.x_ce - crate::sail::chordwise_shift(&head.profile, head.area, jib_chord, jib_cop);
         let mut mz = main_x * (main.side + main_upper.side)
             + jib_x * (jib.side + jib_upper.side) * slot_cost
             + cfg.staysail.x_ce * stay_side;
@@ -872,11 +874,8 @@ impl Simulation {
                 * 0.45;
             // Heeled over, the boom's own weight pulls it downhill — which is to
             // leeward, and which is why a rolling boat's boom works against its sheet.
-            let gravity = cfg.boom_mass
-                * GRAVITY
-                * cfg.boom_cg
-                * st.heel.abs().sin()
-                * st.boom_angle.cos();
+            let gravity =
+                cfg.boom_mass * GRAVITY * cfg.boom_cg * st.heel.abs().sin() * st.boom_angle.cos();
             // The sheet. A rope: it pulls when it is tight and does nothing when it is
             // not, and the whole behaviour here comes out of that one asymmetry.
             //

@@ -75,7 +75,11 @@ impl Sim {
                 outhaul,
                 // Genoa rolled away: main alone, to isolate what the mainsail does —
                 // unless a sail was asked for by name, in which case it is wanted set.
-                furl: if headsail == Headsail::Genoa { 1.0 } else { 0.0 },
+                furl: if headsail == Headsail::Genoa {
+                    1.0
+                } else {
+                    0.0
+                },
                 // Whatever the forecast said to tie in before casting off.
                 reef: weather.start_reef,
                 ..Default::default()

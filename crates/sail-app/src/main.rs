@@ -149,7 +149,7 @@ fn main() {
                 // so the whole frame agrees on one mark.
                 frame::rebase_origin,
                 world::report_vitals,
-                    world::report_frame_times,
+                world::report_frame_times,
                 chart::record,
                 islands::follow_origin,
                 (
