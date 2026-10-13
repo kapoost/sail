@@ -17,6 +17,17 @@
 //!   spray come from and why they come in bursts rather than steadily.
 //! * **The quarter.** Foam shed along the run, which falls into the wake the wake module
 //!   is already drawing — this just hands it over fed rather than starting it cold.
+//! * **The rudder.** A blade at an angle of attack sheds its boundary layer off the
+//!   trailing edge, and at any speed worth having that is a visible trail of disturbed
+//!   water a few metres astern. Put the helm hard over and the trail doubles; let it
+//!   stall and it *ventilates* — the low pressure on the back of the blade pulls air
+//!   down from the surface and the whole thing goes white, which is the sound and the
+//!   sight of a boat being over-steered and the moment the helm goes light in your hand.
+//! * **The keel.** The same thing on a bigger foil working at a smaller angle: the fin
+//!   is making its side force at two or three degrees of leeway, and what surfaces is a
+//!   thin pair of trails off the tip vortices, well aft and much fainter than the
+//!   rudder's. Drawn weaker on purpose — a keel that foamed like a rudder would be a
+//!   keel that had stalled, which is a different and much worse afternoon.
 //!
 //! Drawn deliberately heavy. A true photograph of a 36-footer at seven knots has less
 //! white water in it than this, and at the resolution this is played at a true amount
@@ -173,6 +184,26 @@ pub fn update(
     let at_crest = ((sim.sim.water.height(st.pos, t) / hs - 0.2) / 0.6).clamp(0.0, 1.0);
     spray.owed += 320.0 * (at_crest * at_crest) as f32 * fraction as f32 * dt;
 
+    // The rudder, and then the keel. Both are foils and the rate goes with the work they
+    // are doing: the flow over them squared, times how hard they are turning it.
+    //
+    // The rudder's own factor is the helm angle, so she leaves almost nothing steering
+    // straight and a proper trail through a tack. Stall multiplies it, because a stalled
+    // blade is not shedding a boundary layer any more, it is pulling air down the back
+    // of itself — and that is the one of these two a sailor is actually watching for.
+    let bite = sim.sim.telemetry.rudder_bite as f32;
+    let helm = (sim.controls.rudder.abs() / cfg.max_rudder_angle).clamp(0.0, 1.0) as f32;
+    let stalled = sim.sim.telemetry.rudder_stalled as f32;
+    let rudder_work = fraction as f32 * fraction as f32 * (helm * 0.8 + stalled * 1.5) * bite;
+    spray.owed += 150.0 * rudder_work * dt;
+
+    // The keel is a bigger foil at a smaller angle, so it is keyed to leeway rather than
+    // to the helm — and it is deliberately a tenth of the rudder's, because a keel that
+    // foams like a rudder is a keel that has let go.
+    let leeway = (sim.sim.telemetry.leeway.abs() / sail_core::units::rad(6.0)).clamp(0.0, 1.5);
+    let keel_work = fraction as f32 * fraction as f32 * leeway as f32;
+    spray.owed += 26.0 * keel_work * dt;
+
     // And the stem cutting a wave, which is a different thing from a bow wave and looks
     // it: not a steady moustache but a burst, thrown when she drives her forefoot into
     // the back of the next one. It is the sound a boat makes as much as the sight, and
@@ -200,8 +231,39 @@ pub fn update(
         // planking is rather than at a fixed distance from the centreline that is
         // outside her at the bow and inside her amidships.
         let hull_at = |along: f64| (1.0 - (along * 2.0).powi(2)).max(0.0).sqrt();
-        let where_ = r.next_f64();
-        let (along, across) = if where_ < 0.62 {
+        // Which source this one came from. The two foils are placed by *where they
+        // are* rather than as a fraction of the hull, because that is the whole content
+        // of the effect: a trail that starts at the transom is the rudder's and one
+        // that starts under the keel is not.
+        let foils = (rudder_work + keel_work) as f64;
+        let where_ = r.next_f64() * (1.0 + foils.min(1.4));
+        let (along, across) = if where_ > 1.0 {
+            // On the centreline, at one foil or the other, a little aft of it: the
+            // disturbed water surfaces behind the blade rather than over it.
+            let rudder = r.next_f64() * (rudder_work + keel_work) as f64 <= rudder_work as f64;
+            // Both measured abaft the *transom*, not from where the foil is, and that
+            // is the whole of getting this right. Water disturbed by a blade a metre
+            // under the counter does not appear beside the cockpit; it surfaces astern,
+            // and the deeper the foil the further astern it gets there. The rudder's
+            // trail breaks almost at once because the blade reaches nearly to the
+            // surface; the keel's comes up two metres further back and in a pair,
+            // because what rises is the tip vortices off either side of the fin.
+            //
+            // Placing them at the foil instead put every keel speck inside the hull,
+            // where the waterplane cull ate it — a source that cost its arithmetic and
+            // drew nothing.
+            let astern = if rudder {
+                0.2 + 1.1 * r.next_f64()
+            } else {
+                1.4 + 3.2 * r.next_f64()
+            };
+            let across = if rudder {
+                (r.next_f64() - 0.5) * 0.3
+            } else {
+                (if r.next_f64() < 0.5 { -1.0 } else { 1.0 }) * (0.5 + 0.35 * r.next_f64())
+            };
+            ((-cfg.loa * 0.5 - astern) / cfg.loa, across)
+        } else if where_ < 0.62 {
             // At the stem: a touch ahead of the bow, scattered either side of it.
             (0.46 + 0.04 * r.next_f64(), (r.next_f64() - 0.5) * 0.5)
         } else if where_ < 0.88 {
