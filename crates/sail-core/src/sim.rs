@@ -40,6 +40,12 @@ pub struct Simulation {
     pub water: Box<dyn WaterSurface>,
     pub telemetry: Telemetry,
     accumulator: f64,
+    /// What ended the passage, and how close each sail is to being the thing that does.
+    mishap: Option<crate::state::Mishap>,
+    strain_main: f64,
+    strain_head: f64,
+    strain_stay: f64,
+    capsizing: f64,
     /// The state one substep back, kept so a frame landing between two substeps can be
     /// drawn where the boat actually is rather than where it last happened to be.
     prev_state: BoatState,
@@ -74,6 +80,11 @@ impl Simulation {
             water: Box::new(FlatWater),
             telemetry: Telemetry::default(),
             accumulator: 0.0,
+            mishap: None,
+            strain_main: 0.0,
+            strain_head: 0.0,
+            strain_stay: 0.0,
+            capsizing: 0.0,
             prev_state: state,
             land: None,
             prev_slope_along: 0.0,
@@ -156,6 +167,22 @@ impl Simulation {
             self.prev_state = self.state;
             self.substep(SUBSTEP, controls);
         }
+    }
+
+    /// Take a fresh boat: the sail is bent on, the keel is clear, nothing has happened
+    /// yet.
+    ///
+    /// The mishap is sticky by design — a sail that has blown out does not come back —
+    /// so there has to be one way to say "another boat, another consignment", and this
+    /// is it. It does not undo the sailing; it hands you a new one.
+    pub fn recover(&mut self, at: BoatState) {
+        self.state = at;
+        self.prev_state = at;
+        self.mishap = None;
+        self.strain_main = 0.0;
+        self.strain_head = 0.0;
+        self.strain_stay = 0.0;
+        self.capsizing = 0.0;
     }
 
     /// Put an archipelago in the water.
@@ -1004,7 +1031,78 @@ impl Simulation {
         let to_wind = DVec2::new(twd.sin(), twd.cos());
         let wind_body = self.state.to_body(to_wind);
         let v = self.state.velocity_world();
+        // --- What ends a passage -------------------------------------------------
+        //
+        // Three things, and each of them is a decision somebody made ten minutes
+        // earlier. Aground is instant, because it is: a keel at six knots finding rock
+        // is not a process. The other two take a little while, which is the point —
+        // there is time to do something, and the whole game is in whether you do.
+        let depth_now = depth - cfg.draft;
+        if self.mishap.is_none() {
+            if depth_now <= 0.0 {
+                self.mishap = Some(crate::state::Mishap::Aground);
+            } else if st.heel.abs() > cfg.gz_peak_angle + crate::units::rad(25.0) {
+                // Past the peak of the righting arm by a good margin she is not coming
+                // back, and the model has no business pretending she might.
+                self.capsizing += dt;
+                if self.capsizing > 1.5 {
+                    self.mishap = Some(crate::state::Mishap::Capsized);
+                }
+            } else {
+                self.capsizing = 0.0;
+            }
+        }
+        // Cloth. Every sail is cut for a wind and past it the cloth goes — not at once,
+        // because sailcloth is not a fuse, but a sail carried a fifth over its number
+        // has about five seconds of dignity left.
+        if self.mishap.is_none() {
+            let set_main = cfg.reefed_main(controls.reef).0 > 0.5;
+            let overload = |aws: f64, limit: f64| (aws / limit - 1.0).max(0.0);
+            for (strain, over, which) in [
+                (
+                    &mut self.strain_main,
+                    if set_main {
+                        overload(lower_aws, cfg.main.limit_aws)
+                    } else {
+                        0.0
+                    },
+                    crate::state::Blown::Main,
+                ),
+                (
+                    &mut self.strain_head,
+                    if controls.furl < 0.985 {
+                        overload(jib_aws, head.limit_aws)
+                    } else {
+                        0.0
+                    },
+                    crate::state::Blown::Headsail(flying),
+                ),
+                (
+                    &mut self.strain_stay,
+                    if controls.staysail > 0.02 {
+                        overload(jib_aws, cfg.staysail.limit_aws)
+                    } else {
+                        0.0
+                    },
+                    crate::state::Blown::Staysail,
+                ),
+            ] {
+                if over > 0.0 {
+                    *strain += over * dt;
+                    if *strain > 1.0 {
+                        self.mishap = Some(crate::state::Mishap::BlownOut(which));
+                    }
+                } else {
+                    // Cloth recovers when the load comes off, but not instantly: a sail
+                    // that has been over its number and come back is a sail somebody
+                    // frightened, and frightening it twice in a minute is how it goes.
+                    *strain = (*strain - 0.25 * dt).max(0.0);
+                }
+            }
+        }
+
         self.telemetry = Telemetry {
+            mishap: self.mishap,
             bend_main,
             bend_jib,
             depth,

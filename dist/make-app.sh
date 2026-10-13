@@ -47,7 +47,11 @@ fi
 
 chmod +x "$APP/Contents/MacOS/sail"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+# From the crate, because a version written down twice is a version that is wrong once.
+VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' crates/sail-app/Cargo.toml | head -1)"
+VERSION="${VERSION:-0.0.0}"
+
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -57,14 +61,37 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key><string>sail</string>
   <key>CFBundleIdentifier</key><string>net.kapoost.sail</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
 </dict>
 </plist>
 PLIST
+
+# Signed, even though there is nobody to sign as.
+#
+# This is the difference between a friend opening the game and a friend being told
+# **"Sail is damaged and can't be opened. You should move it to the Bin."** — which is
+# what happened, and the file was not damaged in any way.
+#
+# Apple Silicon will not run an arm64 binary that carries *no* signature at all. Not
+# "warn about it": refuse, with the only message macOS has for a binary whose signature
+# does not check out, which says damaged because from the kernel's point of view that is
+# indistinguishable. Intel Macs are laxer, which is why this went out looking fine.
+#
+# An ad-hoc signature — `--sign -`, no certificate, no account, no money — is enough to
+# satisfy that. What it does not do is make Gatekeeper happy about a *downloaded*
+# bundle, so the quarantine flag still has to be got past, and right-click-Open is the
+# way: that is a real dialogue with a real "Open" button in it, which is what the release
+# notes have always promised and what the missing signature was turning into a dead end.
+#
+# `--deep` because the bundle is one executable today and will not always be. `--force`
+# because signing an already-signed bundle is otherwise an error, and this script is run
+# twice in a row on a laptop more often than anywhere else.
+codesign --force --deep --sign - "$APP"
+codesign --verify --strict "$APP" && echo "signed: ad-hoc"
 
 # The licences travel with the bundle as well as inside the binary. `--licences` prints
 # them from the executable, which is what satisfies the font's terms for a single file;

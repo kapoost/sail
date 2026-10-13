@@ -72,10 +72,19 @@ jobs:
             protected your PC"* because the file is not signed: click **More info**, then
             **Run anyway**.
 
-            **macOS** — download `Sail-macos.zip`, unzip it, and the first time, **right-click
-            `Sail.app` and choose Open** rather than double-clicking. Unsigned
-            applications are quarantined, and right-click-Open is the way past it. Universal:
-            Apple Silicon and Intel.
+            **macOS** — download `Sail-macos.zip`, unzip it, and the first time,
+            **right-click `Sail.app` and choose Open** rather than double-clicking.
+            Downloaded applications are quarantined, and right-click-Open is the way past
+            it. Universal: Apple Silicon and Intel.
+
+            If macOS says **"Sail is damaged and can't be opened"**, the file is not
+            damaged — that is what an Apple Silicon Mac says about an application whose
+            signature it cannot check, and builds before v0.1.3 went out without one.
+            Either take this release, or clear the quarantine flag on the one you have:
+
+            ```
+            xattr -dr com.apple.quarantine /path/to/Sail.app
+            ```
 
             The hull model and the font are inside the executable; `Sail.exe --licences`
             or `Sail.app/Contents/MacOS/sail --licences` prints their terms.

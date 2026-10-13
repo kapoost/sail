@@ -297,6 +297,49 @@ impl Controls {
 
 /// Everything worth putting on a gauge, a telltale, or a chart. The polar overlay
 /// built from `vmg` and `speed` is the single most useful development instrument.
+/// The three ways a passage ends badly, which are the three a cruising sailor fears.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mishap {
+    /// The keel found the bottom.
+    Aground,
+    /// A sail was carried in more wind than it is built for, and the cloth let go.
+    BlownOut(Blown),
+    /// She went past the point where the righting arm gives up.
+    Capsized,
+}
+
+/// Which sail it was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Blown {
+    Main,
+    Headsail(Headsail),
+    Staysail,
+}
+
+impl Mishap {
+    /// What to tell somebody who was looking at the sea rather than the instruments.
+    pub fn what_happened(&self) -> &'static str {
+        match self {
+            Mishap::Aground => "aground — the keel found the bottom",
+            Mishap::BlownOut(Blown::Main) => "the mainsail blew out",
+            Mishap::BlownOut(Blown::Headsail(Headsail::Genoa)) => "the genoa blew out",
+            Mishap::BlownOut(Blown::Headsail(Headsail::Code0)) => "the Code 0 blew out",
+            Mishap::BlownOut(Blown::Headsail(Headsail::Gennaker)) => "the gennaker blew out",
+            Mishap::BlownOut(Blown::Staysail) => "the staysail blew out",
+            Mishap::Capsized => "capsized",
+        }
+    }
+
+    /// And what they should have done, because a loss you cannot learn from is a bug.
+    pub fn the_lesson(&self) -> &'static str {
+        match self {
+            Mishap::Aground => "the depth gauge was on the panel the whole time",
+            Mishap::BlownOut(_) => "every sail is cut for a wind; past it the cloth goes",
+            Mishap::Capsized => "she asked to be reefed long before this",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Telemetry {
     /// Water under the keel's deepest point, metres. Negative means she is on it.
@@ -432,6 +475,13 @@ pub struct Telemetry {
     pub yaw_from_rig: f64,
     pub yaw_from_heel: f64,
     pub yaw_from_hull: f64,
+
+    /// What ended the passage, once something has.
+    ///
+    /// Sticky: a sail that has blown out does not come back, and a boat on the rocks
+    /// stays there. The simulation keeps running — she still rolls, still drifts, and
+    /// the sea does not care — but this is set and the game above has something to say.
+    pub mishap: Option<Mishap>,
 
     /// The surge ledger, in newtons: what pushes her along her own axis and what holds
     /// her back, signed so forward is positive and the three of them sum to the net.

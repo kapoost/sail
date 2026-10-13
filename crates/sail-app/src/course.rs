@@ -376,7 +376,7 @@ pub fn update(
 /// Give up on this consignment and take another from where you are.
 pub fn restart(
     keys: Res<ButtonInput<KeyCode>>,
-    sim: Res<Sim>,
+    mut sim: ResMut<Sim>,
     mut course: ResMut<Course>,
     mut marks: Query<&mut Floating, With<Destination>>,
 ) {
@@ -393,6 +393,15 @@ pub fn restart(
     course.take_consignment(pos);
     for mut mark in &mut marks {
         mark.at = course.target();
+    }
+    // A fresh boat, if the last one came to grief. She starts where the new consignment
+    // starts, at rest, head to the wind she has — which is what stepping aboard is.
+    if sim.sim.telemetry.mishap.is_some() {
+        let heading = sim.sim.state.heading;
+        let mut fresh = sail_core::state::BoatState::at_rest(heading);
+        fresh.pos = course.harbours[course.from].at;
+        fresh.time = sim.sim.state.time;
+        sim.sim.recover(fresh);
     }
 }
 

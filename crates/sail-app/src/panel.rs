@@ -523,6 +523,45 @@ pub fn draw(
                 });
             });
         });
+    // --- And the one thing that stops the passage ---------------------------------
+    if let Some(mishap) = telemetry.mishap {
+        egui::Area::new("mishap".into())
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -40.0))
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgb(28, 10, 10))
+                    .stroke(egui::Stroke::new(2.0, paint::BAD))
+                    .inner_margin(egui::Margin::symmetric(26, 20))
+                    .show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new("YOU DIED")
+                                    .color(paint::BAD)
+                                    .monospace()
+                                    .size(44.0),
+                            );
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new(mishap.what_happened())
+                                    .color(paint::FACE)
+                                    .monospace()
+                                    .size(15.0),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                egui::RichText::new(mishap.the_lesson())
+                                    .color(paint::LABEL)
+                                    .monospace()
+                                    .size(11.0),
+                            );
+                            ui.add_space(12.0);
+                            if small_button(ui, "ANOTHER BOAT  (L)").clicked() {
+                                course.wants_new = true;
+                            }
+                        });
+                    });
+            });
+    }
     Ok(())
 }
 
