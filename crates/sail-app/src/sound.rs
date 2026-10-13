@@ -62,6 +62,10 @@ pub struct SeaParams {
     flog_level: AtomicU32,
     flog_hz: AtomicU32,
     rain_level: AtomicU32,
+    /// What the person listening asked for, 0 to 1. Separate from every other level in
+    /// here, all of which are the boat telling the mix what it is doing — this one is
+    /// the only number in the audio path that is nobody's measurement.
+    master: AtomicU32,
     /// Rope and pawls: how hard it is being worked, and how fast the pawls are going.
     gear_level: AtomicU32,
     gear_hz: AtomicU32,
@@ -80,6 +84,22 @@ fn load(slot: &AtomicU32) -> f32 {
 }
 
 impl SeaParams {
+    pub fn set_master(&self, level: f32) {
+        store(&self.master, level.clamp(0.0, 1.0));
+    }
+
+    pub fn master(&self) -> f32 {
+        // Zero is what an uninitialised atomic reads, and silence-by-default would look
+        // exactly like a broken audio thread. The parameter block is Default-derived, so
+        // the stream treats "never set" as "full".
+        let v = load(&self.master);
+        if v <= 0.0 {
+            1.0
+        } else {
+            v
+        }
+    }
+
     /// Fire a one-shot clack: a clutch, a boom, a winch handle dropped on the sole.
     /// `strength` is how hard, 0 to 1.
     pub fn clack(&self, strength: f32) {
@@ -248,6 +268,7 @@ impl Iterator for SeaStream {
             t_flog,
             flog_hz,
             t_rain,
+            t_master,
             t_gear,
             gear_hz,
             clack,
@@ -264,6 +285,7 @@ impl Iterator for SeaStream {
                 load(&p.flog_level),
                 load(&p.flog_hz),
                 load(&p.rain_level),
+                p.master(),
                 load(&p.gear_level),
                 load(&p.gear_hz),
                 // Taken, not read: swapping zero in is what makes a one-shot fire once.
@@ -379,7 +401,7 @@ impl Iterator for SeaStream {
         let n3 = self.noise();
         let flog = n3 * self.flog_env * self.flog_env * self.smooth.flog * 0.9;
 
-        let mix = (wind + rig + water + flog + rain + gear) * MASTER * self.smooth.mute;
+        let mix = (wind + rig + water + flog + rain + gear) * MASTER * t_master * self.smooth.mute;
         // Soft clip. A gust plus a flogging genoa can stack up, and a hard clip is a
         // much worse sound than a little compression.
         Some(mix.tanh())

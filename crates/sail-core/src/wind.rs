@@ -70,6 +70,17 @@ pub trait WindField: Send + Sync {
         0.0
     }
 
+    /// The synthetic weather behind this field, if there is one.
+    ///
+    /// The seam a settings dial needs, and it is deliberately the only one: a real
+    /// forecast read off a GRIB file has no dials on it and answers `None`, at which
+    /// point the panel says the weather is not adjustable, which is the truth. Giving
+    /// the trait a set of setters instead would have put a promise on every field that
+    /// only one of them can keep.
+    fn adjustable(&mut self) -> Option<&mut SyntheticWind> {
+        None
+    }
+
     /// Cloud cover, 0 clear to 1 solid. Weather, so it lives with the rest of the slow
     /// weather rather than in the renderer: a front brings cloud and wind together, and
     /// a sky that clears while the breeze builds is a sky nobody believes.
@@ -202,7 +213,7 @@ impl Synoptic {
     /// Cover now. Correlated with the wind, because they are correlated in the weather:
     /// the cloud comes with the front that brings the breeze, so a building wind brings
     /// a thickening sky and a dying one lets it open up.
-    fn cover(&self) -> f64 {
+    pub fn cover(&self) -> f64 {
         (self.cover_mean + self.cover_trend + COVER_FROM_WIND * self.speed_trend).clamp(0.0, 1.0)
     }
 
@@ -562,6 +573,10 @@ impl SyntheticWind {
 }
 
 impl WindField for SyntheticWind {
+    fn adjustable(&mut self) -> Option<&mut SyntheticWind> {
+        Some(self)
+    }
+
     fn sample(&self, pos: DVec2, t: f64) -> DVec2 {
         let mut flow = flow_from(self.direction_at(pos, t), self.speed_at(pos, t));
         for squall in &self.squalls {

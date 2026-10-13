@@ -67,6 +67,7 @@ pub fn draw(
     mut view: ResMut<View>,
     mut console: ResMut<Console>,
     mut hud: ResMut<crate::hud::HudVisible>,
+    mut settings: ResMut<crate::settings::Settings>,
     course: Res<Course>,
     sound: Res<SoundHandle>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -432,6 +433,9 @@ pub fn draw(
                                 .monospace()
                                 .size(9.0),
                         );
+                        if small_button(ui, "SETTINGS  ESC").clicked() {
+                            settings.open = !settings.open;
+                        }
                         if small_button(ui, "TRIM TO BEST").clicked() {
                             let (m, j) = optimal_sheets(&cfg, telemetry.awa, sim.controls.outhaul);
                             sim.controls.main_sheet = m;

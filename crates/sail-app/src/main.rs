@@ -27,6 +27,7 @@ mod retro;
 mod rig;
 mod sail_texture;
 mod sea_texture;
+mod settings;
 mod sim;
 mod sky;
 mod sound;
@@ -186,6 +187,7 @@ fn main() {
             weather.cover as f32,
         ))
         .init_resource::<sky::Baking>()
+        .init_resource::<settings::Settings>()
         .insert_resource(retro::Retro::from_env())
         .insert_resource(world::Ink::from_env())
         .init_resource::<world::SeaFilm>()
@@ -263,6 +265,7 @@ fn main() {
                     sky::light,
                     rain::update,
                     rain::shroud,
+                    settings::toggle,
                     camera::toggle,
                     camera::aim,
                     hud::toggle,
@@ -285,6 +288,7 @@ fn main() {
                 retro::install_font.run_if(bevy::ecs::schedule::common_conditions::run_once),
                 retro::scale_instruments,
                 panel::draw,
+                settings::draw,
                 chart::draw,
                 hud::draw,
             )

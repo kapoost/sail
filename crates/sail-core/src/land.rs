@@ -386,6 +386,10 @@ impl crate::wind::WindField for ShelteredWind {
         self.inner.cover()
     }
 
+    fn adjustable(&mut self) -> Option<&mut crate::wind::SyntheticWind> {
+        self.inner.adjustable()
+    }
+
     fn squall_at(&self, pos: DVec2) -> f64 {
         // A squall is a column of air a kilometre and more across coming down out of a
         // cloud. An island does not shelter you from one; it only takes the gradient
