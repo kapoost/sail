@@ -12,6 +12,7 @@ mod chart;
 mod clouds;
 mod clutch;
 mod course;
+mod curve;
 mod deck;
 mod deck_texture;
 mod fittings;

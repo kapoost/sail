@@ -18,6 +18,7 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
 use crate::camera;
+use crate::curve::smoothstep;
 use crate::frame;
 use crate::sea_texture;
 use crate::sim::Sim;
@@ -270,6 +271,48 @@ pub const DRIFT_OF_WIND: f64 = 0.025;
 /// next to it. If the water's colour is ever changed, the line has to come with it.
 pub const DEEP: Vec3 = Vec3::new(0.035, 0.095, 0.150);
 
+/// The drawn sea's own two ends, before the weather is allowed to move them.
+///
+/// Prussian blue, which is not a decorative choice: it is *the* pigment of the picture
+/// everybody means by a drawn wave. Hokusai had Berlin blue for about a decade before
+/// the Great Wave and used it for exactly this — a blue that holds its hue at full
+/// strength instead of going grey, so a flat field of it reads as water rather than as
+/// shadow. The sea here was mixed from the sky instead, which gave it a green-cyan cast
+/// at two-thirds the blue of the real pigment: a lagoon, not a print.
+///
+/// The light end is the paper, which in a woodblock is not white but a warm off-cream,
+/// and the contrast between the two ends is what makes flat tone read as form.
+const PRUSSIAN: Vec3 = Vec3::new(0.030, 0.105, 0.330);
+const PAPER: Vec3 = Vec3::new(0.620, 0.660, 0.665);
+
+/// The key line, struck on the dark side of each tone step.
+///
+/// A woodblock print is a *key block* — the drawing in line — with colour blocks
+/// registered behind it, so every edge in the picture carries a dark line on one side.
+/// The sea had only the white one, and the argument for white still holds on the side
+/// it was written for: it marks the crest, where water is bright, and dark there reads
+/// as a crack in the surface. The side it does not hold for is the other one, where the
+/// form turns away and a print has its heaviest line.
+const KEY_LINE: Vec3 = Vec3::new(0.012, 0.030, 0.075);
+
+/// How far apart the streaks run on the water, as a fraction of the wave height.
+///
+/// Because the strokes are contours of the surface now. A fixed bearing laid them in
+/// rows across the sea, which is hatching — shading laid *over* a form. What the print
+/// does is draw lines that follow the form itself, round the shoulder of a wave and up
+/// its face, and that is the whole difference between a shaded photograph and a drawing.
+///
+/// Iso-height lines are exactly those lines, and they come free: the height is already
+/// known at every vertex, so making it the texture coordinate turns the stroke pattern
+/// into a contour map of the sea. They crowd where the water is steep and open out where
+/// it is flat, which is tonal shading by line density arrived at from the geometry
+/// rather than imposed on it — and the card's mipmapping handles the crowding, so the
+/// steepest water merges to a solid tone instead of aliasing.
+///
+/// A seventh of the significant height, so a wave carries about seven streaks from
+/// trough to crest whether it is a ripple or a gale.
+const STREAK_OF_HEIGHT: f32 = 0.14;
+
 /// How far from the boat cloud shadows are drawn on the water, metres.
 ///
 /// As much an honesty as an economy. The eye is two metres above the water: at three
@@ -283,30 +326,6 @@ const SHADOW_REACH: f32 = 1900.0;
 /// inker uses for water, and it is enough to carry a wave's shape and not enough to
 /// suggest a gradient.
 const INK_BANDS: usize = 4;
-
-/// Spacing of the hatching, metres on the water.
-///
-/// Manga shades with line, not with grey: a tone is a field of parallel strokes, and
-/// how dark it reads is how close together they are. Three quarters of a metre at the
-/// boat, which at this resolution puts a stroke every few pixels close in and lets them
-/// merge into an even tone further out — which is what happens on the page too, and why
-/// a screentone looks like shading rather than like stripes.
-const HATCH_SPACING: f32 = 0.75;
-
-/// Which way the strokes run, as a bearing in the world, radians.
-///
-/// Not aligned with anything in the scene. Hatching that runs square to the waves reads
-/// as corduroy, and hatching that runs square to the screen reads as a screen-door; a
-/// draughtsman lays strokes across the form at an angle to it, and that is the one
-/// direction that does not fight what it is shading.
-///
-/// Fixed in the world rather than taken off the wind, which is what it used to be. A
-/// direction that rotates turns the whole pattern about the world's origin, and a boat
-/// a kilometre out with the wind veering twenty degrees would watch the strokes sweep
-/// three hundred metres across the sea under her. The wind's own direction is not worth
-/// that: what the lean has to avoid is the waves and the screen, and a fixed bearing
-/// avoids both except by coincidence.
-const HATCH_BEARING: f32 = 0.62;
 
 /// How wide the contour line on the water is, as a fraction of a tone band.
 ///
@@ -375,7 +394,7 @@ const INK_RISE: f32 = 0.16;
 /// The line straddles the step rather than sitting above it, which is the one visible
 /// change. One-sided it could not be continuous — it would have to appear at full
 /// strength the instant a vertex crossed, which is the flicker again, one band narrower.
-fn ink_tone(tone: f32) -> (f32, f32) {
+fn ink_tone(tone: f32) -> (f32, f32, f32) {
     let bands = INK_BANDS as f32;
     let x = (tone * bands).clamp(0.0, bands);
     let f = x - x.floor();
@@ -383,15 +402,13 @@ fn ink_tone(tone: f32) -> (f32, f32) {
     // begins — so the two agree at the join and the staircase is continuous.
     let level = x.floor() + smoothstep(0.0, INK_RISE, f) - 1.0;
     let tone = (level / (INK_BANDS - 1) as f32).clamp(0.0, 1.0);
-    // Distance to the nearest step, the short way round.
+    // Distance to the nearest step, the short way round, and which side of it this
+    // vertex fell. The step is at the bottom of a band, so the first half of a band is
+    // the light side of the step just climbed and the second half is the dark side of
+    // the one coming.
     let to_step = f.min(1.0 - f);
-    (tone, 1.0 - smoothstep(0.0, CONTOUR, to_step))
-}
-
-/// Hermite between two edges. The same curve `smoothstep` means everywhere else.
-fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
-    let t = ((x - a) / (b - a).max(1e-6)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
+    let side = if f < 0.5 { 1.0 } else { -1.0 };
+    (tone, 1.0 - smoothstep(0.0, CONTOUR, to_step), side)
 }
 
 /// Stable per-parcel hash, used to decide which facets catch the light.
@@ -631,6 +648,28 @@ pub fn update_sea(
         let mut colours = Vec::with_capacity(count);
 
         let hs = (sim.sim.telemetry.significant_height as f32).max(0.05);
+        // The sea's two ends, worked out once a frame rather than forty thousand times,
+        // and — the point of hoisting them — available to the water *beyond* the near
+        // field as well. That water took the lit palette whatever the sea was drawn in:
+        // a band more than twice as dark as the drawn water inshore of it, running from
+        // a quarter of a kilometre out to the horizon, which is most of the sea there
+        // is. One palette now, and both halves of the grid read it.
+        let body = Vec3::new(0.02, 0.07, 0.06);
+        let (deep, shallow) = if ink {
+            // Mixed towards the pigment rather than from the sky, but not all the way:
+            // the weather still has to be able to put a grey afternoon on the water,
+            // and a print that never changes with the light is wallpaper.
+            (
+                PRUSSIAN.lerp(crate::sky::ZENITH * 0.34 + body, 0.30),
+                PAPER.lerp(crate::sky::HORIZON * 0.62 + body, 0.34),
+            )
+        } else {
+            (
+                crate::sky::ZENITH * 0.16 + body * 0.6,
+                crate::sky::HORIZON * 0.17 + body * 1.4,
+            )
+        };
+        let far = if ink { deep } else { DEEP };
         let typical = (sim.sim.water.characteristic_slope() as f32).max(1e-4);
         // Steady surface drift: about two and a half percent of the wind speed,
         // downwind, which is the usual rule of thumb. This is a real current and it
@@ -693,18 +732,6 @@ pub fn update_sea(
             (anchor.x / tile).round() * tile,
             (anchor.y / tile).round() * tile,
         );
-        // The hatching is rebased with everything else, and whole tiles of the ripple
-        // texture are not whole strokes: twenty-four metres across the lean is not a
-        // multiple of three quarters of a metre, so every rebase would have shifted the
-        // strokes — a jump across the whole sea every ten seconds of sailing. Putting
-        // the base's own phase back and keeping only its fraction cancels it exactly,
-        // because the stroke texture repeats with period one and an integer shift of a
-        // repeating coordinate is no shift at all.
-        let hatch_base = ((uv_base.x as f32 * HATCH_BEARING.sin()
-            - uv_base.y as f32 * HATCH_BEARING.cos())
-            / HATCH_SPACING)
-            .rem_euclid(1.0);
-
         // Where every cloud shadow falls, worked out once for the frame rather than per
         // vertex. Forty thousand vertices times twenty clouds is a number that has to be
         // cheap in the inner loop and does not have to be cheap out here.
@@ -733,7 +760,7 @@ pub fn update_sea(
                         -flat.y as f32 / sea_texture::TILE_METRES,
                     )
                 });
-                colours.push([DEEP.x, DEEP.y, DEEP.z, 1.0]);
+                colours.push([far.x, far.y, far.z, 1.0]);
                 continue;
             }
             // Sample at the true world position. Bevy's -Z is sim north, so the
@@ -789,18 +816,6 @@ pub fn update_sea(
             // zenith, so it takes the zenith darkened; a crest sees the whole dome and
             // takes the horizon. The water's own body colour leans green, which is why
             // the two are not simply the sky scaled.
-            let body = Vec3::new(0.02, 0.07, 0.06);
-            let (deep, shallow) = if ink {
-                (
-                    crate::sky::ZENITH * 0.55 + body * 1.6,
-                    crate::sky::HORIZON * 0.44 + body,
-                )
-            } else {
-                (
-                    crate::sky::ZENITH * 0.16 + body * 0.6,
-                    crate::sky::HORIZON * 0.17 + body * 1.4,
-                )
-            };
             let mut tone = (lift * 0.5 + 0.5).clamp(0.0, 1.0);
             // Cloud shadow. Taken off the tone *before* it is quantised, which is the
             // whole trick: in ink mode the shadow then lands on a tone boundary and
@@ -828,6 +843,7 @@ pub fn update_sea(
             };
             tone = (tone - 0.42 * shade).clamp(0.0, 1.0);
             let mut edge = 0.0;
+            let mut side = 1.0;
             if ink {
                 // Drawn water, not photographed water.
                 //
@@ -839,8 +855,9 @@ pub fn update_sea(
                 // It is the right place for it, too: this colour is already computed
                 // per vertex on the processor every frame, so a style that would
                 // normally want a shader costs one rounding here.
-                let (banded, on_step) = ink_tone(tone);
+                let (banded, on_step, which) = ink_tone(tone);
                 tone = banded;
+                side = which;
                 // How near a step this vertex sits, kept before the tone is flattened,
                 // because afterwards the information is gone.
                 edge = on_step;
@@ -861,7 +878,15 @@ pub fn update_sea(
                 // Over a narrow range rather than at a point: still a mark with an
                 // edge to it at any one moment, and no longer a crest that switches
                 // itself on and off as the sea breathes under the grid.
-                foam = smoothstep(0.15, 0.21, foam);
+                //
+                // And with a ragged edge to it. Foam thrown as a clean shape is the one
+                // thing in the drawn sea that looked machined: what the print draws, and
+                // what a breaking crest does, is fingers — the water tears along the top
+                // and comes down in claws. A slow world-locked noise on the threshold
+                // does it, and it travels with the water because it is read at the
+                // parcel rather than at the vertex.
+                let torn = sail_core::noise::two_octaves(parcel * 0.9, 0x5EA_F0A4) as f32;
+                foam = smoothstep(0.15 + 0.07 * torn, 0.21 + 0.07 * torn, foam);
             }
             let mut colour = base.lerp(
                 if ink {
@@ -878,16 +903,23 @@ pub fn update_sea(
                 // down the tone, which is what picks the width of the stroke out of
                 // the tonal art map. Written over the ripple coordinates pushed above,
                 // because the tone is not known until here and a vertex gets one UV.
-                let along = parcel.x as f32 * HATCH_BEARING.sin()
-                    - parcel.y as f32 * HATCH_BEARING.cos();
                 if let Some(uv) = uvs.last_mut() {
-                    *uv = Vec2::new(along / HATCH_SPACING + hatch_base, 1.0 - tone);
+                    *uv = Vec2::new(height / (STREAK_OF_HEIGHT * hs), 1.0 - tone);
                 }
             }
             if ink && edge > 0.0 {
-                // The contour line along the step between two tones, struck as hard as
-                // the vertex is near one.
-                colour = colour.lerp(Vec3::new(0.97, 0.99, 1.0), CONTOUR_INK * edge);
+                // The line along the step between two tones, struck as hard as the
+                // vertex is near one — and struck in two colours, which is what a
+                // woodblock does. White where the form turns towards the light, because
+                // that edge is the crest and a crest is bright; the key block's own dark
+                // line where it turns away, because that is where a print puts its
+                // weight. One line in two halves, and the pair of them is the drawing.
+                let (mark, strength) = if side > 0.0 {
+                    (Vec3::new(0.97, 0.99, 1.0), CONTOUR_INK)
+                } else {
+                    (KEY_LINE, CONTOUR_INK * 0.85)
+                };
+                colour = colour.lerp(mark, strength * edge);
             }
             if ink {
                 // Glints off the wave faces.
@@ -1041,8 +1073,8 @@ mod drawn_sea {
         let mut worst: f32 = 0.0;
         let mut x = 0.0_f32;
         while x < 1.0 {
-            let (a, line_a) = ink_tone(x);
-            let (b, line_b) = ink_tone(x + STEP);
+            let (a, line_a, _) = ink_tone(x);
+            let (b, line_b, _) = ink_tone(x + STEP);
             worst = worst.max((b - a).abs());
             // And the contour line with it, which was the second hard threshold: it
             // used to switch on at full strength the moment a vertex crossed.
@@ -1077,8 +1109,8 @@ mod drawn_sea {
         let mut total = 0;
         let mut x = 0.0_f32;
         while x < 1.0 {
-            let (a, _) = ink_tone(x);
-            let (b, _) = ink_tone(x + 0.001);
+            let (a, _, _) = ink_tone(x);
+            let (b, _, _) = ink_tone(x + 0.001);
             if (b - a).abs() < 1e-6 {
                 flat += 1;
             }
@@ -1095,7 +1127,7 @@ mod drawn_sea {
         // The treads are where they always were: four tones evenly spread, so the
         // picture is the same picture.
         for (i, at) in [0.20_f32, 0.45, 0.70, 0.95].iter().enumerate() {
-            let (tone, _) = ink_tone(*at);
+            let (tone, _, _) = ink_tone(*at);
             let want = i as f32 / (INK_BANDS - 1) as f32;
             assert!(
                 (tone - want).abs() < 1e-4,

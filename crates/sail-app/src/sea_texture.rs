@@ -14,6 +14,7 @@
 //! where a gust has ruffled the water and the rest is still slick.
 
 use bevy::asset::RenderAssetUsages;
+use crate::curve::smoothstep;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -350,9 +351,85 @@ pub fn hatch_map() -> Image {
     image
 }
 
-fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
-    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
+/// The two marks the spray is drawn with, side by side on one sheet.
+///
+/// The particles were untextured quads, which is a square of light, and a square of
+/// light is what "the whitecaps are squares" meant — twice, from two different
+/// directions, because the same quad was being used for two things that are not alike.
+/// A speck off the bow is a *drop*: round, bright in the middle, gone at the edge. A
+/// mark torn off a breaking crest is a *handful of foam*, and what foam does when it
+/// comes off the top of a wave is tear into fingers. The print everybody means by a
+/// drawn wave is built out of exactly those claws.
+///
+/// Left half is the drop, right half the claw. Additive, so this is light rather than
+/// colour: black adds nothing, which is why it wants no alpha channel and why two marks
+/// may overlap without anybody having to sort them back to front.
+pub fn spray_marks() -> Image {
+    const W: u32 = 128;
+    let mut data = vec![0u8; (W * 2 * W * 4) as usize];
+    for y in 0..W {
+        for x in 0..W * 2 {
+            let claw = x >= W;
+            let u = ((x % W) as f32 + 0.5) / W as f32 * 2.0 - 1.0;
+            let v = (y as f32 + 0.5) / W as f32 * 2.0 - 1.0;
+            let value = if claw { claw_mark(u, v) } else { drop_mark(u, v) };
+            let i = ((y * W * 2 + x) * 4) as usize;
+            let byte = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+            data[i] = byte;
+            data[i + 1] = byte;
+            data[i + 2] = byte;
+            data[i + 3] = 255;
+        }
+    }
+    let mut image = Image::new(
+        Extent3d {
+            width: W * 2,
+            height: W,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    build_mipmaps(&mut image, false);
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        // Clamped both ways: each half is a mark on its own and must not bleed into its
+        // neighbour or wrap round to itself.
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        mipmap_filter: ImageFilterMode::Linear,
+        ..ImageSamplerDescriptor::linear()
+    });
+    image
+}
+
+/// A drop: bright in the middle, out by the rim, with nothing in the corners.
+fn drop_mark(u: f32, v: f32) -> f32 {
+    let r = (u * u + v * v).sqrt();
+    1.0 - smoothstep(0.12, 0.92, r)
+}
+
+/// A handful of foam: a body with fingers torn off its top.
+///
+/// Built rather than drawn, out of the one thing that makes foam look like foam — the
+/// edge is a lobed curve instead of a circle, and the lobes grow where the water is
+/// thrown. Five fingers, reaching further at the top than at the sides, because that is
+/// the way a crest tears: the water goes up and over and comes down in claws.
+fn claw_mark(u: f32, v: f32) -> f32 {
+    let r = (u * u + v * v).sqrt().max(1e-4);
+    let angle = v.atan2(u);
+    // Lobes round the rim. The phase puts a finger pointing up rather than a gap.
+    let lobes = (angle * 5.0 - std::f32::consts::FRAC_PI_2).cos();
+    // Reaching further upwards: the fingers are thrown, and what throws them is gravity
+    // acting on water that has already gone over the top.
+    let up = (v * 0.5 + 0.5).clamp(0.0, 1.0);
+    let rim = 0.40 + 0.30 * lobes.max(0.0) * (0.35 + 0.65 * up);
+    // Hard on the outside, because this is a *mark* and a mark has an edge, and softer
+    // on the inside where the foam is thick.
+    let body = 1.0 - smoothstep(rim * 0.55, rim, r);
+    let fingers = 1.0 - smoothstep(rim, rim + 0.10, r);
+    (body * 0.65 + fingers * 0.45).min(1.0)
 }
 
 /// The tile has to repeat, and the mesh's UVs run to hundreds of tiles across.

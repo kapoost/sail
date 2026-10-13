@@ -43,7 +43,7 @@ fn grain(u: f32, v: f32, scale_u: f32, scale_v: f32) -> f32 {
     let (x, y) = (u * scale_u, v * scale_v);
     let (xi, yi) = (x.floor(), y.floor());
     let (xf, yf) = (x - xi, y - yi);
-    let ease = |t: f32| t * t * (3.0 - 2.0 * t);
+    let ease = crate::curve::ease;
     let (sx, sy) = (ease(xf), ease(yf));
     let w = |i: f32, j: f32| {
         noise(

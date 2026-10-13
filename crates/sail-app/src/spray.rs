@@ -82,6 +82,9 @@ struct Speck {
     /// How blue this one is to begin with, 0 white and 1 the colour of the sea it came
     /// out of.
     tint: f32,
+    /// Whether this one is foam torn off a breaking crest rather than spray thrown off
+    /// the bow, which decides which mark it is drawn with — see `spray_marks`.
+    claw: bool,
 }
 
 #[derive(Resource)]
@@ -106,6 +109,7 @@ pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
@@ -131,6 +135,11 @@ pub fn setup(
         Mesh3d(handle.clone()),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::WHITE,
+            // The shape of a mark, instead of the square it is drawn on. Additive, so
+            // the sheet is read as light added and black is nothing — which is why it
+            // needs no alpha channel and why the marks can overlap without the usual
+            // business of sorting them.
+            base_color_texture: Some(images.add(crate::sea_texture::spray_marks())),
             // Added rather than blended: foam is bright water, and two layers of it are
             // brighter than one. It also means the specks never darken the sea they are
             // drawn over, which a blended quad with any alpha at all will do.
@@ -340,6 +349,7 @@ pub fn update(
                     scale: 2.0 + 2.6 * r.next_f64() as f32,
                     phase: r.next_f64() as f32 * std::f32::consts::TAU,
                     tint: 0.2 * r.next_f64() as f32,
+                    claw: true,
                 });
             }
             born_breaking += 1;
@@ -426,6 +436,7 @@ pub fn update(
             scale: 0.55 + 0.9 * r.next_f64() as f32,
             phase: r.next_f64() as f32 * std::f32::consts::TAU,
             tint: r.next_f64() as f32,
+            claw: false,
         });
     }
     *owed = owed.min(8.0);
@@ -529,10 +540,15 @@ pub fn update(
         let to_eye = (view.translation - centre).normalize_or_zero();
         let right = to_eye.cross(Vec3::Y).normalize_or_zero();
         let up = right.cross(to_eye).normalize_or_zero();
+        // Which half of the sheet this one is drawn from. A speck off the bow is a
+        // drop of water and a mark torn off a crest is a handful of foam, and until now
+        // both were the same white square — which is what "I still cannot see the
+        // whitecaps, and they are squares" was about from two directions at once.
+        let cell = if s.claw { 0.5 } else { 0.0 };
         for (u, v) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
             positions.push(centre + right * (size * u) + up * (size * v));
             colours.push([colour.x, colour.y, colour.z, alpha]);
-            uvs.push(Vec2::new(u * 0.5 + 0.5, v * 0.5 + 0.5));
+            uvs.push(Vec2::new(cell + (u * 0.5 + 0.5) * 0.5, v * 0.5 + 0.5));
         }
     }
 
