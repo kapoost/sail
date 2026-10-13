@@ -66,6 +66,9 @@ pub fn draw(
     mut settings: ResMut<crate::settings::Settings>,
     mut course: ResMut<Course>,
     keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    // How long the screen has been up, so it can surface rather than appear.
+    mut dying: Local<f32>,
 ) -> Result {
 
     if keys.just_pressed(KeyCode::KeyH) {
@@ -524,43 +527,76 @@ pub fn draw(
             });
         });
     // --- And the one thing that stops the passage ---------------------------------
+    if telemetry.mishap.is_none() {
+        *dying = 0.0;
+    }
     if let Some(mishap) = telemetry.mishap {
-        egui::Area::new("mishap".into())
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -40.0))
-            .show(ctx, |ui| {
-                egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(28, 10, 10))
-                    .stroke(egui::Stroke::new(2.0, paint::BAD))
-                    .inner_margin(egui::Margin::symmetric(26, 20))
-                    .show(ui, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                egui::RichText::new("YOU DIED")
-                                    .color(paint::BAD)
-                                    .monospace()
-                                    .size(44.0),
-                            );
-                            ui.add_space(8.0);
-                            ui.label(
-                                egui::RichText::new(mishap.what_happened())
-                                    .color(paint::FACE)
-                                    .monospace()
-                                    .size(15.0),
-                            );
-                            ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new(mishap.the_lesson())
-                                    .color(paint::LABEL)
-                                    .monospace()
-                                    .size(11.0),
-                            );
-                            ui.add_space(12.0);
-                            if small_button(ui, "ANOTHER BOAT  (L)").clicked() {
-                                course.wants_new = true;
-                            }
-                        });
-                    });
-            });
+        // Drawn the way the game that made this screen famous draws it, because there is
+        // no point pretending otherwise and because the way it is done is *right*: the
+        // letters do not arrive, they surface. A black veil comes up over the whole
+        // picture, the words bleed in out of it in deep red with the letters held far
+        // apart, and nothing is in a hurry. What that buys is a beat of silence in which
+        // you work out what you did — which is also what the sea gives you.
+        //
+        // Two seconds to come up and nothing to click for the first of them, so the
+        // instinctive mash of a key does not skip the only moment of reflection the
+        // game has.
+        *dying += time.delta_secs();
+        let age = *dying;
+        let veil = crate::curve::smoothstep(0.0, 1.6, age);
+        let words = crate::curve::smoothstep(0.35, 2.2, age);
+        // `viewport_rect` in egui 0.36 — what used to be `screen_rect`, and the whole of
+        // the window rather than what is left after the panels.
+        let screen = ctx.viewport_rect();
+        let paint_on = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("mishap"),
+        ));
+        paint_on.rect_filled(
+            screen,
+            0.0,
+            egui::Color32::from_black_alpha((215.0 * veil) as u8),
+        );
+        // Letterspaced by hand, because egui has no tracking: a space between every
+        // letter is what the original does and it is most of the look.
+        let spaced: String = "YOU DIED"
+            .chars()
+            .flat_map(|c| [c, ' '])
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        let red = egui::Color32::from_rgba_unmultiplied(170, 18, 18, (255.0 * words) as u8);
+        paint_on.text(
+            screen.center() - egui::vec2(0.0, 30.0),
+            egui::Align2::CENTER_CENTER,
+            &spaced,
+            egui::FontId::proportional(76.0),
+            red,
+        );
+        let faint = egui::Color32::from_rgba_unmultiplied(150, 140, 130, (190.0 * words) as u8);
+        paint_on.text(
+            screen.center() + egui::vec2(0.0, 36.0),
+            egui::Align2::CENTER_CENTER,
+            mishap.what_happened(),
+            egui::FontId::monospace(15.0),
+            faint,
+        );
+        paint_on.text(
+            screen.center() + egui::vec2(0.0, 60.0),
+            egui::Align2::CENTER_CENTER,
+            mishap.the_lesson(),
+            egui::FontId::monospace(11.0),
+            egui::Color32::from_rgba_unmultiplied(120, 112, 104, (170.0 * words) as u8),
+        );
+        if age > 2.2 {
+            egui::Area::new("another boat".into())
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 120.0))
+                .show(ctx, |ui| {
+                    if small_button(ui, "ANOTHER BOAT  (L)").clicked() {
+                        course.wants_new = true;
+                    }
+                });
+        }
     }
     Ok(())
 }

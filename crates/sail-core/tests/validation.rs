@@ -14,7 +14,7 @@ use sail_core::sail::{
     camber_for_outhaul, camber_reefed, camber_rolled, outhaul_for, sail_forces, SailProfile,
     CAMBER_DEEP, CAMBER_FLAT, CAMBER_REFERENCE,
 };
-use sail_core::state::Headsail;
+use sail_core::state::{Blown, Headsail, Mishap};
 use sail_core::wind::{SteadyWind, WindField};
 
 fn wind(kn: f64) -> impl Fn() -> Box<dyn WindField> {
@@ -3099,6 +3099,111 @@ fn with_no_wind_she_only_ever_slows_down() {
             );
         }
     }
+}
+
+#[test]
+fn the_keel_finding_the_bottom_ends_the_passage() {
+    // Instant, because it is: a keel at six knots meeting rock is not a process. The
+    // depth gauge is on the panel with an alarm on it and has been all along, which is
+    // what makes this a fair way to lose rather than a trap.
+    let cfg = BoatConfig::archipelago_packet();
+    // A real archipelago rather than a contrived bottom, because the depth the boat
+    // feels comes from the land and nowhere else — a test that invents its own would be
+    // testing the test. Walk out from an island until the water is shallower than her
+    // keel, and start her there.
+    let land = std::sync::Arc::new(sail_core::land::Archipelago::generate(0x15_1A, 6_000.0, 24));
+    let mut shoal = None;
+    'search: for ix in -300..300 {
+        for iy in -300..300 {
+            let p = glam::DVec2::new(ix as f64 * 20.0, iy as f64 * 20.0);
+            let d = land.depth(p);
+            if d > 0.2 && d < cfg.draft - 0.3 {
+                shoal = Some(p);
+                break 'search;
+            }
+        }
+    }
+    let shoal = shoal.expect("an archipelago has shelves round its islands");
+
+    let mut sim = Simulation::new(
+        cfg,
+        {
+            let mut st = BoatState::at_rest(rad(40.0));
+            st.pos = shoal;
+            st.surge = kn_to_ms(5.0);
+            st
+        },
+        Box::new(SteadyWind::new(0.0, kn_to_ms(12.0))) as Box<dyn WindField>,
+    )
+    .with_land(land.clone());
+    let controls = Controls::default();
+    sim.run(1.0, &controls);
+    assert_eq!(
+        sim.telemetry.mishap,
+        Some(Mishap::Aground),
+        "in {:.1} m of water under a {:.2} m keel she should be on the bottom",
+        land.depth(shoal),
+        cfg.draft
+    );
+
+    // And it sticks. A boat on the rocks does not quietly become a boat at sea again
+    // because the next wave lifted her.
+    sim.run(20.0, &controls);
+    assert_eq!(sim.telemetry.mishap, Some(Mishap::Aground));
+}
+
+#[test]
+fn a_sail_carried_past_its_wind_blows_out() {
+    // Every sail is cut for a wind and past it the cloth goes — not at once, because
+    // sailcloth is not a fuse, but a sail carried a fifth over its number has about five
+    // seconds of dignity left. Five seconds is enough time to do something, which is the
+    // whole of the game in it.
+    let cfg = BoatConfig::archipelago_packet();
+    let fly = |tws: f64, twa: f64, head: Headsail| {
+        let heading = wrap_tau(0.0 - rad(twa));
+        let mut state = BoatState::at_rest(heading);
+        state.surge = kn_to_ms(4.0);
+        let mut sim = Simulation::new(
+            cfg,
+            state,
+            Box::new(SteadyWind::new(0.0, kn_to_ms(tws))) as Box<dyn WindField>,
+        );
+        let controls = Controls {
+            headsail: head,
+            furl: 0.0,
+            jib_sheet: 0.35,
+            main_sheet: 0.3,
+            ..Default::default()
+        };
+        for i in 0..(90.0 / SUBSTEP) as u64 {
+            sim.run(SUBSTEP, &controls);
+            if let Some(what) = sim.telemetry.mishap {
+                return Some((i as f64 * SUBSTEP, what));
+            }
+        }
+        None
+    };
+
+    // A kite carried close-hauled into twenty-six knots. There is no sailor alive who
+    // would be surprised by what happens next.
+    let (when, what) = fly(26.0, 20.0, Headsail::Gennaker).expect("the gennaker should have gone");
+    assert_eq!(what, Mishap::BlownOut(Blown::Headsail(Headsail::Gennaker)));
+    assert!(
+        (2.0..=30.0).contains(&when),
+        "it should go in seconds rather than instantly or never: {when:.0} s"
+    );
+
+    // And the same sail in the wind it is for is simply a gennaker.
+    assert!(
+        fly(12.0, 120.0, Headsail::Gennaker).is_none(),
+        "a gennaker in twelve knots on a reach is not a mishap"
+    );
+    // A dacron genoa is a sail you reef rather than blow out: it is still there at
+    // thirty-eight knots, which is the point of having one.
+    assert!(
+        fly(38.0, 45.0, Headsail::Genoa).is_none(),
+        "the genoa should survive a gale — it is cut for one"
+    );
 }
 
 // ---------------------------------------------------------------------------
