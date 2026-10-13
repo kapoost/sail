@@ -466,6 +466,44 @@ fn wind_vane(w: &mut Workshop, b: &mut ChildSpawnerCommands, varnish: &Handle<St
     });
 }
 
+/// Where the apparent wind comes *from*, as a direction in the boat's own frame.
+///
+/// The one definition of that mapping, and it exists because there were two. The
+/// masthead windex has used `from_rotation_y(-awa)` since it was built and it has been
+/// right every day since; the vane was written fresh with `+awa` and came out ninety
+/// degrees round — standing square across the wind instead of edge-on to it, which is
+/// a vane doing the one thing a vane must never do.
+///
+/// Both signs agree at nought, ninety and a hundred and eighty degrees, which is most of
+/// why it survived a reading of the code: the three angles a person checks are the three
+/// it cannot catch.
+pub fn into_the_wind(awa: f32) -> Quat {
+    Quat::from_rotation_y(-awa)
+}
+
+/// The same thing as a direction, for anything that needs the vector rather than the
+/// turn — which at the moment is only the test that holds the two of them together, and
+/// that is reason enough for it to exist: the test is the thing that caught a vane
+/// standing square across the wind.
+#[cfg(test)]
+pub fn wind_from(awa: f32) -> Vec3 {
+    into_the_wind(awa) * Vec3::NEG_Z
+}
+
+/// How far round the vane's turret stands when it is set to hold `awa`.
+///
+/// The blade's plane has to lie *along* that wind — a vane holds an angle by presenting
+/// its edge to it, so the wind strikes neither face while she is on course and both
+/// faces as soon as she is not. Fore and aft for a wind dead astern, athwartships for
+/// one on the beam.
+fn vane_turret(set: f32) -> Quat {
+    // Literally the rotation that points the masthead windex at the wind, which is the
+    // fact that makes this right: the vane's plane and the windex's arrow are both
+    // laid along the same wind, so if one is correct the other cannot be ninety degrees
+    // out. They were, until this was one function instead of two signs.
+    into_the_wind(set)
+}
+
 /// Set the vane to what the pilot is holding, and lean it by how far she is off.
 ///
 /// Both of those are the same two numbers the pilot steers on, which is the point: the
@@ -497,10 +535,7 @@ pub fn update_vane(
 
     if let Ok(mut t) = turret.single_mut() {
         if set.is_finite() {
-            // The plane of the vane lies along the wind it is set to hold, because a
-            // vane holds an angle by presenting its *edge* to that wind. Fore and aft
-            // for a wind dead astern, athwartships for one on the beam.
-            t.rotation = Quat::from_rotation_y(set);
+            t.rotation = vane_turret(set);
         }
     }
     if let Ok(mut t) = blade.single_mut() {
@@ -610,4 +645,53 @@ fn winch_mesh() -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_indices(Indices::U32(indices));
     mesh
+}
+
+#[cfg(test)]
+mod vane {
+    use super::*;
+
+    /// The blade must be edge-on to the wind it is set for, at every angle.
+    ///
+    /// Written after it was found standing square across the wind instead. The test
+    /// matters more than the fix: a sign error in an angle is invisible in a code
+    /// reading, survives the three angles anybody checks by hand — nought, ninety and a
+    /// hundred and eighty, where both signs agree — and is instantly obvious to a
+    /// sailor looking at the transom. One dot product catches all of it.
+    #[test]
+    fn the_vane_stands_edge_on_to_the_wind_it_is_set_for() {
+        for degrees in [0.0_f32, 20.0, 45.0, 70.0, 90.0, 120.0, 150.0, 175.0] {
+            for side in [1.0_f32, -1.0] {
+                let set = (degrees * side).to_radians();
+                // The blade is thin across its local x, so that is its face's normal.
+                let normal = vane_turret(set) * Vec3::X;
+                let wind = wind_from(set);
+                assert!(
+                    normal.dot(wind).abs() < 1.0e-5,
+                    "set to {:.0} deg the vane presents its face to the wind by {:.2} \
+                     of a right angle, which is a vane that cannot steer",
+                    degrees * side,
+                    normal.dot(wind).abs()
+                );
+                // And the blade's own plane contains the wind, which is the same claim
+                // from the other side and catches a normal that is right by accident.
+                let along = vane_turret(set) * Vec3::Z;
+                assert!(along.dot(wind).abs() > 0.999);
+            }
+        }
+    }
+
+    /// The wind direction itself, against the convention the windex has always used.
+    #[test]
+    fn the_wind_comes_from_where_the_windex_says_it_does() {
+        // Dead ahead is forward, which on this boat is negative z.
+        assert!((wind_from(0.0) - Vec3::NEG_Z).length() < 1.0e-5);
+        // On the starboard beam is to starboard, which is positive x.
+        assert!((wind_from(std::f32::consts::FRAC_PI_2) - Vec3::X).length() < 1.0e-5);
+        // And on the port beam, the other way. This is the pair that a sign error
+        // cannot survive, and the pair that nought and a hundred and eighty let through.
+        assert!((wind_from(-std::f32::consts::FRAC_PI_2) - Vec3::NEG_X).length() < 1.0e-5);
+        // Astern.
+        assert!((wind_from(std::f32::consts::PI) - Vec3::Z).length() < 1.0e-5);
+    }
 }

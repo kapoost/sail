@@ -614,10 +614,13 @@ pub fn update_genoa_cars(sim: Res<Sim>, mut q: Query<(&GenoaCar, &mut Transform)
 }
 
 pub fn update_windex(sim: Res<Sim>, mut q: Query<&mut Transform, With<Windex>>) {
-    // A windex swings freely and points into the apparent wind.
+    // A windex swings freely and points into the apparent wind — and it does it through
+    // the same function the vane on the transom is set by, so the two cannot disagree
+    // about where the wind is. They did, by ninety degrees, for as long as that was a
+    // sign written out twice.
     let awa = sim.sim.telemetry.awa as f32;
     for mut t in &mut q {
-        t.rotation = Quat::from_rotation_y(-awa);
+        t.rotation = crate::fittings::into_the_wind(awa);
     }
 }
 
@@ -861,9 +864,11 @@ pub fn update_sails(
                     // have to agree about where the sail is — the fault this file keeps
                     // being caught by.
                     shrouds: if surface.which == Sail::Headsail
-                        && t_.jib.chord_angle.abs()
-                            > cfg.headsail_bears_at + sail_core::units::rad(30.0)
-                    {
+                        && !feels_the_shrouds(
+                            sim.controls.headsail,
+                            t_.jib.chord_angle,
+                            cfg.headsail_bears_at,
+                        ) {
                         &[]
                     } else {
                         &shrouds
@@ -1257,6 +1262,35 @@ const SHROUD_INFLUENCE: f32 = 0.9;
 
 /// Hold a point of sailcloth off the standing rigging.
 ///
+/// Whether this headsail's cloth is held off the shrouds at all.
+///
+/// Two different sails with two different answers, and writing it as one condition on
+/// the sheet angle lost the difference — which showed up as a vertical crease down a
+/// Code 0 on a close reach, where the wire was pushing cloth that is never near it.
+///
+/// * **A genoa is hanked to the forestay and sheets inside the rig**, to a track on the
+///   side deck. Its leech lies against the cap shroud on anything but a run, and that
+///   contact is real: it is what the leech takes its shape from when the sheet is hard
+///   in. Eased right out past the spreaders it swings clear and the wire stops being an
+///   obstacle, which is the angle test.
+/// * **A Code 0 and a gennaker are set flying.** Tacked to the sprit a metre and a half
+///   ahead of the stem and sheeted to a block on the quarter, they live *outside*
+///   everything by construction — that is what setting a sail flying means. There is no
+///   angle at which their cloth is inside a shroud, so there is no angle at which a
+///   shroud may push it.
+pub fn feels_the_shrouds(
+    kind: sail_core::state::Headsail,
+    chord_angle: f64,
+    bears_at: f64,
+) -> bool {
+    match kind {
+        sail_core::state::Headsail::Genoa => {
+            chord_angle.abs() <= bears_at + sail_core::units::rad(30.0)
+        }
+        sail_core::state::Headsail::Code0 | sail_core::state::Headsail::Gennaker => false,
+    }
+}
+
 /// An eased headsail does not pass through the shrouds. It lies *against* them, and
 /// what you see is a crease running up the sail from each wire — which is also the
 /// thing that limits how far a genoa can be eased on a reach, and the reason the sail
@@ -1753,4 +1787,56 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.compute_normals();
+}
+
+#[cfg(test)]
+mod rigging_rules {
+    use super::*;
+    use sail_core::state::Headsail;
+    use sail_core::units::rad;
+
+    /// A sail set flying is outside the rig at every angle, and the wire may never
+    /// touch it.
+    ///
+    /// This has been reported twice from the deck — once as a sheet drawn inside the
+    /// shrouds and once as a crease down a Code 0 on a close reach — and both times the
+    /// rule was written as a condition on the sheet angle, which is the genoa's rule
+    /// applied to a sail that does not share it. Now it is a statement about which sail
+    /// is up, and this is what holds it there.
+    #[test]
+    fn a_sail_set_flying_never_feels_a_shroud() {
+        let bears_at = rad(28.0);
+        for degrees in [0.0_f64, 15.0, 30.0, 45.0, 60.0, 75.0, 88.0] {
+            for side in [1.0_f64, -1.0] {
+                let angle = rad(degrees * side);
+                assert!(
+                    !feels_the_shrouds(Headsail::Code0, angle, bears_at),
+                    "a Code 0 at {degrees:.0} deg of chord is tacked to the sprit and \
+                     sheeted to the quarter: there is nothing of it inside a shroud"
+                );
+                assert!(!feels_the_shrouds(Headsail::Gennaker, angle, bears_at));
+            }
+        }
+    }
+
+    /// And a genoa does, because it is hanked to the stay and sheets inside the rig —
+    /// right up until it is eased far enough to swing clear of the spreaders.
+    #[test]
+    fn a_genoa_lies_against_the_shroud_until_it_is_eased_clear() {
+        let bears_at = rad(28.0);
+        assert!(
+            feels_the_shrouds(Headsail::Genoa, rad(12.0), bears_at),
+            "sheeted in, the leech is against the cap shroud and takes its shape from it"
+        );
+        assert!(feels_the_shrouds(Headsail::Genoa, rad(45.0), bears_at));
+        assert!(
+            !feels_the_shrouds(Headsail::Genoa, rad(75.0), bears_at),
+            "eased past the spreaders it is flying clear and the wire is not an obstacle"
+        );
+        // Both tacks, which is where a sign error would hide.
+        assert_eq!(
+            feels_the_shrouds(Headsail::Genoa, rad(-45.0), bears_at),
+            feels_the_shrouds(Headsail::Genoa, rad(45.0), bears_at)
+        );
+    }
 }
