@@ -987,6 +987,14 @@ impl Simulation {
             keel_sway: lp_sway,
             rudder_alpha: rud.alpha,
             rudder_stalled: rud.stalled,
+            // Measured off the same three factors the force above is built from, so the
+            // instrument cannot disagree with the boat. Referenced to five knots over
+            // the blade, which is a cruising boat with way on and the speed at which a
+            // tiller feels like a tiller.
+            rudder_bite: (appendage_factor
+                * (rud_speed / crate::units::kn_to_ms(5.0)).powi(2)
+                * (1.0 - 0.85 * rud.stalled))
+                .clamp(0.0, 1.0),
             weather_helm: mz - cfg.x_rudder * rud_fy,
             righting_arm: righting_arm(self.state.heel, cfg.gm, cfg.gz_peak_angle),
         };

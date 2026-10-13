@@ -203,6 +203,12 @@ pub fn draw(
                             sim.controls.rudder = rudder;
                             pilot.disengage();
                         }
+                        // What the blade has left, and why. A rudder on the centreline
+                        // is a metre under the transom and the water is not glass, so
+                        // none of the three things that take its grip away can be seen
+                        // from on deck. On a real boat you read them through the tiller;
+                        // here there is no tiller in your hand, so they are printed.
+                        readout(ui, "BITE", &bite_words(&telemetry));
                         ui.horizontal(|ui| {
                             if small_button(ui, "AMIDSHIPS").clicked() {
                                 sim.controls.rudder = 0.0;
@@ -677,6 +683,33 @@ fn readout(ui: &mut egui::Ui, label: &str, value: &str) {
 }
 
 /// The tiller: drag it, and it stays.
+/// How much helm there is, and what is taking it away.
+///
+/// The number first, because it is the one you act on, and then the reason — a helm
+/// that has gone soft because there is no way on wants the opposite response to one
+/// that has gone soft because the blade is stalled. Only the dominant cause is named:
+/// three reasons at once is a sentence, and an instrument is not read, it is glanced at.
+fn bite_words(t: &sail_core::state::Telemetry) -> String {
+    let bite = t.rudder_bite;
+    if bite > 0.75 {
+        return format!("{:.0}%", bite * 100.0);
+    }
+    // Which of the three has taken the most, measured as what each one costs on its
+    // own. Speed is the square law, heel is the cosine plus the stern coming out, and
+    // stall is the flow letting go of the blade.
+    let slow = 1.0 - (ms_to_kn(t.stw) / 5.0).clamp(0.0, 1.0).powi(2);
+    let heeled = 1.0 - t.heel.abs().cos();
+    let stalled = t.rudder_stalled;
+    let worst = if stalled > slow.max(heeled) {
+        "stalled"
+    } else if heeled > slow {
+        "heeled"
+    } else {
+        "no way on"
+    };
+    format!("{:.0}% {worst}", bite * 100.0)
+}
+
 /// The nearest squall, if one is near enough to matter.
 ///
 /// Range and bearing, and whether it is going to hit — which is the question, and it is

@@ -2429,3 +2429,76 @@ fn a_squall_passing_over_is_light_then_hard_then_light() {
         deg(shift)
     );
 }
+
+#[test]
+fn heel_and_speed_take_the_helm_away() {
+    // The three things that cost a rudder its grip, asserted through the real code path
+    // rather than against the formula — the state goes in, one step runs, and the
+    // telemetry is read. A test that re-derived the arithmetic would pass even if the
+    // force used a different number from the instrument, which is the only failure that
+    // matters here.
+    let cfg = BoatConfig::charter_sloop_34();
+    let bite = |knots: f64, heel_deg: f64, helm_deg: f64| {
+        let mut state = BoatState::at_rest(0.0);
+        state.surge = kn_to_ms(knots);
+        state.heel = rad(heel_deg);
+        let mut sim = Simulation::new(
+            cfg,
+            state,
+            Box::new(SteadyWind::new(0.0, kn_to_ms(10.0))) as Box<dyn WindField>,
+        );
+        let controls = Controls {
+            rudder: rad(helm_deg),
+            ..Controls::close_hauled()
+        };
+        sim.run(SUBSTEP, &controls);
+        sim.telemetry.rudder_bite
+    };
+
+    // Five knots, upright, a working angle of helm: this is what a tiller feels like,
+    // and it is the reference the number is scaled to.
+    let working = bite(5.0, 0.0, 8.0);
+    assert!(
+        working > 0.9,
+        "five knots upright should be a full rudder, got {:.2}",
+        working
+    );
+
+    // Speed, squared. Two knots out of a tack has a fraction of the helm five knots has,
+    // and it is why she will not answer there.
+    let crawling = bite(2.0, 0.0, 8.0);
+    assert!(
+        crawling < working * 0.3,
+        "at two knots the helm should be nearly gone: {:.2} against {:.2}",
+        crawling,
+        working
+    );
+
+    // Heel, two ways. The cosine alone at twenty-five degrees is a tenth; past thirty
+    // the stern starts coming out and it goes much faster than any cosine.
+    let pressed = bite(5.0, 25.0, 8.0);
+    let over = bite(5.0, 50.0, 8.0);
+    assert!(
+        pressed < working * 0.95 && pressed > working * 0.8,
+        "twenty-five degrees should cost about a tenth, got {:.2} against {:.2}",
+        pressed,
+        working
+    );
+    assert!(
+        over < pressed * 0.7,
+        "past thirty the blade starts to emerge and it should fall away fast: \
+         {:.2} at fifty against {:.2} at twenty-five",
+        over,
+        pressed
+    );
+
+    // And stall: hauling the tiller further does not buy more rudder past about thirty
+    // degrees, it buys a brake.
+    let hard = bite(5.0, 0.0, 40.0);
+    assert!(
+        hard < working * 0.5,
+        "forty degrees of helm should be stalled, got {:.2} against {:.2}",
+        hard,
+        working
+    );
+}

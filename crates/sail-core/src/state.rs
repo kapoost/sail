@@ -371,6 +371,27 @@ pub struct Telemetry {
     /// Rudder angle of attack and how stalled it is.
     pub rudder_alpha: f64,
     pub rudder_stalled: f64,
+    /// How much of its nominal authority the blade actually has, 0 to 1.
+    ///
+    /// A rudder on the centreline cannot be seen from the boat — it is a metre under
+    /// the transom and the water is not transparent — so the three things that take its
+    /// grip away are invisible unless they are reported. All three are real and all
+    /// three are in the model already; this is the one number that says how much is
+    /// left, and it is computed from exactly the factors the force itself uses rather
+    /// than from a second estimate of them:
+    ///
+    /// * **Speed.** Force goes as the square of the flow over the blade, so a boat at
+    ///   two knots has a sixth of the helm she has at five. This is why she will not
+    ///   answer coming out of a tack, and it is the first thing a new helm gets wrong.
+    /// * **Heel**, two ways. The blade's lift is normal to its own plane, and heeled
+    ///   over that plane is tilted, so only the cosine of the heel acts in the
+    ///   horizontal — at forty degrees that is three quarters. Past thirty degrees the
+    ///   stern also starts to come out and the blade loses up to another half of its
+    ///   area, which is the mechanism that makes a knocked-down boat stop steering.
+    /// * **Stall.** Past about thirty degrees of helm the flow separates and the blade
+    ///   is a brake rather than a foil, which is the other half of why hauling the
+    ///   tiller harder is not the answer.
+    pub rudder_bite: f64,
     /// Net yaw moment with the rudder centred — positive means the boat wants to luff.
     /// This is weather helm, expressed as a number.
     pub weather_helm: f64,
