@@ -189,6 +189,19 @@ pub fn draw(
                         });
                     });
 
+                    ui.add_space(8.0);
+                    // The compass next to the helm, because the two are one instrument:
+                    // the card tells you where she is going and the tiller is how you
+                    // argue with it.
+                    compass_repeater(
+                        ui,
+                        heading,
+                        match course.leg {
+                            Leg::Carrying => Some(course.to_target(sim.sim.state.pos).1),
+                            Leg::Idle => None,
+                        },
+                    );
+
                     ui.add_space(10.0);
                     separator(ui);
                     ui.add_space(10.0);
@@ -283,8 +296,8 @@ pub fn draw(
                             } else {
                                 format!("{} is not led to this sail", bank.line().name())
                             })
-                                .color(paint::LABEL)
-                                .size(10.0),
+                            .color(paint::LABEL)
+                            .size(10.0),
                         );
                     });
 
@@ -297,14 +310,16 @@ pub fn draw(
                         ui.label(
                             egui::RichText::new("HEADSAIL")
                                 .color(paint::LABEL)
-                                .monospace().size(10.0),
+                                .monospace()
+                                .size(10.0),
                         );
                         ui.add_space(4.0);
                         let rolled = sim.controls.furl > 0.9;
                         for sail in [Headsail::Genoa, Headsail::Code0, Headsail::Gennaker] {
                             let up = sim.controls.headsail == sail;
                             let label = egui::RichText::new(sail.name().to_uppercase())
-                                .monospace().size(10.0)
+                                .monospace()
+                                .size(10.0)
                                 .color(if up {
                                     egui::Color32::BLACK
                                 } else if rolled {
@@ -325,7 +340,8 @@ pub fn draw(
                         if !rolled {
                             ui.label(
                                 egui::RichText::new("roll it away first")
-                                    .monospace().size(10.0)
+                                    .monospace()
+                                    .size(10.0)
                                     .color(egui::Color32::from_gray(90)),
                             );
                         }
@@ -639,6 +655,97 @@ fn readout(ui: &mut egui::Ui, label: &str, value: &str) {
 }
 
 /// The tiller: drag it, and it stays.
+/// A compass repeater: the same card as the one in the bowl, on the console.
+///
+/// The card turns and the lubber line does not, which is the one thing that makes a
+/// compass a compass and the thing a digital heading readout cannot teach. There is a
+/// heading in figures three centimetres away on this same panel; this is here because
+/// steering to a number and steering to a card are different skills, and the second one
+/// is the one that works when she is being thrown about.
+fn compass_repeater(ui: &mut egui::Ui, heading: f64, mark: Option<f64>) {
+    ui.label(
+        egui::RichText::new("COMPASS")
+            .color(paint::LABEL)
+            .monospace()
+            .size(10.0),
+    );
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(92.0, 92.0), egui::Sense::hover());
+    let p = ui.painter();
+    let c = rect.center();
+    let r = rect.width() * 0.42;
+    p.circle_filled(c, r + 4.0, paint::CASE);
+    p.circle_filled(c, r, paint::FACE);
+
+    let at = |bearing: f32, radius: f32| -> egui::Pos2 {
+        // Card bearings run clockwise from north, and the card is turned by the heading
+        // so that north stays north while the boat swings under it.
+        let a = bearing - heading as f32;
+        egui::pos2(c.x + radius * a.sin(), c.y - radius * a.cos())
+    };
+    for step in 0..36 {
+        let b = std::f32::consts::TAU * step as f32 / 36.0;
+        let long = step % 3 == 0;
+        p.line_segment(
+            [at(b, r * if long { 0.74 } else { 0.84 }), at(b, r * 0.96)],
+            egui::Stroke::new(if long { 1.6 } else { 1.0 }, paint::INK),
+        );
+    }
+    // North, as the arrowhead it is on the card.
+    let north = at(0.0, r * 0.80);
+    p.add(egui::Shape::convex_polygon(
+        vec![north, at(-0.10, r * 0.34), at(0.10, r * 0.34)],
+        paint::NEEDLE,
+        egui::Stroke::NONE,
+    ));
+    for (cardinal, _name) in [
+        (std::f32::consts::FRAC_PI_2, "E"),
+        (std::f32::consts::PI, "S"),
+        (3.0 * std::f32::consts::FRAC_PI_2, "W"),
+    ] {
+        p.add(egui::Shape::convex_polygon(
+            vec![
+                at(cardinal, r * 0.78),
+                at(cardinal - 0.08, r * 0.42),
+                at(cardinal + 0.08, r * 0.42),
+            ],
+            paint::INK,
+            egui::Stroke::NONE,
+        ));
+    }
+    // The lubber line, which belongs to the boat and therefore does not move.
+    p.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(c.x, c.y - r - 1.0),
+            egui::pos2(c.x - 4.0, c.y - r - 9.0),
+            egui::pos2(c.x + 4.0, c.y - r - 9.0),
+        ],
+        paint::NEEDLE,
+        egui::Stroke::NONE,
+    ));
+    // Where we are bound, on the rim. A repeater with a course pointer answers the
+    // question you actually have at the helm — am I pointing at it — without arithmetic
+    // between two three-digit numbers.
+    if let Some(bearing) = mark {
+        let b = bearing as f32;
+        p.add(egui::Shape::convex_polygon(
+            vec![
+                at(b, r * 0.98),
+                at(b - 0.09, r * 1.14),
+                at(b + 0.09, r * 1.14),
+            ],
+            paint::LIVE,
+            egui::Stroke::NONE,
+        ));
+    }
+    p.text(
+        egui::pos2(c.x, c.y + r * 0.52),
+        egui::Align2::CENTER_CENTER,
+        format!("{:03.0}", sail_core::units::deg(heading).rem_euclid(360.0)),
+        egui::FontId::monospace(12.0),
+        paint::INK,
+    );
+}
+
 fn tiller(ui: &mut egui::Ui, rudder: &mut f64, max: f64) -> bool {
     ui.label(
         egui::RichText::new("HELM")
@@ -646,8 +753,11 @@ fn tiller(ui: &mut egui::Ui, rudder: &mut f64, max: f64) -> bool {
             .monospace()
             .size(10.0),
     );
+    // A strip rather than a box. A tiller has one number in it — where it is — and the
+    // old panel gave that one number a hundred and eighty by ninety pixels of console,
+    // which is more room than the compass gets and more than the thing deserves.
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(188.0, 92.0), egui::Sense::click_and_drag());
+        ui.allocate_exact_size(egui::vec2(150.0, 38.0), egui::Sense::click_and_drag());
     let p = ui.painter();
     p.rect_filled(rect, 3.0, paint::TRACK);
 
@@ -665,7 +775,7 @@ fn tiller(ui: &mut egui::Ui, rudder: &mut f64, max: f64) -> bool {
         false
     };
 
-    let c = egui::pos2(rect.center().x, rect.bottom() - 10.0);
+    let c = egui::pos2(rect.center().x, rect.bottom() - 6.0);
     for mark in [-1.0_f32, -0.5, 0.0, 0.5, 1.0] {
         let x = c.x + mark * rect.width() * 0.45;
         p.line_segment(
@@ -810,7 +920,6 @@ fn clutch(ui: &mut egui::Ui, label: &str, value: &mut f64, selected: bool) -> (b
     })
     .inner
 }
-
 
 fn small_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add(
