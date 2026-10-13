@@ -13,3 +13,6 @@
 
 # Packaged builds
 /dist/out/
+
+# Session scratch
+/.claude/
