@@ -860,7 +860,19 @@ pub fn update_sails(
                                 0.55
                             } else {
                                 1.9
-                            } * forces.chord_angle.abs().sin() as f32),
+                            } * forces.chord_angle.abs().sin() as f32)
+                        // A backed headsail is not a wing at all. The clew is held to
+                        // windward and the wind is on the front of the cloth, so the
+                        // whole sail is pressed bodily *across* the boat and on to the
+                        // rig: it bags out, lies against the mast and the wires, and the
+                        // spar disappears behind it. Drawn as a clean foil standing clear
+                        // of the mast it reads as a sail that has been swung over, which
+                        // is a thing nobody has ever seen a sail do.
+                        * if surface.which == Sail::Headsail && sim.controls.headsail_aback {
+                            1.9
+                        } else {
+                            1.0
+                        },
                     // Where the deepest part of the sail sits, measured from the luff.
                     //
                     // Forty-two percent for a working sail, and it moves aft as the sail
@@ -899,7 +911,11 @@ pub fn update_sails(
                     // inner stay's tang actually is, which leaves the head clear and the
                     // constraint free to do its one job: stop the cloth being drawn
                     // through the mast, which is what it was doing.
-                    clear_mast: surface.which != Sail::Main,
+                    // The main is bent on to the mast, so it is never held off it. Nor
+                    // is a backed headsail — the wind is holding it *against* the spar,
+                    // which is where it lies and what the crew hears.
+                    clear_mast: surface.which != Sail::Main
+                        && !(surface.which == Sail::Headsail && sim.controls.headsail_aback),
                 },
             );
         }
