@@ -210,12 +210,19 @@ impl Bank {
 pub fn handle(
     mut sim: ResMut<Sim>,
     mut bank: ResMut<Bank>,
+    sound: Res<crate::sound::SoundHandle>,
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
     let dt = time.delta_secs_f64();
     bank.since_change += time.delta_secs();
 
+    // A clutch is a cam with a spring behind it and it lands with a bang you can hear
+    // from the foredeck. Rated low: it is a sharp sound rather than a loud one, and a
+    // boom arriving must still be the loudest thing on the boat.
+    if keys.just_pressed(KeyCode::Digit1) || keys.just_pressed(KeyCode::Digit2) {
+        sound.0.clack(0.35);
+    }
     if keys.just_pressed(KeyCode::Digit2) {
         bank.selected = (bank.selected + 1) % BANK.len();
         bank.since_change = 0.0;

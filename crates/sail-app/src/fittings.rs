@@ -174,10 +174,10 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     //
     // Two for the sheets, one each side on the coaming, and one on the coachroof for
     // the bank of slow lines. They are drums rather than models of winches, which is
-    // the right level of detail for something seen from two metres away, and they
-    // matter because the sheets are already drawn running to them.
-    let drum = w.meshes.add(Cylinder::new(0.105, 0.20));
-    let top = w.meshes.add(Cylinder::new(0.125, 0.035));
+    // matter because the sheets are already drawn running to them — and because in the
+    // cockpit view you are sitting next to one. See `winch_mesh` for what the shape is
+    // doing; it is all function, and the function is legible.
+    let drum = w.meshes.add(winch_mesh());
     for side in [-1.0_f32, 1.0] {
         // Abaft the headsail track, so the sheet runs forward to its lead and back to
         // the drum without the two fittings fouling each other — and far enough aft
@@ -185,16 +185,15 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
         // the side deck.
         let z = 2.9;
         let x = side * (crate::boat::track_x(z) + 0.02);
-        let y = deck::deck_height(z) + 0.10;
+        // On the deck rather than floating above it: the profile starts at its own
+        // base, so the fitting is placed where it sits.
+        let y = deck::deck_height(z);
         b.spawn((
             Mesh3d(drum.clone()),
             MeshMaterial3d(metal.clone()),
-            Transform::from_xyz(x, y, z),
-        ));
-        b.spawn((
-            Mesh3d(top.clone()),
-            MeshMaterial3d(metal.clone()),
-            Transform::from_xyz(x, y + 0.11, z),
+            // Turned so the self-tailing feeder faces the person grinding, which on a
+            // real boat is what the installer spends ten minutes getting right.
+            Transform::from_xyz(x, y, z).with_rotation(Quat::from_rotation_y(side * 0.5)),
         ));
     }
     // The clutch-bank winch, on the deck just forward of the coaming where the slow
@@ -202,7 +201,7 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     b.spawn((
         Mesh3d(drum.clone()),
         MeshMaterial3d(metal.clone()),
-        Transform::from_xyz(0.52, deck::deck_height(0.55) + 0.10, 0.55),
+        Transform::from_xyz(0.52, deck::deck_height(0.55), 0.55),
     ));
 
     // --- Companionway --------------------------------------------------------
@@ -389,4 +388,102 @@ pub fn update_tiller(sim: Res<Sim>, mut q: Query<&mut Transform, With<Tiller>>) 
         // sailing, and getting it backwards would be felt immediately.
         t.rotation = Quat::from_rotation_y(angle);
     }
+}
+
+/// A sheet winch, as one solid of revolution.
+///
+/// It was a cylinder with a disc on top, which is the right level of detail for a thing
+/// seen at two metres until you are *sitting next to it*, and in the cockpit view you
+/// are. Everything that makes a winch recognisable is in its profile, so the profile is
+/// the model: one lathe turns the base flange, the waisted drum, the self-tailing jaw
+/// with its groove, the cap and the handle socket, and comes out as a single mesh with a
+/// single outline round it rather than a pile of primitives each wearing its own.
+///
+/// What the shapes are for, since a winch is all function:
+///
+/// * **The waist.** A drum is narrower in the middle than at its ends so the turns ride
+///   *down* towards the base as they tighten. A straight drum lets them climb and
+///   override, which jams the winch at the one moment you need it — easing a sheet in a
+///   gust.
+/// * **The ribs.** Vertical knurling. A rope round a polished drum slips; the ribs are
+///   what make three turns hold a sail's worth of load. They are also the detail that
+///   reads from the helm, because at this distance what you see of a winch is the way
+///   light breaks up along its side.
+/// * **The jaw.** The self-tailer: a sprung groove in the crown that grips the tail so
+///   one person can grind and tail at once. It is the thing that distinguishes a winch
+///   made after about 1975 from one made before, and it is the most recognisable part of
+///   the shape.
+/// * **The socket.** Square, in the top, for the handle. Left empty here, as it should
+///   be: a handle stowed in a winch goes over the side on the first lurch.
+fn winch_mesh() -> Mesh {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::mesh::{Indices, PrimitiveTopology};
+
+    /// Turned stations, bottom to top: radius and height, in metres.
+    const PROFILE: [(f32, f32); 13] = [
+        (0.000, 0.000),
+        (0.113, 0.000),
+        (0.113, 0.014),
+        (0.105, 0.024),
+        (0.097, 0.105),
+        (0.105, 0.182),
+        (0.119, 0.193),
+        (0.103, 0.208),
+        (0.123, 0.226),
+        (0.106, 0.236),
+        (0.040, 0.252),
+        (0.031, 0.256),
+        (0.012, 0.250),
+    ];
+    /// Which stations are drum, and therefore ribbed.
+    const RIBBED: std::ops::Range<usize> = 3..6;
+    /// Segments round. Enough that twelve ribs get six segments each, which is the
+    /// fewest that makes a rib a rib rather than a wobble.
+    const SEGMENTS: usize = 72;
+    const RIBS: f32 = 12.0;
+    const RIB_DEPTH: f32 = 0.0045;
+
+    let mut positions: Vec<Vec3> = Vec::new();
+    let mut normals: Vec<Vec3> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for (station, &(r, y)) in PROFILE.iter().enumerate() {
+        // The ribs stand proud over the drum and fade out at both of its ends, so they
+        // do not leave a step where the drum meets its flanges.
+        let ribbed = if RIBBED.contains(&station) {
+            let span = (RIBBED.end - RIBBED.start - 1).max(1) as f32;
+            let along = (station - RIBBED.start) as f32 / span;
+            (std::f32::consts::PI * along).sin()
+        } else {
+            0.0
+        };
+        for i in 0..=SEGMENTS {
+            let a = std::f32::consts::TAU * i as f32 / SEGMENTS as f32;
+            let rib = (a * RIBS).cos() * 0.5 + 0.5;
+            let radius = r + ribbed * rib * RIB_DEPTH;
+            positions.push(Vec3::new(a.sin() * radius, y, a.cos() * radius));
+            // Outward, which is right everywhere but the two end caps and near enough
+            // there: this is a lit metal fitting, not a surface anyone reads shading off.
+            normals.push(Vec3::new(a.sin(), 0.0, a.cos()));
+        }
+    }
+    let ring = SEGMENTS + 1;
+    for station in 0..PROFILE.len() - 1 {
+        for i in 0..SEGMENTS {
+            let a = (station * ring + i) as u32;
+            let b = (station * ring + i + 1) as u32;
+            let c = ((station + 1) * ring + i + 1) as u32;
+            let d = ((station + 1) * ring + i) as u32;
+            indices.extend_from_slice(&[a, b, c, a, c, d]);
+        }
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
 }

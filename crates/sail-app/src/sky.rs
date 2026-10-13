@@ -105,6 +105,36 @@ impl Sky {
         Vec3::new(1.0, 1.0, 1.0).lerp(Vec3::new(1.0, 0.76, 0.55), low)
     }
 
+    /// The shadowed side and the sunlit face of cloud, for the weather there is.
+    ///
+    /// These were two constants, and constants are wrong for the same reason a constant
+    /// sun was: the thing that decides a cloud's colour is *how much direct sunlight
+    /// reaches it*, and that is exactly what the cover and the sun's height say.
+    ///
+    /// * **Cover closes the contrast.** The bright top and the dark base of a cumulus
+    ///   are the same cloud lit from one side; take the direct sun away and there is no
+    ///   side to be lit, so a solid overcast is one flat tone from edge to edge. Under
+    ///   eight oktas both ends of the range converge on it, which is why an overcast sky
+    ///   has no shape in it and a broken one is all shape.
+    /// * **A low sun gilds the tops**, through the same reddening that warms everything
+    ///   else: the light has come a long way through the atmosphere and the blue end has
+    ///   been scattered out of it. The sunlit face reads orange at six in the morning
+    ///   and white at noon, and it was reading warm-white at both.
+    /// * **And the flat tone follows the sun's height**, because a diffuse sky is only as
+    ///   bright as the light getting into the top of it.
+    pub fn cloud_tones(&self) -> (Vec3, Vec3) {
+        let direct = (1.0 - self.cover).clamp(0.0, 1.0);
+        let height = (self.elevation() / 0.52).clamp(0.0, 1.0);
+        // What a sky with no direct sun in it is: one diffuse tone, and that is the whole
+        // of an overcast.
+        let flat = Vec3::new(0.26, 0.29, 0.34) * (0.55 + 0.75 * height);
+        let diffuse = 1.0 - direct;
+        (
+            CLOUD_SHADOW.lerp(flat, diffuse),
+            (CLOUD_SUNLIT * self.sunlight()).lerp(flat, diffuse),
+        )
+    }
+
     /// And how strong it is: thinner through cloud, and weaker with a low sun for the
     /// same reason it is redder.
     pub fn illuminance(&self) -> f32 {
@@ -293,8 +323,6 @@ fn shafts(dir: Vec3, sun: Vec3, cover: f32) -> f32 {
 
 /// Build the sky cubemap.
 pub fn cubemap(sky: &Sky) -> Image {
-    let sun = sky.sun.normalize();
-    let cover = sky.cover;
     let n = FACE as f32;
     // Six faces stacked vertically, then reinterpreted as array layers.
     let mut data: Vec<u8> = Vec::with_capacity((FACE * FACE * 6 * 16) as usize);
@@ -306,7 +334,7 @@ pub fn cubemap(sky: &Sky) -> Image {
                 let u = (x as f32 + 0.5) / n * 2.0 - 1.0;
                 let v = (y as f32 + 0.5) / n * 2.0 - 1.0;
                 let dir = face_direction(face, u, v).normalize();
-                let colour = sky_colour(dir, sun, cover);
+                let colour = sky_colour(dir, sky);
                 for c in [colour.x, colour.y, colour.z, 1.0] {
                     data.extend_from_slice(&c.to_le_bytes());
                 }
@@ -349,7 +377,9 @@ fn face_direction(face: u32, u: f32, v: f32) -> Vec3 {
 }
 
 /// Sky radiance in a direction, relative units.
-fn sky_colour(dir: Vec3, sun: Vec3, cover: f32) -> Vec3 {
+fn sky_colour(dir: Vec3, state: &Sky) -> Vec3 {
+    let sun = state.sun;
+    let cover = state.cover;
     let up = dir.y;
     let sky = if up >= 0.0 {
         // Pale at the horizon, deep overhead. The exponent is doing the work of
@@ -394,8 +424,7 @@ fn sky_colour(dir: Vec3, sun: Vec3, cover: f32) -> Vec3 {
     // it — far darker than ordinary cloud, which is what makes the lit parts look as
     // bright as they do — and the sunlit face is close to white, because a cumulonimbus
     // is thick enough to scatter everything back out at you.
-    let shadow = CLOUD_SHADOW;
-    let sunlit = CLOUD_SUNLIT;
+    let (shadow, sunlit) = state.cloud_tones();
     let sky = {
         let storm = shadow.lerp(sunlit, (storm_l * 0.4 + towering * 0.75).clamp(0.0, 1.0));
         let high = shadow.lerp(sunlit, (high_l * 0.7 + towering * 0.4).clamp(0.0, 1.0));
@@ -446,7 +475,6 @@ fn sky_colour(dir: Vec3, sun: Vec3, cover: f32) -> Vec3 {
 /// far away actually sits. A hundred and twenty-eight samples of the same function the
 /// cubemap is painted with, so the two cannot disagree about what colour the distance is.
 fn horizon_average(sky: &Sky) -> Vec3 {
-    let sun = sky.sun.normalize();
     let mut sum = Vec3::ZERO;
     const N: usize = 128;
     for i in 0..N {
@@ -454,7 +482,7 @@ fn horizon_average(sky: &Sky) -> Vec3 {
         // A couple of degrees up: low enough to be the distance, high enough not to be
         // sampling the sea's own reflection band.
         let dir = Vec3::new(a.cos(), 0.04, a.sin()).normalize();
-        sum += sky_colour(dir, sun, sky.cover);
+        sum += sky_colour(dir, sky);
     }
     // The sun's disc and corona are in there and would drag the mean towards white if a
     // sample landed on them; clamped, because haze is haze and not a light source.

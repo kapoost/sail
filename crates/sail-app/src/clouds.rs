@@ -663,6 +663,9 @@ pub fn update(
     }
     order.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
 
+    // The same two tones the painted decks are shaded with, for the same weather: one
+    // palette, so the particles are the sky they are standing in front of.
+    let (shadow, sunlit) = sky.cloud_tones();
     let haze = crate::sky::haze_colour(&sky).to_linear();
     let haze = Vec3::new(haze.red, haze.green, haze.blue);
     let mut positions = Vec::with_capacity(COUNT * 4);
@@ -694,7 +697,7 @@ pub fn update(
             let towering = (height - 0.45).max(0.0) / 0.55;
             light = light * (1.0 - cell.storm) + (0.04 + 0.85 * towering) * cell.storm;
         }
-        let mut colour = crate::sky::CLOUD_SHADOW.lerp(crate::sky::CLOUD_SUNLIT, light) * p.tone;
+        let mut colour = shadow.lerp(sunlit, light) * p.tone;
 
         // Into the haze with distance, so the near cells sit in front of the deck
         // painted on the cubemap instead of ending at a visible edge against it.
@@ -710,9 +713,7 @@ pub fn update(
             // survives it is that the *stack* of them still gives a ragged silhouette.
             const LEVELS: f32 = 3.0;
             let step = (light * LEVELS).round() / LEVELS;
-            colour = crate::sky::CLOUD_SHADOW
-                .lerp(crate::sky::CLOUD_SUNLIT, step)
-                .lerp(haze, far * far * 0.5);
+            colour = shadow.lerp(sunlit, step).lerp(haze, far * far * 0.5);
             alpha = (alpha * 1.15).min(0.95);
         }
 
