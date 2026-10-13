@@ -8,10 +8,13 @@
 //! under 6 knots at 15-20 degrees of heel, tacks through about 90 degrees losing a
 //! knot or more, and cannot be driven much past its hull speed.
 
+use sail_core::autopilot::steady_state_sailplan;
 use sail_core::prelude::*;
 use sail_core::sail::{
-    camber_for_outhaul, outhaul_for, sail_forces, SailProfile, CAMBER_REFERENCE,
+    camber_for_outhaul, outhaul_for, sail_forces, SailProfile, CAMBER_DEEP, CAMBER_FLAT,
+    CAMBER_REFERENCE,
 };
+use sail_core::state::Headsail;
 use sail_core::wind::{SteadyWind, WindField};
 
 fn wind(kn: f64) -> impl Fn() -> Box<dyn WindField> {
@@ -2646,6 +2649,108 @@ fn under_bare_poles_she_bears_away_and_lies_stern_to() {
              {twa:.0} with the wind forward"
         );
     }
+}
+
+#[test]
+fn she_will_not_point_under_headsail_alone() {
+    // "You cannot go to windward on the genoa alone." Which she could, and nearly as
+    // well as under the whole rig: a third of the sail area was making five sixths of
+    // the velocity made good, and she pointed to thirty-eight degrees doing it.
+    //
+    // The mechanism that was missing is at the *leech*, and the luff is where I looked
+    // first and wrongly. A headsail alone has a perfectly attached luff — fourteen
+    // degrees of attack at the track lead against a twelve degree entry — so nothing in
+    // the entry test was ever going to stop her. What stops her is that the flow leaving
+    // a cambered sail leaves along the tangent at its leech, a good twenty-five degrees
+    // off its own chord, and sheeted in to the track that points it across the
+    // centreline into the space the mainsail occupies. With the main set that space is
+    // the slot and the flow is received. With the main handed it is received by nothing,
+    // and the after part of the sail separates. See `sail::alone_leech_drag`.
+    //
+    // So the shape of the answer is a pincer, and the pincer is the real phenomenon:
+    // strapped in, the sail separates; eased enough to exit fair, it has no angle of
+    // attack left. Neither is a sheet setting that points. The only cure is to bear
+    // away, which is what the sailor says it is.
+    let cfg = BoatConfig::archipelago_packet();
+    let make = wind(12.0);
+    let best = |reef: f64, furl: f64| {
+        let mut best = (0.0, f64::NEG_INFINITY);
+        let mut at = std::collections::BTreeMap::new();
+        for twa in [38.0, 42.0, 45.0, 48.0, 50.0, 55.0, 60.0, 65.0] {
+            let s = steady_state_sailplan(
+                cfg,
+                &make,
+                rad(twa),
+                SETTLE,
+                reef,
+                furl,
+                Headsail::Genoa,
+                0.0,
+            );
+            assert!(s.converged, "TWA {twa} did not converge");
+            let vmg = ms_to_kn(s.telemetry.vmg);
+            at.insert(twa as i32, vmg);
+            if vmg > best.1 {
+                best = (twa, vmg);
+            }
+        }
+        (best.0, best.1, at)
+    };
+
+    let (whole_rig, _, _) = best(0.0, 0.0);
+    assert!(
+        (38.0..=46.0).contains(&whole_rig),
+        "under the whole rig she should still beat at 38-46 deg, got {whole_rig}"
+    );
+
+    let (alone, alone_vmg, by_angle) = best(1.0, 0.0);
+    assert!(
+        (48.0..=56.0).contains(&alone),
+        "under headsail alone the best she should do is 48-56 deg true, got {alone}"
+    );
+
+    // And not merely a flat optimum with the close angles nearly as good — pinching
+    // under headsail alone has to cost something a helmsman would notice.
+    let pinched = by_angle[&42];
+    assert!(
+        pinched < 0.90 * alone_vmg,
+        "at 42 deg under headsail alone she made {pinched:.2} kn against {alone_vmg:.2} \
+         at her best, which is not a boat that refuses to point"
+    );
+}
+
+#[test]
+fn the_leech_only_separates_for_a_sail_both_close_sheeted_and_alone() {
+    // The test of whether `alone_leech_drag` is a mechanism or a fudge, which is that
+    // all four of these have to come out right and only one of them was asked for.
+    use sail_core::sail::alone_leech_drag;
+    let close = rad(12.0);
+
+    // With a mainsail behind it, nothing. The slot receives the flow and this is the
+    // case the whole boat is calibrated on, so it had better be untouched.
+    assert_eq!(alone_leech_drag(CAMBER_REFERENCE, close, 1.0), 0.0);
+
+    // Alone and strapped to the track lead: the after part of the sail is separated.
+    let strapped = alone_leech_drag(CAMBER_REFERENCE, close, 0.0);
+    assert!(
+        (0.4..=0.8).contains(&strapped),
+        "a headsail alone and sheeted hard should be dragging like a half-stalled \
+         sail, got an extra cd of {strapped:.2}"
+    );
+
+    // Eased until the leech exits fair, and it goes away by itself. This is the part
+    // that makes it the thing sailors actually do rather than a penalty for a sail
+    // plan: you cannot strap a headsail in without a main, so you ease it.
+    assert_eq!(alone_leech_drag(CAMBER_REFERENCE, rad(40.0), 0.0), 0.0);
+
+    // And a flat sail exits nearly along its own chord, so it suffers far less —
+    // which is why a storm jib will point and a rolled-up genoa will not.
+    let flat = alone_leech_drag(CAMBER_FLAT, close, 0.0);
+    let deep = alone_leech_drag(CAMBER_DEEP, close, 0.0);
+    assert!(
+        flat < 0.5 * deep,
+        "flat {flat:.2} against deep {deep:.2}: flattening the sail has to be the cure"
+    );
 }
 
 // ---------------------------------------------------------------------------

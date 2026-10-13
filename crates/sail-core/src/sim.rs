@@ -318,6 +318,29 @@ impl Simulation {
             self.telemetry.main.coeffs.cl,
             self.telemetry.jib.coeffs.cl,
         );
+        // And whether there is a mainsail behind the headsail at all, which decides
+        // something else again: whether the headsail can be sheeted close. A sloop's
+        // two sails are one aerofoil, and the headsail's exit flow is received by the
+        // slot. Hand the main and it is received by nothing — see `alone_leech_drag`.
+        //
+        // From the *area* that is actually set, which is the correction to the first
+        // version of this and worth writing down: it asked the mainsail's lift
+        // coefficient, and a coefficient knows nothing about whether the sail exists. A
+        // main rolled away to nothing still reports a perfectly good cl, so the slot
+        // stayed open with no mainsail in it and the whole mechanism did nothing. Area
+        // cannot lie about that. Both are needed — a main of some size, and that main
+        // drawing rather than flogging.
+        let main_set = lower_area + upper_area;
+        let jib_slot_support = crate::units::smoothstep(
+            0.12,
+            0.40,
+            main_set / (jib_lower_area + jib_upper_area).max(1e-6),
+        )
+        .min(crate::units::smoothstep(
+            0.0,
+            0.5,
+            self.telemetry.main.coeffs.cl,
+        ));
         let bent = |awa: f64, by: f64| awa.signum() * (awa.abs() + by).max(0.0);
         let lower_awa = bent(lower_awa, bend_main);
         let upper_awa = bent(upper_awa, bend_main);
@@ -428,7 +451,7 @@ impl Simulation {
             0.0
         };
 
-        let jib = sail_forces(
+        let jib = crate::sail::sail_forces_in_slot(
             &head.profile,
             jib_awa,
             jib_aws,
@@ -437,6 +460,7 @@ impl Simulation {
             st.heel,
             shadow,
             jib_camber,
+            jib_slot_support,
         )
         .scaled(jib_lift, jib_drag);
         // A sail that has collapsed is not a sail quietly making less force: it is cloth
@@ -449,7 +473,7 @@ impl Simulation {
         // force model was taking the drive away quietly and leaving two serene triangles
         // pressed into each other. A fouled rig is the noisiest thing on a boat.
         jib.coeffs.luffing = jib.coeffs.luffing.max(1.0 - fill).max(fouling);
-        let jib_upper = sail_forces(
+        let jib_upper = crate::sail::sail_forces_in_slot(
             &head.profile,
             jib_upper_awa,
             jib_upper_aws,
@@ -458,6 +482,7 @@ impl Simulation {
             st.heel,
             shadow_upper,
             jib_camber,
+            jib_slot_support,
         )
         .scaled(jib_upper_lift, jib_upper_drag);
         let mut jib_upper = jib_upper;

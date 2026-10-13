@@ -193,6 +193,58 @@ pub fn slot_interaction(main_cl: f64, jib_cl: f64) -> (f64, f64) {
     )
 }
 
+/// Extra drag coefficient on a headsail sheeted close with no mainsail behind it.
+///
+/// This is the answer to "you cannot go to windward on the genoa alone", and the
+/// mechanism is the leech rather than the luff — which is where I looked first, and
+/// wrongly, because the luff of a headsail alone is attached perfectly well: its angle
+/// of attack at the track lead is fourteen degrees against an entry angle of twelve,
+/// and the test passes. Nothing was stopping her.
+///
+/// What a cambered sail does at its *leech* is the thing. The flow leaving a sail has
+/// been turned by the camber and leaves along the tangent there, which for an eleven
+/// percent sail stands about twenty-five degrees off its own chord. Sheeted to its
+/// track at twelve degrees, that puts the exit flow pointing a dozen degrees across the
+/// centreline — straight into the space the mainsail occupies. With the main set, that
+/// space is the slot and the flow is received by it; the pair is one aerofoil and
+/// Gentry's whole argument is that neither sail can be understood alone. With the main
+/// handed, the same flow has to turn back out around nothing, against a rising pressure,
+/// and it separates off the after part of the sail.
+///
+/// Which is why a headsail worked alone has to be *eased*: you cannot strap it in, and
+/// every sailor who has sailed under headsail alone while the main was being reefed
+/// knows it. Eased, the exit is fair again and the penalty goes away by itself — which
+/// is the test of whether this is a mechanism or a fudge. Flatten the sail and it also
+/// goes away, because a flat sail exits nearly along its chord: a storm jib is cut flat
+/// and will point, a rolled-up genoa is a bag and will not.
+///
+/// Expressed as separation drag rather than as a limit on the sheet, because that is how
+/// it actually shows up: the winch will still take the sheet, the sail will still look
+/// full, and the boat will simply not go to windward. Drag is also exactly the quantity
+/// that sets how close a boat can sail — the aerodynamic part of the sailing angle is
+/// the arctangent of drag over lift — so this is the right place for it and not a
+/// coincidence.
+///
+/// `SEPARATED` is the one calibrated number: set so this boat will not point closer
+/// than fifty degrees true under headsail alone, which is the figure the sailor who
+/// asked for it gives. The shape around it is geometry.
+pub fn alone_leech_drag(camber: f64, chord_angle: f64, slot_support: f64) -> f64 {
+    /// Drag coefficient with the after part of the sail fully separated.
+    const SEPARATED: f64 = 2.10;
+    let support = slot_support.clamp(0.0, 1.0);
+    if support >= 1.0 {
+        return 0.0;
+    }
+    // Tangent at the leech of a circular arc of this camber, from the chord. Twenty-five
+    // degrees at the reference eleven percent.
+    let exit = 2.0 * (2.0 * camber.max(0.0)).atan();
+    if exit <= 0.0 {
+        return 0.0;
+    }
+    let shortfall = ((exit - chord_angle.max(0.0)) / exit).clamp(0.0, 1.0);
+    SEPARATED * shortfall * shortfall * (1.0 - support)
+}
+
 /// Where along the chord the force actually acts, as a fraction back from the luff.
 ///
 /// Until now every sail's force was applied at a point fixed in the configuration, as
@@ -750,10 +802,36 @@ pub fn sail_forces(
     blanketing: f64,
     camber: f64,
 ) -> SailForces {
+    sail_forces_in_slot(
+        profile, awa, aws, sheet, area, heel, blanketing, camber, 1.0,
+    )
+}
+
+/// The same, for a headsail told how much mainsail is working behind it.
+///
+/// `slot_support` runs from one — a main set and pulling, the pair working as the single
+/// aerofoil it really is — down to zero, the main handed and the headsail on its own.
+/// See [`alone_leech_drag`]. A ninth positional argument on a function that already had
+/// eight is not an improvement, which is why the plain [`sail_forces`] stays and assumes
+/// full support: every other sail on the boat either has a main behind it or is not a
+/// headsail.
+#[allow(clippy::too_many_arguments)]
+pub fn sail_forces_in_slot(
+    profile: &SailProfile,
+    awa: f64,
+    aws: f64,
+    sheet: f64,
+    area: f64,
+    heel: f64,
+    blanketing: f64,
+    camber: f64,
+    slot_support: f64,
+) -> SailForces {
     let beta = awa.abs();
     let chord_angle = profile.chord_angle(sheet);
     let alpha = beta - chord_angle;
-    let coeffs = profile.coefficients(alpha, camber);
+    let mut coeffs = profile.coefficients(alpha, camber);
+    coeffs.cd += alone_leech_drag(camber, chord_angle, slot_support);
 
     // A heeled rig presents a smaller projected area to a horizontal wind. Applying
     // cos(heel) to both force components is the standard first-order treatment, and it

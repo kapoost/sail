@@ -244,12 +244,42 @@ where
 }
 
 /// The same again, with the staysail set or handed.
+///
+/// Headsail furl follows the reef here, which is how a boat is shortened down: you put
+/// a slab in and roll a bit of genoa away together, and the rig stays balanced. For a
+/// *deliberately* unbalanced rig — the main handed with full genoa, or the other way
+/// about, which is a real question and not a mistake — use
+/// [`steady_state_sailplan`].
 pub fn steady_state_rigged<F>(
     cfg: BoatConfig,
     make_wind: F,
     twa: f64,
     seconds: f64,
     reef: f64,
+    head: crate::state::Headsail,
+    staysail: f64,
+) -> Steady
+where
+    F: Fn() -> Box<dyn WindField>,
+{
+    let furl = (reef * 0.85).clamp(0.0, 1.0);
+    steady_state_sailplan(cfg, make_wind, twa, seconds, reef, furl, head, staysail)
+}
+
+/// The same, with the reef and the furl set independently.
+///
+/// Every other entry point ties them together because that is how shortening down
+/// works. This one exists because "can she go to windward under headsail alone" is a
+/// question with a real answer, and it cannot even be *asked* through an interface where
+/// handing the main rolls the genoa away with it.
+#[allow(clippy::too_many_arguments)]
+pub fn steady_state_sailplan<F>(
+    cfg: BoatConfig,
+    make_wind: F,
+    twa: f64,
+    seconds: f64,
+    reef: f64,
+    furl: f64,
     head: crate::state::Headsail,
     staysail: f64,
 ) -> Steady
@@ -273,7 +303,7 @@ where
         // Start full and let the heel decide, below.
         outhaul: 0.0,
         reef,
-        furl: (reef * 0.85).clamp(0.0, 1.0),
+        furl,
         headsail: head,
         staysail,
         ..Default::default()
