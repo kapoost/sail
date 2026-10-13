@@ -147,6 +147,83 @@ pub struct BoatConfig {
 
 }
 
+
+/// The rig of the boat the game is sailed in, as numbers rather than as a drawing.
+///
+/// Every one of these is either measured or derived from something measured, and they
+/// live here — in the crate that knows nothing about any renderer — because the drawing
+/// and the physics are descriptions of the *same rig* and this file has been caught
+/// three times letting them drift apart. The mast was 1.6 m shorter in the picture than
+/// the mainsail's luff needed, the boom half a metre longer than its area allowed, and
+/// the forestay two metres higher than the genoa could reach.
+///
+/// A sail is measured by its luff and its area. Everything else about where the spars
+/// are follows, and is written here as the arithmetic that makes it follow.
+pub mod packet {
+    /// What the sailmaker measured.
+    pub const MAIN_AREA: f64 = 46.0;
+    pub const MAIN_LUFF: f64 = 15.2;
+    pub const GENOA_AREA: f64 = 26.0;
+    pub const GENOA_LUFF: f64 = 12.4;
+
+    /// Where the mast is stepped, metres abaft the centre of gravity.
+    pub const MAST_FOOT_Z: f64 = -1.8;
+    /// Gooseneck height above the water. A choice — head clearance over the cockpit —
+    /// and the only free number in this module.
+    pub const BOOM_HEIGHT: f64 = 2.62;
+
+    /// The masthead is the gooseneck plus the luff. There is nowhere else it can be.
+    pub const MAST_HEAD: f64 = BOOM_HEIGHT + MAIN_LUFF;
+    /// And the forestay lands where the genoa's luff reaches from its tack, which on
+    /// this boat is four metres below the masthead: a fractional rig, as the sail plan
+    /// has been saying all along — a 46 square metre main against a 26 metre jib.
+    pub const GENOA_TACK_HEIGHT: f64 = 1.12;
+    pub const FORESTAY_HEAD: f64 = GENOA_TACK_HEIGHT + GENOA_LUFF;
+
+    /// The boom is the mainsail's foot, so it is the area over the luff, with the roach
+    /// a modern main carries taken off the top.
+    pub const CLOTH_OVER_TRIANGLE: f64 = 1.15;
+    pub const BOOM_LENGTH: f64 = 2.0 * MAIN_AREA / CLOTH_OVER_TRIANGLE / MAIN_LUFF;
+}
+
+/// How the rest of the wardrobe follows from the two sails that are measured.
+///
+/// Three boats in this file carry the same five sails, and until now each wrote all
+/// five out longhand. Which cost exactly what duplication always costs: two scripted
+/// edits in a row landed on a boat nobody sails, and the Code 0 the game was played
+/// with stayed at 39 square metres while every commit said 55. One function, one set of
+/// ratios, and that cannot happen again.
+///
+/// The ratios are to the genoa, because the genoa is the sail a rig is measured by.
+fn wardrobe(genoa: &RiggedSail, genoa_luff: f64) -> (RiggedSail, RiggedSail, RiggedSail) {
+    let area = genoa.area;
+    let code_zero = RiggedSail {
+        // Sixty square metres against the genoa's twenty-six, which is not a typo: a
+        // Code 0 is measured as a spinnaker and cut like one. Sized on the only evidence
+        // that settles a sail's size, which is somebody who owns one — tacked on the
+        // sprit it sheets back nearly to the cockpit, which is a foot of about 7.2 m and
+        // an LP of 148 percent of the base the sprit gives it.
+        profile: SailProfile::code_zero(area * 2.3, genoa_luff * 1.05),
+        area: area * 2.3,
+        z_ce: genoa.z_ce * 1.22,
+        x_ce: genoa.x_ce * 1.29,
+    };
+    let gennaker = RiggedSail {
+        // Twice the mainsail, which is what a running sail is.
+        profile: SailProfile::gennaker(area * 3.4, genoa_luff * 1.02),
+        area: area * 3.4,
+        z_ce: genoa.z_ce * 1.30,
+        x_ce: genoa.x_ce * 1.47,
+    };
+    let staysail = RiggedSail {
+        profile: SailProfile::staysail(area * 0.54, genoa_luff * 0.62),
+        area: area * 0.54,
+        z_ce: genoa.z_ce * 0.78,
+        x_ce: genoa.x_ce * 0.55,
+    };
+    (code_zero, gennaker, staysail)
+}
+
 /// Where on the reef control the mainsail stops being set at all.
 pub const DROPPED: f64 = 0.98;
 
@@ -166,6 +243,14 @@ impl BoatConfig {
         // Radii of gyration from the usual rules of thumb, then added inertia.
         let roll_radius = 0.35 * beam;
         let yaw_radius = 0.25 * loa;
+
+        let genoa = RiggedSail {
+                profile: SailProfile::genoa(genoa_area, genoa_luff),
+                area: genoa_area,
+                z_ce: 4.60,
+                x_ce: 1.90,
+        };
+        let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
 
         Self {
             name: "charter sloop 34",
@@ -228,43 +313,10 @@ impl BoatConfig {
                 z_ce: 6.20,
                 x_ce: -0.30,
             },
-            genoa: RiggedSail {
-                profile: SailProfile::genoa(genoa_area, genoa_luff),
-                area: genoa_area,
-                z_ce: 4.60,
-                x_ce: 1.90,
-            },
-            code_zero: RiggedSail {
-                // Sixty square metres against the genoa's twenty-six, which is not a
-                // typo: a Code 0 is measured as a spinnaker and cut like one, and the
-                // genoa on this boat is a small working jib. The sail is bigger than the
-                // mainsail.
-                //
-                // Raised from 2.1 of the genoa to 2.3 on the only evidence that settles
-                // a sail's size, which is somebody who has one: tacked on the sprit, a
-                // Code 0 on a boat this size sheets back nearly to the cockpit. The
-                // cockpit begins 0.9 m abaft the centre of gravity and the sprit end is
-                // 6.6 m forward of it, so "nearly to the cockpit" is a foot of about 7.2
-                // m — which is 55 square metres of flat triangle, 60 of cloth, and an LP
-                // of 148 percent of the base the sprit gives it.
-                profile: SailProfile::code_zero(genoa_area * 2.3, genoa_luff * 1.05),
-                area: genoa_area * 2.3,
-                z_ce: 5.60,
-                x_ce: 2.45,
-            },
-            gennaker: RiggedSail {
-                // Eighty-eight. Twice the mainsail, which is what a running sail is.
-                profile: SailProfile::gennaker(genoa_area * 3.4, genoa_luff * 1.02),
-                area: genoa_area * 3.4,
-                z_ce: 6.00,
-                x_ce: 2.80,
-            },
-            staysail: RiggedSail {
-                profile: SailProfile::staysail(genoa_area * 0.54, genoa_luff * 0.62),
-                area: genoa_area * 0.54,
-                z_ce: 3.60,
-                x_ce: 1.05,
-            },
+            genoa,
+            code_zero,
+            gennaker,
+            staysail,
             boom_mass: 58.0,
             boom_cg: 2.4,
             headsail_bears_at: rad(19.0),
@@ -342,8 +394,10 @@ impl BoatConfig {
         // deliberately so. Under-canvassed boats are dull in the light airs an
         // archipelago is full of, and the cost of a big rig is paid honestly here,
         // in reefing.
-        let main_area = 46.0;
-        let main_luff = 15.2;
+        // From the module that derives the spars from them, so the sail plan and the rig
+        // cannot be edited apart.
+        let main_area = packet::MAIN_AREA;
+        let main_luff = packet::MAIN_LUFF;
         // How far the boom can be eased before it lies on the cap shroud.
         //
         // Not a round number and not a guess: worked out from this boat's own rig.
@@ -357,11 +411,19 @@ impl BoatConfig {
         // angles worse than the polar alone suggests. Ninety degrees — what this was —
         // is a boom that has swung through its own standing rigging.
         let boom_against_shrouds = rad(75.0);
-        let genoa_area = 26.0;
-        let genoa_luff = 12.4;
+        let genoa_area = packet::GENOA_AREA;
+        let genoa_luff = packet::GENOA_LUFF;
 
         let roll_radius = 0.35 * beam;
         let yaw_radius = 0.25 * loa;
+
+        let genoa = RiggedSail {
+                profile: SailProfile::genoa(genoa_area, genoa_luff),
+                area: genoa_area,
+                z_ce: 4.40,
+                x_ce: 1.95,
+        };
+        let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
 
         Self {
             name: "archipelago packet 36",
@@ -451,41 +513,10 @@ impl BoatConfig {
                 z_ce: 6.60,
                 x_ce: -0.35,
             },
-            genoa: RiggedSail {
-                profile: SailProfile::genoa(genoa_area, genoa_luff),
-                area: genoa_area,
-                z_ce: 4.40,
-                x_ce: 1.95,
-            },
-            code_zero: RiggedSail {
-                // Sixty square metres against the genoa's twenty-six, which is not a
-                // typo: a Code 0 is measured as a spinnaker and cut like one, and the
-                // genoa here is a small working jib. The sail is bigger than the main.
-                //
-                // Sized on the only evidence that settles a sail's size, which is
-                // somebody who owns one: tacked on the sprit, a Code 0 on a boat this
-                // size sheets back nearly to the cockpit. The cockpit begins 0.9 m abaft
-                // the centre of gravity and the sprit end is 6.6 m forward of it, so that
-                // is a foot of about 7.2 m — 55 square metres of flat triangle, 60 of
-                // cloth, an LP of 148 percent of the base the sprit gives it.
-                profile: SailProfile::code_zero(genoa_area * 2.3, genoa_luff * 1.05),
-                area: genoa_area * 2.3,
-                z_ce: 4.97,
-                x_ce: 2.50,
-            },
-            gennaker: RiggedSail {
-                // Eighty-eight. Twice the mainsail, which is what a running sail is.
-                profile: SailProfile::gennaker(genoa_area * 3.4, genoa_luff * 1.02),
-                area: genoa_area * 3.4,
-                z_ce: 5.37,
-                x_ce: 2.83,
-            },
-            staysail: RiggedSail {
-                profile: SailProfile::staysail(genoa_area * 0.54, genoa_luff * 0.62),
-                area: genoa_area * 0.54,
-                z_ce: 3.60,
-                x_ce: 1.05,
-            },
+            genoa,
+            code_zero,
+            gennaker,
+            staysail,
             boom_mass: 58.0,
             boom_cg: 2.4,
             headsail_bears_at: rad(17.0),
@@ -640,6 +671,14 @@ impl BoatConfig {
         let roll_radius = 0.35 * beam;
         let yaw_radius = 0.25 * loa;
 
+        let genoa = RiggedSail {
+                profile: SailProfile::genoa(genoa_area, genoa_luff),
+                area: genoa_area,
+                z_ce: 6.40,
+                x_ce: 2.90,
+        };
+        let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
+
         Self {
             name: "performance cruiser 53",
 
@@ -704,30 +743,10 @@ impl BoatConfig {
                 z_ce: 8.60,
                 x_ce: -0.45,
             },
-            genoa: RiggedSail {
-                profile: SailProfile::genoa(genoa_area, genoa_luff),
-                area: genoa_area,
-                z_ce: 6.40,
-                x_ce: 2.90,
-            },
-            code_zero: RiggedSail {
-                profile: SailProfile::code_zero(genoa_area * 1.5, genoa_luff * 1.05),
-                area: genoa_area * 1.5,
-                z_ce: 7.23,
-                x_ce: 3.71,
-            },
-            gennaker: RiggedSail {
-                profile: SailProfile::gennaker(genoa_area * 2.3, genoa_luff * 1.02),
-                area: genoa_area * 2.3,
-                z_ce: 7.81,
-                x_ce: 4.21,
-            },
-            staysail: RiggedSail {
-                profile: SailProfile::staysail(genoa_area * 0.54, genoa_luff * 0.62),
-                area: genoa_area * 0.54,
-                z_ce: 3.60,
-                x_ce: 1.05,
-            },
+            genoa,
+            code_zero,
+            gennaker,
+            staysail,
             boom_mass: 58.0,
             boom_cg: 2.4,
             headsail_bears_at: rad(19.0),

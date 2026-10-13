@@ -112,8 +112,9 @@ pub fn car_position(car: f32) -> f32 {
     TRACK_FORWARD + car.clamp(0.0, 1.0) * (TRACK_AFT - TRACK_FORWARD)
 }
 
-/// Where the mast is stepped, metres aft of the centre of gravity.
-const MAST_FOOT_Z: f32 = -1.8;
+/// Where the mast is stepped, metres aft of the centre of gravity. One definition, in
+/// the core, shared by the physics and the drawing.
+const MAST_FOOT_Z: f32 = sail_core::boat::packet::MAST_FOOT_Z as f32;
 /// Height of the boom above the waterline — the mainsail's tack. Defined in `rig`, so
 /// the spar and the sail cannot disagree about it.
 use crate::rig::BOOM_HEIGHT;
@@ -353,11 +354,20 @@ pub fn setup(
                 MeshMaterial3d(underwater_mat.clone()),
                 Transform::from_xyz(0.0, -0.95, -cfg.x_rudder as f32),
             ));
-            // Mast.
+            // Mast: from where it is stepped on the deck to the masthead, which are both
+            // known, so neither its length nor its position is written down again here.
+            //
+            // It had a typed-in length of 15.2 m and a typed-in centre, and when the
+            // masthead moved — because the mainsail's luff said it had to — the spar
+            // stayed where it was and the top of the rig came off it. The second half of
+            // that was mine twice over: the constant I replaced in the centre position
+            // was not the spreaders, it was the middle of the mast.
+            let step = crate::deck::deck_height(MAST_FOOT_Z);
+            let mast = crate::rig::MAST_HEAD - step;
             b.spawn((
-                Mesh3d(meshes.add(Cylinder::new(0.09, 15.2))),
+                Mesh3d(meshes.add(Cylinder::new(0.09, mast))),
                 MeshMaterial3d(spar_mat.clone()),
-                Transform::from_xyz(0.0, DECK + 7.6, MAST_FOOT_Z),
+                Transform::from_xyz(0.0, step + mast * 0.5, MAST_FOOT_Z),
             ));
             // Boom, pivoting at the mast. Its own transform carries the sheet angle.
             b.spawn((
@@ -932,6 +942,64 @@ pub fn main_foot(cfg: &sail_core::boat::BoatConfig, controls: &sail_core::state:
     crate::rig::BOOM_LENGTH * main_reef_scale(cfg, controls) - travel * (1.0 - hauled)
 }
 
+/// What the rig actually measures, printed once on request.
+///
+/// `SAIL_RIG=1`. The verification loop on this project has been: somebody looks at the
+/// screen, says what is wrong, and I guess at which of two descriptions of the same
+/// thing has drifted. Four faults in one evening were found that way and two of them
+/// took three attempts. Every one of them would have fallen straight out of this list —
+/// a mast shorter than its own mainsail's luff, a boom longer than its area allows, a
+/// Code 0 whose foot does not reach the mast, a sail plan belonging to a different boat.
+pub fn report(sim: Res<Sim>) {
+    if !std::env::var("SAIL_RIG").is_ok_and(|v| v != "0") {
+        return;
+    }
+    let cfg = sim.config();
+    let p = sail_core::boat::packet::MAST_HEAD;
+    info!("rig: mast head {p:.2} m, forestay {:.2}, boom {:.2} x {:.2} high, spreaders {:.2}",
+        sail_core::boat::packet::FORESTAY_HEAD,
+        crate::rig::BOOM_LENGTH,
+        crate::rig::BOOM_HEIGHT,
+        crate::rig::SPREADER_HEIGHT);
+    let luff_main = crate::rig::MAST_HEAD - crate::rig::BOOM_HEIGHT;
+    info!(
+        "     mainsail: luff drawn {:.2} m against {:.2} configured, foot {:.2}, area {:.1} m2",
+        luff_main, sail_core::boat::packet::MAIN_LUFF, crate::rig::BOOM_LENGTH, cfg.main.area
+    );
+    for kind in [
+        sail_core::state::Headsail::Genoa,
+        sail_core::state::Headsail::Code0,
+        sail_core::state::Headsail::Gennaker,
+    ] {
+        let controls = sail_core::state::Controls {
+            headsail: kind,
+            furl: 0.0,
+            jib_sheet: 0.0,
+            ..Default::default()
+        };
+        let g = headsail_shape(&cfg, &controls, -1.0, sail_core::units::rad(14.0) as f32);
+        // LP is the *perpendicular* from the clew to the luff — the measurement a
+        // sailmaker quotes a headsail by — and the base it is quoted against is J, the
+        // deck distance from that sail's tack to the mast. The first attempt here
+        // multiplied the foot by the clew's athwartships direction, which is neither,
+        // and reported every sail at a quarter of its real size. An instrument's first
+        // job is to be right about the thing nobody else is measuring.
+        let luff_dir = (g.head - g.tack).normalize_or_zero();
+        let to_clew = g.clew - g.tack;
+        let lp = (to_clew - luff_dir * to_clew.dot(luff_dir)).length();
+        let base = (MAST_FOOT_Z - g.tack.z).abs();
+        info!(
+            "     {:8}: area {:5.1} m2  luff {:5.2}  foot {:5.2}  clew z {:+5.2}  LP/base {:4.0}%",
+            kind.name(),
+            cfg.headsail(kind).area,
+            (g.head - g.tack).length(),
+            (g.clew - g.tack).length(),
+            g.clew.z,
+            lp / base * 100.0,
+        );
+    }
+}
+
 /// The three corners of whichever sail is up forward.
 ///
 /// One definition, used by the cloth and by the sheet that pulls on it. They were two,
@@ -984,10 +1052,13 @@ pub fn headsail_shape(
         // flat one. That depth is what moves the ring the clew rides.
         let belly = 1.0 - controls.genoa_car as f32;
         let car = genoa_car_at(controls.genoa_car as f32, side > 0.0);
+        // What the perpendicular has to be for the triangle to hold the sail's area.
+        let want = 2.0 * (cfg.genoa.area as f32 / 1.15) / (hoisted - tack).length() * out;
+        let fitted = Cloth::cut(tack, hoisted, fitted_foot(tack, hoisted, &cloth, belly, angle, car, want), 0.30);
         return SailGeometry {
             tack,
             head: hoisted,
-            clew: clew_on_cloth(tack, hoisted, &cloth, belly, angle, car),
+            clew: clew_on_cloth(tack, hoisted, &fitted, belly, angle, car),
         };
     }
     // A sail set flying: tacked out on the sprit end, hoisted to the masthead, clew
@@ -1035,10 +1106,17 @@ pub fn headsail_shape(
         crate::deck::deck_height(3.9) + 0.07,
         3.9,
     );
+    let want = 2.0 * (cfg.headsail(kind).area as f32 / fullness) / (hoisted - tack).length() * out;
+    let fitted = Cloth::flying(
+        tack,
+        hoisted,
+        fitted_foot(tack, hoisted, &cloth, belly, angle, block, want),
+        if gennaker { 0.90 } else { 0.93 },
+    );
     SailGeometry {
         tack,
         head: hoisted,
-        clew: clew_on_cloth(tack, hoisted, &cloth, belly, angle, block),
+        clew: clew_on_cloth(tack, hoisted, &fitted, belly, angle, block),
     }
 }
 
@@ -1060,7 +1138,7 @@ pub fn staysail_tack() -> Vec3 {
 /// through the mast. An inner stay lands on a tang bolted to the front of the spar
 /// anyway; it has never been on the centreline of it.
 pub fn staysail_head() -> Vec3 {
-    Vec3::new(0.0, DECK + 8.4, MAST_FOOT_Z - 0.40)
+    Vec3::new(0.0, crate::rig::INNER_STAY_HEAD, MAST_FOOT_Z - 0.40)
 }
 
 /// The club boom's length, which is the sail's foot and therefore not a free choice.
@@ -1298,6 +1376,30 @@ impl Cloth {
             leech: (head - design).length(),
         }
     }
+}
+
+/// The same shape, with the foot corrected so the sail comes out the size it is.
+///
+/// The foot is worked out from the area as though the clew were free to go wherever the
+/// arithmetic puts it, and then the cloth's ring pulls it somewhere else — closer in,
+/// because the ring is the intersection of two spheres and the bearing the trim asks
+/// for is rarely where the design clew sat. The drawn sail is then smaller than the sail
+/// the physics is pulling with: measured by the rig report, the genoa was coming out at
+/// three quarters of its own area, an LP of 82 percent of J where the configuration says
+/// 129.
+///
+/// One Newton step closes it. Solve, measure the perpendicular from the clew to the
+/// luff, scale the foot by how far short it fell, solve again. Twice the work of a
+/// single solve, which is nothing, and the two descriptions agree to within a percent.
+fn fitted_foot(tack: Vec3, head: Vec3, cloth: &Cloth, belly: f32, chord: f32, block: Vec3, want: f32) -> f32 {
+    let clew = clew_on_cloth(tack, head, cloth, belly, chord, block);
+    let luff_dir = (head - tack).normalize_or_zero();
+    let to_clew = clew - tack;
+    let lp = (to_clew - luff_dir * to_clew.dot(luff_dir)).length();
+    if lp < 0.05 {
+        return cloth.foot;
+    }
+    (cloth.foot * (want / lp)).clamp(cloth.foot * 0.5, cloth.foot * 2.5)
 }
 
 /// Where on that ring the clew has been pulled to.

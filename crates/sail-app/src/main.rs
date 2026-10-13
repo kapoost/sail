@@ -122,6 +122,7 @@ fn main() {
                 retro::setup_ui_camera,
                 world::setup,
                 boat::setup,
+                boat::report,
                 islands::setup,
                 camera::setup,
                 hud::build_polar,

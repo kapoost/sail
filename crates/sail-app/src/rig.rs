@@ -25,9 +25,20 @@ use crate::sim::Sim;
 /// Segments per line. Enough that a sagging sheet curves smoothly.
 const SEGMENTS: usize = 14;
 
-const DECK: f32 = 0.95;
-const MAST_FOOT_Z: f32 = -1.8;
-pub const MAST_HEAD: f32 = DECK + 15.2;
+/// Where the spreaders stand, as a fraction of the mast above the deck.
+///
+/// Was a bare height. On a fractional rig the spreaders are a little above the forestay,
+/// which is where the mast most wants holding, so it follows the rig rather than being
+/// typed in beside it.
+pub const SPREADER_HEIGHT: f32 = FORESTAY_HEAD + 0.6;
+
+/// And the inner stay lands below the forestay, which is what makes it inner.
+pub const INNER_STAY_HEAD: f32 = FORESTAY_HEAD * 0.62;
+/// Where the mast is stepped — from the core, which derives the whole rig from the two
+/// sails that were measured. Both files used to carry their own copy of every one of
+/// these numbers.
+const MAST_FOOT_Z: f32 = sail_core::boat::packet::MAST_FOOT_Z as f32;
+pub const MAST_HEAD: f32 = sail_core::boat::packet::MAST_HEAD as f32;
 
 /// Where the forestay lands, which is not the masthead.
 ///
@@ -35,7 +46,7 @@ pub const MAST_HEAD: f32 = DECK + 15.2;
 /// them, and it is why a Code 0 out-measures a genoa on the same rig — while the
 /// forestay stops short, so the genoa's head and the sails hoisted above it are not
 /// fighting over the same crane. Half a metre is the usual gap on a rig this size.
-pub const FORESTAY_HEAD: f32 = MAST_HEAD - 0.55;
+pub const FORESTAY_HEAD: f32 = sail_core::boat::packet::FORESTAY_HEAD as f32;
 /// The boom, high enough to stand under.
 ///
 /// It was a quarter of a metre *below* the helmsman's eye, which put it across the
@@ -50,7 +61,7 @@ pub const FORESTAY_HEAD: f32 = MAST_HEAD - 0.55;
 /// past; this is still a comfortable duck underneath and it puts the sail's area where
 /// it does the most good and the least heeling — the end of a boom is the one part of a
 /// mainsail you can lower without losing any of it.
-pub const BOOM_HEIGHT: f32 = DECK + 1.62;
+pub const BOOM_HEIGHT: f32 = sail_core::boat::packet::BOOM_HEIGHT as f32;
 /// Boom length, and it is not a free choice.
 ///
 /// It is the mainsail's foot, so it is fixed by the sail's area and its luff — and by
@@ -73,7 +84,7 @@ pub const BOOM_HEIGHT: f32 = DECK + 1.62;
 /// That mattered more than it sounds. The genoa was drawn a third too *large* at the
 /// same time, so on deck the headsail looked nearly the size of the main when it is in
 /// fact half of it — the one proportion a sailor reads a rig by, and it was reversed.
-pub const BOOM_LENGTH: f32 = 5.80;
+pub const BOOM_LENGTH: f32 = sail_core::boat::packet::BOOM_LENGTH as f32;
 /// Where along the boom the vang takes hold, as a fraction of its length.
 ///
 /// Shared, because the bail is drawn on the boom and the line is drawn to it, and a
