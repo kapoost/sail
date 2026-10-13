@@ -759,8 +759,11 @@ impl Simulation {
             + y_upper * main_upper.drive
             + y_jib * jib.drive
             + y_jib_upper * jib_upper.drive);
+        // Everything the rig has contributed so far, kept so the three causes of weather
+        // helm can be told apart downstream.
+        let yaw_from_rig = mz;
         // The heeled waterplane is asymmetric, which drives the bow to windward too.
-        mz += -cfg.heel_yaw_coefficient
+        let yaw_from_heel = -cfg.heel_yaw_coefficient
             * st.heel.sin()
             * 0.5
             * RHO_SEA
@@ -768,10 +771,15 @@ impl Simulation {
             * cfg.lwl
             * speed
             * speed;
+        mz += yaw_from_heel;
         // Appendages.
         mz += cfg.x_clr * lp_fy + cfg.x_rudder * rud_fy;
         // Residual bare-hull yaw damping, on top of what the appendages already give.
         mz -= cfg.yaw_damping * st.yaw_rate * (speed + 0.5);
+        // The hull's share is what is left once the rig and the heel are taken out, with
+        // the rudder's own contribution removed the same way `weather_helm` removes it:
+        // the question is what the helm has to *fight*, not what it is doing.
+        let yaw_from_hull = mz - yaw_from_rig - yaw_from_heel - cfg.x_rudder * rud_fy;
 
         // --- Heave and pitch, from distributed buoyancy ---------------------------
         // Each station asks how deep it is in the *local* surface. In a seaway they
@@ -1023,6 +1031,9 @@ impl Simulation {
                 * (1.0 - 0.85 * rud.stalled))
                 .clamp(0.0, 1.0),
             weather_helm: mz - cfg.x_rudder * rud_fy,
+            yaw_from_rig,
+            yaw_from_heel,
+            yaw_from_hull,
             righting_arm: righting_arm(self.state.heel, cfg.gm, cfg.gz_peak_angle),
         };
     }

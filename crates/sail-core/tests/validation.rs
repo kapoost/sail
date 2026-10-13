@@ -2638,3 +2638,151 @@ fn under_bare_poles_she_goes_to_leeward() {
         "{beam:.2} kn beam-on against {close:.2} close-hauled"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Balance: what makes her gripe, and what actually cures it
+// ---------------------------------------------------------------------------
+
+/// Settle close-hauled under a given rig and report what the helm is fighting.
+fn balance(tws_kn: f64, reef: f64, furl: f64) -> (f64, f64, f64, f64, f64) {
+    let cfg = BoatConfig::archipelago_packet();
+    let twa = rad(42.0);
+    let heading = wrap_tau(0.0 - twa);
+    let mut state = BoatState::at_rest(heading);
+    state.surge = kn_to_ms(4.0);
+    let mut sim = Simulation::new(
+        cfg,
+        state,
+        Box::new(SteadyWind::new(0.0, kn_to_ms(tws_kn))) as Box<dyn WindField>,
+    );
+    let mut pilot = TillerPilot::new();
+    let mut controls = Controls {
+        reef,
+        furl,
+        outhaul: 0.5,
+        ..Default::default()
+    };
+    for _ in 0..(240.0 / SUBSTEP) as u64 {
+        let (m, j) = optimal_sheets(&cfg, sim.telemetry.awa, controls.outhaul);
+        controls.main_sheet = m;
+        controls.jib_sheet = j;
+        controls.rudder = pilot.correct_under_load(
+            &cfg,
+            wrap_pi(heading - sim.state.heading),
+            sim.state.yaw_rate,
+            sim.telemetry.weather_helm,
+            SUBSTEP,
+        );
+        sim.run(SUBSTEP, &controls);
+    }
+    let t = sim.telemetry;
+    (
+        t.weather_helm,
+        t.yaw_from_rig,
+        t.yaw_from_heel,
+        deg(controls.rudder).abs(),
+        deg(sim.state.heel).abs(),
+    )
+}
+
+#[test]
+fn the_three_causes_of_weather_helm_sum_to_it() {
+    // The invariant that keeps the decomposition honest. Without it the three numbers
+    // are three opinions rather than three parts of one measurement, and a reader would
+    // have no way of knowing which.
+    let (whole, rig, heel, _, _) = balance(14.0, 0.0, 0.0);
+    let hull = whole - rig - heel;
+    assert!(
+        (rig + heel + hull - whole).abs() < 1.0,
+        "{rig:.0} + {heel:.0} + {hull:.0} should be {whole:.0}"
+    );
+    // And the hull's share is the small one: it is damping and the lateral plane, not a
+    // cause of griping in its own right.
+    assert!(
+        hull.abs() < whole.abs() * 0.3,
+        "the hull is carrying {hull:.0} of {whole:.0}, which makes it a cause rather \
+         than a bystander"
+    );
+}
+
+#[test]
+fn reefing_the_main_is_the_cure_for_weather_helm() {
+    // A mainsail's load is aft of where the keel holds, so it is the sail that luffs
+    // her, and taking it off is the thing that works. All three move the right way at
+    // once, which is why it is the answer: less rig, less heel, less helm.
+    let full = balance(14.0, 0.0, 0.0);
+    let slab = balance(14.0, 0.33, 0.0);
+    let deep = balance(14.0, 0.67, 0.0);
+    assert!(
+        slab.1 < full.1 && deep.1 < slab.1,
+        "the rig's own luffing moment should fall with every slab: {:.0}, {:.0}, {:.0}",
+        full.1,
+        slab.1,
+        deep.1
+    );
+    assert!(
+        slab.2 < full.2 && deep.2 < slab.2,
+        "and so should the heel term"
+    );
+    assert!(
+        deep.3 < full.3 * 0.5,
+        "two slabs should halve the helm: {:.1} deg against {:.1}",
+        deep.3,
+        full.3
+    );
+}
+
+#[test]
+fn rolling_the_genoa_away_is_not() {
+    // The question a crew gets wrong, and the model has to get right. A headsail's load
+    // is *forward* of where the keel holds, so it is what keeps her bow down; roll it
+    // away and the main is left on its own with its load aft.
+    //
+    // Measured at eight knots of true wind: the rig's own moment goes from −95 Nm, which
+    // is balanced, to +842, which is griping — and the helm needed goes *up*, from 2.6
+    // degrees to 3.5, because she has also slowed down and a slower rudder has less
+    // bite. That is the whole of why "roll the genoa" is the wrong answer and "put a
+    // reef in" is the right one.
+    let full = balance(8.0, 0.0, 0.0);
+    let rolled = balance(8.0, 0.0, 1.0);
+    assert!(
+        rolled.1 > full.1 + 500.0,
+        "rolling the headsail away should move the rig's moment hard towards luffing: \
+         {:.0} Nm against {:.0}",
+        rolled.1,
+        full.1
+    );
+    assert!(
+        rolled.3 > full.3,
+        "and the helm should want *more* angle, not less: {:.1} deg against {:.1}",
+        rolled.3,
+        full.3
+    );
+    // She heels less for it, which is the trap: the one number that improves is the one
+    // a crew is looking at when they decide.
+    assert!(rolled.4 < full.4);
+}
+
+#[test]
+fn heel_is_most_of_it_once_she_is_pressed() {
+    // Which is why reefing works and why a boat sailed flat barely gripes at all. At
+    // eight knots the rig is balanced and the heel term is the whole of the weather
+    // helm; at fourteen, with her rail down, it is still the larger part by far.
+    let easy = balance(8.0, 0.0, 0.0);
+    let pressed = balance(14.0, 0.0, 0.0);
+    assert!(
+        easy.2 > easy.1.abs() * 3.0,
+        "in eight knots the heel term {:.0} should dwarf the rig's {:.0}",
+        easy.2,
+        easy.1
+    );
+    assert!(
+        pressed.2 > pressed.1 * 2.0,
+        "and in fourteen it is still the larger: {:.0} against {:.0}",
+        pressed.2,
+        pressed.1
+    );
+    // And it grows faster than the wind, because it goes with the square of the speed
+    // and the sine of the heel at once.
+    assert!(pressed.2 > easy.2 * 2.0);
+}

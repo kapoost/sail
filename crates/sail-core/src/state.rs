@@ -395,6 +395,26 @@ pub struct Telemetry {
     /// Net yaw moment with the rudder centred — positive means the boat wants to luff.
     /// This is weather helm, expressed as a number.
     pub weather_helm: f64,
+    /// And what it is made of, because "she gripes" is a symptom with three causes and
+    /// they want opposite cures.
+    ///
+    /// A crew that reefs when the trouble is heel does the right thing; a crew that
+    /// rolls the genoa when the trouble is the centre of effort makes it worse, and the
+    /// one thing that cannot tell them apart is a single number. These three are the
+    /// decomposition, all about the same origin as `weather_helm` and summing to it:
+    ///
+    /// * **The rig**, which is where the sails push and how far that is from where the
+    ///   keel holds. Positive is luffing — a main alone, with its load aft, does this.
+    ///   A headsail's is negative, because its load is forward, and that is why rolling
+    ///   one away is not a cure for weather helm.
+    /// * **Heel**, through the asymmetric waterplane and through the rig's own load
+    ///   swinging out to leeward onto a lever arm. This one grows with the square of the
+    ///   speed and the sine of the heel, and it is the one that reefing cures.
+    /// * **The hull**, meaning the lateral plane and what is left of the bare-hull
+    ///   damping.
+    pub yaw_from_rig: f64,
+    pub yaw_from_heel: f64,
+    pub yaw_from_hull: f64,
     /// Righting arm at the current heel, m.
     pub righting_arm: f64,
 }
