@@ -82,9 +82,13 @@ impl Default for SeaParams {
             tick: AtomicU32::default(),
             shape: AtomicU32::default(),
             music_level: AtomicU32::default(),
+            sea_level: AtomicU32::default(),
+            boat_level: AtomicU32::default(),
         };
         store(&p.master, 1.0);
         store(&p.music_level, 0.45);
+        store(&p.sea_level, 1.0);
+        store(&p.boat_level, 1.0);
         p
     }
 }
@@ -140,6 +144,15 @@ pub struct SeaParams {
     /// Nought for soft triangles, one for the pulse waves of a cartridge.
     shape: AtomicU32,
     music_level: AtomicU32,
+    /// The mix, in the three groups somebody actually wants separately.
+    ///
+    /// Not one slider per voice — nobody wants to balance a flogging genoa against a
+    /// winch. Three: the **sea**, which is the wind and the water and the rain and is
+    /// what this game sounds like; the **boat**, which is her rigging and her gear and
+    /// her sails making a noise; and the **music** over both. The alarm stays outside
+    /// all of them, because a warning that can be mixed away is not a warning.
+    sea_level: AtomicU32,
+    boat_level: AtomicU32,
 }
 
 fn store(slot: &AtomicU32, v: f32) {
@@ -216,6 +229,14 @@ impl SeaParams {
 
     pub fn set_music(&self, level: f32) {
         store(&self.music_level, level.clamp(0.0, 1.0));
+    }
+
+    pub fn set_sea(&self, level: f32) {
+        store(&self.sea_level, level.clamp(0.0, 1.0));
+    }
+
+    pub fn set_boat(&self, level: f32) {
+        store(&self.boat_level, level.clamp(0.0, 1.0));
     }
 
 
@@ -560,6 +581,8 @@ impl Iterator for SeaStream {
             t_mute,
             t_shape,
             t_music,
+            t_sea,
+            t_boat,
         ) = {
             let p = &self.params;
             (
@@ -581,6 +604,8 @@ impl Iterator for SeaStream {
                 if p.muted() { 0.0 } else { 1.0 },
                 load(&p.shape),
                 load(&p.music_level),
+                load(&p.sea_level),
+                load(&p.boat_level),
             )
         };
 
@@ -774,7 +799,11 @@ impl Iterator for SeaStream {
             song += n * self.tick_env * 0.18;
         }
 
-        let mix = (wind + rig + water + flog + rain + gear) * MASTER * t_master
+        // Grouped as somebody would actually want them: the elements, the ship, and the
+        // music over both.
+        let mix = ((wind + water + rain) * t_sea + (rig + flog + gear) * t_boat)
+            * MASTER
+            * t_master
             + song * t_music * t_master
             + beep * MASTER * 2.0;
         let mix = mix * self.smooth.mute;

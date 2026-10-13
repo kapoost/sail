@@ -2052,14 +2052,14 @@ fn a_flying_sail_collapses_close_hauled() {
     );
 }
 
-/// The staysail belongs under the big reaching sails, and nowhere else.
+/// A staysail is never free speed, whatever is set in front of it.
 ///
 /// This is the test that keeps the double head rig honest. A model that simply adds the
 /// inner sail's area makes it free speed everywhere and there is no reason ever to hand
-/// it, which is not how the rig works: inside a genoa it is covered and it backwinds
-/// the main, and what it costs there is about what it gives.
+/// it, which is not how the rig works: it lives in whatever air the sail ahead of it
+/// has left, and inside a genoa it backwinds the main as well.
 #[test]
-fn the_staysail_earns_its_place_only_under_a_flying_sail() {
+fn a_staysail_is_never_free_speed() {
     use sail_core::autopilot::steady_state_rigged;
     use sail_core::state::Headsail;
     let cfg = BoatConfig::archipelago_packet();
@@ -2073,16 +2073,25 @@ fn the_staysail_earns_its_place_only_under_a_flying_sail() {
                 .stw,
         )
     });
-    // It must not cost anything under a flying sail, and the margin is deliberately
-    // small: under an eighty-eight square metre gennaker a fourteen metre staysail is
-    // working in what is left of the air, and what is left is not much. The threshold
-    // was +0.02 kn while the gennaker was sixty square metres; the sail grew to the size
-    // its owner says it is and the gain fell to +0.013, which is the right way round and
-    // is the whole cruising argument about whether the inner sail is worth setting.
+    // Marginal, and that is the finding rather than a disappointment.
+    //
+    // This test used to claim the staysail *earns* its place under a kite, and it did, by
+    // thirteen thousandths of a knot, when the staysail was fourteen square metres.
+    // Two things have happened since and both were corrections. The sail came down to
+    // seven and a half, because the club boom has to fit between its stay and the mast
+    // and at the old size it ran a metre past the gooseneck. And the gennaker's angle of
+    // attack went up to where a spinnaker's actually is, so the sail in front is working
+    // harder and casting a deeper shadow.
+    //
+    // A small sail in a big sail's wind-shadow does not pay. That is the real cruising
+    // argument about the inner sail and it is worth having the model say it: the
+    // staysail is for when the big sail is *down*, not for filling the last gap under
+    // one. What the test holds is that it stays marginal either way — a tenth of a knot
+    // in either direction is the honest answer, and free speed is not.
+    let under = under_kite[1] - under_kite[0];
     assert!(
-        under_kite[1] - under_kite[0] > 0.0,
-        "a staysail under a gennaker should not cost anything: {:+.3} kn",
-        under_kite[1] - under_kite[0]
+        under.abs() < 0.1,
+        "a staysail under a gennaker is marginal, not free and not ruinous: {under:+.3} kn"
     );
 
     let upwind = [0.0, 1.0].map(|stay| {

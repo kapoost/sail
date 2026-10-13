@@ -643,8 +643,23 @@ impl SailProfile {
     pub fn gennaker(area: f64, luff_height: f64) -> Self {
         Self {
             cl_max: 1.78,
-            alpha_opt: rad(22.0),
-            alpha_stall: rad(42.0),
+            // A spinnaker works at a far bigger angle of attack than anything else on
+            // the boat, and twenty-two degrees had it almost on the genoa's number.
+            //
+            // There is nothing about this sail that resembles a genoa. It has no luff
+            // tension at all, a round entry a metre deep, and it is cut to be a bag; what
+            // it does is somewhere between a wing and a parachute, and the published best
+            // lift-to-drag for an asymmetric sits between twenty-five and thirty-five
+            // degrees of attack with useful work going on past fifty. Thirty here, and a
+            // stall at fifty-five.
+            //
+            // The symptom was a sailor pointing at a well-trimmed kite and the
+            // instruments beside it reading STALLED: at seventy-two degrees of apparent
+            // wind the model wanted the clew fifty degrees off the centreline, and
+            // anything sheeted harder than that it called stalled. A real one is sheeted
+            // harder than that and is working.
+            alpha_opt: rad(30.0),
+            alpha_stall: rad(55.0),
             cd0: 0.075,
             aspect_ratio: luff_height * luff_height / area,
             luff_margin: rad(5.0),

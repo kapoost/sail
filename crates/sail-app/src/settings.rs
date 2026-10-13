@@ -35,6 +35,10 @@ pub struct Settings {
     pub volume: f32,
     /// And the music separately, because somebody will want the sea without it.
     pub music: f32,
+    /// The wind, the water and the rain — what the game sounds like.
+    pub sea: f32,
+    /// Her rigging, her gear and her sails making a noise.
+    pub boat: f32,
     /// Whether the weather has been touched. Until it is, the panel shows the day as
     /// drawn and says so; after it, it stops pretending the forecast still applies.
     pub weather_touched: bool,
@@ -46,6 +50,8 @@ impl Default for Settings {
             open: false,
             volume: 0.8,
             music: 0.45,
+            sea: 1.0,
+            boat: 1.0,
             weather_touched: false,
         }
     }
@@ -126,6 +132,23 @@ pub fn draw(
                 // ears and nothing else is not turning the game down, they are turning
                 // one instrument out of the mix — and that is a reasonable thing to do
                 // with a soundtrack that is generated rather than composed for them.
+                // Copied out and back rather than borrowed twice, because the settings
+                // resource is one borrow and these are two sliders in it.
+                let (mut sea, mut boat) = (settings.sea, settings.boat);
+                ui.add(
+                    egui::Slider::new(&mut sea, 0.0..=1.0)
+                        .show_value(false)
+                        .text("sea"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut boat, 0.0..=1.0)
+                        .show_value(false)
+                        .text("boat"),
+                );
+                settings.sea = sea;
+                settings.boat = boat;
+                sound.0.set_sea(sea);
+                sound.0.set_boat(boat);
                 let mut music = settings.music;
                 if ui
                     .add(
