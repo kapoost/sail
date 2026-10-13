@@ -51,6 +51,13 @@ const COUNT: usize = 2800;
 const LIFE: f32 = 3.4;
 /// How fast foam spreads outward from where it was thrown, m/s.
 const SPREAD: f64 = 0.55;
+/// How near the top of a wave a dart has to land, as a fraction of the significant
+/// height. Elevation only — see the dart loop for why steepness is the wrong question.
+const CREST_TOP: f64 = 0.42;
+
+/// How many looks at the water a fully whitecapped sea gets a second.
+const CREST_DARTS: f32 = 1_400.0;
+
 /// How far out breaking crests are drawn, metres.
 ///
 /// Ninety: far enough that the sea has whitecaps in it rather than a ring of them round
@@ -82,6 +89,14 @@ pub struct Spray {
     /// Fractional specks carried between frames, so a birth rate of three and a half a
     /// second does not round down to three and lose its half for ever.
     owed: f32,
+    /// The same, for darts thrown at the sea looking for a breaking crest.
+    ///
+    /// A separate budget, and that *is* the fix rather than a tidying. Sharing one with
+    /// the hull's foam meant a dart that found flat water still spent a speck's worth of
+    /// it — so with one crest in a hundred darts breaking, ninety-nine hundredths of the
+    /// sea's entire allowance went on looking and three whitecaps a second got drawn.
+    /// Measured: three a second, over two and a half hectares of water.
+    darts: f32,
 }
 
 pub fn setup(
@@ -130,6 +145,7 @@ pub fn setup(
         live: Vec::with_capacity(COUNT),
         seed: sail_core::rng::Pcg32::new(0xF0_A3_11),
         owed: 0.0,
+        darts: 0.0,
     });
 }
 
@@ -244,12 +260,75 @@ pub fn update(
 
     // How much of the budget goes to the open sea rather than to the hull, and how far
     // out to look. Both rise with the sea: in a flat calm there is nothing to break.
-    let typical_slope = sim.sim.water.characteristic_slope().max(1e-4);
     let crest_share = ((hs - 0.35) * 0.55 + blown as f64 * 0.25).clamp(0.0, 0.72);
     // Where the tops are carried: downwind, which is the direction the flow goes rather
     // than the direction the wind is quoted from.
     let downwind = sail_core::wind::flow_from(sim.sim.telemetry.twd, 1.0);
-    spray.owed += 260.0 * crest_share as f32 * (1.0 + blown) * dt;
+    // Darts, not specks: this is how many *looks* at the water the sea gets this frame,
+    // and only the ones that find a crest steep enough to break turn into anything.
+    spray.darts += CREST_DARTS * crest_share as f32 * (1.0 + blown) * dt;
+
+    // --- Breaking crests, anywhere in sight ------------------------------------
+    //
+    // What this draws is whitecaps, and they are the thing that tells you what the sea
+    // is doing when there is nothing else out there to look at: a sea with no white in
+    // it is one you can carry full sail in, and one going white all over is one you
+    // should already have reefed for.
+    //
+    // Found by throwing darts rather than by walking a grid. A grid tied to the boat
+    // makes a pattern that travels with her, which is the one thing a sea must never do;
+    // scattered darts come out even and cost a fraction of the sweep. Each one asks how
+    // steep the surface is where it landed, and steep *and* lifted is a crest about to
+    // go — both conditions, or the sea foams in its hollows.
+    let mut born_breaking = 0u32;
+    let mut darts_thrown = 0u32;
+    {
+        let Spray {
+            live, seed, darts, ..
+        } = &mut *spray;
+        while *darts >= 1.0 && live.len() < COUNT {
+            *darts -= 1.0;
+            darts_thrown += 1;
+            let r = &mut *seed;
+            let a = r.next_f64() * std::f64::consts::TAU;
+            let range = CREST_REACH * r.next_f64().sqrt();
+            let at = st.pos + glam::DVec2::new(a.cos(), a.sin()) * range;
+            // Near the top of a wave, and that is the whole test.
+            //
+            // The first version asked for steep *and* lifted, which is very nearly a
+            // contradiction and measured like one: twenty-three darts a frame finding
+            // nought or one. On any wave the surface is steepest on the *face*, halfway
+            // down, and flattest at the crest — the slope goes through zero at the apex
+            // by definition. Asking for the steepest water at the highest point is
+            // asking for the two places a wave does not have at once.
+            //
+            // What actually decides whether a crest breaks is not local at all: it is
+            // the steepness of the *sea*, which is a property of the whole spectrum and
+            // lives in the rate below rather than in the dart. So the dart's only job is
+            // to find the top of a wave, and how often a top turns white is the weather's
+            // business.
+            let lifted = sim.sim.water.height(at, t) / hs.max(0.05);
+            if lifted < CREST_TOP {
+                continue;
+            }
+            let blow = downwind * (0.5 + 1.5 * r.next_f64()) * blown.min(1.2) as f64;
+            live.push(Speck {
+                at,
+                drift: blow + glam::DVec2::new(a.cos(), a.sin()) * 0.25,
+                age: 0.0,
+                // Twenty times the scale of a speck thrown off the bow, and that is not
+                // a fudge — it is the difference between the two things. Foam at the
+                // stem is bubbles a few centimetres across seen from five metres away; a
+                // breaking crest is a patch of white a metre or two across seen from
+                // fifty. At the hull's scale a whitecap at eighty metres came out a
+                // third of a pixel, which is why there were none to see.
+                scale: 9.0 + 14.0 * r.next_f64() as f32,
+                phase: r.next_f64() as f32 * std::f32::consts::TAU,
+                tint: 0.2 * r.next_f64() as f32,
+            });
+            born_breaking += 1;
+        }
+    }
 
     let Spray {
         live, seed, owed, ..
@@ -263,46 +342,6 @@ pub fn update(
         // planking is rather than at a fixed distance from the centreline that is
         // outside her at the bow and inside her amidships.
         let hull_at = |along: f64| (1.0 - (along * 2.0).powi(2)).max(0.0).sqrt();
-        // A breaking crest, anywhere in sight. This one is placed in the *world* rather
-        // than on the boat, so it leaves the whole branch below alone.
-        //
-        // What it draws is whitecaps, and they are the thing that tells you what the sea
-        // is doing when there is nothing else out there to look at: a sea with no white
-        // in it is a sea you can carry full sail in, and one that is going white all over
-        // is one you should already have reefed for. The shading on the water has had
-        // foam on the steep faces for a while, but a tone is a tone — what reads at this
-        // resolution is *specks*, because that is what a breaking crest is.
-        //
-        // Found by throwing darts rather than by walking a grid: a few candidates a
-        // frame, scattered over the water in sight, each asked how steep the surface is
-        // there. Steep enough and it breaks. The statistics come out the same as a grid
-        // sweep for a fraction of the work, and they come out *even* — a grid tied to the
-        // boat makes a pattern that moves with her, which is exactly what a sea must not
-        // do.
-        if crest_share > 0.0 && r.next_f64() < crest_share {
-            let a = r.next_f64() * std::f64::consts::TAU;
-            let range = CREST_REACH * r.next_f64().sqrt();
-            let at = st.pos + glam::DVec2::new(a.cos(), a.sin()) * range;
-            let slope = sim.sim.water.slope(at, t);
-            let steep = slope.length() / typical_slope;
-            let lifted = sim.sim.water.height(at, t) / hs.max(0.05);
-            // Breaking is a *steepness* threshold, and it happens on the crest rather
-            // than in the trough: both conditions, or the sea foams in its hollows.
-            if steep > 1.35 && lifted > 0.25 {
-                let blow = downwind * (0.5 + 1.5 * r.next_f64()) * blown.min(1.2) as f64;
-                live.push(Speck {
-                    at,
-                    drift: blow + glam::DVec2::new(a.cos(), a.sin()) * 0.25,
-                    age: 0.0,
-                    scale: 0.5 + 1.1 * r.next_f64() as f32,
-                    phase: r.next_f64() as f32 * std::f32::consts::TAU,
-                    tint: 0.2 * r.next_f64() as f32,
-                });
-                continue;
-            }
-            continue;
-        }
-
         // Which source this one came from. The two foils are placed by *where they
         // are* rather than as a fraction of the hull, because that is the whole content
         // of the effect: a trail that starts at the transom is the rudder's and one
@@ -462,7 +501,12 @@ pub fn update(
             alpha = stepped.clamp(0.0, 1.0) * 0.95;
             colour = Vec3::new(0.97, 0.99, 1.0);
         }
-        let height = sim.sim.water.height(s.at, t) + 0.06;
+        // Sitting *on* the water rather than half in it. A speck off the bow is a few
+        // centimetres across and six centimetres of lift clears it; a whitecap is a
+        // metre or two across, and at the same lift the sea — which is drawn opaque —
+        // hid its bottom half and what was left read as something sunk rather than
+        // something floating.
+        let height = sim.sim.water.height(s.at, t) + 0.06 + 0.3 * size as f64;
         let centre = origin.to_bevy(s.at, height as f32);
         // Facing the eye, so a speck is a speck from everywhere rather than a flake
         // lying on the water that vanishes edge-on.
@@ -479,4 +523,14 @@ pub fn update(
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+
+    // A pulse, because "there are no whitecaps" has two completely different causes —
+    // none are being born, or they are being born too small to see — and no amount of
+    // looking at the water tells you which.
+    if darts_thrown > 0 {
+        debug!(
+            "spray: {born_breaking} of {darts_thrown} darts found a crest, {} specks alive",
+            spray.live.len()
+        );
+    }
 }
