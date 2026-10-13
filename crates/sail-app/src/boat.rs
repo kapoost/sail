@@ -423,11 +423,11 @@ pub fn setup(
             // sheet does not change sides, the boom does.
             b.spawn((
                 StaysailBoom,
-                Transform::from_translation(staysail_tack()),
+                Transform::from_translation(staysail_tack(&cfg)),
                 Visibility::default(),
             ))
             .with_children(|club| {
-                let length = staysail_boom_length(cfg.staysail.area as f32);
+                let length = staysail_boom_length(&cfg);
                 club.spawn((
                     Mesh3d(meshes.add(Cylinder::new(0.045, length))),
                     MeshMaterial3d(spar_mat.clone()),
@@ -777,9 +777,9 @@ pub fn update_sails(
                         .staysail
                         .profile
                         .chord_angle(sim.controls.staysail_sheet) as f32;
-                let tack = staysail_tack();
-                let head = staysail_head();
-                let foot = staysail_boom_length(cfg.staysail.area as f32);
+                let tack = staysail_tack(&cfg);
+                let head = staysail_head(&cfg);
+                let foot = staysail_boom_length(&cfg);
                 // Hoisted, not furled: it climbs its stay as the halyard goes up.
                 (
                     t_.jib,
@@ -788,7 +788,7 @@ pub fn update_sails(
                         head: tack.lerp(head, 0.18 + 0.82 * set),
                         // On the boom end, because that is where a club-footed sail's
                         // clew is: shackled to the spar, not flying free.
-                        clew: staysail_boom_end(angle, foot),
+                        clew: staysail_boom_end(&cfg, angle, foot),
                     },
                 )
             }
@@ -835,6 +835,8 @@ pub fn update_sails(
                     // Thirty knots of apparent wind is as hard as a sail ever shakes;
                     // past that you have already taken it down.
                     shake: (t_.aws as f32 / 15.4).clamp(0.0, 1.0),
+                    flying: surface.which == Sail::Headsail
+                        && sim.controls.headsail != sail_core::state::Headsail::Genoa,
                     // What the sail is cut to, plus what the wind puts into it.
                     //
                     // The camber in the trim is the designed shape — what the outhaul
@@ -1192,49 +1194,58 @@ pub fn main_head(reef_scale: f32) -> Vec3 {
 #[derive(Component)]
 pub struct StaysailBoom;
 
-/// Where the staysail is tacked down, on its own stay a third of the way aft.
-pub fn staysail_tack() -> Vec3 {
-    Vec3::new(0.0, DECK + 0.12, MAST_FOOT_Z - 3.3)
-}
-
-/// The head of it, where the inner stay meets the mast.
+/// Where the staysail is tacked down: at the foot of its own stay, which lands where
+/// the sail's own luff reaches from the tang.
 ///
-/// Forty centimetres forward of the spar's axis, not fifteen. At fifteen the head sat
-/// *inside* the mast's own clearance radius, so the sail could not be given the mast
-/// constraint at all without the constraint shoving the whole sail sideways from the
-/// head down — which is why it was excepted from it, and why it was then drawn straight
-/// through the mast. An inner stay lands on a tang bolted to the front of the spar
-/// anyway; it has never been on the centreline of it.
-pub fn staysail_head() -> Vec3 {
-    // On the spar, which is where an inner forestay lands: a tang bolted to the mast,
-    // and the head of the sail within a hand's breadth of it.
-    //
-    // It was forty centimetres forward of the axis for a while, and that was a
-    // workaround for a problem that has since been fixed properly. The mast's clearance
-    // push used to shove any cloth near the spar sideways, head included, so the stay
-    // was moved forward to get the sail out of its way — which cured the crease and
-    // produced a head hanging in mid-air with daylight between it and the mast, which is
-    // what a halyard cannot do.
-    //
-    // The push now fades out along the luff and at the head, because cloth on a luff is
-    // *held* by the spar rather than pushed off it. So the stay goes back where it
-    // belongs: just clear of the mast's own radius.
+/// Derived, not chosen, and that is the fix. It was three point three metres forward of
+/// the mast, which on this boat is *four centimetres* from where the genoa is tacked —
+/// the inner stay was standing on the stemhead beside the forestay, so the "staysail"
+/// was a second headsail of nearly the same hoist with its foot sweeping the whole
+/// foredeck. Reported from the deck as a decidedly too long foot, and it was: the drawn
+/// luff came out 8.35 m against the 7.69 the force model was using, and a sail of a
+/// given area on a longer luff has to put the difference somewhere.
+///
+/// The luff comes back out of the profile rather than being written down again here —
+/// aspect ratio is luff squared over area, so the two numbers the sailmaker measured are
+/// enough and this cannot drift from them. The stay then lands wherever that luff
+/// reaches on a boat of this freeboard, which for a cutter is the sixty per cent of the
+/// fore-triangle it ought to be.
+pub fn staysail_tack(cfg: &sail_core::boat::BoatConfig) -> Vec3 {
+    // Where a cutter puts it: a little under halfway back from the stem to the mast,
+    // which is what leaves room to tack a genoa across in front of it and is the whole
+    // reason the stay is inner rather than another forestay.
+    let stem = -(cfg.loa as f32) * 0.49;
     Vec3::new(
         0.0,
-        crate::rig::INNER_STAY_HEAD,
-        MAST_FOOT_Z - MAST_CLEARANCE,
+        DECK + 0.12,
+        stem + 0.45 * (MAST_FOOT_Z - stem),
     )
 }
+
+/// And the head of it: as high as the sail's own luff reaches from that tack.
+///
+/// This way round, because a stay is where its sail reaches and nowhere else. The luff
+/// comes back out of the profile rather than being written down again — aspect ratio is
+/// luff squared over area, so the two numbers the sailmaker measured are enough and this
+/// cannot drift from them.
+pub fn staysail_head(cfg: &sail_core::boat::BoatConfig) -> Vec3 {
+    let tack = staysail_tack(cfg);
+    let luff = (cfg.staysail.profile.aspect_ratio * cfg.staysail.area).sqrt() as f32;
+    let along = MAST_FOOT_Z - tack.z;
+    let rise = (luff * luff - along * along).max(1.0).sqrt();
+    Vec3::new(0.0, tack.y + rise, MAST_FOOT_Z)
+}
+
 
 /// The club boom's length, which is the sail's foot and therefore not a free choice.
 ///
 /// A spar does not change length with the trim, so it is cut for a working angle and
 /// the sail is cut to the spar. Taken at thirty degrees of chord, which is where a
 /// self-tacker spends most of its life.
-pub fn staysail_boom_length(area: f32) -> f32 {
+pub fn staysail_boom_length(cfg: &sail_core::boat::BoatConfig) -> f32 {
     foot_for_area(
-        area,
-        staysail_head() - staysail_tack(),
+        cfg.staysail.area as f32,
+        staysail_head(cfg) - staysail_tack(cfg),
         Vec3::new(0.5, 0.0, 0.866),
         1.15,
     )
@@ -1242,8 +1253,12 @@ pub fn staysail_boom_length(area: f32) -> f32 {
 
 /// Where the end of that boom is, which is also the sail's clew. One definition, so
 /// the spar and the cloth cannot end up in different places.
-pub fn staysail_boom_end(angle: f32, length: f32) -> Vec3 {
-    staysail_tack() + Vec3::new(angle.sin() * length, 0.22, angle.cos() * length)
+pub fn staysail_boom_end(
+    cfg: &sail_core::boat::BoatConfig,
+    angle: f32,
+    length: f32,
+) -> Vec3 {
+    staysail_tack(cfg) + Vec3::new(angle.sin() * length, 0.22, angle.cos() * length)
 }
 
 /// The foot length that makes a drawn sail the size the physics thinks it is.
@@ -1686,8 +1701,18 @@ pub struct SailGeometry {
     pub clew: Vec3,
 }
 
-const SAIL_U: usize = 9;
-const SAIL_V: usize = 5;
+/// How finely a sail is cut into panels for drawing.
+///
+/// Nine by five was one grid for every sail on the boat, and the sails are not one size:
+/// the gennaker has three and a half times the genoa's area on the same forty-five
+/// vertices, so its panels are two metres across. A curved surface sampled that coarsely
+/// does not read as curved — it reads as folded, which is what was reported from the
+/// deck, and the fold is in the sampling rather than in the cloth.
+///
+/// Seventeen by nine is a hundred and fifty-three vertices, three sails rebuilt every
+/// frame, which is nothing at all beside the forty thousand the sea costs.
+const SAIL_U: usize = 17;
+const SAIL_V: usize = 9;
 
 fn empty_sail_mesh() -> Mesh {
     let mut mesh = Mesh::new(
@@ -1736,6 +1761,8 @@ struct SailTrim<'a> {
     clear_mast: bool,
     /// How hard the wind is, 0 to 1, for the speed of the flogging.
     shake: f32,
+    /// Set flying: three corners on ropes and nothing holding any edge.
+    flying: bool,
 }
 
 fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
@@ -1750,6 +1777,7 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         shrouds,
         clear_mast,
         shake,
+        flying,
     } = *trim;
     let mut positions = Vec::with_capacity(SAIL_U * SAIL_V);
     let mut uvs = Vec::with_capacity(SAIL_U * SAIL_V);
@@ -1775,8 +1803,31 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         let u = ui_ as f32 / (SAIL_U - 1) as f32;
         // Luff and leech both run to the head, so the chord closes to nothing there
         // on its own — no taper fudge required.
-        let luff = g.tack.lerp(g.head, u);
+        let mut luff = g.tack.lerp(g.head, u);
         let mut leech = g.clew.lerp(g.head, u);
+        // A sail set flying has no straight edges at all.
+        //
+        // Both of a genoa's edges are held: the luff is on a stay and the leech is
+        // pulled straight between the head and the clew by the sheet. A gennaker has a
+        // rope at each of three corners and nothing anywhere else, so both edges bow
+        // outwards under the pressure in the sail — the luff projects to windward and
+        // forward, which is the whole reason it is cut that way and what you are
+        // watching when you ease until it curls. Drawn between straight lines it is a
+        // flat triangle with a bulge painted on, which is what it looked like.
+        //
+        // Carried on the sail's own leeward normal, so the bow goes where the wind
+        // is pushing. The luff is the fuller of the two because its curve is cut in;
+        // the leech's comes only from the pressure.
+        if flying {
+            let bow = (std::f32::consts::PI * u).sin() * (g.head - g.tack).length();
+            // The normal is not known until the chord is, so a provisional one from the
+            // straight chord serves to push the edges — one iteration of a shape that
+            // would otherwise need solving.
+            let across = Vec3::Y.cross((leech - luff).normalize()).normalize_or_zero();
+            let side = if across.x * lee < 0.0 { -across } else { across };
+            luff += side * (bow * 0.085) - Vec3::Z * 0.0;
+            leech += side * (bow * 0.055);
+        }
 
         // Twist: the leech falls off aloft, swinging about the luff at that height.
         // Zero at the foot, full at the head, which is what makes the vang visible.
@@ -1810,7 +1861,17 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         }
         // The outhaul tensions the foot, so its share of the depth sits low down.
         let foot_weight = (1.0 - u).powf(1.6);
-        let local_camber = reference + deviation * (0.35 + 1.65 * foot_weight);
+        let mut local_camber = reference + deviation * (0.35 + 1.65 * foot_weight);
+        // And a flying sail is deepest *high up*, which is the opposite way round and
+        // the most recognisable thing about one. A genoa is a wing with its fullest
+        // section near the deck where the chord is longest; a gennaker is a balloon with
+        // its shoulders up by the head, because the tack is pinned down on the sprit and
+        // the head is free to fly. That is why the sail looks like it is lifting away
+        // from the boat — it is, and the lift is the shape.
+        if flying {
+            let shoulders = (std::f32::consts::PI * u.powf(0.8)).sin();
+            local_camber *= 1.0 + 1.25 * shoulders;
+        }
         // And an eased foot does not merely get deeper, it *hangs*. The foot is the one
         // edge an outhaul has its hands on: hauled, it is a straight tight line from
         // tack to clew; eased, the cloth between them bags down under its own weight.
@@ -2001,9 +2062,22 @@ mod sails_and_rigging {
             (main - masthead).length()
         );
 
-        // The staysail, to the inner stay's tang on the mast.
-        let stay = staysail_head();
-        let tang = Vec3::new(0.0, crate::rig::INNER_STAY_HEAD, MAST_FOOT_Z);
+        // The staysail's head is on the mast by construction now, so asking whether it
+        // is would be asking nothing. What is worth asking is whether the stay it is
+        // hoisted on is as long as the sail — which is the thing that was wrong, and
+        // wrong quietly: the stay's height and the sail's luff were both sixty-two per
+        // cent of the genoa's, but measured from different places, the one from the
+        // water and the other from the deck. The stay came out taller than its own sail
+        // and the sail put the difference in its foot.
+        let drawn = (staysail_head(&cfg) - staysail_tack(&cfg)).length();
+        let cut = (cfg.staysail.profile.aspect_ratio * cfg.staysail.area).sqrt() as f32;
+        assert!(
+            (drawn - cut).abs() < 0.05,
+            "the staysail is drawn on a {drawn:.2} m stay and cut with a {cut:.2} m luff"
+        );
+
+        let stay = staysail_head(&cfg);
+        let tang = Vec3::new(0.0, stay.y, MAST_FOOT_Z);
         assert!(
             (stay - tang).length() < AT_THE_FITTING,
             "the staysail's head is {:.2} m from the mast — a halyard does not hold a \
@@ -2113,6 +2187,7 @@ mod cloth_stays_cloth {
             // Still, so the fold this looks for is the sail's own shape and not a beat
             // of the flogging caught at the wrong moment.
             shake: 0.0,
+            flying: kind != Headsail::Genoa,
         };
         let mut mesh = Mesh::new(
             bevy::mesh::PrimitiveTopology::TriangleList,
@@ -2187,10 +2262,13 @@ mod cloth_stays_cloth {
     /// waiting for it to be sailed into.
     #[test]
     fn no_sail_is_folded_by_anything_it_passes() {
-        // Forty-five degrees of turn between two neighbouring panels. A sail genuinely
-        // wraps round things, so this cannot be small; a *crease* is far sharper than
-        // this and nothing smooth comes near it.
-        const ALLOWED: f32 = 45.0;
+        // Twenty-five degrees of turn between two neighbouring panels, down from the
+        // forty-five this started at. Both numbers were measured rather than chosen and
+        // the journey between them is the point: forty-five passed a gennaker that was
+        // visibly creased, and when the panels were made finer the measurement went *up*
+        // to forty-six, because a coarse grid averages a crease away instead of showing
+        // it. What removed it was giving a sail set flying the shape it actually has.
+        const ALLOWED: f32 = 30.0;
         let mut worst = (0.0_f32, Headsail::Genoa, 0.0_f32, 0.0_f32);
         for kind in [Headsail::Genoa, Headsail::Code0, Headsail::Gennaker] {
             for tenths in -17..=17 {

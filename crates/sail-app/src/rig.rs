@@ -33,7 +33,6 @@ const SEGMENTS: usize = 14;
 pub const SPREADER_HEIGHT: f32 = FORESTAY_HEAD + 0.6;
 
 /// And the inner stay lands below the forestay, which is what makes it inner.
-pub const INNER_STAY_HEAD: f32 = FORESTAY_HEAD * 0.62;
 /// Where the mast is stepped — from the core, which derives the whole rig from the two
 /// sails that were measured. Both files used to carry their own copy of every one of
 /// these numbers.
@@ -447,12 +446,12 @@ pub fn update(
                         .staysail
                         .profile
                         .chord_angle(sim.controls.staysail_sheet) as f32;
-                let length = crate::boat::staysail_boom_length(cfg.staysail.area as f32);
+                let length = crate::boat::staysail_boom_length(&cfg);
                 // From the boom end, not part way along it: a club boom's sheet is made
                 // fast at the end where the leverage is, and the earlier attachment at
                 // seven tenths left a stub of rope half a metre long that was hidden
                 // under the sail and might as well not have been drawn.
-                let at = crate::boat::staysail_boom_end(club, length);
+                let at = crate::boat::staysail_boom_end(&cfg, club, length);
                 let eye = Vec3::new(
                     0.0,
                     crate::deck::deck_height(MAST_FOOT_Z - 0.55) + 0.06,
