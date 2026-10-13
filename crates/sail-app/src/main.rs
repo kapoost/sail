@@ -23,6 +23,7 @@ mod hud;
 mod ink;
 mod input;
 mod islands;
+mod music;
 mod panel;
 mod rain;
 mod retro;
@@ -209,6 +210,7 @@ fn main() {
         .insert_resource(retro::Retro::from_env())
         .insert_resource(world::Ink::from_env())
         .init_resource::<world::SeaFilm>()
+        .init_resource::<music::Music>()
         .init_resource::<chart::Chart>()
         .init_resource::<chart::Track>()
         .init_resource::<world::SurfaceDrift>()
@@ -292,7 +294,7 @@ fn main() {
                     chart::toggle,
                     retro::toggle,
                     retro::stress.run_if(|| std::env::var("SAIL_RETRO_STRESS").is_ok()),
-                    world::toggle_ink,
+                    (music::compose, world::toggle_ink),
                     world::apply_ink,
                     world::roll_sea_film,
                     ink::apply,

@@ -33,6 +33,8 @@ pub struct Settings {
     pub open: bool,
     /// What the listener asked for, which is remembered across a mute.
     pub volume: f32,
+    /// And the music separately, because somebody will want the sea without it.
+    pub music: f32,
     /// Whether the weather has been touched. Until it is, the panel shows the day as
     /// drawn and says so; after it, it stops pretending the forecast still applies.
     pub weather_touched: bool,
@@ -43,6 +45,7 @@ impl Default for Settings {
         Self {
             open: false,
             volume: 0.8,
+            music: 0.45,
             weather_touched: false,
         }
     }
@@ -118,6 +121,22 @@ pub fn draw(
                     settings.volume = volume;
                 }
                 sound.0.set_master(settings.volume);
+                // Separate from the master, because the sea and the music are two
+                // different things to want. Somebody who sails with the wind in their
+                // ears and nothing else is not turning the game down, they are turning
+                // one instrument out of the mix — and that is a reasonable thing to do
+                // with a soundtrack that is generated rather than composed for them.
+                let mut music = settings.music;
+                if ui
+                    .add(
+                        egui::Slider::new(&mut music, 0.0..=1.0)
+                            .show_value(false)
+                            .text("music"),
+                    )
+                    .changed()
+                {
+                    settings.music = music;
+                }
                 let muted = sound.0.muted();
                 if ui
                     .button(if muted { "UNMUTE  (K)" } else { "MUTE  (K)" })

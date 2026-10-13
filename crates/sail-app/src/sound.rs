@@ -75,6 +75,25 @@ pub struct SeaParams {
     /// The autopilot's alarm, taken the same way.
     alarm: AtomicU32,
     muted: AtomicU32,
+    /// Three voices and a tick, written by the composer in `music.rs`.
+    ///
+    /// Frequency and gain per voice and nothing else — no sequencer on the audio thread,
+    /// no note queue, no timing to get wrong across a thread boundary. The composer runs
+    /// in the world at frame rate and *places* notes; sixty hertz is sixteen milliseconds
+    /// of placement error against a quaver of two hundred and fifty, which is tighter
+    /// than a session fiddler and far simpler than the alternative.
+    ///
+    /// Why generate instead of play a file: the whole game is one executable, a sound
+    /// font is tens of megabytes, and a shanty recording carries rights of its own even
+    /// when the song is three hundred years old and free. What a generator also gets —
+    /// which no recording can — is music that is *about* the weather it is playing over.
+    voice_hz: [AtomicU32; 3],
+    voice_gain: [AtomicU32; 3],
+    /// A hard tick on the beat, for the ink drawing's sake.
+    tick: AtomicU32,
+    /// Nought for soft triangles, one for the pulse waves of a cartridge.
+    shape: AtomicU32,
+    music_level: AtomicU32,
 }
 
 fn store(slot: &AtomicU32, v: f32) {
@@ -121,6 +140,29 @@ impl SeaParams {
     pub fn alarm(&self) {
         store(&self.alarm, 1.0);
     }
+
+    /// What the composer writes. Three voices, each a frequency and a gain.
+    pub fn set_voice(&self, i: usize, hz: f32, gain: f32) {
+        if let (Some(f), Some(g)) = (self.voice_hz.get(i), self.voice_gain.get(i)) {
+            store(f, hz.max(0.0));
+            store(g, gain.clamp(0.0, 1.0));
+        }
+    }
+
+    /// A single tick on the beat, taken the same way as the clack.
+    pub fn tick(&self, strength: f32) {
+        store(&self.tick, strength.clamp(0.0, 1.0));
+    }
+
+    /// Nought is a soft triangle, one the pulse of a cartridge.
+    pub fn set_shape(&self, shape: f32) {
+        store(&self.shape, shape.clamp(0.0, 1.0));
+    }
+
+    pub fn set_music(&self, level: f32) {
+        store(&self.music_level, level.clamp(0.0, 1.0));
+    }
+
 
     pub fn set_muted(&self, muted: bool) {
         self.muted
@@ -193,6 +235,17 @@ pub struct SeaStream {
     rig_phase2: f32,
     surge_phase: f32,
     flog_phase: f32,
+    /// One phase and two smoothed followers per musical voice.
+    ///
+    /// The gain is followed rather than used raw because a note that starts at full
+    /// level in one sample is a click, and three of those a second is a fault rather
+    /// than a style. Three milliseconds of attack is still an attack — sharper than any
+    /// instrument with a body — and forty of release lets a note ring off instead of
+    /// being switched off.
+    voice_phase: [f32; 3],
+    voice_level: [f32; 3],
+    voice_freq: [f32; 3],
+    tick_env: f32,
     flog_env: f32,
 }
 
@@ -225,6 +278,10 @@ impl Smoothed {
 impl SeaStream {
     fn new(params: Arc<SeaParams>) -> Self {
         Self {
+            voice_phase: [0.0; 3],
+            voice_level: [0.0; 3],
+            voice_freq: [0.0; 3],
+            tick_env: 0.0,
             params,
             rng: 0x2545_F491,
             wind_a: OnePole::default(),
@@ -291,6 +348,8 @@ impl Iterator for SeaStream {
             clack,
             alarm,
             t_mute,
+            t_shape,
+            t_music,
         ) = {
             let p = &self.params;
             (
@@ -310,6 +369,8 @@ impl Iterator for SeaStream {
                 f32::from_bits(p.clack.swap(0, Ordering::Relaxed)),
                 f32::from_bits(p.alarm.swap(0, Ordering::Relaxed)),
                 if p.muted() { 0.0 } else { 1.0 },
+                load(&p.shape),
+                load(&p.music_level),
             )
         };
 
@@ -450,8 +511,55 @@ impl Iterator for SeaStream {
         // The alarm sits outside the master gain and inside only the mute: it is a
         // warning rather than part of the picture, and a volume turned down because the
         // sea was loud must not be the reason nobody heard the pilot let go.
-        let mix =
-            (wind + rig + water + flog + rain + gear) * MASTER * t_master + beep * MASTER * 2.0;
+        // --- The music -------------------------------------------------------------
+        //
+        // Three voices: a lead, a counter-line under it and a bass. Triangle when the
+        // sea is drawn the way a photograph is, pulse when it is drawn in ink — which is
+        // the whole of the "cartridge" sound, two waveforms and hard envelopes, and it
+        // is right that the picture and the music change together.
+        let mut song = 0.0;
+        for v in 0..3 {
+            let want_hz = load(&self.params.voice_hz[v]);
+            let want_gain = load(&self.params.voice_gain[v]);
+            // Frequency glides over about eight milliseconds. Instant would be correct
+            // for a cartridge and is a click on everything else; this is short enough to
+            // read as a new note and long enough not to tick.
+            self.voice_freq[v] += (want_hz - self.voice_freq[v]) * (1.0 - (-dt * 120.0).exp());
+            let rising = want_gain > self.voice_level[v];
+            let rate = if rising { 330.0 } else { 25.0 };
+            self.voice_level[v] += (want_gain - self.voice_level[v]) * (1.0 - (-dt * rate).exp());
+            if self.voice_level[v] < 1e-4 || self.voice_freq[v] < 20.0 {
+                continue;
+            }
+            self.voice_phase[v] += self.voice_freq[v] * dt;
+            self.voice_phase[v] -= self.voice_phase[v].floor();
+            let p = self.voice_phase[v];
+            // Triangle, and a quarter-duty pulse, crossfaded by the drawing.
+            let tri = 4.0 * (p - 0.5).abs() - 1.0;
+            let pulse = if p < 0.25 { 1.0 } else { -1.0 };
+            let wave = tri + (pulse - tri) * t_shape;
+            // The bass is quieter per unit gain than the lead, because a triangle two
+            // octaves down carries far more energy and would own the mix.
+            let weight = if v == 2 { 0.5 } else { 0.34 };
+            song += wave * self.voice_level[v] * weight;
+        }
+        // The beat, which exists so the music has a floor to stand on when the voices
+        // thin out — and which is a woodblock rather than a drum, because this is a
+        // small boat and not a procession.
+        let hit = load(&self.params.tick);
+        if hit > 0.0 {
+            store(&self.params.tick, 0.0);
+            self.tick_env = hit;
+        }
+        if self.tick_env > 1e-4 {
+            self.tick_env *= (-dt * 60.0).exp();
+            let n = self.noise();
+            song += n * self.tick_env * 0.18;
+        }
+
+        let mix = (wind + rig + water + flog + rain + gear) * MASTER * t_master
+            + song * t_music * t_master
+            + beep * MASTER * 2.0;
         let mix = mix * self.smooth.mute;
         // Soft clip. A gust plus a flogging genoa can stack up, and a hard clip is a
         // much worse sound than a little compression.

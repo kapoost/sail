@@ -73,7 +73,7 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
             ("H", "hide the console"),
             ("K", "mute"),
             ("L", "ask for a new consignment"),
-            ("Esc", "settings — sound, weather, sea"),
+            ("Esc", "settings — sound, music, weather, sea"),
         ],
     ),
 ];
