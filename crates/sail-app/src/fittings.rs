@@ -95,10 +95,14 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     //
     // The bowl used to be tilted sixty degrees towards the helm with the card bolted
     // across it, which is a dial painted on a slope.
+    // A low base with a glass dome over it, which is what a compass is. A straight-sided
+    // bowl crops the card the moment she heels — the card stays level and the rim does
+    // not, so the rim comes across it — and the dome exists precisely so that it cannot:
+    // every line of sight into a hemisphere clears its edge.
     b.spawn((
-        Mesh3d(w.meshes.add(Cylinder::new(0.115, 0.13))),
+        Mesh3d(w.meshes.add(Cylinder::new(0.115, 0.06))),
         MeshMaterial3d(metal.clone()),
-        Transform::from_translation(at),
+        Transform::from_translation(at - Vec3::new(0.0, 0.02, 0.0)),
     ))
     .with_children(|bowl| {
         // The lubber line: a mark on the *bowl*, which is bolted to the boat, and
@@ -121,9 +125,22 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
         CompassCard,
         Mesh3d(w.meshes.add(disc(0.098))),
         MeshMaterial3d(card_mat.clone()),
-        // Just proud of the rim, where it can be read from the tiller rather than only
-        // from directly overhead.
-        Transform::from_translation(at + Vec3::new(0.0, 0.072, 0.0)),
+        Transform::from_translation(at + Vec3::new(0.0, 0.028, 0.0)),
+    ));
+    // The dome. Glass: it has to be seen through, so it is nearly clear, and the little
+    // it does reflect is what makes it read as glass rather than as a hole in the air.
+    b.spawn((
+        Mesh3d(w.meshes.add(Sphere::new(0.108))),
+        MeshMaterial3d(w.materials.add(StandardMaterial {
+            base_color: Color::srgba(0.86, 0.90, 0.94, 0.16),
+            alpha_mode: AlphaMode::Blend,
+            perceptual_roughness: 0.05,
+            reflectance: 0.9,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        })),
+        Transform::from_translation(at + Vec3::new(0.0, 0.028, 0.0)),
     ));
 
     // --- The tiller ----------------------------------------------------------
