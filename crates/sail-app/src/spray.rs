@@ -46,11 +46,19 @@ use crate::sim::Sim;
 /// Nine hundred, which is a great deal, and deliberately so. They cost one quad each
 /// and nothing at all in the physics, and the alternative — a true photographic amount
 /// of white water — is a few grey pixels at the resolution this is played at.
-const COUNT: usize = 1600;
+const COUNT: usize = 2800;
 /// Seconds one lives.
 const LIFE: f32 = 3.4;
 /// How fast foam spreads outward from where it was thrown, m/s.
 const SPREAD: f64 = 0.55;
+/// How far out breaking crests are drawn, metres.
+///
+/// Ninety: far enough that the sea has whitecaps in it rather than a ring of them round
+/// the boat, near enough that each speck is still more than one pixel. Past this the
+/// shading on the water carries it, which is the right division of labour — a speck at
+/// three hundred metres is a sub-pixel dot and the tone it would contribute is already
+/// there.
+const CREST_REACH: f64 = 90.0;
 
 struct Speck {
     at: glam::DVec2,
@@ -167,6 +175,21 @@ pub fn update(
     let rate = 420.0 * fraction.powi(3) as f32 * pressed as f32;
     spray.owed += rate * dt;
 
+    // And the weather, which until now made no spray at all unless the boat was going
+    // fast — so a gale with her hove-to under a scrap of main was a dry afternoon. It is
+    // the other way round: in bad weather most of the water in the air was never touched
+    // by the hull. The wind tears the tops off the seas and carries them, and at the top
+    // of force six it starts doing it in long streaks that are the classic sign of a
+    // gale coming on. The rate goes as a high power of the wind because the threshold is
+    // sharp: below about twenty-five knots the tops stay on.
+    let tws_kn = sail_core::units::ms_to_kn(sim.sim.telemetry.tws).max(0.0) as f32;
+    // Named apart from the `hs` further down, which is the same quantity floored
+    // differently for a different job. Two bindings of one name in one function is how
+    // a float quietly becomes the wrong float.
+    let sea_height = sim.sim.telemetry.significant_height.max(0.0) as f32;
+    let blown = ((tws_kn - 22.0) / 14.0).clamp(0.0, 2.2);
+    spray.owed += 900.0 * blown * blown * blown * (0.35 + sea_height) * dt;
+
     let forward = st.forward();
     let starboard = st.starboard();
     let lee = -sim.sim.telemetry.awa.signum();
@@ -219,6 +242,15 @@ pub fn update(
         spray.owed += (buried * 260.0 * fraction) as f32 * dt;
     }
 
+    // How much of the budget goes to the open sea rather than to the hull, and how far
+    // out to look. Both rise with the sea: in a flat calm there is nothing to break.
+    let typical_slope = sim.sim.water.characteristic_slope().max(1e-4);
+    let crest_share = ((hs - 0.35) * 0.55 + blown as f64 * 0.25).clamp(0.0, 0.72);
+    // Where the tops are carried: downwind, which is the direction the flow goes rather
+    // than the direction the wind is quoted from.
+    let downwind = sail_core::wind::flow_from(sim.sim.telemetry.twd, 1.0);
+    spray.owed += 260.0 * crest_share as f32 * (1.0 + blown) * dt;
+
     let Spray {
         live, seed, owed, ..
     } = &mut *spray;
@@ -231,6 +263,46 @@ pub fn update(
         // planking is rather than at a fixed distance from the centreline that is
         // outside her at the bow and inside her amidships.
         let hull_at = |along: f64| (1.0 - (along * 2.0).powi(2)).max(0.0).sqrt();
+        // A breaking crest, anywhere in sight. This one is placed in the *world* rather
+        // than on the boat, so it leaves the whole branch below alone.
+        //
+        // What it draws is whitecaps, and they are the thing that tells you what the sea
+        // is doing when there is nothing else out there to look at: a sea with no white
+        // in it is a sea you can carry full sail in, and one that is going white all over
+        // is one you should already have reefed for. The shading on the water has had
+        // foam on the steep faces for a while, but a tone is a tone — what reads at this
+        // resolution is *specks*, because that is what a breaking crest is.
+        //
+        // Found by throwing darts rather than by walking a grid: a few candidates a
+        // frame, scattered over the water in sight, each asked how steep the surface is
+        // there. Steep enough and it breaks. The statistics come out the same as a grid
+        // sweep for a fraction of the work, and they come out *even* — a grid tied to the
+        // boat makes a pattern that moves with her, which is exactly what a sea must not
+        // do.
+        if crest_share > 0.0 && r.next_f64() < crest_share {
+            let a = r.next_f64() * std::f64::consts::TAU;
+            let range = CREST_REACH * r.next_f64().sqrt();
+            let at = st.pos + glam::DVec2::new(a.cos(), a.sin()) * range;
+            let slope = sim.sim.water.slope(at, t);
+            let steep = slope.length() / typical_slope;
+            let lifted = sim.sim.water.height(at, t) / hs.max(0.05);
+            // Breaking is a *steepness* threshold, and it happens on the crest rather
+            // than in the trough: both conditions, or the sea foams in its hollows.
+            if steep > 1.35 && lifted > 0.25 {
+                let blow = downwind * (0.5 + 1.5 * r.next_f64()) * blown.min(1.2) as f64;
+                live.push(Speck {
+                    at,
+                    drift: blow + glam::DVec2::new(a.cos(), a.sin()) * 0.25,
+                    age: 0.0,
+                    scale: 0.5 + 1.1 * r.next_f64() as f32,
+                    phase: r.next_f64() as f32 * std::f32::consts::TAU,
+                    tint: 0.2 * r.next_f64() as f32,
+                });
+                continue;
+            }
+            continue;
+        }
+
         // Which source this one came from. The two foils are placed by *where they
         // are* rather than as a fraction of the hull, because that is the whole content
         // of the effect: a trail that starts at the transom is the rudder's and one
