@@ -477,6 +477,7 @@ pub struct SeaStream {
     next_voice: usize,
     poll: u32,
     tick_env: f32,
+    tick_phase: f32,
     flog_env: f32,
 }
 
@@ -513,6 +514,7 @@ impl SeaStream {
             next_voice: 0,
             poll: 0,
             tick_env: 0.0,
+            tick_phase: 0.0,
             params,
             rng: 0x2545_F491,
             wind_a: OnePole::default(),
@@ -794,9 +796,23 @@ impl Iterator for SeaStream {
             self.tick_env = hit;
         }
         if self.tick_env > 1e-4 {
-            self.tick_env *= 1.0 - (dt * 60.0).min(1.0);
-            let n = self.noise();
-            song += n * self.tick_env * 0.18;
+            // A woodblock, and deliberately not anything on the boat.
+            //
+            // The first version used the clutch's own clack for this, and that is a real
+            // fault rather than a shortcut: a winch pawl rattling as a musical fill means
+            // nobody can tell whether somebody is actually grinding. Her sounds are
+            // *instruments* in this game — they are how you know what is happening — and
+            // borrowing one for the band makes an instrument lie.
+            //
+            // So the music gets a sound of its own that belongs to the same world and is
+            // not any of her gear: a pitched wooden knock, short, with a touch of noise
+            // in the attack. Near enough to a block on a deck to sit with everything
+            // else, nowhere near the broadband crack of a clutch going on.
+            self.tick_env *= 1.0 - (dt * 34.0).min(1.0);
+            self.tick_phase += 760.0 * dt;
+            self.tick_phase -= self.tick_phase.floor();
+            let body = fast_sin(self.tick_phase) * 0.7 + self.noise() * 0.3;
+            song += body * self.tick_env * self.tick_env * 0.5;
         }
 
         // Grouped as somebody would actually want them: the elements, the ship, and the

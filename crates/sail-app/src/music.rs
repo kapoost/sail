@@ -94,22 +94,31 @@ impl Motif {
     /// constraint is what makes it singable — four notes drawn uniformly from a scale is
     /// four notes, not a motif.
     fn invent(rng: &mut impl FnMut() -> f32) -> Self {
-        let openings: [[i32; 4]; 6] = [
-            [0, 2, 1, 0],  // a turn round the tonic: the commonest opening there is
-            [0, 1, 2, 4],  // a climb
-            [4, 2, 1, 0],  // and the fall that answers it
-            [0, 4, 2, 1],  // a leap, then filling in behind it
-            [0, 2, 4, 2],  // an arch
-            [2, 1, 0, -3], // dropping to the seventh below, which is very Nordic
+        let openings: [[i32; 4]; 12] = [
+            [0, 2, 1, 0],   // a turn round the tonic: the commonest opening there is
+            [0, 1, 2, 4],   // a climb
+            [4, 2, 1, 0],   // and the fall that answers it
+            [0, 4, 2, 1],   // a leap, then filling in behind it
+            [0, 2, 4, 2],   // an arch
+            [2, 1, 0, -3],  // dropping to the seventh below, which is very Nordic
+            [0, 0, 2, 4],   // a repeated note that then goes: a shanty's shape
+            [4, 4, 2, 0],   // the same thing falling, which is how a chorus answers
+            [0, -1, 0, 2],  // dipping under the tonic first — a lift that works by delay
+            [2, 4, 3, 2],   // a turn higher up, round the third
+            [0, 3, 2, 1],   // a fourth, the interval every hymn and half the sea songs
+            [1, 0, 2, 0],   // leaning on the second and resolving down, twice
         ];
         let shape = openings[(rng() * openings.len() as f32) as usize % openings.len()];
         // Rhythms that leave the right silences. A cell that speaks on every quaver has
         // no rhythm; what gives a tune its gait is where it does *not* play.
-        let rhythms: [[bool; 8]; 4] = [
-            [true, false, true, false, true, false, true, false],
+        let rhythms: [[bool; 8]; 7] = [
+            [true, false, true, false, true, false, true, false], // even, the reel's walk
             [true, false, true, true, false, true, false, false],
             [true, true, false, true, false, false, true, false],
             [true, false, false, true, true, false, true, false],
+            [true, true, true, false, true, false, false, false], // three and a rest
+            [true, false, true, false, false, true, true, false],
+            [true, false, false, false, true, true, false, true], // a long one, then two
         ];
         let voiced = rhythms[(rng() * rhythms.len() as f32) as usize % rhythms.len()];
         Self { shape, voiced }
@@ -128,18 +137,26 @@ impl Motif {
     }
 }
 
-/// What a bar does with the motif.
+/// What a bar does, and which of the two strains it belongs to.
 ///
-/// The plan of a folk phrase, which is the same plan every time because it works:
-/// state it, state it again, go somewhere, come back and land.
-fn how_to_say_it(bar: u32) -> (i32, bool) {
+/// AABB is two *different* tunes, not one tune played twice, and that is the thing the
+/// first version of this missed. Every reel, every jig and every shanty has an A part
+/// and a B part: the B sits higher, usually starts where the A ended, and is what the
+/// whole form is for — you get to come *back* to the A, and coming back is only worth
+/// anything if you went somewhere.
+///
+/// Returns which strain, how far to lift it, whether to turn it over, and whether this
+/// bar is a cadence — the bar that has to land rather than carry on.
+fn how_to_say_it(bar: u32) -> (usize, i32, bool, bool) {
     match bar % PHRASE {
-        0 | 1 => (0, false),   // say it
-        2 | 3 => (2, false),   // say it a third higher
-        4 => (0, true),        // turn it over
-        5 => (-2, true),       // and again, lower
-        6 => (2, false),       // back towards home
-        _ => (0, false),       // and land
+        0 => (0, 0, false, false),  // the A part
+        1 => (0, 2, false, false),  // said a third higher
+        2 => (0, 0, true, false),   // turned over
+        3 => (0, 0, false, true),   // and landed: the half cadence
+        4 => (1, 4, false, false),  // the B part, up where a B part lives
+        5 => (1, 4, false, false),  // said again
+        6 => (1, 2, true, false),   // turned over and coming down
+        _ => (0, 0, false, true),   // home, with the A's own shape, and landed
     }
 }
 
@@ -155,8 +172,8 @@ pub struct Music {
     rng: u32,
     /// The melody's position in the scale, for the passing notes between motif notes.
     degree: i32,
-    /// The cell the whole passage is built from, invented once when she casts off.
-    motif: Option<Motif>,
+    /// The two cells the whole passage is built from, invented once when she casts off.
+    motif: Option<[Motif; 2]>,
     /// What is being played now, as opposed to what the weather is asking for.
     ///
     /// The two are different on purpose. Music that changed the instant the wind did
@@ -272,6 +289,55 @@ fn modulate(from: f32, rising: bool, settled: bool) -> f32 {
     }
 }
 
+/// How hard a sail is working, 0 to 1 — and therefore how much of the band it is.
+///
+/// Every sail gets a voice and the voice is only there while the sail is. That is the
+/// thing a soundtrack can do that a picture cannot: you *hear* the sail plan. Hand the
+/// main and the bass goes with it; roll the genoa away and the tune thins to a line;
+/// set the staysail and a second voice comes in under the melody. A sail that is luffing
+/// stops playing, which is exactly what a luffing sail has stopped doing.
+///
+/// Measured as the force the cloth is actually making against the force it *could* make
+/// in this wind — the resultant coefficient, in other words — so it is about how hard
+/// she is pressed rather than how much wind there is. A sail at its best trim in six
+/// knots is working as hard as the same sail at its best trim in twenty, and the music
+/// says so; what the wind changes is the tempo, which is a different thing and already
+/// handled.
+fn worked(sail: &sail_core::sail::SailForces) -> f32 {
+    let c = sail.coeffs;
+    let resultant = (c.cl * c.cl + c.cd * c.cd).sqrt();
+    let alive = (1.0 - c.luffing) * (1.0 - 0.5 * c.stalled);
+    ((resultant / 1.5) * alive).clamp(0.0, 1.0) as f32
+}
+
+/// How often the hull meets a wave, in seconds.
+///
+/// The wave period as the *boat* experiences it, which is not the period of the sea:
+/// going with them she meets them slowly and punching into them she meets them fast,
+/// and the difference is large — a four-second sea met at seven knots head-on arrives
+/// every two and a half, and the same sea from astern every eight or more.
+///
+/// `Te = T / |1 - (V/c) cos mu|`, where c is the wave's own speed `gT/2pi` and mu is the
+/// angle between where she is going and where they are going. The denominator goes to
+/// nothing when she is running at exactly wave speed — which is surfing, and which the
+/// clamp on the result handles by leaving the tempo to the wind.
+fn encounter_period(sim: &Sim) -> f64 {
+    let t = &sim.sim.telemetry;
+    let period = sim.sim.water.peak_period_or(3.0);
+    if period < 0.5 {
+        return 0.0;
+    }
+    let wave_speed = 9.81 * period / std::f64::consts::TAU;
+    // The sea runs with the wind, so the angle between her course and the waves is her
+    // true wind angle — which is the one number a sailor already has in front of them.
+    let mu = std::f64::consts::PI - t.twa.abs();
+    let relative = 1.0 - (t.stw / wave_speed) * mu.cos();
+    if relative.abs() < 0.08 {
+        return 0.0;
+    }
+    period / relative.abs()
+}
+
 /// Read the boat and the sky, and decide what kind of music this is.
 ///
 /// Every line of this is a relation somebody could argue with on the water, which is the
@@ -282,11 +348,32 @@ fn asking(sim: &Sim, hour: f32, tonic: f32) -> Asking {
     let force = crate::weather::force(wind as f64) as f32;
     let twa = sail_core::units::deg(t.twa).abs() as f32;
 
+    // The rhythm section is the hull meeting the sea, so the tempo is chosen to lock to
+    // it rather than to run across it.
+    //
+    // This is the best idea anybody has had about this soundtrack and it belongs to the
+    // sailor. A boat in a seaway is already making a rhythm — the slap under the bow,
+    // the shoulder going in, the quarter wave — and it is a *steady* rhythm with a period
+    // you can calculate: the encounter period, which is the wave period stretched or
+    // squeezed by how fast she is going through them and at what angle. Music laid over
+    // that at an unrelated tempo is two rhythms in the same room. Music whose beat
+    // divides it is one.
+    //
+    // So the wind proposes a tempo and the sea rounds it: pick the whole number of beats
+    // per wave that lands nearest what the wind asked for. Eight beats to a four-second
+    // wave is a hundred and twenty; punching into a short sea at speed gives a quicker
+    // encounter and a quicker tune, which is also what it feels like.
+    let proposed = (52.0 + 9.0 * force.min(6.0)).clamp(52.0, 112.0);
+    let encounter = encounter_period(sim) as f32;
+    let tempo = if encounter > 0.8 && encounter < 14.0 {
+        let beats = (proposed * encounter / 60.0).round().clamp(2.0, 24.0);
+        (beats * 60.0 / encounter).clamp(48.0, 124.0)
+    } else {
+        proposed
+    };
+
     Asking {
-        // The wind sets the pulse. Five knots is a drift and a slow air; thirty is not
-        // the moment for a jig, so it climbs and then stops climbing — past a gale the
-        // music is not getting faster, it is getting *thinner*.
-        tempo: (52.0 + 9.0 * force.min(6.0)).clamp(52.0, 112.0),
+        tempo,
         // The point of sail chooses the metre, which is where the shanty came from: four
         // to haul to, close-hauled; six-eight rolling off the wind; three in light airs
         // when nothing is being hauled at all and the boat is only drifting.
@@ -385,7 +472,10 @@ pub fn compose(
             // speed — four semiquavers to a beat, and the first of each is the one the
             // ear counts.
             let on_the_beat = tick % 4 == 0;
-            p.clack(if on_the_beat { 0.5 } else { 0.22 } * hush);
+            // The music's own block, not her gear — see the note in `sound.rs`. A fill
+            // played on a winch would make the winch mean two things, and one of them is
+            // something you need to be able to hear.
+            p.tick(if on_the_beat { 0.75 } else { 0.3 } * hush);
             if music.bridge <= 0 {
                 // Arrived. The new plan starts on a phrase boundary, which is where the
                 // bridge was put so that it would.
@@ -474,12 +564,28 @@ pub fn compose(
             seed ^= seed << 5;
             seed as f32 / u32::MAX as f32
         };
-        music.motif = Some(Motif::invent(&mut rng));
+        music.motif = Some([Motif::invent(&mut rng), Motif::invent(&mut rng)]);
         music.rng = seed;
     }
-    let motif = music.motif.expect("just set");
+    let motifs = music.motif.expect("just set");
 
-    let (lift, upside_down) = how_to_say_it(bar);
+    // What each sail is doing, which is what each voice is.
+    let head_work = worked(&t.jib).max(worked(&t.jib_upper) * 0.8);
+    let main_work = worked(&t.main).max(worked(&t.main_upper) * 0.8);
+    let stay_work = if sim.controls.staysail > 0.02 {
+        // The staysail shares the headsail's telemetry slot, so what says it is there is
+        // the halyard rather than a force of its own.
+        head_work * 0.8
+    } else {
+        0.0
+    };
+
+    let (strain, lift, upside_down, cadence) = how_to_say_it(bar);
+    let motif = motifs[strain];
+    // Which time through this is. A session player never plays a repeat the way he
+    // played it the first time — same bones, different flesh — and that is most of what
+    // makes a tune played for five minutes bearable rather than a loop.
+    let repeat = (step.div_euclid(per_bar * PHRASE as i64) % 2) as u32;
     // Copied out, so the closure does not hold a borrow of the resource the notes are
     // also writing to.
     let tonic = music.tonic;
@@ -492,7 +598,21 @@ pub fn compose(
     // The tune. The motif, said the way this bar says it, on the chord this bar sits on.
     let spoken = motif.at(in_bar).map(|d| {
         let turned = if upside_down { -d } else { d };
-        chord + lift + turned
+        let mut deg = chord + lift + turned;
+        // The cadence bar lands rather than carries on: the half cadence at the end of
+        // the A part comes to rest on the fifth, and the end of the whole phrase comes
+        // home to the tonic. Without this a tune has no punctuation at all — it is eight
+        // bars of saying things and never finishing a sentence.
+        if cadence && in_bar >= per_bar as usize - 2 {
+            deg = if bar == PHRASE - 1 { 0 } else { 4 };
+        }
+        // And the second time through, the bones get different flesh. One note displaced
+        // up a third is the commonest variation there is and it never sounds wrong,
+        // because a third up is still in the chord.
+        if repeat == 1 && !cadence && in_bar % 4 == 2 {
+            deg += 2;
+        }
+        deg
     });
 
     if let Some(mut degree) = spoken {
@@ -505,24 +625,50 @@ pub fn compose(
         }
         music.degree = degree;
         let weight = if strong { 1.0 } else { 0.72 };
-        p.strike(hz(degree, 1.0), want.level * weight * hush);
+        // The melody is the headsail's. It is the sail you look at, the one that decides
+        // whether she is going, and the one a trimmer's hands are on — so it carries the
+        // tune, and it carries it only while there is a headsail doing something.
+        p.strike(hz(degree, 1.0), want.level * weight * hush * head_work);
         // Going well, the melody is doubled an octave up — the oldest way there is of
         // saying the same thing brighter, and it arrives exactly when she does.
         if flying && strong {
-            p.strike(hz(degree, 2.0), want.level * 0.4 * hush);
+            p.strike(hz(degree, 2.0), want.level * 0.4 * hush * head_work);
         }
-    } else if going > 0.45 && !ink.0 {
-        // The passing notes: only when she is moving, and only in the vanilla picture,
-        // because a chip has no voices to spare for them. Between the motif's notes,
-        // stepping towards wherever it goes next.
-        let step_to = music.degree + if music.next() < 0.5 { 1 } else { -1 };
-        p.strike(hz(step_to, 1.0), want.level * 0.34 * going * hush);
+    } else if going > 0.35 {
+        // The quaver the motif does not speak on, and what a player puts there.
+        //
+        // Not a random passing note, which is what was here and which sounds like
+        // filling. What a piper or a fiddler does is *cut*: a flick of the note above,
+        // short and unaccented, immediately before the note that matters. It is the
+        // single most idiomatic thing in this music — the ornament that makes a whistle
+        // sound like a whistle rather than a recorder — and it costs one strike in a slot
+        // that was silent anyway.
+        //
+        // Only when she is going, because ornament is what a player adds when the tune
+        // is running and the hands are free.
+        let coming = motif.at((in_bar + 1).min(7)).map(|d| {
+            let turned = if upside_down { -d } else { d };
+            chord + lift + turned
+        });
+        if let Some(next) = coming {
+            // A step above whatever is about to be played, which is what a cut is.
+            p.strike(hz(next + 1, 1.0), want.level * 0.22 * going * hush);
+        } else if going > 0.55 && !ink.0 {
+            // And in the gaps with nothing coming, a passing note towards where the tune
+            // was — only in the vanilla picture, because a chip has no voice to spare.
+            let step_to = music.degree + if music.next() < 0.5 { 1 } else { -1 };
+            p.strike(hz(step_to, 1.0), want.level * 0.3 * going * hush);
+        }
     }
 
     // The left hand. A chord on the downbeat, which is what makes this a piano and not a
     // whistle — and spread a little rather than struck dead together, because nobody's
     // hand lands flat and the spread is most of what makes it sound played.
-    if strong && !ink.0 {
+    // The mainsail is the ground: the chord under everything, which is what a mainsail
+    // is to a sail plan. Reef it down and the harmony goes quiet; hand it and there is no
+    // chord at all and the melody is left standing on its own, which is precisely how a
+    // boat under headsail alone sounds to sail.
+    if strong && !ink.0 && main_work > 0.05 {
         // Both of these modes are minor, so the third of the chord is the same in each —
         // which is worth saying because it is the one interval somebody would expect to
         // change with the mode and it does not. What dorian moves is the sixth, four
@@ -532,15 +678,26 @@ pub fn compose(
             let fatten = if want.fullness > 0.6 || i < 2 { 1.0 } else { 0.0 };
             p.strike(
                 hz(chord + tone, -1.0),
-                want.level * 0.5 * fatten * hush * (1.0 - 0.1 * i as f32),
+                want.level * 0.5 * fatten * hush * main_work * (1.0 - 0.1 * i as f32),
             );
         }
     }
 
     // And the bass, which holds under a long sea and walks under a short one.
     let swell = sim.sim.water.significant_height() > 1.2;
-    if strong || (!swell && in_bar == (per_bar / 2) as usize && going > 0.5) {
-        p.strike(hz(chord, -2.0), want.level * 0.7 * hush);
+    if (strong || (!swell && in_bar == (per_bar / 2) as usize && going > 0.5))
+        && main_work > 0.05
+    {
+        p.strike(hz(chord, -2.0), want.level * 0.7 * hush * main_work);
+    }
+
+    // And the staysail, when it is set, is the counter-line under the melody — a second
+    // voice that is only there when there is a second sail making it.
+    if stay_work > 0.05 && in_bar % 4 == 2 {
+        p.strike(
+            hz(music.degree - 2, 0.0),
+            want.level * 0.45 * hush * stay_work,
+        );
     }
 
     if strong || (want.beats == 4 && in_bar == (per_bar / 2) as usize) {
