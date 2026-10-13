@@ -287,12 +287,28 @@ impl Plucked {
             // Falling roughly as one over n, and harder as the note is played softer —
             // a quiet piano note is not a loud one turned down, it is rounder.
             let brightness = 0.35 + 0.65 * velocity;
-            self.amp[n] = velocity / partial.powf(1.25 + 0.9 * (1.0 - brightness));
+            self.amp[n] = 1.0 / partial.powf(1.25 + 0.9 * (1.0 - brightness));
             // The stretched partial, and its own decay — higher partials die first.
             self.decay[n] = 1.0 / (base / (1.0 + 0.55 * n as f32));
             let _ = b;
         }
         self.stretch = b;
+        // Normalised so that one note at full velocity peaks at one, whatever the
+        // brightness did to the partials.
+        //
+        // Without this a note's loudness was the *sum* of six partials each starting at
+        // the velocity — about twice what was intended — and five of those ringing at
+        // once put ten through a mix that soft-clips at one. The clip is a limiter, and a
+        // limiter fed something that loud ducks everything else under it: reported from
+        // the deck as the music interrupting the sea, which is exactly what it was doing.
+        // The sea is the thing this game sounds like; the music plays over it and not
+        // instead of it.
+        let total: f32 = self.amp.iter().sum();
+        if total > 0.0 {
+            for a in &mut self.amp {
+                *a *= velocity / total;
+            }
+        }
     }
 
     fn next(&mut self, dt: f32, noise: f32) -> f32 {
@@ -669,7 +685,10 @@ impl Iterator for SeaStream {
                 song += self.voices[v].next(dt, n);
             }
         }
-        song *= 0.22;
+        // On the same scale as every other voice in here, and then some: the sea is the
+        // ground and the music is over it. A chord of five peaks around a third of what
+        // the wind alone is doing.
+        song *= MASTER * 0.85;
 
         // The beat, which exists so the music has a floor to stand on when the voices
         // thin out — and which is a woodblock rather than a drum, because this is a
