@@ -334,6 +334,51 @@ pub fn gather(
     // the boat comes round, and that is what this does now — five seconds of somebody
     // trimming, which is about as long as a gybe takes and not nearly long enough to
     // sail the boat for you.
+    // --- Dump: the other half of the sheet, and the one you need in a hurry ---------
+    //
+    // `T` hauls towards the right trim. There was nothing that let it *go*, and letting
+    // it go is the thing you do first and fastest: a gust arrives, she lies over, and
+    // what a crew does is dump the mainsheet — not trim it correctly, dump it — and sort
+    // the shape out once she is on her feet again.
+    //
+    // Held rather than pressed, because that is what a hand on a clutch is. The rate is
+    // the sheet running out through the jammer and it is quick: a main can be dumped in
+    // a second and a half, which is the difference between a broach and a wobble.
+    //
+    // The mainsail first and then the headsail, which is the order that works and the
+    // order a crew uses. The main is up high with a long lever and it is the sail that
+    // spills cleanly: eased, it lets the top go first and the heeling moment comes off
+    // before the drive does. A headsail eased just stops working. So the main goes to
+    // the shrouds before the genoa is touched at all.
+    //
+    // It stops at the heel it is aiming for rather than running the sheets right out,
+    // and it never hauls anything back in — this is a release, and a control that both
+    // eased and trimmed would be `T` with a different name.
+    if keys.pressed(KeyCode::KeyR) || pad.is_some_and(|p| p.pressed(GamepadButton::West)) {
+        let heel = sim.sim.telemetry.heel.abs();
+        let over = ((heel - sail_core::autopilot::OVERPOWERED_HEEL)
+            / sail_core::autopilot::OVERPOWERED_HEEL)
+            .clamp(0.0, 1.0) as f32;
+        if over > 0.0 {
+            // A second and a half of travel when she is right over, and still four
+            // seconds when she is barely past the mark — because a hand on a clutch
+            // does not meter the rope out in proportion to anything, it opens it. The
+            // proportional part is there so the last of it comes off gently instead of
+            // the sheet running out and the boom slamming against the shrouds.
+            let run = (0.7 * (0.35 + 0.65 * over) * dt as f32).min(1.0);
+            let main_room = 1.0 - sim.controls.main_sheet as f32;
+            if main_room > 0.01 {
+                sim.controls.main_sheet =
+                    (sim.controls.main_sheet + run as f64).clamp(0.0, 1.0);
+            } else {
+                sim.controls.jib_sheet = (sim.controls.jib_sheet + run as f64).clamp(0.0, 1.0);
+            }
+            // And it takes the hands off whatever `T` was doing, or the two of them
+            // fight over the same winch.
+            *assisting = 0.0;
+        }
+    }
+
     // One sail at a time, and the order is the order a crew works in.
     //
     // It took both sheets at once, which is two people and this boat has one of you. A
