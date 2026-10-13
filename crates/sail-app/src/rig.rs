@@ -500,7 +500,27 @@ pub fn update(
                     if starboard { 1.0 } else { -1.0 },
                     t.jib.chord_angle as f32,
                 );
-                let clew = shape.clew;
+                // And where the *cloth* ends, not where the geometry says: the corner is
+                // pushed off the mast, the shrouds and the deck like every other point
+                // on the sail, so a rope drawn to the unpushed corner misses it by
+                // exactly the push.
+                let shrouds = crate::boat::shroud_polyline(
+                    cfg.beam as f32,
+                    lee > 0.0,
+                    st.heel as f32,
+                    lee,
+                );
+                let chord = (shape.clew - shape.tack).normalize_or_zero();
+                let mut normal = Vec3::Y.cross(chord).normalize_or_zero();
+                if normal.x * lee < 0.0 {
+                    normal = -normal;
+                }
+                let clew = crate::boat::constrained(
+                    shape.clew,
+                    normal,
+                    &shrouds,
+                    sim.controls.headsail == sail_core::state::Headsail::Genoa,
+                );
                 // A flying sail is sheeted to a block on the quarter, right aft, not to
                 // the genoa track — which is why the car does nothing when one is up.
                 let car_at = if sim.controls.headsail == sail_core::state::Headsail::Genoa {

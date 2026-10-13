@@ -1207,7 +1207,7 @@ pub fn shroud(beam: f32, starboard: bool) -> (Vec3, Vec3) {
 /// disagreed: the cloth was held off the straight line between the shroud's ends while
 /// the wire itself was drawn hanging below it, so it cut through a sail that was, by
 /// its own lights, perfectly clear. Both now come from the same two functions.
-fn shroud_polyline(beam: f32, starboard: bool, heel: f32, lee: f32) -> Vec<Vec3> {
+pub fn shroud_polyline(beam: f32, starboard: bool, heel: f32, lee: f32) -> Vec<Vec3> {
     let (top, foot) = shroud(beam, starboard);
     let slack = crate::rig::shroud_slack(starboard, heel, lee);
     let sag = crate::rig::line_sag((foot - top).length(), 1.0 - slack, true);
@@ -1274,6 +1274,28 @@ const MAST_CLEARANCE: f32 = 0.16;
 ///
 /// Only the headsail is held off. The mainsail's luff is bent *on* the mast; pushing
 /// it clear would tear the sail off the spar it is attached to.
+/// Everything that pushes a piece of sailcloth about, in one place.
+///
+/// The mast, the shrouds and the deck, applied in that order, to a single point. It
+/// exists because the sheet has to end where the *cloth* ends and the cloth is not where
+/// the geometry says: the corner is computed from three points and then shoved by
+/// whatever it is leaning on, so a rope drawn to the unshoved corner misses the sail by
+/// however much the shove was. Reported from the deck as the sheet not reaching the
+/// clew, and it did not.
+pub fn constrained(point: Vec3, normal: Vec3, shrouds: &[Vec3], clear_mast: bool) -> Vec3 {
+    let point = clear_of_shrouds(point, normal, shrouds);
+    let point = if clear_mast { clear_of_mast(point) } else { point };
+    let floor = crate::deck::deck_height(point.z) + 0.05;
+    const BAND: f32 = 0.25;
+    let above = (point.y - floor) / BAND;
+    let eased = if above > 8.0 {
+        point.y
+    } else {
+        floor + BAND * (1.0 + above.exp()).ln()
+    };
+    Vec3::new(point.x, eased, point.z)
+}
+
 /// A push that has no corner in it: zero well clear, the full amount well inside, and a
 /// smooth bend in between.
 ///
@@ -1663,34 +1685,7 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
                 * free_edge
                 * chord_length.max(0.4);
             let point = luff.lerp(leech, v) + normal * (belly + flap + crease) - Vec3::Y * droop;
-            let point = clear_of_shrouds(point, normal, shrouds);
-            let point = if clear_mast {
-                clear_of_mast(point)
-            } else {
-                point
-            };
-            // And never below the deck — but gently. A headsail flogging head to wind
-            // swept down through the planking and across the companionway hatch, which
-            // no amount of cloth can do: it lies *on* the deck.
-            //
-            // Clamping it with a maximum did stop that and left a crease: everything
-            // below the line was flattened onto one plane, everything above it was not,
-            // and the join between them was a fold straight across the sail. Cloth does
-            // not fold like that when it meets a surface — it comes down to the deck and
-            // flattens out *into* it over a hand's breadth.
-            //
-            // A softplus is that: it is the maximum, rounded off over a band, and it has
-            // no corner in it anywhere. Twenty-five centimetres of band, which is about
-            // how far up a sail you can see the deck pushing back.
-            let floor = crate::deck::deck_height(point.z) + 0.05;
-            const BAND: f32 = 0.25;
-            let above = (point.y - floor) / BAND;
-            let eased = if above > 8.0 {
-                point.y
-            } else {
-                floor + BAND * (1.0 + above.exp()).ln()
-            };
-            let point = Vec3::new(point.x, eased, point.z);
+            let point = constrained(point, normal, shrouds, clear_mast);
             positions.push(point);
             // Metres, not a normalised zero to one. A panel of sailcloth is a metre
             // wide whatever sail it is in, so the seams have to be laid out in the
