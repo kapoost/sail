@@ -402,6 +402,9 @@ pub fn restart(
         fresh.pos = course.harbours[course.from].at;
         fresh.time = sim.sim.state.time;
         sim.sim.recover(fresh);
+        // And a fresh sail plan with her, or the gennaker that just blew out is still
+        // set when she reappears and goes again inside a second.
+        sim.controls = sail_core::sim::Simulation::safe_rig();
     }
 }
 

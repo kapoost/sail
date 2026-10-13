@@ -65,6 +65,9 @@ mod ink {
 pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut chart: ResMut<Chart>) {
     if keys.just_pressed(KeyCode::KeyM) {
         chart.open = !chart.open;
+        if std::env::var("SAIL_KEYS").is_ok() {
+            info!("chart: M -> {}", chart.open);
+        }
     }
     if chart.open {
         if keys.just_pressed(KeyCode::BracketRight) {

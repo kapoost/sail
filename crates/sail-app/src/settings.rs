@@ -48,9 +48,29 @@ impl Default for Settings {
     }
 }
 
-/// Escape opens it, which is the one key everybody tries first.
-pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut settings: ResMut<Settings>) {
-    if keys.just_pressed(KeyCode::Escape) {
+/// Escape, which is the one key everybody tries first — and the only system allowed to
+/// have it.
+///
+/// It was two systems: this one toggled the settings and the help panel closed itself.
+/// Both fired on the same press, so Escape with the help up closed the help *and opened
+/// the settings* — which from the deck is "sometimes Escape does not close the menu",
+/// because what you saw was a menu appearing as the other one went.
+///
+/// One key, one owner, one rule: Escape closes the topmost thing that is open, and if
+/// nothing is open it opens the settings. The chart is not in that stack because it is
+/// an instrument rather than a modal — you sail with it up, and a key that put it away
+/// every time you reached for Escape would be a nuisance.
+pub fn toggle(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut settings: ResMut<Settings>,
+    mut help: ResMut<crate::help::Help>,
+) {
+    if !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    if help.open {
+        help.open = false;
+    } else {
         settings.open = !settings.open;
     }
 }

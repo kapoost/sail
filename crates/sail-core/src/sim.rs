@@ -175,6 +175,26 @@ impl Simulation {
     /// The mishap is sticky by design — a sail that has blown out does not come back —
     /// so there has to be one way to say "another boat, another consignment", and this
     /// is it. It does not undo the sailing; it hands you a new one.
+    /// What a fresh boat is rigged with: everything shortened right down.
+    ///
+    /// Because handing somebody the same sail plan that just killed them is not a fresh
+    /// boat, it is the same accident with a loading screen. The gennaker that blew out
+    /// in twenty-six knots is still set the instant she exists again, and it blows out
+    /// again before the words have faded — which is what "L does not reset" looks like
+    /// from the deck. She starts under a deep reef with the headsail rolled away, which
+    /// is how you leave a dock in weather you do not know yet.
+    pub fn safe_rig() -> Controls {
+        Controls {
+            reef: 1.0,
+            furl: 1.0,
+            staysail: 0.0,
+            rudder: 0.0,
+            headsail: crate::state::Headsail::Genoa,
+            headsail_aback: false,
+            ..Default::default()
+        }
+    }
+
     pub fn recover(&mut self, at: BoatState) {
         self.state = at;
         self.prev_state = at;

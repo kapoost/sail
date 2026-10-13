@@ -26,9 +26,6 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut help: ResMut<Help>) {
     if asked {
         help.open = !help.open;
     }
-    if help.open && keys.just_pressed(KeyCode::Escape) {
-        help.open = false;
-    }
 }
 
 /// Everything the boat answers to.
