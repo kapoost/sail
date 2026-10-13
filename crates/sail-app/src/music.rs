@@ -446,17 +446,36 @@ pub fn compose(
     // which is louder, in the way that mattering is louder than volume. And a boat lying
     // over past the point of being sailed has a sound of her own already.
     let dying = t.mishap.is_some();
-    let squall = sim
+    // How near the nearest squall is, as a thing that can be built on rather than a
+    // switch that is thrown.
+    //
+    // This is what a game can do that a film cannot. A composer scoring a storm has to
+    // guess when it will arrive and write towards that guess; here the squall is an
+    // object with a position and a radius, so the tension can be keyed to the actual
+    // distance and be *right* — it grows because the thing is nearer, not because the
+    // music has decided it is time.
+    //
+    // Nought at four radii out, which is far enough that you can only see it as a dark
+    // patch, and one when the edge of it reaches her. Past that it is not a warning any
+    // more, it is weather.
+    let approach = sim
         .sim
         .wind
         .squalls()
         .iter()
-        .any(|&(at, radius, _)| (at - sim.sim.state.pos).length() < radius * 2.2);
+        .map(|&(at, radius, _)| {
+            let away = (at - sim.sim.state.pos).length() / radius.max(50.0);
+            ((4.0 - away) / 3.0).clamp(0.0, 1.0) as f32
+        })
+        .fold(0.0_f32, f32::max);
+    let inside = approach >= 1.0;
     let pressed = t.heel.abs() > sail_core::autopilot::OVERPOWERED_HEEL * 1.6;
     let hush = if dying {
         0.0
-    } else if squall {
-        0.3
+    } else if inside {
+        // Arrived. The release is the squall itself: the band stops and the sea has the
+        // floor, which is louder than any climax that could have been written for it.
+        0.25
     } else if pressed {
         0.6
     } else {
@@ -676,7 +695,12 @@ pub fn compose(
         // The melody is the headsail's. It is the sail you look at, the one that decides
         // whether she is going, and the one a trimmer's hands are on — so it carries the
         // tune, and it carries it only while there is a headsail doing something.
-        p.strike(hz(degree, 1.0), want.level * weight * hush * head_work);
+        // The tune thins out as a squall comes on and is gone before it arrives.
+        let left = (1.0 - approach * 1.3).clamp(0.0, 1.0);
+        p.strike(
+            hz(degree, 1.0),
+            want.level * weight * hush * head_work * left,
+        );
         // Going well, the melody is doubled an octave up — the oldest way there is of
         // saying the same thing brighter, and it arrives exactly when she does.
         if flying && strong {
@@ -706,6 +730,50 @@ pub fn compose(
             // was — only in the vanilla picture, because a chip has no voice to spare.
             let step_to = music.degree + if music.next() < 0.5 { 1 } else { -1 };
             p.strike(hz(step_to, 1.0), want.level * 0.3 * going * hush);
+        }
+    }
+
+    // A squall coming, built rather than announced.
+    //
+    // Four things, all of them keyed to the distance, and all of them older than film:
+    //
+    // * **The tune goes.** The melody thins and then stops, so the ear has nothing to
+    //   hold on to — which is the oldest trick there is for making somebody uneasy and
+    //   needs nothing added to do it.
+    // * **A pedal appears**, low and unmoving, and it does not belong to the harmony
+    //   above it. A note that will not go away is a thing being waited for.
+    // * **A semitone above it**, once it is close. The minor second is simply the most
+    //   uncomfortable interval there is, and against a pedal it is unbearable in exactly
+    //   the way that is wanted: not loud, not fast, just wrong and not stopping.
+    // * **The pulse quickens.** Quavers, then semiquavers, then a tremolo — a heartbeat
+    //   rather than a drum roll, which is why the rate rises instead of the volume.
+    if approach > 0.15 && !inside {
+        let near = ((approach - 0.15) / 0.85).clamp(0.0, 1.0);
+        if strong {
+            p.strike(hz(0, -2.0), (0.25 + 0.6 * near) * hush);
+        }
+        if near > 0.45 && strong {
+            // The semitone. Not in the scale at all, which is the point — it is not part
+            // of the music, it is the thing arriving.
+            p.strike(music.tonic * 2.0_f32.powf(1.0 / 12.0) * 0.25, 0.3 * near * hush);
+        }
+        // The pulse quickens by *thinning the gaps* rather than by playing faster than
+        // the composer can place: every fourth quaver while it is still a dark patch on
+        // the horizon, every other one when it has a shape, every one when it is close.
+        //
+        // The first version of this struck twice in the same step for the close case,
+        // which does nothing at all — the slot is a store and the second strike only
+        // overwrites the first. A comment claiming a thing the code did not do is worse
+        // than the missing beat.
+        let every = if near > 0.7 {
+            1
+        } else if near > 0.4 {
+            2
+        } else {
+            4
+        };
+        if in_bar.is_multiple_of(every) {
+            p.tick((0.15 + 0.55 * near) * hush);
         }
     }
 
