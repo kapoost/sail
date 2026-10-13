@@ -822,6 +822,9 @@ pub fn update_sails(
                     },
                     twist,
                     luffing: forces.coeffs.luffing as f32,
+                    // Thirty knots of apparent wind is as hard as a sail ever shakes;
+                    // past that you have already taken it down.
+                    shake: (t_.aws as f32 / 15.4).clamp(0.0, 1.0),
                     // What the sail is cut to, plus what the wind puts into it.
                     //
                     // The camber in the trim is the designed shape — what the outhaul
@@ -1705,6 +1708,8 @@ struct SailTrim<'a> {
     /// Whether this sail has to keep clear of the mast. The main does not: its luff
     /// is bent on to it.
     clear_mast: bool,
+    /// How hard the wind is, 0 to 1, for the speed of the flogging.
+    shake: f32,
 }
 
 fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
@@ -1718,6 +1723,7 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         draft_at,
         shrouds,
         clear_mast,
+        shake,
     } = *trim;
     let mut positions = Vec::with_capacity(SAIL_U * SAIL_V);
     let mut uvs = Vec::with_capacity(SAIL_U * SAIL_V);
@@ -1823,9 +1829,25 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
             // the outhaul, so the shaking vanishes at v = 0, at u = 0, and therefore
             // at the corner where the two meet.
             let free_edge = v * u.powf(0.65);
-            let flap = (now * 9.0 + u * 5.0 + v * 3.0).sin()
+            // Flogging, and it has to *look* like flogging.
+            //
+            // One sine at nine radians a second and four tenths of a chord of amplitude
+            // is a sail breathing. What a sail head to wind actually does is crack: it
+            // shakes through its whole width, hard enough to be the loudest thing on the
+            // boat and fast enough that you cannot count it, and the leech snaps a beat
+            // of its own. Reported from the deck as a mainsail standing like a sheet of
+            // tin with the instruments saying LUFFING beside it.
+            //
+            // Two beats rather than one, because a single frequency reads as a wave
+            // travelling and not as cloth losing its shape — and the second one is
+            // deliberately not a multiple of the first. The rate goes with the wind,
+            // which is the thing that makes it read as violence rather than as motion:
+            // a sail flogging in six knots waves, and in thirty it is a machine gun.
+            let beat = 7.0 + 11.0 * shake;
+            let flap = ((now * beat + u * 5.0 + v * 3.0).sin() * 0.62
+                + (now * beat * 1.7 + u * 9.0 - v * 4.0).sin() * 0.38)
                 * luffing
-                * 0.42
+                * 1.05
                 * free_edge
                 * chord_length.max(0.4);
             let point = luff.lerp(leech, v) + normal * (belly + flap + crease) - Vec3::Y * droop;
@@ -2062,6 +2084,9 @@ mod cloth_stays_cloth {
                 &[]
             },
             clear_mast: true,
+            // Still, so the fold this looks for is the sail's own shape and not a beat
+            // of the flogging caught at the wrong moment.
+            shake: 0.0,
         };
         let mut mesh = Mesh::new(
             bevy::mesh::PrimitiveTopology::TriangleList,
