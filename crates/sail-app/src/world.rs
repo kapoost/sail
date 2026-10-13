@@ -98,30 +98,38 @@ pub fn setup(
     // The ripple animation, baked here so the first frame is ready before anything is
     // drawn. `SAIL_WATER_FRAMES=0` turns it off and leaves the still map, which is both
     // an escape hatch and the way to see what the motion is actually buying.
-    let animated = std::env::var("SAIL_WATER_FRAMES").is_ok_and(|v| v == "0");
-    let film: Vec<Handle<Image>> = if animated {
-        Vec::new()
-    } else {
+    let still = std::env::var("SAIL_WATER_FRAMES").is_ok_and(|v| v == "0");
+    let mut keys: Vec<Vec<u8>> = Vec::new();
+    let mut live = sea_texture::normal_map();
+    if !still {
         let started = std::time::Instant::now();
-        let frames: Vec<Handle<Image>> = sea_texture::normal_map_frames()
+        let frames = sea_texture::normal_map_frames();
+        let bytes: usize = frames
+            .first()
+            .and_then(|f| f.data.as_ref())
+            .map_or(0, Vec::len);
+        keys = frames
             .into_iter()
-            .map(|f| images.add(f))
+            .filter_map(|f| f.data)
+            .filter(|d| d.len() == bytes && bytes > 0)
             .collect();
         info!(
-            "water: {} ripple frames over {:.1} s, baked in {:.2} s",
-            frames.len(),
+            "water: {} ripple frames over {:.1} s at {:.0} fps, {:.1} MB of key frames, \
+             baked in {:.2} s",
+            keys.len(),
             sea_texture::RIPPLE_LOOP,
+            keys.len() as f32 / sea_texture::RIPPLE_LOOP,
+            (keys.len() * bytes) as f32 / 1.0e6,
             started.elapsed().as_secs_f32()
         );
-        frames
-    };
-    let first = film
-        .first()
-        .cloned()
-        .unwrap_or_else(|| images.add(sea_texture::normal_map()));
+        // The live image starts as the first key frame, mip chain and all, so the very
+        // first frame drawn is already the right shape.
+        live = sea_texture::normal_map_at_size(sea_texture::ANIM_SIZE, 0.0);
+    }
+    let first = images.add(live);
     let water = materials.add(StandardMaterial {
         base_color: Color::WHITE,
-        normal_map_texture: Some(first),
+        normal_map_texture: Some(first.clone()),
         metallic_roughness_texture: Some(images.add(sea_texture::roughness_map())),
         perceptual_roughness: 1.0,
         metallic: 0.0,
@@ -131,9 +139,9 @@ pub fn setup(
         ..default()
     });
     commands.insert_resource(SeaFilm {
-        frames: film,
-        material: Some(water.clone()),
-        shown: 0,
+        keys,
+        live: Some(first),
+        blended: None,
     });
 
     // Spacing chosen from what the sea is, not from a convenient curve.
@@ -336,9 +344,18 @@ fn stipple(parcel: glam::DVec2) -> f32 {
 /// cost paid once at startup, and after that showing one is a pointer swap.
 #[derive(Resource, Default)]
 pub struct SeaFilm {
-    frames: Vec<Handle<Image>>,
-    material: Option<Handle<StandardMaterial>>,
-    shown: usize,
+    /// The key frames, as bytes on the processor rather than textures on the card.
+    ///
+    /// They are never bound to anything now: what the material carries is one `live`
+    /// image that is written every frame as the blend of two of these. So the card
+    /// holds *one* ripple map instead of thirty-six, which is 37 MB of video memory
+    /// handed back, and the processor holds the key frames instead.
+    keys: Vec<Vec<u8>>,
+    /// The image the material actually samples. The material itself no longer needs
+    /// holding: the handle never changes now, only the bytes behind it.
+    live: Option<Handle<Image>>,
+    /// Which pair was last written, so an unchanged blend is not written again.
+    blended: Option<(usize, u16)>,
 }
 
 /// Show the frame the clock is on.
@@ -349,26 +366,65 @@ pub struct SeaFilm {
 pub fn roll_sea_film(
     time: Res<Time>,
     mut film: ResMut<SeaFilm>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
-    if film.frames.is_empty() {
+    if film.keys.len() < 2 {
         return;
     }
-    let count = film.frames.len();
-    let phase = time.elapsed_secs() / sea_texture::RIPPLE_LOOP;
-    let want = ((phase.fract() + 1.0).fract() * count as f32) as usize % count;
-    if want == film.shown {
+    let count = film.keys.len();
+    let phase = (time.elapsed_secs() / sea_texture::RIPPLE_LOOP).fract();
+    let phase = (phase + 1.0).fract() * count as f32;
+    let i = phase.floor() as usize % count;
+    let f = phase - phase.floor();
+
+    // Quantised to a few hundred steps, which is the only reason this is cheap: a blend
+    // that has not visibly changed is not written, so standing still costs nothing and
+    // the texture is rewritten at most a few times a frame's worth of motion.
+    let step = (f * BLEND_STEPS as f32) as u16;
+    if film.blended == Some((i, step)) {
         return;
     }
-    film.shown = want;
-    let Some(handle) = film.material.clone() else {
+    film.blended = Some((i, step));
+    let f = step as f32 / BLEND_STEPS as f32;
+
+    let Some(handle) = film.live.clone() else {
         return;
     };
-    let frame = film.frames[want].clone();
-    if let Some(m) = materials.get_mut(&handle).as_deref_mut() {
-        m.normal_map_texture = Some(frame);
+    let Some(mut target) = images.get_mut(&handle) else {
+        return;
+    };
+    let Some(out) = target.data.as_mut() else {
+        return;
+    };
+    let a = &film.keys[i];
+    let b = &film.keys[(i + 1) % count];
+    if out.len() != a.len() {
+        return;
+    }
+    // Thirty-six key frames over three seconds is twelve a second, and twelve a second
+    // steps visibly: the whole ripple pattern jumps five times out of every six display
+    // frames. Reported from the deck as the water clattering.
+    //
+    // So the frames become key frames and what the card samples is their blend. The
+    // whole buffer is interpolated, *mip levels included*, and that is the part that
+    // makes it affordable: box filtering is linear, so the mip chain of a blend is the
+    // blend of the mip chains, and there is nothing to rebuild. One linear pass over a
+    // megabyte and a half, no shader, and the motion is continuous rather than
+    // thirty-six positions.
+    let mix = (f * 256.0) as u32;
+    for ((o, &x), &y) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
+        *o = (((x as u32) * (256 - mix) + (y as u32) * mix) >> 8) as u8;
     }
 }
+
+/// How finely the blend between two key frames is stepped.
+///
+/// Not continuous, because the texture is only rewritten when the number changes and a
+/// truly continuous blend would rewrite it every single frame whether the water had
+/// moved or not. Sixty-four steps between key frames is 768 a second against the twelve
+/// it had — far past anything the eye resolves, and it means a boat sitting still in a
+/// calm does no work at all.
+const BLEND_STEPS: u16 = 64;
 
 /// Whether the sea is drawn rather than lit.
 #[derive(Resource, Default)]

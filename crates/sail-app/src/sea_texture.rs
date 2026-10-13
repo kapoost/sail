@@ -42,7 +42,7 @@ pub const TILE_METRES: f32 = 24.0;
 /// water, which is not a trade anyone would take. At 512 a tile texel is 4.7 cm and the
 /// shortest ripple in the spectrum still spans eleven of them, which is plenty to carry
 /// a smooth normal — and the window this is played in is 480 pixels across.
-const ANIM_SIZE: u32 = 512;
+pub const ANIM_SIZE: u32 = 512;
 
 /// How long the ripple animation takes to come back to itself, seconds.
 ///
@@ -142,7 +142,7 @@ fn ripples() -> Vec<Ripple> {
 
 /// Tangent-space normal map for the small-scale ripples.
 pub fn normal_map() -> Image {
-    normal_map_at(SIZE, 0.0)
+    normal_map_at_size(SIZE, 0.0)
 }
 
 /// The whole loop, as one image per frame.
@@ -163,7 +163,7 @@ pub fn normal_map_frames() -> Vec<Image> {
             handles.push(scope.spawn(move || {
                 for (i, cell) in slot.iter_mut().enumerate() {
                     let t = (base + i) as f32 / RIPPLE_FRAMES as f32 * RIPPLE_LOOP;
-                    *cell = Some(normal_map_at(ANIM_SIZE, t));
+                    *cell = Some(normal_map_at_size(ANIM_SIZE, t));
                 }
             }));
         }
@@ -175,7 +175,7 @@ pub fn normal_map_frames() -> Vec<Image> {
 }
 
 /// One frame of it, at a chosen resolution and a chosen moment in the loop.
-fn normal_map_at(size: u32, t: f32) -> Image {
+pub fn normal_map_at_size(size: u32, t: f32) -> Image {
     let spectrum = ripples();
     let mut data = Vec::with_capacity((size * size * 4) as usize);
     let n = size as f32;
