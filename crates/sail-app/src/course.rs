@@ -65,6 +65,8 @@ pub enum Leg {
 
 #[derive(Resource)]
 pub struct Course {
+    /// Set by the console button; cleared by [`restart`] the same frame.
+    pub wants_new: bool,
     pub harbours: Vec<Harbour>,
     pub from: usize,
     pub to: usize,
@@ -90,6 +92,7 @@ impl Course {
         // leaving from somewhere rather than materialising at sea.
         let from = nearest(&harbours, start);
         let mut course = Self {
+            wants_new: false,
             harbours,
             from,
             to: from,
@@ -377,7 +380,11 @@ pub fn restart(
     mut course: ResMut<Course>,
     mut marks: Query<&mut Floating, With<Destination>>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyL) {
+    // Either the key or the button on the console. This was `L` and nothing else, which
+    // made it one of the three things on the boat a mouse could not reach at all.
+    let asked = keys.just_pressed(KeyCode::KeyL) || course.wants_new;
+    course.wants_new = false;
+    if !asked {
         return;
     }
     let pos = sim.sim.state.pos;

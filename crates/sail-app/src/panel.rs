@@ -24,12 +24,10 @@ use bevy_egui::{egui, EguiContexts};
 use sail_core::prelude::*;
 use sail_core::state::Headsail;
 
-use crate::camera::View;
 use crate::clutch::{Bank, BANK};
 use crate::course::{clock, Course, Leg};
 use crate::input::Pilot;
 use crate::sim::Sim;
-use crate::sound::SoundHandle;
 
 /// Painted metal, cream dial faces, red needles. A deliberately small palette: the
 /// old panels were cheap to print and that is exactly why they read so well.
@@ -64,12 +62,9 @@ pub fn draw(
     mut sim: ResMut<Sim>,
     mut bank: ResMut<Bank>,
     mut pilot: ResMut<Pilot>,
-    mut view: ResMut<View>,
     mut console: ResMut<Console>,
-    mut hud: ResMut<crate::hud::HudVisible>,
     mut settings: ResMut<crate::settings::Settings>,
-    course: Res<Course>,
-    sound: Res<SoundHandle>,
+    mut course: ResMut<Course>,
     keys: Res<ButtonInput<KeyCode>>,
 ) -> Result {
     if keys.just_pressed(KeyCode::KeyH) {
@@ -246,24 +241,31 @@ pub fn draw(
                         .optimal_sheet(telemetry.awa, telemetry.jib.camber);
                     let mut main_sheet = sim.controls.main_sheet;
                     let mut jib_sheet = sim.controls.jib_sheet;
-                    if lever(
-                        ui,
-                        "MAIN",
-                        &mut main_sheet,
-                        Some(want_main),
-                        sail_state(&telemetry.main, 1.0 - sim.controls.reef * cfg.max_reef),
-                    ) {
-                        sim.controls.main_sheet = main_sheet;
-                    }
-                    if lever(
-                        ui,
-                        "GENOA",
-                        &mut jib_sheet,
-                        Some(want_jib),
-                        sail_state(&telemetry.jib, 1.0 - sim.controls.furl),
-                    ) {
-                        sim.controls.jib_sheet = jib_sheet;
-                    }
+                    // The two sheets. Trimming for you has no switch here and is the
+                    // one thing on the boat that does not: it stands for a crew doing
+                    // it, which is a different kind of act from putting your own hand
+                    // on a winch, and a button for it sat on the console inviting
+                    // itself to be pressed instead of the levers beside it. `T`.
+                    ui.horizontal_top(|ui| {
+                        if lever(
+                            ui,
+                            "MAIN",
+                            &mut main_sheet,
+                            Some(want_main),
+                            sail_state(&telemetry.main, 1.0 - sim.controls.reef * cfg.max_reef),
+                        ) {
+                            sim.controls.main_sheet = main_sheet;
+                        }
+                        if lever(
+                            ui,
+                            "GENOA",
+                            &mut jib_sheet,
+                            Some(want_jib),
+                            sail_state(&telemetry.jib, 1.0 - sim.controls.furl),
+                        ) {
+                            sim.controls.jib_sheet = jib_sheet;
+                        }
+                    });
 
                     ui.add_space(7.0);
                     separator(ui);
@@ -448,7 +450,7 @@ pub fn draw(
                                 (">", crate::input::PILOT_FINE),
                                 (">>", crate::input::PILOT_STEP),
                             ] {
-                                if small_button(ui, label).clicked() {
+                                if nudge_button(ui, label).clicked() {
                                     pilot.adjust(delta);
                                 }
                             }
@@ -459,7 +461,18 @@ pub fn draw(
                     separator(ui);
                     ui.add_space(7.0);
 
-                    // Everything else that had only a key.
+                    // What is left when everything that is a *setting* has gone to the
+                    // settings panel.
+                    //
+                    // The console's rule is that everything the keyboard can do the
+                    // mouse can do, and it was being read as though it also said
+                    // everything the mouse can do must be on the bar. It does not. The
+                    // sound switch was the mute key and the mute button in the menu and
+                    // a third copy here; the view and the diagnostic panel are a
+                    // preference and a microscope. Three switches came off the bar, and
+                    // in exchange the ink drawing and the resolution — which were keys
+                    // and nothing else, so the rule was being broken in the direction
+                    // that matters — can now be reached with a mouse at all.
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new("SHIP")
@@ -470,33 +483,19 @@ pub fn draw(
                         if small_button(ui, "SETTINGS  ESC").clicked() {
                             settings.open = !settings.open;
                         }
-                        if small_button(ui, "TRIM TO BEST").clicked() {
-                            let (m, j) = optimal_sheets(&cfg, telemetry.awa, sim.controls.outhaul);
-                            sim.controls.main_sheet = m;
-                            sim.controls.jib_sheet = j;
-                        }
+                        // The third of the keyboard-only three, and the one with
+                        // consequences, so it says what it will cost rather than
+                        // sitting there as a word.
                         if small_button(
                             ui,
-                            match *view {
-                                View::Cockpit => "VIEW: HELM",
-                                View::Chase => "VIEW: ASTERN",
+                            match course.leg {
+                                Leg::Idle => "TAKE A JOB  L",
+                                Leg::Carrying => "GIVE UP, NEW JOB",
                             },
                         )
                         .clicked()
                         {
-                            *view = match *view {
-                                View::Cockpit => View::Chase,
-                                View::Chase => View::Cockpit,
-                            };
-                        }
-                        let muted = sound.0.muted();
-                        if lamp_button(ui, if muted { "SOUND OFF" } else { "SOUND ON" }, !muted)
-                            .clicked()
-                        {
-                            sound.0.set_muted(!muted);
-                        }
-                        if lamp_button(ui, "DIAGNOSTICS", hud.0).clicked() {
-                            hud.0 = !hud.0;
+                            course.wants_new = true;
                         }
                     });
                 });
@@ -1115,6 +1114,26 @@ fn small_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
         .fill(paint::TRACK)
         .stroke(egui::Stroke::new(1.0, paint::BEZEL))
         .min_size(egui::vec2(96.0, 20.0)),
+    )
+}
+
+/// A button with nothing in it but an arrow, sized to the arrow.
+///
+/// `small_button` carries a 96 pixel floor so that a column of labelled switches lines
+/// up, which is right for a switch and badly wrong for four chevrons in a row: it put
+/// three hundred and eighty pixels of pilot across a console and opened a gap you could
+/// park the chart in.
+fn nudge_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(
+            egui::RichText::new(text)
+                .monospace()
+                .size(10.0)
+                .color(paint::FACE),
+        )
+        .fill(paint::TRACK)
+        .stroke(egui::Stroke::new(1.0, paint::BEZEL))
+        .min_size(egui::vec2(22.0, 20.0)),
     )
 }
 

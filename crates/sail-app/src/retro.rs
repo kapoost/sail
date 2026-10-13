@@ -125,6 +125,38 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut retro: ResMut<Retro>) {
     };
 }
 
+/// Cycle the picture on a timer, to go looking for the freeze on `V`.
+///
+/// `SAIL_RETRO_STRESS=1`. A fault that happens "sometimes" when a key is pressed is a
+/// fault nobody can hold still long enough to look at, and pressing the key by hand a
+/// hundred times is not a measurement. This presses it a hundred times and counts the
+/// frames between, so if the picture ever stops the log stops with it and says at which
+/// step it was standing when it did.
+pub fn stress(
+    time: Res<Time>,
+    mut retro: ResMut<Retro>,
+    mut since: Local<f64>,
+    mut frames: Local<u64>,
+) {
+    *frames += 1;
+    *since += time.delta_secs_f64();
+    let gap: f64 = std::env::var("SAIL_RETRO_STRESS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.4);
+    if *since < gap {
+        return;
+    }
+    *since = 0.0;
+    retro.step = match retro.step {
+        None => Some(2),
+        Some(2) => Some(1),
+        Some(1) => Some(0),
+        _ => None,
+    };
+    info!("stress: now {:?} after {} frames", retro.step, *frames);
+}
+
 /// Point the camera at a small image, and put that image on the screen.
 pub fn apply(
     mut commands: Commands,

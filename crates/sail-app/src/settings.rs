@@ -8,6 +8,10 @@
 //! belongs to the listener rather than to the boat is the one number in the audio path
 //! that is nobody's measurement, and it is reasonable to put it where it can be reached.
 //!
+//! **Picture** is a preference too, and the three controls here were keys and nothing
+//! else — which breaks the console's own rule that everything the keyboard can do the
+//! mouse can do. A look you have to know a letter for is a look most people never find.
+//!
 //! **Weather** is not a preference, and the panel says so out loud. The whole argument
 //! of this simulator is that you are handed conditions and have to deal with them — the
 //! forecast is drawn before you cast off, the reef goes in because of what it says, and
@@ -51,12 +55,20 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut settings: ResMut<Settings>) {
     }
 }
 
+// A system's parameters are its dependency list rather than an argument list, and this
+// panel reaches four more resources than it did now that the picture is settable from
+// somewhere other than a keypress.
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: bevy_egui::EguiContexts,
     mut settings: ResMut<Settings>,
     mut sim: ResMut<Sim>,
     mut sky: ResMut<crate::sky::Sky>,
     sound: Res<SoundHandle>,
+    mut view: ResMut<crate::camera::View>,
+    mut ink: ResMut<crate::world::Ink>,
+    mut retro: ResMut<crate::retro::Retro>,
+    mut hud: ResMut<crate::hud::HudVisible>,
 ) -> Result {
     if !settings.open {
         return Ok(());
@@ -92,6 +104,62 @@ pub fn draw(
                     .clicked()
                 {
                     sound.0.set_muted(!muted);
+                }
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                heading(ui, "PICTURE");
+                // Where you are sitting. Two places on a small boat: at the helm, or
+                // astern of her looking back, which is the one that shows you what the
+                // sails are doing.
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("view")
+                            .color(egui::Color32::from_rgb(150, 150, 130))
+                            .monospace()
+                            .size(11.0),
+                    );
+                    for (name, which) in [
+                        ("at the helm", crate::camera::View::Cockpit),
+                        ("from astern", crate::camera::View::Chase),
+                    ] {
+                        if ui.selectable_label(*view == which, name).clicked() {
+                            *view = which;
+                        }
+                    }
+                });
+                // The drawn sea. Not a quality setting: a different picture, and the one
+                // this boat was always headed for.
+                if ui.selectable_label(ink.0, "the ink drawing  (B)").clicked() {
+                    ink.0 = !ink.0;
+                }
+                // Resolution. Named in pixels of height, because that is what the old
+                // machines were sold as and it is what the look is.
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("pixels")
+                            .color(egui::Color32::from_rgb(150, 150, 130))
+                            .monospace()
+                            .size(11.0),
+                    );
+                    for (name, step) in [
+                        ("sharp", None),
+                        ("960", Some(2usize)),
+                        ("720", Some(1)),
+                        ("480", Some(0)),
+                    ] {
+                        if ui.selectable_label(retro.step == step, name).clicked() {
+                            retro.step = step;
+                        }
+                    }
+                });
+                if ui
+                    .selectable_label(hud.0, "the diagnostic panel  (Tab)")
+                    .clicked()
+                {
+                    hud.0 = !hud.0;
                 }
 
                 ui.add_space(10.0);

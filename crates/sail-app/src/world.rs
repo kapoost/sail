@@ -484,16 +484,26 @@ impl Ink {
 }
 
 /// `B` for the drawn sea.
-pub fn toggle_ink(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut ink: ResMut<Ink>,
+///
+/// The key only flips the flag. What follows the flag is below, on `is_changed`, so
+/// that the settings panel can flip the same flag and get the same sea — the key used
+/// to *be* the switch, which meant anything else that wanted to turn the ink on had to
+/// pretend to be a keypress or duplicate the material work.
+pub fn toggle_ink(keys: Res<ButtonInput<KeyCode>>, mut ink: ResMut<Ink>) {
+    if keys.just_pressed(KeyCode::KeyB) {
+        ink.0 = !ink.0;
+    }
+}
+
+/// Take the lighting off the water, or put it back, whenever the flag moves.
+pub fn apply_ink(
+    ink: Res<Ink>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     q: Query<&MeshMaterial3d<StandardMaterial>, With<SeaSurface>>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyB) {
+    if !ink.is_changed() {
         return;
     }
-    ink.0 = !ink.0;
     // The lighting has to be taken off the water as well, or the bands are drowned in
     // a specular sheen that has no edges in it — flat tones and a glossy highlight are
     // two different pictures and the sheen wins.
