@@ -349,6 +349,23 @@ const KEY_LINE: Vec3 = Vec3::new(0.012, 0.030, 0.075);
 /// trough to crest whether it is a ripple or a gale.
 const STREAK_OF_HEIGHT: f32 = 0.14;
 
+/// How fast the streaks run up the back of a wave and down its face, bands a second.
+///
+/// Iso-height lines standing still are a contour map, and a contour map of a moving sea
+/// is still a map: the water goes through the lines and the lines do not move, so
+/// nothing on the surface is *going* anywhere. What a wave actually does to the water in
+/// it is the orbit — a parcel rises up the back, goes forward over the top, falls down
+/// the face and comes back through the trough — so the water climbs through the
+/// contours on the windward side and falls through them on the lee side.
+///
+/// Which is a thing you can see from a deck and the reason a wave reads as moving rather
+/// than as a shape being carried along. So the streaks are given that motion: the
+/// pattern's phase is shifted up on the back and down on the front, signed by which way
+/// the surface is tilted with respect to the wind and strongest where it is steepest.
+/// Both sides of a crest shear against each other, which piles the lines up along it —
+/// correctly, because that is where the water is thrown together.
+const STREAK_RUN: f32 = 0.55;
+
 /// How far from the boat cloud shadows are drawn on the water, metres.
 ///
 /// As much an honesty as an economy. The eye is two metres above the water: at three
@@ -939,8 +956,23 @@ pub fn update_sea(
                 // down the tone, which is what picks the width of the stroke out of
                 // the tonal art map. Written over the ripple coordinates pushed above,
                 // because the tone is not known until here and a vertex gets one UV.
+                // Which face of the wave this is, −1 on the lee side and +1 on the
+                // windward, from the surface's own tilt along the wind. Through a
+                // tanh so a steep face is fully one or the other and the crest and the
+                // trough — where the tilt passes through nothing — are neither, which
+                // is what keeps the pattern continuous across them.
+                // `sz` is the *negated* north slope, because Bevy's -Z is north, while
+                // `downwind` is in the simulation's frame where y is north. Dotting them
+                // as they stand would have the north-going half of every wind backwards
+                // — the streaks running down the back of a wave and up its face, which
+                // is the one thing this is for.
+                let tilt = (sx * downwind.x as f32 - sz * downwind.y as f32) / typical;
+                let face = tilt.tanh();
                 if let Some(uv) = uvs.last_mut() {
-                    *uv = Vec2::new(height / (STREAK_OF_HEIGHT * hs), 1.0 - tone);
+                    *uv = Vec2::new(
+                        height / (STREAK_OF_HEIGHT * hs) + face * STREAK_RUN * t as f32,
+                        1.0 - tone,
+                    );
                 }
             }
             if ink && edge > 0.0 {

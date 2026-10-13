@@ -46,7 +46,7 @@ use crate::sim::Sim;
 /// Nine hundred, which is a great deal, and deliberately so. They cost one quad each
 /// and nothing at all in the physics, and the alternative — a true photographic amount
 /// of white water — is a few grey pixels at the resolution this is played at.
-const COUNT: usize = 2800;
+const COUNT: usize = 9000;
 
 /// Multiply the whole spray budget, for finding out what it costs.
 ///
@@ -62,6 +62,20 @@ fn budget() -> usize {
 }
 /// Seconds one lives.
 const LIFE: f32 = 3.4;
+/// And how long a mark torn off a crest does.
+///
+/// *Short*, and many of them, which is the opposite of the obvious answer. A long life
+/// gives a few marks that sit there being looked at; what a breaking crest actually
+/// does is throw a great deal of foam that is gone almost at once, and the eye reads the
+/// seething rather than any one patch of it. So: a second and a half, and four times as
+/// many thrown.
+///
+/// They grow as they go. A puff of foam does not fade where it was — it spreads, which
+/// is air coming out of it and the water running off the top of the wave, and a mark
+/// that gets bigger while it gets fainter reads as something dispersing rather than
+/// something being turned off. The two together are most of what makes it look like
+/// foam and not like a sprite.
+const CLAW_LIFE: f32 = 1.6;
 /// How fast foam spreads outward from where it was thrown, m/s.
 const SPREAD: f64 = 0.55;
 /// How near the top of a wave a dart has to land, as a fraction of the significant
@@ -69,7 +83,7 @@ const SPREAD: f64 = 0.55;
 const CREST_TOP: f64 = 0.42;
 
 /// How many looks at the water a fully whitecapped sea gets a second.
-const CREST_DARTS: f32 = 440.0;
+const CREST_DARTS: f32 = 4200.0;
 /// Marks in one breaking crest, and how far they are scattered, metres.
 const CREST_SPECKS: usize = 6;
 const CREST_PATCH: f64 = 1.5;
@@ -230,7 +244,7 @@ pub fn update(
     for mut s in spray.live.drain(..) {
         s.age += dt;
         s.at += s.drift * dt as f64;
-        if s.age < LIFE {
+        if s.age < if s.claw { CLAW_LIFE } else { LIFE } {
             keep.push(s);
         }
     }
@@ -530,7 +544,7 @@ pub fn update(
             }
             continue;
         }
-        let life = (s.age / LIFE).clamp(0.0, 1.0);
+        let life = (s.age / if s.claw { CLAW_LIFE } else { LIFE }).clamp(0.0, 1.0);
         // Thrown up bright, spreading and thinning as it settles. The brightness falls
         // faster than the size grows, which is what foam does: it goes from white to a
         // patch of bubbles to nothing, getting wider the whole time.
@@ -543,8 +557,15 @@ pub fn update(
         // centimetres a speck is a pixel or two, which is foam, and at five it is a
         // blob of paint. The claws keep their size, because a mark torn off a crest is
         // a handful of foam and genuinely is that big.
-        let fine = if s.claw { 1.0 } else { 0.62 };
-        let size = (0.055 + 0.085 * life) * s.scale * fine;
+        // Two different things with two different profiles. A speck off the bow is a
+        // drop that spreads a little as it falls. A mark off a crest *blooms*: it comes
+        // out small and hard and ends up four times the size and gone, which is what a
+        // handful of foam does when the air comes out of it.
+        let size = if s.claw {
+            (0.05 + 0.30 * life) * s.scale
+        } else {
+            (0.055 + 0.085 * life) * s.scale * 0.62
+        };
         // And every one of them twinkles. Real broken water does not glow steadily: a
         // bubble catches the sky, turns, and goes out, and what the eye picks up from a
         // bow wave is that seething rather than any single bright patch. Two beats, not
@@ -557,7 +578,11 @@ pub fn update(
                 * (0.6 * (s.age * s.beat + s.phase).sin()
                     + 0.4 * (s.age * s.beat * 1.73 + s.phase * 2.1).sin())
                 .mul_add(-0.5, 0.5);
-        let alpha = (1.0 - life).powf(1.7) * 0.95 * twinkle.clamp(0.0, 1.4);
+        // And they go out faster than they grow, or a bloom is a cloud that swells to
+        // fill the sea. The claws are given a steeper curve than the specks for the same
+        // reason they are given a bigger one: the mark is the *arrival* of the foam.
+        let fade = if s.claw { 2.6 } else { 1.7 };
+        let alpha = (1.0 - life).powf(fade) * 0.95 * twinkle.clamp(0.0, 1.4);
         // The surface this mark has to sit on is the one that is *drawn*, which is not
         // the one the water has. The mesh carries nothing finer than four samples
         // across it, so `update_sea` asks the field filtered to that — and this asked
