@@ -61,6 +61,17 @@ const DORIAN: [i32; 7] = [0, 2, 3, 5, 7, 9, 10];
 const WALKING: [usize; 4] = [0, 6, 5, 6];
 const TURNING: [usize; 4] = [0, 6, 3, 0];
 
+/// And the one every film score reaches for when something is about to happen.
+///
+/// i–VI–III–VII, which is the same four chords under half the music written for
+/// pictures since the seventies, and it is not a cliché by accident: every root moves by
+/// a *third* rather than by a step or a fifth, so each chord shares two notes with the
+/// last and the progression slides instead of walking. Nothing resolves and nothing is
+/// unresolved either — it can turn for as long as the scene needs and never arrive —
+/// which is exactly the feeling of being on a boat that is going too fast to be
+/// comfortable and cannot be slowed down.
+const CINEMATIC: [usize; 4] = [0, 5, 2, 6];
+
 /// How long a phrase is, in bars. Eight, because every tune in this tradition is eight.
 const PHRASE: u32 = 8;
 
@@ -409,6 +420,7 @@ pub fn compose(
     sim: Res<Sim>,
     sky: Res<crate::sky::Sky>,
     ink: Res<crate::world::Ink>,
+    pilot: Res<crate::input::Pilot>,
     sound: Res<SoundHandle>,
     mut music: ResMut<Music>,
 ) {
@@ -540,7 +552,43 @@ pub fn compose(
     let bar = step.div_euclid(per_bar) as u32 % PHRASE;
     let in_bar = step.rem_euclid(per_bar) as usize;
     let strong = in_bar == 0;
-    let chord = if want.dorian { TURNING } else { WALKING }[(bar % 4) as usize] as i32;
+    // How much trouble she is in, nought to one.
+    //
+    // Drama does not wait for the end of a phrase. Everything else in this composer
+    // changes at a bar line, with a bridge, because music that moves whenever the wind
+    // moves is never anywhere — but the whole point of a cinematic shift is that it
+    // arrives *with* the thing it is about. A boat lying over at twenty-three degrees
+    // with a kite up and the autopilot handing back the helm does not get an eight-bar
+    // preparation.
+    //
+    // Four things, and any of them is enough: pressed past the angle a cruising crew
+    // reefs at, a sea that is throwing her about, a sail carrying more wind than its
+    // cloth is cut for, and the pilot having given up — which is the machine's own
+    // opinion that this is beyond it.
+    let pressed = (t.heel.abs() / sail_core::autopilot::OVERPOWERED_HEEL - 1.0).clamp(0.0, 1.0);
+    let rough = ((sim.sim.water.significant_height() - 1.2) / 2.0).clamp(0.0, 1.0);
+    let overloaded = {
+        let limit = sail_core::units::ms_to_kn(cfg_headsail_limit(&sim));
+        ((sail_core::units::ms_to_kn(t.aws) / limit - 0.85) / 0.3).clamp(0.0, 1.0)
+    };
+    let abandoned = if pilot.last_reason.is_some() && pilot.since_reason < 12.0 {
+        1.0
+    } else {
+        0.0
+    };
+    let drama = (pressed.max(rough).max(overloaded).max(abandoned) as f32).clamp(0.0, 1.0);
+
+    // The harmony changes language when she is in trouble. Same tune, different world
+    // under it — which is exactly what a film score does with a theme and why the theme
+    // is worth having.
+    let progression = if drama > 0.45 {
+        CINEMATIC
+    } else if want.dorian {
+        TURNING
+    } else {
+        WALKING
+    };
+    let chord = progression[(bar % 4) as usize] as i32;
 
     // How hard she is going, as a fraction of what this hull can do.
     //
@@ -661,6 +709,32 @@ pub fn compose(
         }
     }
 
+    // The cinematic treatment of the same tune: wide, slow and open.
+    //
+    // Three things do nearly all of it, and none is a new melody. The register opens
+    // out — a pedal two octaves down and the tune up where it can be heard over it, with
+    // the middle left empty, which is what makes an orchestra sound large. The chords
+    // lose their thirds and become open fifths, because a bare fifth is neither major nor
+    // minor and will not say how this ends. And an ostinato runs underneath on the block,
+    // three and three and two, which is the oldest way there is of making something feel
+    // like it is not going to stop.
+    if drama > 0.45 {
+        let urgency = ((drama - 0.45) / 0.55).clamp(0.0, 1.0);
+        if strong {
+            // The pedal: the tonic, low, held under everything whatever the chord above
+            // is doing. It is what a film score puts under a scene that has not resolved.
+            p.strike(hz(0, -2.0), want.level * 0.85 * hush);
+            // And the chord as an open fifth, wide apart.
+            p.strike(hz(chord, -1.0), want.level * 0.6 * hush * main_work.max(0.35));
+            p.strike(hz(chord + 4, 0.0), want.level * 0.5 * hush * main_work.max(0.35));
+        }
+        // Three and three and two, which is a bar of eight read the way a heartbeat
+        // reads it rather than the way a dance does.
+        if matches!(in_bar % 8, 0 | 3 | 6) {
+            p.tick(0.3 + 0.45 * urgency);
+        }
+    }
+
     // The left hand. A chord on the downbeat, which is what makes this a piano and not a
     // whistle — and spread a little rather than struck dead together, because nobody's
     // hand lands flat and the spread is most of what makes it sound played.
@@ -668,7 +742,7 @@ pub fn compose(
     // is to a sail plan. Reef it down and the harmony goes quiet; hand it and there is no
     // chord at all and the melody is left standing on its own, which is precisely how a
     // boat under headsail alone sounds to sail.
-    if strong && !ink.0 && main_work > 0.05 {
+    if strong && !ink.0 && main_work > 0.05 && drama <= 0.45 {
         // Both of these modes are minor, so the third of the chord is the same in each —
         // which is worth saying because it is the one interval somebody would expect to
         // change with the mode and it does not. What dorian moves is the sixth, four
@@ -703,6 +777,11 @@ pub fn compose(
     if strong || (want.beats == 4 && in_bar == (per_bar / 2) as usize) {
         p.tick(0.4 * hush);
     }
+}
+
+/// What the headsail that is up is built to carry, in metres a second.
+fn cfg_headsail_limit(sim: &Sim) -> f64 {
+    sim.config().headsail(sim.controls.headsail).limit_aws
 }
 
 /// This hull's own speed, which is what "going well" is measured against.
