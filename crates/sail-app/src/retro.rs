@@ -16,6 +16,35 @@
 //! and a pixelated instrument is a nostalgic idea rather than a readable one: those
 //! games put their panels in crisp text for the same reason.
 //!
+//! # Why it is drawn twice the size and then halved
+//!
+//! Because a small picture and a *badly sampled* small picture are not the same thing,
+//! and only one of them is the look. Drawn straight at four hundred and eighty across,
+//! the horizon is a step function: the sea/sky boundary falls inside one row of pixels,
+//! and that row is six pixels tall on the screen, so as the boat heaves the whole
+//! horizon jumps up and down in six-pixel lurches. The rigging does the same thing
+//! sideways — a shroud a third of a pixel wide either lands on a pixel or does not, so
+//! it flickers on and off as the mast sways. Neither is what the period hardware did:
+//! those machines drew *sprites*, hand-placed and hand-shaded, and the one thing a hand
+//! never does is drop a line because it fell between two pixels.
+//!
+//! So the world is rendered at twice the width and twice the height and then averaged
+//! two-by-two into the small grid. The grid is identical — same chunky pixels, same
+//! nearest-neighbour blow-up, no filtering on the way to the screen. What changes is
+//! what is *in* each pixel: the average of the four samples that fell inside it, so the
+//! horizon moves through tones instead of jumping rows, and a wire too thin to fill a
+//! pixel comes out as a dimmer pixel rather than as nothing. Genuinely antialiased
+//! pixel art, which is what a pixel artist does by hand with a brush.
+//!
+//! **Off by default, and that is a decision rather than caution.** It works and it
+//! costs about what it should, but the sharpness of the boat and the horizon is being
+//! solved with *line* instead — a drawn edge at this size carries more than a better
+//! sampled one, which is the same reason the instruments are text and not pixels. So
+//! the machinery stays, switched off, one variable away: `SAIL_SUPERSAMPLE=1`. It is
+//! worth keeping because it is the only honest answer to the horizon *jumping*, which
+//! is a sampling fault and not a drawing one, and if the lines do not settle that then
+//! this is where to come back to.
+//!
 //! The grading is the other half. Period hardware had a small palette and a contrast
 //! curve nothing like a linear one, so the picture is pushed harder and pulled a
 //! little off saturation — which is what the memory of those games actually looks
@@ -34,12 +63,23 @@ use crate::camera::MainCamera;
 /// commitment.
 const WIDTHS: [u32; 3] = [480, 720, 960];
 
+/// How many samples across each pixel of the small picture the world is drawn with.
+///
+/// Two, and two only: the reduction is done by a linear sampler drawing the big image
+/// at exactly half size, which lands each output texel dead between four input texels
+/// and therefore averages them exactly. At any other ratio bilinear picks four of the
+/// nine and the filter stops being a box, so three would need a shader to be honest.
+const SUPERSAMPLE: u32 = 2;
+
 #[derive(Resource, Default)]
 pub struct Retro {
     /// `None` is the modern picture.
     pub step: Option<usize>,
+    /// On with `SAIL_SUPERSAMPLE=1`. Off by default — see the module docs.
+    supersample: bool,
     target: Option<Handle<Image>>,
-    screen: Option<Entity>,
+    /// The cameras that reduce the big picture and then blow the small one up.
+    passes: Vec<Entity>,
     sized: (u32, u32),
 }
 
@@ -66,6 +106,7 @@ impl Retro {
             .map(|(i, _)| i);
         Self {
             step,
+            supersample: std::env::var("SAIL_SUPERSAMPLE").is_ok_and(|v| v != "0"),
             ..Self::default()
         }
     }
@@ -116,8 +157,8 @@ pub fn apply(
         None => {
             if retro.target.take().is_some() {
                 commands.entity(camera).remove::<RenderTarget>();
-                if let Some(screen) = retro.screen.take() {
-                    commands.entity(screen).despawn();
+                for pass in retro.passes.drain(..) {
+                    commands.entity(pass).despawn();
                 }
                 retro.sized = (0, 0);
                 info!("picture: sharp");
@@ -127,53 +168,85 @@ pub fn apply(
             if retro.sized == size && retro.target.is_some() {
                 return;
             }
-            // A new image, because the size changed or there was none. Nearest
-            // filtering on the way out is the whole point: a linear filter turns this
-            // back into a blurry modern picture, which is the one thing it must not be.
-            let mut image = Image::new_fill(
-                Extent3d {
-                    width: size.0,
-                    height: size.1,
-                    depth_or_array_layers: 1,
-                },
-                TextureDimension::D2,
-                &[0, 0, 0, 255],
-                TextureFormat::Rgba8UnormSrgb,
-                bevy::asset::RenderAssetUsages::RENDER_WORLD,
+            let ss = if retro.supersample { SUPERSAMPLE } else { 1 };
+
+            // Two images. The world is drawn into the big one and averaged into the
+            // small one, and only the small one is ever shown.
+            //
+            // The samplers are the whole of the method and they are opposites on
+            // purpose. Linear on the way *down*, because at exactly half size a
+            // bilinear tap is a four-texel box average and that is the filter we want.
+            // Nearest on the way *out*, because a linear filter there turns this back
+            // into a blurry modern picture, which is the one thing it must not be.
+            let big = canvas(
+                size.0 * ss,
+                size.1 * ss,
+                bevy::image::ImageSampler::linear(),
             );
-            image.texture_descriptor.usage =
-                TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING;
-            image.sampler = bevy::image::ImageSampler::nearest();
-            let handle = images.add(image);
+            let small = canvas(size.0, size.1, bevy::image::ImageSampler::nearest());
+            let big = images.add(big);
+            let small = images.add(small);
 
             commands
                 .entity(camera)
-                .insert(RenderTarget::Image(handle.clone().into()));
+                .insert(RenderTarget::Image(big.clone().into()));
 
-            if let Some(screen) = retro.screen.take() {
-                commands.entity(screen).despawn();
+            for pass in retro.passes.drain(..) {
+                commands.entity(pass).despawn();
             }
-            // A second camera, drawn after the first, showing the small image blown up
-            // to fill the window. `Sprite::sized` with `ScalingMode` would letterbox;
-            // stretching to the window keeps the pixels square because the image's
-            // aspect was taken from the window in the first place.
+
+            // The reduction. A camera whose target is the small image, showing the big
+            // one at exactly the small one's size. A 2D camera's units are its target's
+            // pixels, so a sprite of that size centred on the origin covers it exactly —
+            // which is what makes the sample positions land where the box filter needs
+            // them rather than half a texel off.
+            if ss > 1 {
+                let reduce = commands
+                    .spawn((
+                        Camera2d,
+                        Camera {
+                            order: 1,
+                            ..default()
+                        },
+                        // In Bevy 0.20 the target is its own component, which is also
+                        // how the main camera is pointed at the big image.
+                        RenderTarget::Image(small.clone().into()),
+                    ))
+                    .with_children(|c| {
+                        c.spawn((
+                            Sprite {
+                                image: big.clone(),
+                                custom_size: Some(Vec2::new(size.0 as f32, size.1 as f32)),
+                                ..default()
+                            },
+                            Transform::default(),
+                        ));
+                    })
+                    .id();
+                retro.passes.push(reduce);
+            }
+
+            // And the blow-up, drawn after it, filling the window. `Sprite::sized` with
+            // a scaling mode would letterbox; stretching to the window keeps the pixels
+            // square because the image's aspect came from the window in the first place.
+            let shown = if ss > 1 { small.clone() } else { big.clone() };
             let screen = commands
                 .spawn((
                     Camera2d,
                     Camera {
-                        order: 1,
+                        order: 2,
                         ..default()
                     },
                 ))
                 .with_children(|c| {
-                    // A child of the camera, so switching away takes it with it. It
-                    // was a loose entity, which meant every change of picture left
-                    // another full-screen sprite behind it — invisible, stacked, and
-                    // the sort of leak that is only ever found by someone wondering
-                    // why the frame rate fell over an hour.
+                    // A child of the camera, so switching away takes it with it. It was
+                    // a loose entity, which meant every change of picture left another
+                    // full-screen sprite behind it — invisible, stacked, and the sort of
+                    // leak only ever found by someone wondering why the frame rate fell
+                    // over an hour.
                     c.spawn((
                         Sprite {
-                            image: handle.clone(),
+                            image: shown,
                             custom_size: Some(Vec2::new(window.width(), window.height())),
                             ..default()
                         },
@@ -181,17 +254,38 @@ pub fn apply(
                     ));
                 })
                 .id();
-            retro.screen = Some(screen);
-            retro.target = Some(handle);
+            retro.passes.push(screen);
+            retro.target = Some(small);
             retro.sized = size;
             info!(
-                "picture: {} by {} pixels, scaled up {:.1} times",
+                "picture: {} by {} pixels from {} by {} samples, scaled up {:.1} times",
                 size.0,
                 size.1,
+                size.0 * ss,
+                size.1 * ss,
                 physical.0 as f32 / size.0 as f32
             );
         }
     }
+}
+
+/// A render target of a given size and sampling.
+fn canvas(width: u32, height: u32, sampler: bevy::image::ImageSampler) -> Image {
+    let mut image = Image::new_fill(
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
+    );
+    image.texture_descriptor.usage =
+        TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING;
+    image.sampler = sampler;
+    image
 }
 
 /// The camera the instruments are drawn on.

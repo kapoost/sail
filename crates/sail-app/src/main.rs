@@ -16,6 +16,7 @@ mod deck;
 mod deck_texture;
 mod fittings;
 mod frame;
+mod horizon;
 mod hud;
 mod ink;
 mod input;
@@ -131,6 +132,7 @@ fn main() {
                 boat::setup,
                 boat::report,
                 islands::setup,
+                horizon::setup,
                 clouds::setup,
                 camera::setup,
                 hud::build_polar,
@@ -185,6 +187,7 @@ fn main() {
                 ),
                 (
                     // The weather you can see, after everything that places it.
+                    horizon::follow,
                     sky::drift,
                     sky::light,
                     rain::update,

@@ -134,6 +134,26 @@ const CREASE_ANGLE: f32 = 32.0;
 /// it has no lines in it to find.
 const GRAIN_SHARE: f32 = 0.25;
 
+/// Why a measured mesh is not even given its *boundary* lines, which was tried.
+///
+/// The idea was sound: a scan has no folds in it, but the edge of the measured surface
+/// is a real line — on a hull that is the sheer, the single most important line on a
+/// boat, and throwing the whole mesh away throws it away too. An edge with one face
+/// instead of two is a boundary, which the welder already knows.
+///
+/// Measured on this hull, and the numbers killed it outright. The two big pieces of the
+/// scan report 21 759 boundary edges out of 52 419, and 21 764 out of 44 335 — **two
+/// edges in five**. A surface with an open rim has a boundary of a few hundred; forty
+/// percent means the welding is not joining the triangles at all, so what reads as
+/// "where the surface stops" is where one measured facet failed to meet the next. It is
+/// the same grain the share rule exists to reject, wearing a different hat, and drawing
+/// it would have put the hull in a net.
+///
+/// So a scan gets a silhouette and nothing else, and the lines that belong *on* a hull —
+/// the sheer, the boot top — have to be authored from geometry that knows where they
+/// are. The deck is procedural and its outer edge already draws, which is one of them.
+const _WHY_NO_BOUNDARY_LINES: () = ();
+
 /// How far the crease lines are lifted off the surface they belong to.
 ///
 /// A line lying exactly in the surface fights the surface for the depth buffer and the
@@ -295,19 +315,24 @@ pub fn creases(mesh: &Mesh) -> Option<(Mesh, usize)> {
     // the cockpit lining against the inside of the planking, the deck against the
     // skirt tucked under it — and whichever two of its faces the test happens to
     // compare, the answer is meaningless.
-    let mut folds: Vec<[usize; 2]> = Vec::new();
+    let mut folds: Vec<([usize; 2], bool)> = Vec::new();
     let mut considered = 0usize;
     for (first, second, extra, ends) in edges.into_values() {
         if extra {
             continue;
         }
         considered += 1;
+        // An edge with one face is a boundary: the surface simply stops there. That is
+        // always a line — it is where the thing ends — and it is kept apart from the
+        // folds because when a measured mesh turns out to be all grain, the boundary is
+        // the one part of it that is still a drawing.
+        let boundary = second.is_none();
         let fold = match second {
             Some(other) => first.dot(other) < cos_limit,
             None => true,
         };
         if fold {
-            folds.push(ends);
+            folds.push((ends, boundary));
         }
     }
 
@@ -325,7 +350,7 @@ pub fn creases(mesh: &Mesh) -> Option<(Mesh, usize)> {
 
     let mut line_pos: Vec<[f32; 3]> = Vec::new();
     let mut line_norm: Vec<[f32; 3]> = Vec::new();
-    for ends in &folds {
+    for (ends, _) in &folds {
         for &i in ends {
             let p = Vec3::from_array(pos[i]) + out[i] * CREASE_LIFT;
             line_pos.push(p.to_array());
