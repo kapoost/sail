@@ -1067,7 +1067,7 @@ pub fn report_frame_times(time: Res<Time>, mut window: Local<(f32, u32, f32)>) {
         // line that matters, and the whole value of this is that it answered "is the
         // sea badly sampled or is the application not making its frames" with a
         // number instead of an afternoon.
-        if window.2 > 0.025 {
+        if window.2 > 0.025 || std::env::var("SAIL_FRAMES").is_ok() {
             warn!(
                 "slow frames: {:.0} per second mean, worst {:.1} ms",
                 window.1 as f32 / window.0,

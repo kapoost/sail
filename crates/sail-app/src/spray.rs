@@ -47,6 +47,19 @@ use crate::sim::Sim;
 /// and nothing at all in the physics, and the alternative — a true photographic amount
 /// of white water — is a few grey pixels at the resolution this is played at.
 const COUNT: usize = 2800;
+
+/// Multiply the whole spray budget, for finding out what it costs.
+///
+/// `SAIL_SPRAY=4`. "Can there be a great many more marks on the crests, or is that
+/// expensive?" is a question with a number for an answer, and the only way to get the
+/// number is to run the same gale twice with two budgets.
+fn budget() -> usize {
+    let scale: f32 = std::env::var("SAIL_SPRAY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1.0);
+    ((COUNT as f32) * scale.clamp(0.1, 20.0)) as usize
+}
 /// Seconds one lives.
 const LIFE: f32 = 3.4;
 /// How fast foam spreads outward from where it was thrown, m/s.
@@ -85,6 +98,38 @@ struct Speck {
     /// Whether this one is foam torn off a breaking crest rather than spray thrown off
     /// the bow, which decides which mark it is drawn with — see `spray_marks`.
     claw: bool,
+    /// How fast this one breathes, radians a second.
+    ///
+    /// Its own, which is the correction: every speck used the same two beats and
+    /// differed only in phase, so a thousand of them were a thousand copies of one
+    /// rhythm offset against each other. That reads as a pattern however well the
+    /// phases are spread — reported from the deck as the sparkles coming too regularly.
+    /// Drawn across a wide range rather than jittered around one, because what the eye
+    /// is looking for is *no* tempo at all.
+    beat: f32,
+    /// And how deeply it twinkles, 0 for one that just glows.
+    ///
+    /// Most foam does not sparkle. It sits there being white, and the glitter is a few
+    /// bubbles in it catching the sky and turning. Giving every speck the same strong
+    /// twinkle made the whole field pulse; most of them barely move now, and the few
+    /// that do are what the sparkle is.
+    sparkle: f32,
+}
+
+/// A speck's own tempo, radians a second, from a uniform draw.
+///
+/// Geometric across four to one, so the draw spreads the *rhythms* evenly rather than
+/// the frequencies — which is how the ear and the eye both measure tempo, and the
+/// difference between a field with no beat in it and one with a beat and some jitter.
+/// Slower than the single rate it replaces, because every speck having the same one
+/// made it the rate of the whole sea.
+fn beat_of(r: f32) -> f32 {
+    0.9 * 4.0_f32.powf(r)
+}
+
+/// How deeply it twinkles. Squared, so most hardly do and a few do it hard.
+fn sparkle_of(r: f32) -> f32 {
+    0.62 * r * r
 }
 
 #[derive(Resource)]
@@ -115,7 +160,7 @@ pub fn setup(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     );
-    let vertices = COUNT * 4;
+    let vertices = budget() * 4;
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![Vec3::ZERO; vertices]);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![Vec3::Y; vertices]);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![Vec2::ZERO; vertices]);
@@ -123,8 +168,8 @@ pub fn setup(
         Mesh::ATTRIBUTE_COLOR,
         vec![[1.0_f32, 1.0, 1.0, 0.0]; vertices],
     );
-    let mut indices = Vec::with_capacity(COUNT * 6);
-    for i in 0..COUNT {
+    let mut indices = Vec::with_capacity(budget() * 6);
+    for i in 0..budget() {
         let a = (i * 4) as u32;
         indices.extend_from_slice(&[a, a + 1, a + 2, a, a + 2, a + 3]);
     }
@@ -154,7 +199,7 @@ pub fn setup(
 
     commands.insert_resource(Spray {
         mesh: handle,
-        live: Vec::with_capacity(COUNT),
+        live: Vec::with_capacity(budget()),
         seed: sail_core::rng::Pcg32::new(0xF0_A3_11),
         owed: 0.0,
         darts: 0.0,
@@ -181,7 +226,7 @@ pub fn update(
 
     // Age and carry what is already in the water. Foam does not chase the boat: it is
     // left where it was made, spreading and dying, and the boat sails out from under it.
-    let mut keep = Vec::with_capacity(COUNT);
+    let mut keep = Vec::with_capacity(budget());
     for mut s in spray.live.drain(..) {
         s.age += dt;
         s.at += s.drift * dt as f64;
@@ -278,7 +323,8 @@ pub fn update(
     let downwind = sail_core::wind::flow_from(sim.sim.telemetry.twd, 1.0);
     // Darts, not specks: this is how many *looks* at the water the sea gets this frame,
     // and only the ones that find a crest steep enough to break turn into anything.
-    spray.darts += CREST_DARTS * crest_share as f32 * (1.0 + blown) * dt;
+    spray.darts +=
+        CREST_DARTS * (budget() as f32 / COUNT as f32) * crest_share as f32 * (1.0 + blown) * dt;
 
     // --- Breaking crests, anywhere in sight ------------------------------------
     //
@@ -298,7 +344,7 @@ pub fn update(
         let Spray {
             live, seed, darts, ..
         } = &mut *spray;
-        while *darts >= 1.0 && live.len() < COUNT {
+        while *darts >= 1.0 && live.len() < budget() {
             *darts -= 1.0;
             darts_thrown += 1;
             let r = &mut *seed;
@@ -337,7 +383,7 @@ pub fn update(
             // size the thing actually is.
             let blow = downwind * (0.5 + 1.5 * r.next_f64()) * blown.min(1.2) as f64;
             for _ in 0..CREST_SPECKS {
-                if live.len() >= COUNT {
+                if live.len() >= budget() {
                     break;
                 }
                 let spread = r.next_f64() * std::f64::consts::TAU;
@@ -350,6 +396,8 @@ pub fn update(
                     phase: r.next_f64() as f32 * std::f32::consts::TAU,
                     tint: 0.2 * r.next_f64() as f32,
                     claw: true,
+                    beat: beat_of(r.next_f64() as f32),
+                    sparkle: sparkle_of(r.next_f64() as f32),
                 });
             }
             born_breaking += 1;
@@ -437,6 +485,8 @@ pub fn update(
             phase: r.next_f64() as f32 * std::f32::consts::TAU,
             tint: r.next_f64() as f32,
             claw: false,
+            beat: beat_of(r.next_f64() as f32),
+            sparkle: sparkle_of(r.next_f64() as f32),
         });
     }
     *owed = owed.min(8.0);
@@ -502,9 +552,11 @@ pub fn update(
         // Slower than it was. At seventeen beats a second a speck crosses every shade it
         // has between one frame and the next, which is the same thing as not having them
         // — the levels only read if the climb through them takes long enough to see.
-        let twinkle = 0.62
-            + 0.38
-                * (0.6 * (s.age * 7.5 + s.phase).sin() + 0.4 * (s.age * 4.1 + s.phase * 2.1).sin());
+        let twinkle = 1.0
+            - s.sparkle
+                * (0.6 * (s.age * s.beat + s.phase).sin()
+                    + 0.4 * (s.age * s.beat * 1.73 + s.phase * 2.1).sin())
+                .mul_add(-0.5, 0.5);
         let alpha = (1.0 - life).powf(1.7) * 0.95 * twinkle.clamp(0.0, 1.4);
         // The surface this mark has to sit on is the one that is *drawn*, which is not
         // the one the water has. The mesh carries nothing finer than four samples
