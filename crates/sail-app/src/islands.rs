@@ -109,15 +109,35 @@ fn island_mesh(island: &Island, below: bool) -> Mesh {
                 let out = shore + t * 300.0;
                 (out, -34.0 * (t * t).min(1.0))
             } else {
-                // In and up. Relief on top of the mean rise, because a smooth dome
-                // reads as a dish-cover and a skyline is the only thing at this
-                // distance with any information in it: two harmonics are enough to
-                // give an island a summit, a shoulder and a saddle.
+                // In and up, and the shape of that climb is the whole character of the
+                // place. A square root gives a dome — a pudding rising out of the sea —
+                // and these islands are not puddings. They are basalt: the sea has been
+                // taking the edge off them for ten thousand years and what is left stands
+                // up out of the water in a wall, with a green back sloping away behind
+                // it.
+                //
+                // So the first fifth of the way in does three fifths of the climbing,
+                // and the rest is a long easy roll to the summit. Steep enough to read as
+                // a cliff from a mile off, which is the distance you sail past them at.
                 let inward = shore * (1.0 - t);
+                let cliff = if t < 0.2 {
+                    // The face. Nearly vertical, eased at the foot so it meets the water
+                    // in surf rather than in a corner.
+                    {
+                        let e = (t / 0.2).clamp(0.0, 1.0);
+                        0.62 * e * e * (3.0 - 2.0 * e)
+                    }
+                } else {
+                    0.62 + 0.38 * ((t - 0.2) / 0.8).powf(0.75)
+                };
+                // Relief on top of the mean rise, because a smooth anything reads as a
+                // dish-cover and a skyline is the only thing at this distance with
+                // information in it: two harmonics give a summit, a shoulder and a
+                // saddle.
                 let relief = 1.0
                     + 0.30 * (bearing * 2.0 + island.centre.x as f32).sin()
                     + 0.16 * (bearing * 3.0 - island.centre.y as f32).cos();
-                (inward, island.height as f32 * t.sqrt() * relief.max(0.35))
+                (inward, island.height as f32 * cliff * relief.max(0.35))
             };
             positions.push(Vec3::new(bearing.sin() * r, y, -bearing.cos() * r));
             colours.push(if below {
@@ -142,32 +162,35 @@ fn island_mesh(island: &Island, below: bool) -> Mesh {
                         a[2] + (b[2] - a[2]) * f,
                     ]
                 };
-                // Northern, and not a cheerful place.
+                // An Atlantic spring: black cliffs with a green roof on them.
                 //
-                // The bands these had were a temperate island: brown rock, a sandy
-                // strand, green heath, grey tops. The far north has none of that. The
-                // tide line is black — wet basalt and weed, the darkest thing in the
-                // whole picture — and above it there is no sand to speak of, only a
-                // narrow grey shingle where the sea throws stones. The heath above that
-                // is peat and dead heather, which is brown going on black and has no
-                // green in it until June. The tops are bare rock and lichen, pale and
-                // cold, and they are the only light thing on the island.
+                // The arrangement is the thing, and it is the same on every coast facing
+                // that ocean. At the water a band of wet black basalt the sea keeps
+                // scrubbed, and above the splash a line of pale lichen and guano on dry
+                // rock. The cliff face itself is dark and almost bare — nothing grows on
+                // vertical stone but a few tufts in the cracks. And then the top, where
+                // it lies back far enough to hold soil, is grass: the loudest green in
+                // this whole picture, because it is a hundred inches of rain a year on
+                // volcanic dirt with nothing to shade it.
                 //
-                // Keeping them this dark is also what makes the sea read: a sunlit
-                // crest against a green island is just another bright thing, and against
-                // wet black rock it is the brightest thing on the screen.
-                let c = if up < 0.05 {
-                    // Weed and wet stone at the water's edge.
-                    band([0.055, 0.060, 0.065], [0.105, 0.105, 0.100], up / 0.05)
-                } else if up < 0.12 {
-                    // The shingle the sea throws up, and only as wide as it throws it.
-                    band([0.105, 0.105, 0.100], [0.255, 0.250, 0.235], (up - 0.05) / 0.07)
-                } else if up < 0.42 {
-                    // Peat and winter heather.
-                    band([0.255, 0.250, 0.235], [0.150, 0.135, 0.105], (up - 0.12) / 0.30)
+                // The contrast between those two is the postcard, and it only works if
+                // the rock stays genuinely dark.
+                let c = if up < 0.06 {
+                    // Wet basalt and weed, scrubbed by every tide.
+                    band([0.050, 0.055, 0.058], [0.095, 0.098, 0.095], up / 0.06)
+                } else if up < 0.14 {
+                    // The splash zone: dry rock, lichen, the white line of the birds.
+                    band([0.095, 0.098, 0.095], [0.300, 0.300, 0.285], (up - 0.06) / 0.08)
+                } else if up < 0.52 {
+                    // The face. Dark stone with a little green working into the cracks
+                    // as it begins to lie back.
+                    band([0.230, 0.228, 0.215], [0.165, 0.215, 0.120], (up - 0.14) / 0.38)
+                } else if up < 0.80 {
+                    // The green roof, and it is meant to be loud.
+                    band([0.165, 0.215, 0.120], [0.240, 0.470, 0.165], (up - 0.52) / 0.28)
                 } else {
-                    // Bare rock and lichen on the summits.
-                    band([0.150, 0.135, 0.105], [0.360, 0.365, 0.360], (up - 0.42) / 0.58)
+                    // Summits: cropped grass going to stone and sky-bleached rock.
+                    band([0.240, 0.470, 0.165], [0.330, 0.420, 0.270], (up - 0.80) / 0.20)
                 };
                 [c[0], c[1], c[2], 1.0]
             });
