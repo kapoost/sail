@@ -359,9 +359,14 @@ impl Iterator for SeaStream {
             + self.noise() * 0.3)
             * self.clack_env
             * self.clack_env
-            * 0.8;
+            * 1.45;
 
-        let gear = (tooth * 0.5 + rasp * 0.32) * self.smooth.gear + clack_out;
+        // Loud, and it belongs loud. Everything else in this mix is weather happening
+        // around you — wind at 2.2, water at 3.4 — while this is the one voice that is
+        // *you*, a hand's width away, and gear a metre from your ear is not background.
+        // The pawls were at 0.5 against flogging canvas at 0.9, which had a winch being
+        // ground in quieter than a sail shaking two boat-lengths forward.
+        let gear = (tooth * 1.15 + rasp * 0.62) * self.smooth.gear + clack_out;
 
         // --- Flogging canvas: gated bursts with a hard attack ----------------------
         let flog_hz = flog_hz.clamp(0.5, 14.0);
@@ -532,7 +537,10 @@ pub fn update(
     const BRISK: f64 = 0.5;
     let moving = (haul / dt - DEAD).max(0.0);
     let rate = (moving / BRISK).clamp(0.0, 1.6) as f32;
-    store(&p.gear_level, (rate * 0.9).min(1.0));
+    // Reaching full on a moderate haul rather than only on a sprint: with the dead band
+    // taking the first two percent, a brisk but ordinary grind was only getting a third
+    // of the voice.
+    store(&p.gear_level, (rate * 1.7).min(1.0));
     // Pawls per second. A two-speed winch at a hard grind clicks about twenty times a
     // second; eased by hand it is a slow tick you can count.
     store(&p.gear_hz, 3.0 + 26.0 * rate.min(1.2));
