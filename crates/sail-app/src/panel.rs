@@ -85,7 +85,7 @@ pub fn draw(
     let frame = egui::Frame::new()
         .fill(paint::CASE)
         .stroke(egui::Stroke::new(1.0, paint::BEZEL))
-        .inner_margin(egui::Margin::symmetric(10, 8));
+        .inner_margin(egui::Margin::symmetric(8, 5));
 
     // Floating blocks sized to their contents, not panels that reserve a full edge of
     // the screen. A panel took the whole height of the window for a column of
@@ -95,7 +95,7 @@ pub fn draw(
         .interactable(true)
         .show(ctx, |ui| {
             frame.show(ui, |ui| {
-                ui.set_width(186.0);
+                ui.set_width(172.0);
                 ui.spacing_mut().item_spacing.y = 6.0;
 
                 ui.horizontal(|ui| {
@@ -168,7 +168,7 @@ pub fn draw(
                     })
                     .color(paint::LABEL)
                     .monospace()
-                    .size(10.0),
+                    .size(9.0),
                 );
                 ui.label(
                     egui::RichText::new(course.destination_name().to_uppercase())
@@ -230,9 +230,9 @@ pub fn draw(
                         },
                     );
 
-                    ui.add_space(10.0);
+                    ui.add_space(7.0);
                     separator(ui);
-                    ui.add_space(10.0);
+                    ui.add_space(7.0);
 
                     // Sheets, on their own winches, continuously trimmed.
                     let want_main = cfg
@@ -264,9 +264,9 @@ pub fn draw(
                         sim.controls.jib_sheet = jib_sheet;
                     }
 
-                    ui.add_space(10.0);
+                    ui.add_space(7.0);
                     separator(ui);
-                    ui.add_space(10.0);
+                    ui.add_space(7.0);
 
                     // The clutch bank: one winch, one line at a time.
                     ui.vertical(|ui| {
@@ -274,7 +274,7 @@ pub fn draw(
                             egui::RichText::new("CLUTCHES")
                                 .color(paint::LABEL)
                                 .monospace()
-                                .size(10.0),
+                                .size(9.0),
                         );
                         ui.horizontal(|ui| {
                             for (i, line) in BANK.iter().enumerate() {
@@ -325,13 +325,13 @@ pub fn draw(
                                 format!("{} is not led to this sail", bank.line().name())
                             })
                             .color(paint::LABEL)
-                            .size(10.0),
+                            .size(9.0),
                         );
                     });
 
-                    ui.add_space(10.0);
+                    ui.add_space(7.0);
                     separator(ui);
-                    ui.add_space(10.0);
+                    ui.add_space(7.0);
 
                     // The sail wardrobe, and the pilot.
                     ui.vertical(|ui| {
@@ -339,7 +339,7 @@ pub fn draw(
                             egui::RichText::new("HEADSAIL")
                                 .color(paint::LABEL)
                                 .monospace()
-                                .size(10.0),
+                                .size(9.0),
                         );
                         ui.add_space(4.0);
                         let rolled = sim.controls.furl > 0.9;
@@ -381,7 +381,7 @@ pub fn draw(
                             egui::RichText::new("PILOT")
                                 .color(paint::LABEL)
                                 .monospace()
-                                .size(10.0),
+                                .size(9.0),
                         );
                         let engaged = pilot.engaged();
                         if lamp_button(ui, if engaged { "ENGAGED" } else { "STANDBY" }, engaged)
@@ -420,9 +420,9 @@ pub fn draw(
                         });
                     });
 
-                    ui.add_space(10.0);
+                    ui.add_space(7.0);
                     separator(ui);
-                    ui.add_space(10.0);
+                    ui.add_space(7.0);
 
                     // Everything else that had only a key.
                     ui.vertical(|ui| {
@@ -430,7 +430,7 @@ pub fn draw(
                             egui::RichText::new("SHIP")
                                 .color(paint::LABEL)
                                 .monospace()
-                                .size(10.0),
+                                .size(9.0),
                         );
                         if small_button(ui, "TRIM TO BEST").clicked() {
                             let (m, j) = optimal_sheets(&cfg, telemetry.awa, sim.controls.outhaul);
@@ -487,14 +487,20 @@ fn sail_state(f: &sail_core::sail::SailForces, set: f64) -> (&'static str, egui:
     }
 }
 
+/// The rule between two columns of the console.
+///
+/// Its height is a fixed number and that made it the floor under the whole bar: a
+/// hundred and thirty-two pixels of hairline held the console open even after every
+/// widget in it had been brought down. Eighty-four is the tallest column plus its label,
+/// which is what a rule between columns is for.
 fn separator(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, 132.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, 84.0), egui::Sense::hover());
     ui.painter().rect_filled(rect, 0.0, paint::BEZEL);
 }
 
 /// The wind dial: the one instrument a sailor looks at more than the water.
 fn wind_dial(ui: &mut egui::Ui, awa: f64, twa: f64) {
-    let size = egui::vec2(104.0, 104.0);
+    let size = egui::vec2(90.0, 90.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let p = ui.painter();
     let c = rect.center();
@@ -565,7 +571,7 @@ fn gauge_alarmed(
     unit: &str,
     alarm: bool,
 ) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(86.0, 42.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(80.0, 34.0), egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, 2.0, paint::TRACK);
     let f = ((value - lo) / (hi - lo)).clamp(0.0, 1.0) as f32;
@@ -600,7 +606,7 @@ fn gauge_alarmed(
 }
 
 fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &str) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(86.0, 42.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(80.0, 34.0), egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, 2.0, paint::TRACK);
     let f = ((value - lo) / (hi - lo)).clamp(0.0, 1.0) as f32;
@@ -628,7 +634,7 @@ fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &st
 /// Heel, drawn as a horizon that tilts. One to one, because it has to agree with what
 /// your inner ear is already telling you.
 fn heel_scale(ui: &mut egui::Ui, heel: f64) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(180.0, 42.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(164.0, 34.0), egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, 2.0, paint::TRACK);
     let c = rect.center();
@@ -671,13 +677,13 @@ fn readout(ui: &mut egui::Ui, label: &str, value: &str) {
             egui::RichText::new(format!("{label:<6}"))
                 .color(paint::LABEL)
                 .monospace()
-                .size(11.0),
+                .size(9.0),
         );
         ui.label(
             egui::RichText::new(value)
                 .color(paint::FACE)
                 .monospace()
-                .size(13.0),
+                .size(12.0),
         );
     });
 }
@@ -798,9 +804,9 @@ fn compass_repeater(ui: &mut egui::Ui, heading: f64, mark: Option<f64>) {
         egui::RichText::new("COMPASS")
             .color(paint::LABEL)
             .monospace()
-            .size(10.0),
+            .size(9.0),
     );
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(92.0, 92.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(74.0, 74.0), egui::Sense::hover());
     let p = ui.painter();
     let c = rect.center();
     let r = rect.width() * 0.42;
@@ -882,13 +888,13 @@ fn tiller(ui: &mut egui::Ui, rudder: &mut f64, max: f64) -> bool {
         egui::RichText::new("HELM")
             .color(paint::LABEL)
             .monospace()
-            .size(10.0),
+            .size(9.0),
     );
     // A strip rather than a box. A tiller has one number in it — where it is — and the
     // old panel gave that one number a hundred and eighty by ninety pixels of console,
     // which is more room than the compass gets and more than the thing deserves.
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(150.0, 38.0), egui::Sense::click_and_drag());
+        ui.allocate_exact_size(egui::vec2(138.0, 30.0), egui::Sense::click_and_drag());
     let p = ui.painter();
     p.rect_filled(rect, 3.0, paint::TRACK);
 
@@ -947,10 +953,18 @@ fn lever(
             egui::RichText::new(label)
                 .color(paint::LABEL)
                 .monospace()
-                .size(10.0),
+                .size(9.0),
         );
+        // Forty-two by seventy-four, down from forty-six by a hundred and eight. It was
+        // the tallest thing in the console by a wide margin and therefore the thing
+        // setting the height of the whole bar, while the clutches, the headsail, the
+        // pilot and the ship columns all sat in sixty-odd with air above them.
+        //
+        // Still *vertical*, which is the part worth keeping: up is hauled in, so the
+        // lever reads the way the rope moves. Turning these on their side would have
+        // saved more and thrown that away.
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(46.0, 108.0), egui::Sense::click_and_drag());
+            ui.allocate_exact_size(egui::vec2(42.0, 74.0), egui::Sense::click_and_drag());
         let p = ui.painter();
         p.rect_filled(rect, 3.0, paint::TRACK);
 
@@ -1003,7 +1017,7 @@ fn lever(
 fn clutch(ui: &mut egui::Ui, label: &str, value: &mut f64, selected: bool) -> (bool, bool) {
     ui.vertical(|ui| {
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(58.0, 96.0), egui::Sense::click_and_drag());
+            ui.allocate_exact_size(egui::vec2(50.0, 70.0), egui::Sense::click_and_drag());
         let p = ui.painter();
         p.rect_filled(
             rect,
