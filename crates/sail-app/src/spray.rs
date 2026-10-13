@@ -56,7 +56,10 @@ const SPREAD: f64 = 0.55;
 const CREST_TOP: f64 = 0.42;
 
 /// How many looks at the water a fully whitecapped sea gets a second.
-const CREST_DARTS: f32 = 1_400.0;
+const CREST_DARTS: f32 = 440.0;
+/// Marks in one breaking crest, and how far they are scattered, metres.
+const CREST_SPECKS: usize = 6;
+const CREST_PATCH: f64 = 1.5;
 
 /// How far out breaking crests are drawn, metres.
 ///
@@ -311,21 +314,34 @@ pub fn update(
             if lifted < CREST_TOP {
                 continue;
             }
+            // A handful of small ones, not one big one.
+            //
+            // These specks are drawn as plain quads — there is no texture on them, which
+            // is right for foam at the hull where each is a pixel or two and the *field*
+            // of them is the picture. Scale one of those up to two metres and you have
+            // not drawn a whitecap, you have drawn a white square, which is what a
+            // square looks like when it is big enough to see its corners.
+            //
+            // So a breaking crest is a cluster: half a dozen specks a third of a metre
+            // across, scattered over a metre and a half of water. Same grammar as the
+            // foam off the bow — many small marks, each twinkling on its own — at the
+            // size the thing actually is.
             let blow = downwind * (0.5 + 1.5 * r.next_f64()) * blown.min(1.2) as f64;
-            live.push(Speck {
-                at,
-                drift: blow + glam::DVec2::new(a.cos(), a.sin()) * 0.25,
-                age: 0.0,
-                // Twenty times the scale of a speck thrown off the bow, and that is not
-                // a fudge — it is the difference between the two things. Foam at the
-                // stem is bubbles a few centimetres across seen from five metres away; a
-                // breaking crest is a patch of white a metre or two across seen from
-                // fifty. At the hull's scale a whitecap at eighty metres came out a
-                // third of a pixel, which is why there were none to see.
-                scale: 9.0 + 14.0 * r.next_f64() as f32,
-                phase: r.next_f64() as f32 * std::f32::consts::TAU,
-                tint: 0.2 * r.next_f64() as f32,
-            });
+            for _ in 0..CREST_SPECKS {
+                if live.len() >= COUNT {
+                    break;
+                }
+                let spread = r.next_f64() * std::f64::consts::TAU;
+                let out = CREST_PATCH * r.next_f64().sqrt();
+                live.push(Speck {
+                    at: at + glam::DVec2::new(spread.cos(), spread.sin()) * out,
+                    drift: blow + glam::DVec2::new(a.cos(), a.sin()) * 0.25,
+                    age: 0.0,
+                    scale: 2.0 + 2.6 * r.next_f64() as f32,
+                    phase: r.next_f64() as f32 * std::f32::consts::TAU,
+                    tint: 0.2 * r.next_f64() as f32,
+                });
+            }
             born_breaking += 1;
         }
     }
