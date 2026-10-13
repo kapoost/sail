@@ -1,0 +1,95 @@
+name: release
+
+# Built on the runners rather than cross-compiled from a laptop, and that is the whole
+# reason this file exists. Mac to Windows is the one step that reliably costs an
+# afternoon — Bevy through mingw has its own linker arguments, and the MSVC toolchain is
+# not on macOS at all — while a Windows runner builds it natively with nothing special.
+# The same argument runs the other way for anyone who only has a PC.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      # Both architectures, joined with lipo: an Intel Mac is still a Mac somebody has.
+      - run: cargo build --profile dist -p sail-app --target aarch64-apple-darwin
+      - run: cargo build --profile dist -p sail-app --target x86_64-apple-darwin
+      - run: bash dist/make-app.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/out/Sail-macos.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --profile dist -p sail-app
+      # One file, genuinely: the hull is inside it and so are the licences, which
+      # `Sail.exe --licences` prints.
+      - run: mkdir out
+      - run: copy target\dist\sail-app.exe out\Sail.exe
+        shell: cmd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/Sail.exe
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - run: ls -R artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/macos/Sail-macos.zip
+            artifacts/windows/Sail.exe
+            assets/ATTRIBUTION.md
+            assets/VT323-OFL.txt
+          body: |
+            A sailing simulator. One file each way, nothing to install.
+
+            **Windows** — download `Sail.exe` and run it. Windows will say *"Windows
+            protected your PC"* because the file is not signed: click **More info**, then
+            **Run anyway**.
+
+            **macOS** — download `Sail-macos.zip`, unzip it, and the first time, **right-click
+            `Sail.app` and choose Open** rather than double-clicking. Unsigned
+            applications are quarantined, and right-click-Open is the way past it. Universal:
+            Apple Silicon and Intel.
+
+            The hull model and the font are inside the executable; `Sail.exe --licences`
+            or `Sail.app/Contents/MacOS/sail --licences` prints their terms.
+
+            **At the helm.** Arrow keys are the tiller and hold their angle, `Space`
+            centres it, `Shift` makes any trim fine. `W`/`S` the mainsheet, `Q`/`E` the
+            genoa winch. `1`/`2` pick a line out of the clutch bank and `A`/`D` work it —
+            outhaul, vang, genoa car, reef, furl, staysail. `X`/`Z` change headsail, which
+            furls first, because a sail that teleports into another sail while drawing is
+            the one thing nobody would believe. `T` trims both sheets for you for five
+            seconds, which is what makes a gybe manageable single-handed. `P` the
+            autopilot and `O` switches it between a compass course and a wind angle.
+
+            **Looking at it.** `C` swaps between the helm and a view from astern, `V`
+            cycles the picture from sharp down to 480 pixels, `B` turns on the ink
+            drawing, `M` the chart with `[` and `]` to zoom, `Tab` the diagnostic panel,
+            `H` hides the console, `K` mutes, `L` asks for a new consignment.

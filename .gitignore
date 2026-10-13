@@ -10,3 +10,6 @@
 # Editors
 .idea/
 *.swp
+
+# Packaged builds
+/dist/out/

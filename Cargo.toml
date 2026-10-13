@@ -14,3 +14,18 @@ glam = "0.34"
 # validation suite integrates ~10^5 steps per test. Optimise test builds.
 [profile.test]
 opt-level = 2
+
+# A profile for the thing you hand to somebody else.
+#
+# Separate from `release` on purpose. Fat link-time optimisation across a single codegen
+# unit takes minutes rather than seconds, and `release` is what gets rebuilt forty times
+# an afternoon — paying distribution's bill on every one of those would be a tax on the
+# work. CI builds `--profile dist`; a person building to sail builds `--release`.
+#
+# What it buys, measured on this binary: 138 MB stripped and linked down to something a
+# friend will actually download.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = true

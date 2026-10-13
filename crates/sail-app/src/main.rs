@@ -50,15 +50,64 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 /// shipped and wrong for `./target/release/sail-app`, where it finds nothing and the
 /// hull silently fails to appear. So: beside the binary if it is there, otherwise the
 /// workspace, whose path is known at compile time.
+/// The scanned hull, carried inside the executable.
+///
+/// Everything else in this game is generated at startup — the sea, the sky, the deck
+/// planking, the compass card, the sail cloth, the sound — and the one thing that is not
+/// is this: ten megabytes of measured hull. Handing a friend *one file* means it has to
+/// travel inside that file.
+///
+/// `bevy_embedded_assets` would have done it with one line and there is no release of it
+/// for Bevy 0.20 — its 0.16 targets Bevy 0.16 and does not implement this version's
+/// `Plugin` trait at all. Writing a custom `AssetReader` to avoid touching the disk is
+/// the pure answer and it is a lot of API archaeology for a single file; unpacking it
+/// beside the user's temporary directory on first run is four lines, cannot be wrong in
+/// an interesting way, and leaves the distributed artefact a single file either way.
+const HULL: &[u8] = include_bytes!("../../../assets/venus.glb");
+
+/// Where the asset server should look.
+///
+/// Three places, in this order, and the order is the development loop: a loose `assets`
+/// directory beside the executable wins, so a new hull can be dropped in without a
+/// rebuild; then the source tree, for `cargo run`; and only then the copy carried inside
+/// the binary, unpacked. `SAIL_ASSETS=embedded` skips straight to the last one, which is
+/// how the path a friend will take gets tested on a machine that has the other two.
 fn asset_root() -> String {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(beside) = exe.parent().map(|d| d.join("assets")) {
-            if beside.is_dir() {
-                return beside.to_string_lossy().into_owned();
+    let forced = std::env::var("SAIL_ASSETS").is_ok_and(|v| v == "embedded");
+    if !forced {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(beside) = exe.parent().map(|d| d.join("assets")) {
+                if beside.is_dir() {
+                    return beside.to_string_lossy().into_owned();
+                }
             }
         }
+        let source = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets");
+        if std::path::Path::new(source).is_dir() {
+            return source.to_string();
+        }
     }
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").to_string()
+    unpacked().unwrap_or_else(|| {
+        // Nothing to be done about it here — the window has not opened and there is no
+        // logger yet — so say so on the terminal and let the asset server fail loudly.
+        println!("sail: could not unpack the hull; the boat will have no hull in it");
+        String::from("assets")
+    })
+}
+
+/// Put the embedded hull somewhere the asset server can read it, and return that
+/// directory. Skipped when the file is already there with the right length, so the
+/// second run costs a stat.
+fn unpacked() -> Option<String> {
+    let dir = std::env::temp_dir().join(concat!("sail-assets-", env!("CARGO_PKG_VERSION")));
+    std::fs::create_dir_all(&dir).ok()?;
+    let hull = dir.join("venus.glb");
+    let fresh = std::fs::metadata(&hull).is_ok_and(|m| m.len() == HULL.len() as u64);
+    if !fresh {
+        std::fs::write(&hull, HULL).ok()?;
+        println!("sail: unpacked the hull to {}", dir.display());
+    }
+    Some(dir.to_string_lossy().into_owned())
 }
 
 fn main() {
@@ -71,11 +120,32 @@ fn main() {
                 .map(|d| d.as_nanos() as u64)
                 .unwrap_or(0x5A1Fu64)
         });
+    // `--licences` before anything else, because it has to work in a build that cannot
+    // open a window — and because the single-file build carries the fonts and the hull
+    // *inside* it, which is only allowed if the licences travel with them. The OFL says
+    // the text must accompany the font; embedding it and printing it on request is how
+    // one file does that honestly.
+    if std::env::args().any(|a| a == "--licences" || a == "--licenses") {
+        println!("{}", include_str!("../../../assets/ATTRIBUTION.md"));
+        println!("\n--- VT323, SIL Open Font Licence ---\n");
+        println!("{}", include_str!("../../../assets/VT323-OFL.txt"));
+        return;
+    }
+
     let weather = weather::Weather::draw(seed);
     // Printed rather than logged: the draw happens before Bevy's log plugin exists,
     // so `info!` here goes nowhere at all.
     println!("forecast: {}", weather.report());
 
+    // Handing out one file to a friend means the hull has to be *inside* it. Everything
+    // else in this game is generated at startup — the sea, the sky, the deck planking,
+    // the compass card, the sound — and the one thing that is not is the scanned hull,
+    // ten megabytes of GLB that the asset server reads off the disk. Embedded, it is
+    // read out of the binary instead, and `ReplaceDefault` means nothing downstream has
+    // to know: `assets.load("venus.glb")` goes on saying exactly that.
+    //
+    // The loose `assets` directory still wins when it exists, which is what keeps the
+    // development loop: drop a new hull in and run, no rebuild.
     App::new()
         .add_plugins(
             DefaultPlugins
