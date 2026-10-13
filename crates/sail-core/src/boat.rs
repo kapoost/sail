@@ -288,8 +288,21 @@ fn wardrobe(genoa: &RiggedSail, genoa_luff: f64) -> (RiggedSail, RiggedSail, Rig
         limit_aws: cloth::GENNAKER,
     };
     let staysail = RiggedSail {
-        profile: SailProfile::staysail(area * 0.54, genoa_luff * 0.62),
-        area: area * 0.54,
+        // Thirty per cent of the genoa, not fifty-four, and the number is forced by the
+        // boat rather than chosen for her.
+        //
+        // A staysail is club-footed: its clew is shackled to a spar that swings on the
+        // tack fitting, so the sail has to fit in the gap between its own stay and the
+        // mast, and on this boat that gap is one metre ninety-seven. At fifty-four per
+        // cent the foot came out three metres twenty-six — the boom ran a metre and a
+        // third *past the mast*, through the gooseneck and the mainsail's luff, which is
+        // what was reported from the deck as a spar twice as long as the space it has.
+        //
+        // Thirty per cent gives a foot of one metre eighty and a hand's breadth to
+        // spare. That makes it a tall narrow sail, which is exactly what a modern
+        // cutter's staysail is: it is there to fill the slot, not to be a second genoa.
+        profile: SailProfile::staysail(area * 0.30, genoa_luff * 0.62),
+        area: area * 0.30,
         z_ce: genoa.z_ce * 0.78,
         x_ce: genoa.x_ce * 0.55,
         limit_aws: cloth::STAYSAIL,

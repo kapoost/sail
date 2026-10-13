@@ -1819,7 +1819,9 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         // is pushing. The luff is the fuller of the two because its curve is cut in;
         // the leech's comes only from the pressure.
         if flying {
-            let bow = (std::f32::consts::PI * u).sin() * (g.head - g.tack).length();
+            // Fullest at two thirds of the hoist, like everything else about this sail,
+            // instead of at the middle.
+            let bow = (std::f32::consts::PI * u.powf(1.4)).sin() * (g.head - g.tack).length();
             // The normal is not known until the chord is, so a provisional one from the
             // straight chord serves to push the edges — one iteration of a shape that
             // would otherwise need solving.
@@ -1869,8 +1871,18 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         // the head is free to fly. That is why the sail looks like it is lifting away
         // from the boat — it is, and the lift is the shape.
         if flying {
-            let shoulders = (std::f32::consts::PI * u.powf(0.8)).sin();
-            local_camber *= 1.0 + 1.25 * shoulders;
+            // The widest part is *high*, and higher than the first attempt put it. A
+            // power of 0.8 peaks at four tenths of the hoist, which is still a genoa's
+            // proportions; 1.6 peaks at two thirds, which is where a gennaker carries
+            // its shoulders and the reason the sail reads as lifting away from the boat.
+            //
+            // And the foot keeps a belly of its own rather than being pinched to a
+            // straight line between tack and clew. It is a *free edge* — only the two
+            // corners are held — so it bows out like the other two, and drawn flat it
+            // made the sail a balloon sitting on a short straight base, which was
+            // reported as a foot far shorter than the cloth above it.
+            let shoulders = (std::f32::consts::PI * u.powf(1.6)).sin();
+            local_camber *= 0.75 + 1.45 * shoulders;
         }
         // And an eased foot does not merely get deeper, it *hangs*. The foot is the one
         // edge an outhaul has its hands on: hauled, it is a straight tight line from
@@ -2074,6 +2086,19 @@ mod sails_and_rigging {
         assert!(
             (drawn - cut).abs() < 0.05,
             "the staysail is drawn on a {drawn:.2} m stay and cut with a {cut:.2} m luff"
+        );
+
+        // And the club boom has to end before the mast, because it is a spar that swings
+        // in the gap between the inner stay and the gooseneck. It ran a metre and a
+        // third past it, through the mainsail's luff — a sail cannot be given an area
+        // the boat has no room for, and the cure is a smaller sail rather than a shorter
+        // drawing of the same one, or the picture and the forces part company again.
+        let boom_end = staysail_boom_end(&cfg, 0.0, staysail_boom_length(&cfg));
+        assert!(
+            boom_end.z < MAST_FOOT_Z,
+            "the staysail's club boom ends at {:.2}, which is past the mast at {:.2}",
+            boom_end.z,
+            MAST_FOOT_Z
         );
 
         let stay = staysail_head(&cfg);
