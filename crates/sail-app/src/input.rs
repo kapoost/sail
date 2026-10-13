@@ -336,16 +336,30 @@ pub fn gather(
     // sail the boat for you.
     // --- Aback: the sheet on the wrong side, which is sometimes the right side -------
     //
-    // Held, because it is a rope you are holding. Let go and the crew tacks it across to
-    // where it belongs, which is what a crew does without being asked.
+    // A switch, not a key you hold down. It went in as a hold on the reasoning that it
+    // is a rope you have in your hand, and that is wrong about the rope: a backed sheet
+    // is made up on a cleat like every other sheet. Nobody stands there holding it — and
+    // the case it exists for is *heaving to*, where the whole point is that she looks
+    // after herself while you go below. A control you have to keep a finger on cannot
+    // express a boat left to lie for an hour.
     //
     // It is the only way out of irons and half of what it means to heave to. Head to
     // wind with a genoa sheeted normally there is nothing to be done — the sail is at a
     // negative angle of attack and luffs whatever you do with the helm — and the boat
     // sits there going slowly backwards, which is a real and miserable state that this
     // simulator could get into and not out of.
-    sim.controls.headsail_aback =
-        keys.pressed(KeyCode::KeyG) || pad.is_some_and(|p| p.pressed(GamepadButton::East));
+    if keys.just_pressed(KeyCode::KeyG) || pad.is_some_and(|p| p.just_pressed(GamepadButton::East))
+    {
+        sim.controls.headsail_aback = !sim.controls.headsail_aback;
+        info!(
+            "{}",
+            if sim.controls.headsail_aback {
+                "headsail backed — she will pay off"
+            } else {
+                "headsail sheeted across"
+            }
+        );
+    }
 
     // --- Dump: the other half of the sheet, and the one you need in a hurry ---------
     //
@@ -436,6 +450,10 @@ pub fn gather(
         if on_the_main {
             sim.controls.main_sheet += (m - sim.controls.main_sheet) * haul;
         } else {
+            // Trimming the headsail means putting it where it belongs, which includes
+            // the side it belongs on. Hands going to that winch is the moment a backed
+            // sheet gets tacked across.
+            sim.controls.headsail_aback = false;
             sim.controls.jib_sheet += (j - sim.controls.jib_sheet) * haul;
         }
         if pressed {
