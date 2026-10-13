@@ -513,7 +513,9 @@ pub fn setup(
             // Masthead windex.
             b.spawn((
                 Windex,
-                Transform::from_xyz(0.0, DECK + 15.4, MAST_FOOT_Z),
+                // At the very top of the spar, above everything. Derived: this was
+                // `DECK + 15.4` and sat below the masthead once the mast grew.
+                Transform::from_xyz(0.0, crate::rig::MAST_HEAD + 0.15, MAST_FOOT_Z),
                 Visibility::default(),
             ))
             .with_children(|w| {
@@ -651,11 +653,9 @@ pub fn update_telltales(sim: Res<Sim>, time: Res<Time>, mut q: Query<(&Telltale,
     let foot = crate::rig::BOOM_LENGTH * (1.0 - 0.35 * reef);
     let boom = side * t_.main.chord_angle as f32;
     let tack = Vec3::new(0.0, BOOM_HEIGHT, MAST_FOOT_Z);
-    let head = Vec3::new(
-        0.0,
-        BOOM_HEIGHT + (15.4 - BOOM_HEIGHT) * (1.0 - 0.45 * reef),
-        MAST_FOOT_Z,
-    );
+    // The same three corners the sail is built from, from the same functions, which is
+    // the only way a telltale stays sewn to the cloth it is reporting on.
+    let head = main_head(1.0 - 0.45 * reef);
     let clew = tack + Vec3::new(boom.sin() * foot, 0.0, boom.cos() * foot);
 
     for (tt, mut tr) in &mut q {
@@ -747,12 +747,7 @@ pub fn update_sails(
                     t_.main,
                     SailGeometry {
                         tack,
-                        // Reefing pulls the head down the mast, not the foot up.
-                        head: Vec3::new(
-                            0.0,
-                            BOOM_HEIGHT + (DECK + 15.4 - BOOM_HEIGHT) * shrink,
-                            MAST_FOOT_Z,
-                        ),
+                        head: main_head(shrink),
                         // The clew is the boom end: level with the tack, because the
                         // boom is level. That is what made the horizontal-chord
                         // shortcut look right until a headsail turned up.
@@ -966,7 +961,12 @@ pub fn report(sim: Res<Sim>) {
         crate::rig::BOOM_HEIGHT,
         crate::rig::SPREADER_HEIGHT
     );
-    let luff_main = crate::rig::MAST_HEAD - crate::rig::BOOM_HEIGHT;
+    // Measured off the geometry the mesh is built from, not off the constant it was
+    // meant to be built from. Those were the same number for a while and then they were
+    // not, and the version of this line that read the constant reported a correct luff
+    // while the sail was drawn a metre and a third short.
+    let drawn_head = main_head(1.0);
+    let luff_main = drawn_head.y - crate::rig::BOOM_HEIGHT;
     info!(
         "     mainsail: luff drawn {:.2} m against {:.2} configured, foot {:.2}, area {:.1} m2",
         luff_main,
@@ -997,12 +997,14 @@ pub fn report(sim: Res<Sim>) {
         let lp = (to_clew - luff_dir * to_clew.dot(luff_dir)).length();
         let base = (MAST_FOOT_Z - g.tack.z).abs();
         info!(
-            "     {:8}: area {:5.1} m2  luff {:5.2}  foot {:5.2}  clew z {:+5.2}  LP/base {:4.0}%",
+            "     {:8}: area {:5.1} m2  luff {:5.2}  foot {:5.2}  clew z {:+5.2}  \
+             head {:5.2} m  LP/base {:4.0}%",
             kind.name(),
             cfg.headsail(kind).area,
             (g.head - g.tack).length(),
             (g.clew - g.tack).length(),
             g.clew.z,
+            g.head.y,
             lp / base * 100.0,
         );
     }
@@ -1126,6 +1128,30 @@ pub fn headsail_shape(
         head: hoisted,
         clew: clew_on_cloth(tack, hoisted, &fitted, belly, angle, block),
     }
+}
+
+/// Where the head of the mainsail sits, for a reef scale of 1 down to 0.
+///
+/// Reefing pulls the luff down the mast and leaves the foot where it was: the pennant
+/// runs through a cheek block at the *end* of the boom, so the new clew lands within a
+/// hand's breadth of the old one. What you lose is hoist.
+///
+/// A function, and derived, because this was typed in. It read `DECK + 15.4`, which was
+/// the masthead until the mast's height stopped being a typed-in number and became
+/// `BOOM_HEIGHT + MAIN_LUFF` — and then the sail's head stayed where it was, one and a
+/// third metres below the top of its own spar, with the halyard apparently attached to
+/// nothing. Reported from the deck as the head corner coming unstuck from the mast.
+///
+/// What makes it worth a paragraph is that the diagnostic in `report` said the luff was
+/// right. It was measuring `MAST_HEAD - BOOM_HEIGHT` — the intention — while the mesh
+/// was built from a different number. An instrument that reads the constant instead of
+/// the drawing cannot see this class of fault at all, which is the one it exists for.
+pub fn main_head(reef_scale: f32) -> Vec3 {
+    Vec3::new(
+        0.0,
+        BOOM_HEIGHT + (crate::rig::MAST_HEAD - BOOM_HEIGHT) * reef_scale,
+        MAST_FOOT_Z,
+    )
 }
 
 /// Marks the staysail's club boom, which swings on its own.
@@ -1702,7 +1728,16 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
                 * free_edge
                 * chord_length.max(0.4);
             let point = luff.lerp(leech, v) + normal * (belly + flap + crease) - Vec3::Y * droop;
-            let point = constrained(point, normal, shrouds, clear_mast);
+            // Cloth in the body of the sail is pushed clear of the spar and the wires.
+            // Cloth on the luff is *held* by them — it is in a mast track or hanked to a
+            // stay — and the head is a fitting shackled to the halyard at the top of
+            // whichever one it is. Pushing those is how a head corner ends up floating
+            // a hand's breadth off its own stay, which is what a headsail was doing: its
+            // head sits on the mast's axis where the forestay lands, so the clearance
+            // push had the one point that cannot move as its target.
+            let edge = crate::clouds::step_between(0.0, 0.14, v)
+                * (1.0 - crate::clouds::step_between(0.82, 1.0, u));
+            let point = point.lerp(constrained(point, normal, shrouds, clear_mast), edge);
             positions.push(point);
             // Metres, not a normalised zero to one. A panel of sailcloth is a metre
             // wide whatever sail it is in, so the seams have to be laid out in the
