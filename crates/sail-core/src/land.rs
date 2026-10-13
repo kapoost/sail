@@ -56,7 +56,24 @@ pub struct Island {
     pub height: f64,
     lobes: [f64; 3],
     phases: [f64; 3],
+    /// Seed for this island's own relief, so two islands of the same size are not the
+    /// same hill.
+    relief_seed: u64,
 }
+
+/// How far in from the shore the cliff face reaches, as a share of the mean radius.
+const CLIFF_SHARE: f64 = 0.20;
+/// And how much of the island's height it climbs in that distance.
+const CLIFF_RISE: f64 = 0.62;
+/// Size of a ridge, metres. A few hundred: smaller and the island is corrugated,
+/// larger and a whole island is one slope.
+const RIDGE_SCALE: f64 = 260.0;
+/// The lowest the relief may take the ground, as a share of the mean profile. Valleys,
+/// not canyons — a valley that cuts to nothing would flood.
+const RELIEF_FLOOR: f64 = 0.55;
+/// How far inland the relief is held back, as a share of the mean radius. The coastline
+/// belongs to the distance field and the relief may not move it.
+const SHORE_HOLD: f64 = 0.10;
 
 impl Island {
     /// Distance from the centre to the shore on a given bearing, metres.
@@ -67,6 +84,57 @@ impl Island {
             r += amp * (harmonic * bearing + phase).sin();
         }
         self.radius * r.max(0.25)
+    }
+
+    /// Height of the land above the water at a point, metres. Zero at the shore and
+    /// anywhere seaward of it.
+    ///
+    /// **The one definition of how high the ground is**, and it had to become one
+    /// because there were three. `depth` carried `-height * sqrt(inland)`, a dome; the
+    /// renderer carried a cliff-and-roll curve with two harmonics of bearing on it; and
+    /// the wind shadow keyed off `height` alone. A boat could therefore sound six metres
+    /// over ground the eye was looking at the top of, and the relief the renderer drew
+    /// existed nowhere else — which is also why it read as a dish-cover: a function of
+    /// *bearing* scales the whole radial line together, so an island could have lobes
+    /// but never a ridge running inland, never a valley, never two summits.
+    ///
+    /// Three parts, in the order they matter:
+    ///
+    /// * **The profile.** How the ground climbs from the shore. Not a dome: these are
+    ///   basalt islands the Atlantic has been taking the edge off for ten thousand
+    ///   years, so the first fifth of the way inland does three fifths of the climbing
+    ///   and the rest is a long roll to the top. That is a cliff from a mile off, which
+    ///   is the distance you sail past them at.
+    /// * **The ridges**, from a ridged noise field in *world* coordinates — so they run
+    ///   inland, fork, and die out, which is what erosion leaves. This is the part that
+    ///   could not exist before.
+    /// * **A taper to nothing at the water**, because the coastline belongs to the
+    ///   signed distance field and nothing here may move it. Relief that reaches the
+    ///   shore would lift the land out of the water in some places and drown it in
+    ///   others, and the depth sounder and the drawn coast would part company again.
+    pub fn elevation(&self, pos: DVec2) -> f64 {
+        let d = self.signed_distance(pos);
+        if d >= 0.0 {
+            return 0.0;
+        }
+        let inland = (-d / self.radius.max(1.0)).clamp(0.0, 1.0);
+        // The climb. Steep at the shore, easing off inland.
+        let profile = if inland < CLIFF_SHARE {
+            let e = inland / CLIFF_SHARE;
+            CLIFF_RISE * e * e * (3.0 - 2.0 * e)
+        } else {
+            CLIFF_RISE
+                + (1.0 - CLIFF_RISE) * ((inland - CLIFF_SHARE) / (1.0 - CLIFF_SHARE)).powf(0.75)
+        };
+        // The relief, in world metres so it does not stretch with the island's size: a
+        // ridge is a few hundred metres across whether it is on a skerry or on a
+        // headland, and scaling it to the island would make every island the same
+        // picture at a different zoom.
+        let ridge = crate::noise::ridged(pos / RIDGE_SCALE, self.relief_seed);
+        let relief = RELIEF_FLOOR + (1.0 - RELIEF_FLOOR) * ridge;
+        // Held down at the water's edge, released inland.
+        let shore = crate::units::smoothstep(0.0, SHORE_HOLD, inland);
+        self.height * profile * (1.0 - shore + shore * relief)
     }
 
     /// Metres to the shore, negative inside.
@@ -139,6 +207,7 @@ impl Archipelago {
                     rng.next_f64() * std::f64::consts::TAU,
                     rng.next_f64() * std::f64::consts::TAU,
                 ],
+                relief_seed: rng.next_u32() as u64 | ((rng.next_u32() as u64) << 32),
             };
             if candidate.centre.length() < clear_radius + radius {
                 continue;
@@ -181,9 +250,10 @@ impl Archipelago {
     pub fn depth(&self, pos: DVec2) -> f64 {
         let d = self.signed_distance(pos);
         if d <= 0.0 {
-            // Inland. Rises towards the island's own summit rather than at some
-            // unrelated slope, so a low sandbank is low and a steep one is steep —
-            // which the wind shadow is already keyed to and so had better agree with.
+            // Inland, and the height comes from the island's own `elevation` — the same
+            // function the land is drawn from. It used to be a separate square-root dome
+            // here, which meant the sounder and the eye could disagree about the shape
+            // of the ground they were both looking at.
             let island = self
                 .islands
                 .iter()
@@ -193,9 +263,7 @@ impl Archipelago {
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .copied();
-            let (radius, height) = island.map(|i| (i.radius, i.height)).unwrap_or((1.0, 10.0));
-            let inland = (-d / radius.max(1.0)).clamp(0.0, 1.0);
-            return -height * inland.sqrt();
+            return -island.map(|i| i.elevation(pos)).unwrap_or(10.0);
         }
         // Steep close in, flattening out to the open depth: a real bank, not a ramp.
         let t = (d / SHELF).min(1.0);

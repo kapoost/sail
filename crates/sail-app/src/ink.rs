@@ -345,6 +345,12 @@ pub fn creases(mesh: &Mesh) -> Option<(Mesh, usize)> {
     // was for.
     const MEASURED: usize = 2_000;
     if tris.len() > MEASURED && folds.len() as f32 > considered as f32 * GRAIN_SHARE {
+        debug!(
+            "ink: {} triangles judged grain, {} folds of {considered} edges ({:.0}%)",
+            tris.len(),
+            folds.len(),
+            folds.len() as f32 / considered as f32 * 100.0
+        );
         return None;
     }
 

@@ -58,20 +58,27 @@ use crate::frame;
 use crate::sim::Sim;
 
 /// How many separate clouds.
-const CELLS: usize = 20;
+const CELLS: usize = 48;
 /// Puffs in each. Enough that the silhouette is lumpy rather than a row of circles.
 const PER_CELL: usize = 26;
 const COUNT: usize = CELLS * PER_CELL;
 
 /// Beyond this from the boat a cell is recycled upwind, metres.
 ///
-/// Three and a half kilometres, which is near, and that is the point. This layer is not
-/// trying to cover the sky — the deck baked into the cubemap does that, and does it for
-/// nothing out to the horizon. What a cubemap cannot do is parallax, and parallax only
-/// exists close to. Twenty cells over six kilometres covered three percent of the sky
-/// and sat in a band near the horizon, which is a cubemap's job done worse; twenty over
-/// three and a half pass overhead, which is the job only geometry can do.
-const RANGE: f64 = 3400.0;
+/// Seven and a half kilometres, which is the archipelago's own size: the islands are
+/// scattered over nine kilometres each way, and a cloud layer that stopped at three and
+/// a half had clear sky over every one of them. Cloud over land is not decoration — it
+/// is the oldest way of finding land there is, and it is still in the pilot books: a
+/// cumulus stands over an island all day because the land heats and the sea does not,
+/// so a cloud that stays put while the others go by has something underneath it.
+///
+/// This was three and a half kilometres on purpose and the reason still holds — the
+/// baked deck in the cubemap covers the sky for nothing, and what geometry buys is
+/// parallax, which only exists close to. So the cell count goes up with the range
+/// rather than the density going down: forty-eight over seven and a half kilometres
+/// keeps roughly what twenty had over three and a half, and some of them now have
+/// islands under them.
+const RANGE: f64 = 7500.0;
 /// Nothing is born closer than this, metres. Cells drift overhead and are welcome to —
 /// but one *arriving* on top of the mast reads as a bug rather than as weather.
 const KEEP_CLEAR: f64 = 700.0;
@@ -81,6 +88,14 @@ const BASE_LOW: f32 = 260.0;
 const BASE_HIGH: f32 = 520.0;
 /// Texels across the puff.
 const PUFF: u32 = 128;
+/// How much a patch of dry land is worth against a gust when siting a cloud.
+///
+/// Comparable with a strong gust, not overwhelming: an island gets cloud over it more
+/// often than the water does, and not always.
+const LAND_THERMAL: f64 = 0.55;
+/// How much higher a cloud base sits over land, metres.
+const LAND_LIFT: f32 = 90.0;
+
 /// Shafts drawn per cloud. Three narrow ones rather than one the width of the cell: a
 /// ray reads as a ray because it is narrow, and a single wedge as wide as the cloud is a
 /// grey smear.
@@ -375,9 +390,12 @@ pub fn setup(
 
     let mut seed = sail_core::rng::Pcg32::new(0x5C_1D_0B);
     let boat = sim.sim.state.pos;
+    let land = sim.sim.land.clone();
     let mut cells = Vec::with_capacity(CELLS);
     for _ in 0..CELLS {
-        cells.push(seeded_cell(&mut seed, boat, None, &|_| 0.0));
+        cells.push(seeded_cell(&mut seed, boat, None, &|_| 0.0, &|at| {
+            dry_land(&land, at)
+        }));
     }
 
     let mut puffs = Vec::with_capacity(COUNT);
@@ -437,9 +455,17 @@ pub fn setup(
         }
     }
     let probes = (2 * PROBE + 1) * (2 * PROBE + 1);
+    // How many have an island under them, because that is the claim: cloud stands over
+    // land. If this comes out zero the thermal term is not reaching the placement and
+    // nothing else in the frame would say so.
+    let over_land = clouds
+        .cells
+        .iter()
+        .filter(|c| dry_land(&land, c.at))
+        .count();
     info!(
-        "cloud: {CELLS} cells of {PER_CELL} puffs, bases {:.0}-{:.0} m, nearest {:.0} m, \
-         {:.0}% of the water in shadow",
+        "cloud: {CELLS} cells of {PER_CELL} puffs, {over_land} over land, \
+         bases {:.0}-{:.0} m, nearest {:.0} m, {:.0}% of the water in shadow",
         clouds
             .cells
             .iter()
@@ -453,6 +479,11 @@ pub fn setup(
     commands.insert_resource(clouds);
 }
 
+/// Is there land here? False everywhere when there is no archipelago.
+fn dry_land(land: &Option<std::sync::Arc<sail_core::land::Archipelago>>, at: glam::DVec2) -> bool {
+    land.as_ref().is_some_and(|l| l.depth(at) <= 0.0)
+}
+
 /// Place a cloud. With a drift given it comes in from upwind; without one it is
 /// scattered anywhere in range, which is what the first frame wants.
 fn seeded_cell(
@@ -460,7 +491,18 @@ fn seeded_cell(
     boat: glam::DVec2,
     drift: Option<glam::DVec2>,
     gust: &dyn Fn(glam::DVec2) -> f64,
+    dry: &dyn Fn(glam::DVec2) -> bool,
 ) -> Cell {
+    // What makes a place worth a cloud. Two terms, both real convection:
+    //
+    // * **A gust.** A cumulus is the visible top of a column of rising air and the gust
+    //   is what comes back down beside it, so the cloud and the dark patch on the water
+    //   and the pressure in the sails are one event.
+    // * **Land.** Rock and heath heat in the morning sun and the sea does not, so the
+    //   air over an island rises and the air over the water around it does not. That is
+    //   why a cumulus stands over an island while the rest of the sky streams past, and
+    //   why a cloud sitting still is land.
+    let worth = |at: glam::DVec2| gust(at) + if dry(at) { LAND_THERMAL } else { 0.0 };
     let at = match drift {
         Some(d) if d.length_squared() > 1e-6 => {
             let upwind = -d.normalize();
@@ -487,9 +529,19 @@ fn seeded_cell(
             best.0
         }
         _ => {
-            let a = seed.next_f64() * std::f64::consts::TAU;
-            let r = KEEP_CLEAR + seed.next_f64().sqrt() * (RANGE - KEEP_CLEAR);
-            boat + glam::DVec2::new(a.cos(), a.sin()) * r
+            // The first frame: scattered anywhere in range, but still asked which of a
+            // few places is worth a cloud, so the islands start with their own.
+            let mut best = (boat, f64::NEG_INFINITY);
+            for _ in 0..8 {
+                let a = seed.next_f64() * std::f64::consts::TAU;
+                let r = KEEP_CLEAR + seed.next_f64().sqrt() * (RANGE - KEEP_CLEAR);
+                let candidate = boat + glam::DVec2::new(a.cos(), a.sin()) * r;
+                let score = worth(candidate);
+                if score > best.1 {
+                    best = (candidate, score);
+                }
+            }
+            best.0
         }
     };
     let spread = 230.0 + seed.next_f64() as f32 * 280.0;
@@ -500,9 +552,15 @@ fn seeded_cell(
             spread * (0.16 + seed.next_f64() as f32 * 0.22),
         );
     }
+    // Higher over land. A cumulus base is set by where the rising air reaches its
+    // condensation level, and air off a sun-warmed island starts warmer and drier than
+    // air off the sea, so it has to go further up before anything happens to it. The
+    // flat bases of a line of cumulus standing at one height over the land and lower
+    // over the water is a real thing to look at.
+    let over_land = if dry(at) { LAND_LIFT } else { 0.0 };
     Cell {
         at,
-        base: BASE_LOW + seed.next_f64() as f32 * (BASE_HIGH - BASE_LOW),
+        base: BASE_LOW + over_land + seed.next_f64() as f32 * (BASE_HIGH - BASE_LOW),
         spread,
         rise: 90.0 + seed.next_f64() as f32 * 170.0,
         beams,
@@ -544,9 +602,13 @@ pub fn update(
     for cell in &mut clouds.cells {
         cell.at += drift * dt;
         if (cell.at - boat).length() > RANGE {
-            *cell = seeded_cell(&mut seed, boat, Some(drift), &|at| {
-                sim.sim.wind.gust_at(at, t)
-            });
+            *cell = seeded_cell(
+                &mut seed,
+                boat,
+                Some(drift),
+                &|at| sim.sim.wind.gust_at(at, t),
+                &|at| dry_land(&sim.sim.land, at),
+            );
         }
     }
 
@@ -572,9 +634,13 @@ pub fn update(
                 // Its squall has gone, so the cell goes back to being weather. Put it
                 // out of the way upwind rather than letting it fade on the spot, which
                 // would read as a cloud evaporating overhead.
-                *cell = seeded_cell(&mut seed, boat, Some(drift), &|at| {
-                    sim.sim.wind.gust_at(at, t)
-                });
+                *cell = seeded_cell(
+                    &mut seed,
+                    boat,
+                    Some(drift),
+                    &|at| sim.sim.wind.gust_at(at, t),
+                    &|at| dry_land(&sim.sim.land, at),
+                );
             }
             None => {}
         }

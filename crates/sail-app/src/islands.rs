@@ -19,10 +19,10 @@ use crate::frame;
 use crate::sim::Sim;
 
 /// Points round the shoreline of each island.
-const RING: usize = 72;
+const RING: usize = 96;
 /// Rings from the shore to the summit. More than before: the relief needs somewhere
 /// to happen, and seven rings over a kilometre and a half of island is a tent.
-const STEPS: usize = 14;
+const STEPS: usize = 22;
 
 /// Marks an island so it can be re-placed when the render origin moves.
 #[derive(Component)]
@@ -109,35 +109,25 @@ fn island_mesh(island: &Island, below: bool) -> Mesh {
                 let out = shore + t * 300.0;
                 (out, -34.0 * (t * t).min(1.0))
             } else {
-                // In and up, and the shape of that climb is the whole character of the
-                // place. A square root gives a dome — a pudding rising out of the sea —
-                // and these islands are not puddings. They are basalt: the sea has been
-                // taking the edge off them for ten thousand years and what is left stands
-                // up out of the water in a wall, with a green back sloping away behind
-                // it.
+                // In and up, and the height comes from the island itself rather than
+                // from a curve written here.
                 //
-                // So the first fifth of the way in does three fifths of the climbing,
-                // and the rest is a long easy roll to the summit. Steep enough to read as
-                // a cliff from a mile off, which is the distance you sail past them at.
+                // This used to be a cliff profile with two harmonics of *bearing* on it,
+                // which is why every island read as a dish-cover: a function of bearing
+                // scales the whole radial line together, so an island could have lobes
+                // and never a ridge running inland, never a valley, never two tops. And
+                // it was a second description of the ground — the depth sounder had a
+                // third — so a boat could sound six metres over land the eye was looking
+                // at the top of.
+                //
+                // `Island::elevation` is the one description now, in world coordinates,
+                // and the mesh is a sampling of it. All the relief in the skyline comes
+                // from there, which also means the chart, the sounder and the drawn hill
+                // are the same hill.
                 let inward = shore * (1.0 - t);
-                let cliff = if t < 0.2 {
-                    // The face. Nearly vertical, eased at the foot so it meets the water
-                    // in surf rather than in a corner.
-                    {
-                        let e = (t / 0.2).clamp(0.0, 1.0);
-                        0.62 * e * e * (3.0 - 2.0 * e)
-                    }
-                } else {
-                    0.62 + 0.38 * ((t - 0.2) / 0.8).powf(0.75)
-                };
-                // Relief on top of the mean rise, because a smooth anything reads as a
-                // dish-cover and a skyline is the only thing at this distance with
-                // information in it: two harmonics give a summit, a shoulder and a
-                // saddle.
-                let relief = 1.0
-                    + 0.30 * (bearing * 2.0 + island.centre.x as f32).sin()
-                    + 0.16 * (bearing * 3.0 - island.centre.y as f32).cos();
-                (inward, island.height as f32 * cliff * relief.max(0.35))
+                let at = island.centre
+                    + glam::DVec2::new(bearing.sin() as f64, bearing.cos() as f64) * inward as f64;
+                (inward, island.elevation(at) as f32)
             };
             positions.push(Vec3::new(bearing.sin() * r, y, -bearing.cos() * r));
             colours.push(if below {

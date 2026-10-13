@@ -370,14 +370,6 @@ pub struct GustField {
     seed: u64,
 }
 
-/// Standard deviation of [`GustField::shape`], measured rather than derived.
-///
-/// Pinned by `wind::tests::the_gust_field_has_the_intensity_it_claims`, because the
-/// whole point of the number is that `intensity` means what it says: if this drifts,
-/// every wind speed in the simulator is quietly wrong by a few percent and nothing
-/// else says so.
-const SHAPE_SIGMA: f64 = 0.330_6;
-
 impl GustField {
     pub fn new(seed: u64) -> Self {
         Self {
@@ -401,46 +393,12 @@ impl GustField {
         if self.intensity <= 0.0 || self.cell <= 0.0 {
             return 0.0;
         }
-        self.shape((pos - carried) / self.cell) * (self.intensity / SHAPE_SIGMA)
+        // Scaled so `intensity` is the standard deviation of the result, which is
+        // what lets the twelve percent measured over open water mean twelve percent
+        // here.
+        crate::noise::two_octaves((pos - carried) / self.cell, self.seed)
+            * (self.intensity / crate::noise::TWO_OCTAVE_SIGMA)
     }
-
-    /// Unit-ish noise: two octaves, the second small and turned off-lattice so the two
-    /// never line up and make a grid of it.
-    fn shape(&self, p: DVec2) -> f64 {
-        0.74 * value_noise(p, self.seed)
-            + 0.26 * value_noise(p * 2.7 + DVec2::new(11.3, -7.1), self.seed ^ 0x9E37)
-    }
-}
-
-/// Hash of a lattice point to [−1, 1]. Deterministic, stateless, and the reason the
-/// field needs no memory.
-fn lattice(ix: i64, iy: i64, seed: u64) -> f64 {
-    let mut h = seed
-        ^ (ix as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        ^ (iy as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xFF51_AFD7_ED55_8CCD);
-    h ^= h >> 33;
-    h = h.wrapping_mul(0xC4CE_B9FE_1A85_EC53);
-    h ^= h >> 33;
-    (h >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
-}
-
-/// Smooth value noise. Smoothstep rather than linear interpolation, because the
-/// derivative of the wind matters here: a kink in the field is a step in the force on
-/// the rig, and the boat rings like a bell when it crosses one.
-fn value_noise(p: DVec2, seed: u64) -> f64 {
-    let i = p.floor();
-    let f = p - i;
-    let w = f * f * (DVec2::splat(3.0) - 2.0 * f);
-    let (ix, iy) = (i.x as i64, i.y as i64);
-    let a = lattice(ix, iy, seed);
-    let b = lattice(ix + 1, iy, seed);
-    let c = lattice(ix, iy + 1, seed);
-    let d = lattice(ix + 1, iy + 1, seed);
-    let top = a + (b - a) * w.x;
-    let bottom = c + (d - c) * w.x;
-    top + (bottom - top) * w.y
 }
 
 /// Flow vector from a meteorological direction and speed.
@@ -730,9 +688,8 @@ mod tests {
         assert!(
             (sigma - field.intensity).abs() < 0.004,
             "intensity {:.3} should be the standard deviation, got {sigma:.4} — \
-             SHAPE_SIGMA wants to be {:.4}",
-            field.intensity,
-            SHAPE_SIGMA * sigma / field.intensity
+             so the scaling is wrong",
+            field.intensity
         );
     }
 

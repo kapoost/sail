@@ -27,6 +27,10 @@ use bevy::prelude::*;
 /// this range: at seven kilometres and a forty-one degree lens, a hundred and twenty
 /// gives a chord of about a tenth of a degree.
 const SEGMENTS: usize = 120;
+/// How much of the sea's own colour the line keeps. A third: enough to be the water
+/// and dark enough to be a line.
+const SEA_SHARE: f32 = 0.34;
+
 /// How far out the ring sits, metres. Inside the camera's eight-kilometre far plane
 /// with room to spare, and beyond every island the generator places.
 const RANGE: f32 = 7_600.0;
@@ -66,9 +70,15 @@ pub fn setup(
         HorizonLine,
         Mesh3d(meshes.add(mesh)),
         MeshMaterial3d(materials.add(StandardMaterial {
-            // The same ink as everything else, and unlit for the same reason: a lit
-            // dark line picks up the sky and becomes a grey rim.
-            base_color: Color::linear_rgb(0.035, 0.045, 0.062),
+            // The sea's own colour, taken down. Not the boat's near-black ink: a line
+            // along the top of the water belongs to the water, and a black one reads as
+            // a bar laid across the picture rather than as the far edge of the sea. A
+            // third of the sea's deep tone is dark enough to separate it from the sky
+            // and still obviously the same body of water.
+            base_color: {
+                let c = crate::world::DEEP * SEA_SHARE;
+                Color::linear_rgb(c.x, c.y, c.z)
+            },
             unlit: true,
             fog_enabled: false,
             ..default()

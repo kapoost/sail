@@ -235,6 +235,13 @@ pub struct SurfaceDrift {
     offset: glam::DVec2,
 }
 
+/// The colour of water too far off to carry any detail.
+///
+/// Public because the horizon is drawn as a line now, and a line along the top of the
+/// sea has to be the sea's own colour darkened rather than a second dark blue chosen
+/// next to it. If the water's colour is ever changed, the line has to come with it.
+pub const DEEP: Vec3 = Vec3::new(0.035, 0.095, 0.150);
+
 /// How far from the boat cloud shadows are drawn on the water, metres.
 ///
 /// As much an honesty as an economy. The eye is two metres above the water: at three
@@ -528,8 +535,7 @@ pub fn update_sea(
                     flat.x as f32 / sea_texture::TILE_METRES,
                     -flat.y as f32 / sea_texture::TILE_METRES,
                 ));
-                let deep = Vec3::new(0.035, 0.095, 0.150);
-                colours.push([deep.x, deep.y, deep.z, 1.0]);
+                colours.push([DEEP.x, DEEP.y, DEEP.z, 1.0]);
                 continue;
             }
             // Sample at the true world position. Bevy's -Z is sim north, so the
