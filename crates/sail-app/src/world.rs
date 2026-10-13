@@ -253,6 +253,15 @@ pub struct SurfaceDrift {
     offset: glam::DVec2,
 }
 
+/// How much of the wind ends up as a current in the top of the water.
+///
+/// Two and a half percent, which is the old rule of thumb and is in `update_sea` as the
+/// thing that carries the texture along. Public so the chart can draw the set and drift
+/// from the same number the water is moved by, rather than from a second estimate of it:
+/// a chart that disagrees with the sea about which way it is running is worse than a
+/// chart with nothing on it.
+pub const DRIFT_OF_WIND: f64 = 0.025;
+
 /// The colour of water too far off to carry any detail.
 ///
 /// Public because the horizon is drawn as a line now, and a line along the top of the
@@ -584,7 +593,7 @@ pub fn update_sea(
         // now, each at its own dispersion speed, so the texture coordinates are left to
         // carry what genuinely is a bulk translation: the wind-driven surface drift, two
         // and a half percent of the wind speed.
-        let speed = tm.tws * 0.025;
+        let speed = tm.tws * DRIFT_OF_WIND;
         drift.offset += downwind * speed * time.delta_secs_f64();
         let current = drift.offset;
         // Rebase the texture coordinates by a whole number of tile repeats.

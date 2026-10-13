@@ -54,6 +54,12 @@ mod ink {
     pub const BOAT: Color32 = Color32::from_rgb(184, 36, 28);
     pub const MARK: Color32 = Color32::from_rgb(196, 112, 24);
     pub const TRACK: Color32 = Color32::from_rgb(120, 60, 140);
+    /// What the weather is written on with. A navigator corrects a chart in ink and
+    /// pencils the forecast on top of it, and the forecast is the part that is only
+    /// true today — so it is a different hand from the coastline, and it reads as
+    /// something added rather than something printed.
+    pub const PEN: Color32 = Color32::from_rgb(40, 52, 104);
+    pub const SQUALL: Color32 = Color32::from_rgb(96, 74, 120);
 }
 
 pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut chart: ResMut<Chart>) {
@@ -229,6 +235,77 @@ pub fn draw(
                 egui::Stroke::new(1.0, ink::COAST),
                 egui::StrokeKind::Inside,
             );
+            // --- The weather, pencilled on ---------------------------------------
+            //
+            // A navigator corrects the chart in ink and writes the forecast on it in
+            // pencil, because the coastline is true next year and the wind is true for
+            // the afternoon. These are drawn from the *live* field rather than from the
+            // forecast's own numbers, which is a better reading of the same thing: the
+            // barbs show the lee of an island and the outflow of a squall, neither of
+            // which a forecast can tell you and both of which decide which side you pass.
+            const BARBS: i32 = 3;
+            for ix in -BARBS..=BARBS {
+                for iy in -BARBS..=BARBS {
+                    if (ix + iy) % 2 != 0 {
+                        continue; // A quincunx, so they do not crowd into a lattice.
+                    }
+                    let step = chart.range as f64 / (BARBS as f64 + 0.35);
+                    let at = st.pos + glam::DVec2::new(ix as f64 * step, iy as f64 * step);
+                    // Nothing over the land: a wind arrow on a hillside is a symbol
+                    // placed where its quantity does not exist.
+                    if land.depth(at) <= 0.0 {
+                        continue;
+                    }
+                    let screen = to_screen(at);
+                    if !rect.contains(screen) {
+                        continue;
+                    }
+                    let flow = sim.sim.wind.sample(at, st.time);
+                    barb(
+                        &p,
+                        screen,
+                        sail_core::wind::direction_of(flow),
+                        sail_core::units::ms_to_kn(flow.length()),
+                        ink::PEN,
+                    );
+                }
+            }
+
+            // Squalls, as a ring round what they cover. The console says how far off the
+            // nearest one is; this says which way it is going and what it will miss,
+            // which is the question you actually have.
+            for (centre, radius, maturity) in sim.sim.wind.squalls() {
+                let at = to_screen(centre);
+                let r = radius as f32 * scale;
+                if r < 2.0 {
+                    continue;
+                }
+                let ring = ink::SQUALL.gamma_multiply(0.35 + 0.65 * maturity as f32);
+                p.circle_stroke(at, r, egui::Stroke::new(1.0, ring));
+                p.circle_stroke(at, r * 0.55, egui::Stroke::new(1.0, ring));
+            }
+
+            // The set and drift. Uniform over this much water — it is the wind dragging
+            // the top of the sea along, not a tidal stream round a headland — so it is
+            // drawn once, in the corner, the way a chart states a current that has no
+            // particular place.
+            let flow = sim.sim.wind.sample(st.pos, st.time);
+            let rate = sail_core::units::ms_to_kn(flow.length() * crate::world::DRIFT_OF_WIND);
+            if rate > 0.05 {
+                let set = sail_core::wind::direction_of(-flow);
+                let from = egui::pos2(rect.left() + 20.0, rect.bottom() - 46.0);
+                let bearing = sail_core::units::deg(set).to_radians() as f32;
+                let along = egui::vec2(bearing.sin(), -bearing.cos());
+                stream_arrow(&p, from, from + along * 26.0, ink::PEN);
+                p.text(
+                    from + along * 26.0 + egui::vec2(0.0, 11.0),
+                    egui::Align2::CENTER_CENTER,
+                    format!("{:.1} kn", rate),
+                    egui::FontId::monospace(9.0),
+                    ink::PEN,
+                );
+            }
+
             // Scale and sounding, in the corner where a chart puts them.
             p.text(
                 rect.left_bottom() + egui::vec2(6.0, -6.0),
@@ -243,4 +320,139 @@ pub fn draw(
             );
         });
     Ok(())
+}
+
+/// A wind barb: the staff along the wind, the feathers at its tail.
+///
+/// The symbol every weather chart has used for a century, and it is on this one because
+/// it says two things at once in a shape the eye reads without counting. The staff lies
+/// along the wind and points at the place it is blowing *from* — so a glance gives the
+/// direction without a compass rose — and the feathers at its tail are the strength: a
+/// full one is ten knots, a half is five, a solid pennant is fifty. Force six comes out
+/// as two feathers and a half, and you learn to see "two and a half" as a weight rather
+/// than as a number, which is the whole point of a symbol.
+///
+/// Rounded to the nearest five knots by its own nature, which is also what keeps it
+/// still: the wind field under it has gusts in it, and a barb that redrew itself every
+/// time a patch went by would be a flickering mess instead of a reading.
+fn barb(p: &egui::Painter, at: egui::Pos2, from: f64, knots: f64, colour: egui::Color32) {
+    use sail_core::units::deg;
+    // North up: a bearing turns clockwise from the top of the chart, and the screen's y
+    // runs down, so north is −y and east is +x.
+    let bearing = deg(from).to_radians() as f32;
+    let along = egui::vec2(bearing.sin(), -bearing.cos());
+    let stroke = egui::Stroke::new(1.0, colour);
+    // Under three knots there is no wind to draw and the convention says so: a bare
+    // circle, calm.
+    if knots < 3.0 {
+        p.circle_stroke(at, 2.5, stroke);
+        return;
+    }
+    const STAFF: f32 = 21.0;
+    const FEATHER: f32 = 7.0;
+    let tail = at + along * STAFF;
+    p.line_segment([at, tail], stroke);
+    // Feathers hang off the upwind end, raked back towards the staff's point.
+    let across = egui::vec2(along.y, -along.x);
+    let rake = (across * 0.86 - along * 0.5).normalized();
+    let mut left = (knots / 5.0).round() * 5.0;
+    let mut step = 0.0;
+    while left >= 50.0 {
+        // A pennant: a filled triangle, and a day to stay in harbour.
+        let root = tail - along * step;
+        let next = root - along * (FEATHER * 0.55);
+        p.add(egui::Shape::convex_polygon(
+            vec![root, root + rake * FEATHER, next],
+            colour,
+            egui::Stroke::NONE,
+        ));
+        step += FEATHER * 0.8;
+        left -= 50.0;
+    }
+    while left >= 10.0 {
+        let root = tail - along * step;
+        p.line_segment([root, root + rake * FEATHER], stroke);
+        step += FEATHER * 0.5;
+        left -= 10.0;
+    }
+    if left >= 5.0 {
+        // A half feather, and it is drawn half a step in from the end when it is the
+        // only one, because a half barb at the very tail reads as a full one.
+        let root = tail - along * step.max(FEATHER * 0.5);
+        p.line_segment([root, root + rake * (FEATHER * 0.5)], stroke);
+    }
+}
+
+/// An arrow with an open head, which is how a stream is marked.
+fn stream_arrow(p: &egui::Painter, from: egui::Pos2, to: egui::Pos2, colour: egui::Color32) {
+    let stroke = egui::Stroke::new(1.0, colour);
+    p.line_segment([from, to], stroke);
+    let along = (to - from).normalized();
+    let across = egui::vec2(along.y, -along.x);
+    for side in [1.0_f32, -1.0] {
+        p.line_segment([to, to - along * 6.0 + across * (4.0 * side)], stroke);
+    }
+}
+
+#[cfg(test)]
+mod symbols {
+    /// A barb's feathers have to add up to the wind it is drawn for.
+    ///
+    /// The drawing is pixels and cannot be asserted, but the *count* can, and the count
+    /// is the whole content of the symbol: ten knots a feather, five a half, fifty a
+    /// pennant. Getting it wrong by one half-feather is a five-knot lie on a chart, and
+    /// five knots is the difference between a reef and no reef.
+    fn feathers(knots: f64) -> (i32, i32, i32) {
+        let mut left = (knots / 5.0).round() * 5.0;
+        let (mut pennants, mut full, mut half) = (0, 0, 0);
+        while left >= 50.0 {
+            pennants += 1;
+            left -= 50.0;
+        }
+        while left >= 10.0 {
+            full += 1;
+            left -= 10.0;
+        }
+        if left >= 5.0 {
+            half += 1;
+        }
+        (pennants, full, half)
+    }
+
+    #[test]
+    fn the_feathers_add_up_to_the_wind() {
+        assert_eq!(feathers(0.0), (0, 0, 0));
+        // Four knots is a half feather, because four rounds to five and five is what a
+        // half feather means. Calm is a different symbol altogether — a bare circle,
+        // drawn below three knots — and conflating the two was this test's own first
+        // mistake rather than the code's.
+        assert_eq!(feathers(4.0), (0, 0, 1));
+        assert_eq!(feathers(5.0), (0, 0, 1));
+        assert_eq!(
+            feathers(12.0),
+            (0, 1, 0),
+            "twelve rounds to ten: one feather"
+        );
+        assert_eq!(feathers(13.0), (0, 1, 1), "fifteen: a feather and a half");
+        assert_eq!(feathers(25.0), (0, 2, 1), "force six");
+        assert_eq!(
+            feathers(34.0),
+            (0, 3, 1),
+            "a gale, and you can see the weight of it"
+        );
+        assert_eq!(feathers(50.0), (1, 0, 0), "a pennant, and a day to stay in");
+        assert_eq!(feathers(65.0), (1, 1, 1));
+        // And every one of them reads back as the wind it was drawn for, to the nearest
+        // five knots, which is the only promise the symbol makes.
+        for step in 0..30 {
+            let knots = step as f64 * 2.7;
+            let (p, f, h) = feathers(knots);
+            let read = (p * 50 + f * 10 + h * 5) as f64;
+            assert!(
+                (read - knots).abs() <= 2.5,
+                "{knots:.1} kn drawn as {p} pennants, {f} feathers and {h} halves reads \
+                 back as {read:.0}"
+            );
+        }
+    }
 }
