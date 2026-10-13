@@ -237,6 +237,44 @@ impl OnePole {
 }
 
 /// The generator. Runs on the audio thread and never allocates.
+/// A sine, from a table, because the audio callback has a deadline.
+///
+/// Twelve voices of six partials is seventy-two sines a sample, and at forty-four
+/// thousand samples a second that is three million two hundred thousand transcendental
+/// calls — in a callback that must finish inside the buffer it was handed or the device
+/// plays whatever was in memory. What that sounds like is a hole, and a hole in a
+/// continuous noise is the thing you notice: the sea stuttering was reported from the
+/// deck as the music interrupting it, and the music was interrupting it, by taking its
+/// time.
+///
+/// A thousand entries is a tenth of a degree of phase — far finer than the ear, and with
+/// linear interpolation between them the error is below anything a sixteen-bit converter
+/// can represent. One table lookup, one multiply, one add.
+const SINE_BITS: usize = 10;
+const SINE_LEN: usize = 1 << SINE_BITS;
+
+fn sine_table() -> &'static [f32; SINE_LEN] {
+    static TABLE: std::sync::OnceLock<[f32; SINE_LEN]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut t = [0.0; SINE_LEN];
+        for (i, v) in t.iter_mut().enumerate() {
+            *v = (std::f32::consts::TAU * i as f32 / SINE_LEN as f32).sin();
+        }
+        t
+    })
+}
+
+/// Phase in turns, 0 to 1.
+#[inline]
+fn fast_sin(phase: f32) -> f32 {
+    let t = sine_table();
+    let x = phase * SINE_LEN as f32;
+    let i = x as usize & (SINE_LEN - 1);
+    let j = (i + 1) & (SINE_LEN - 1);
+    let f = x - x.floor();
+    t[i] + (t[j] - t[i]) * f
+}
+
 /// One note, struck and then left alone.
 ///
 /// A piano string is not a sine and not a sawtooth. What makes the sound recognisable is
@@ -261,18 +299,20 @@ struct Plucked {
     hz: f32,
     phase: [f32; 6],
     amp: [f32; 6],
-    /// Decay per second for each partial.
-    decay: [f32; 6],
+    /// Each partial's own frequency, stretched by the string's stiffness and worked out
+    /// once — the square root that does the stretching has no business being in a loop
+    /// that runs six times a sample for every note that is ringing.
+    freq: [f32; 6],
+    /// What each partial's amplitude is multiplied by every sample.
+    fade: [f32; 6],
     /// A short noise burst for the hammer, which is most of the attack.
     knock: f32,
     /// Nought for a struck string, one for a chip's square wave.
     shape: f32,
-    /// How stiff the string is, which is how sharp its upper partials sit.
-    stretch: f32,
 }
 
 impl Plucked {
-    fn strike(&mut self, hz: f32, velocity: f32, shape: f32) {
+    fn strike(&mut self, hz: f32, velocity: f32, shape: f32, sample_rate: f32) {
         self.hz = hz;
         self.shape = shape;
         self.knock = velocity * 0.5;
@@ -289,10 +329,11 @@ impl Plucked {
             let brightness = 0.35 + 0.65 * velocity;
             self.amp[n] = 1.0 / partial.powf(1.25 + 0.9 * (1.0 - brightness));
             // The stretched partial, and its own decay — higher partials die first.
-            self.decay[n] = 1.0 / (base / (1.0 + 0.55 * n as f32));
-            let _ = b;
+            // Per sample, so the inner loop is a multiply.
+            let per_second = (1.0 + 0.55 * n as f32) / base;
+            self.fade[n] = (-per_second / sample_rate).exp();
+            self.freq[n] = hz * partial * (1.0 + b * partial * partial).sqrt();
         }
-        self.stretch = b;
         // Normalised so that one note at full velocity peaks at one, whatever the
         // brightness did to the partials.
         //
@@ -322,13 +363,10 @@ impl Plucked {
                 continue;
             }
             alive = true;
-            let partial = n as f32 + 1.0;
-            // Inharmonicity: the nth partial is sharp by sqrt(1 + B n^2).
-            let f = self.hz * partial * (1.0 + self.stretch * partial * partial).sqrt();
-            self.phase[n] += f * dt;
+            self.phase[n] += self.freq[n] * dt;
             self.phase[n] -= self.phase[n].floor();
             let p = self.phase[n];
-            let sine = (std::f32::consts::TAU * p).sin();
+            let sine = fast_sin(p);
             // The cartridge: a quarter-duty pulse on the fundamental only, because a
             // chip has one oscillator per voice and that is the sound.
             let chip = if n == 0 {
@@ -341,14 +379,17 @@ impl Plucked {
                 0.0
             };
             out += (sine + (chip - sine) * self.shape) * self.amp[n];
-            self.amp[n] *= (-dt * self.decay[n]).exp();
+            // The decay is a multiply by a constant, worked out when the note was
+            // struck rather than exponentiated per partial per sample. Another seventy
+            // transcendentals a sample saved, and exactly the same curve.
+            self.amp[n] *= self.fade[n];
         }
         if self.knock > 1e-4 {
             alive = true;
             // The hammer. Three milliseconds of filtered noise, which is what the ear
             // hears as a key going down rather than a tone starting.
             out += noise * self.knock * 0.5;
-            self.knock *= (-dt * 320.0).exp();
+            self.knock *= 1.0 - (dt * 320.0).min(1.0);
         }
         if !alive {
             self.hz = 0.0;
@@ -539,14 +580,13 @@ impl Iterator for SeaStream {
         // --- Rigging whine: a detuned pair, so it reads as wire and not a tone -----
         self.rig_phase = (self.rig_phase + self.smooth.rig_hz * dt).fract();
         self.rig_phase2 = (self.rig_phase2 + self.smooth.rig_hz * 1.013 * dt).fract();
-        let rig = ((self.rig_phase * std::f32::consts::TAU).sin() * 0.6
-            + (self.rig_phase2 * std::f32::consts::TAU).sin() * 0.4)
+        let rig = (fast_sin(self.rig_phase) * 0.6 + fast_sin(self.rig_phase2) * 0.4)
             * self.smooth.rig
             * 0.14;
 
         // --- Water at the hull: bandpassed noise with a bow-wave surge -------------
         self.surge_phase = (self.surge_phase + 0.73 * dt).fract();
-        let surge = 0.78 + 0.22 * (self.surge_phase * std::f32::consts::TAU).sin();
+        let surge = 0.78 + 0.22 * fast_sin(self.surge_phase);
         let n2 = self.noise();
         let low = self.water_lp.run(n2, self.smooth.water_cutoff);
         let dc = self.water_hp.run(low, 110.0);
@@ -579,7 +619,7 @@ impl Iterator for SeaStream {
         }
         self.pawl_env *= 0.9972;
         self.pawl_ring = (self.pawl_ring + self.pawl_hz * dt).fract();
-        let tooth = ((self.pawl_ring * std::f32::consts::TAU).sin() * 0.55 + self.noise() * 0.45)
+        let tooth = (fast_sin(self.pawl_ring) * 0.55 + self.noise() * 0.45)
             * self.pawl_env
             * self.pawl_env;
 
@@ -596,7 +636,7 @@ impl Iterator for SeaStream {
         }
         self.clack_env *= 0.9988;
         self.clack_phase = (self.clack_phase + 95.0 * dt).fract();
-        let clack_out = ((self.clack_phase * std::f32::consts::TAU).sin() * 0.7
+        let clack_out = (fast_sin(self.clack_phase) * 0.7
             + self.noise() * 0.3)
             * self.clack_env
             * self.clack_env
@@ -676,7 +716,7 @@ impl Iterator for SeaStream {
                 // enough that the simplest rule is the right one.
                 let v = self.next_voice;
                 self.next_voice = (self.next_voice + 1) % self.voices.len();
-                self.voices[v].strike(hz, velocity, t_shape);
+                self.voices[v].strike(hz, velocity, t_shape, 1.0 / dt);
             }
         }
         for v in 0..self.voices.len() {
@@ -699,7 +739,7 @@ impl Iterator for SeaStream {
             self.tick_env = hit;
         }
         if self.tick_env > 1e-4 {
-            self.tick_env *= (-dt * 60.0).exp();
+            self.tick_env *= 1.0 - (dt * 60.0).min(1.0);
             let n = self.noise();
             song += n * self.tick_env * 0.18;
         }
