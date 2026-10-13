@@ -243,13 +243,19 @@ pub fn draw(
             // forecast's own numbers, which is a better reading of the same thing: the
             // barbs show the lee of an island and the outflow of a squall, neither of
             // which a forecast can tell you and both of which decide which side you pass.
-            const BARBS: i32 = 3;
+            // Four of them, one to a quadrant, and the middle left clear for the boat
+            // and her track. Twenty-five was a weather map; this is a chart with the
+            // weather written on it, and the difference is that the chart is still
+            // legible underneath. Four is also honest about what the symbol is for: the
+            // wind over this much water is one wind, and the barbs are there to say
+            // which way it sets and roughly how hard, not to map a field.
+            const BARBS: i32 = 1;
             for ix in -BARBS..=BARBS {
                 for iy in -BARBS..=BARBS {
-                    if (ix + iy) % 2 != 0 {
-                        continue; // A quincunx, so they do not crowd into a lattice.
+                    if ix == 0 || iy == 0 {
+                        continue;
                     }
-                    let step = chart.range as f64 / (BARBS as f64 + 0.35);
+                    let step = chart.range as f64 * 0.62;
                     let at = st.pos + glam::DVec2::new(ix as f64 * step, iy as f64 * step);
                     // Nothing over the land: a wind arrow on a hillside is a symbol
                     // placed where its quantity does not exist.
