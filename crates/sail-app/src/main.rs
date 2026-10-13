@@ -9,6 +9,7 @@
 mod boat;
 mod camera;
 mod chart;
+mod clouds;
 mod clutch;
 mod course;
 mod deck;
@@ -124,6 +125,7 @@ fn main() {
                 boat::setup,
                 boat::report,
                 islands::setup,
+                clouds::setup,
                 camera::setup,
                 hud::build_polar,
                 sound::setup,
@@ -172,6 +174,7 @@ fn main() {
                     sound::update,
                     windstreaks::update,
                     spray::update,
+                    clouds::update,
                 ),
                 (
                     camera::toggle,

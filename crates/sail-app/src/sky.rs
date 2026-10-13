@@ -38,6 +38,15 @@ pub const SUN: Vec3 = Vec3::new(-0.62, 0.30, -0.72);
 /// sun never gets far up, so the sky above you stays a hard blue while everything near
 /// the water is washed pale and faintly warm.
 pub const ZENITH: Vec3 = Vec3::new(0.10, 0.24, 0.58);
+/// The shadowed side of cloud, and the sunlit face.
+///
+/// Public because the particle cloud in `clouds.rs` is the same weather as the decks
+/// baked into this cubemap, and two palettes for one sky is how you get a layer of
+/// puffs that visibly does not belong to the sky behind it.
+pub const CLOUD_SHADOW: Vec3 = Vec3::new(0.10, 0.13, 0.19);
+/// The sunlit face. Over one, because a cloud top in a low sun is brighter than white
+/// paper and the tone map is what brings it back.
+pub const CLOUD_SUNLIT: Vec3 = Vec3::new(1.25, 1.18, 1.08);
 pub const HORIZON: Vec3 = Vec3::new(0.70, 0.76, 0.84);
 /// What the lower hemisphere contributes. Never seen directly — the sea covers it —
 /// but the water's downward-facing reflections sample it, so it has to be a plausible
@@ -269,8 +278,8 @@ fn sky_colour(dir: Vec3, sun: Vec3) -> Vec3 {
     // it — far darker than ordinary cloud, which is what makes the lit parts look as
     // bright as they do — and the sunlit face is close to white, because a cumulonimbus
     // is thick enough to scatter everything back out at you.
-    let shadow = Vec3::new(0.10, 0.13, 0.19);
-    let sunlit = Vec3::new(1.25, 1.18, 1.08);
+    let shadow = CLOUD_SHADOW;
+    let sunlit = CLOUD_SUNLIT;
     let sky = {
         let storm = shadow.lerp(sunlit, (storm_l * 0.4 + towering * 0.75).clamp(0.0, 1.0));
         let high = shadow.lerp(sunlit, (high_l * 0.7 + towering * 0.4).clamp(0.0, 1.0));
