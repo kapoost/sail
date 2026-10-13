@@ -235,12 +235,20 @@ impl BoatConfig {
                 x_ce: 1.90,
             },
             code_zero: RiggedSail {
-                // Fifty-five square metres against the genoa's twenty-six, which is not
-                // a typo: a Code 0 is measured as a spinnaker and cut like one, and the
-                // genoa on this boat is a small working jib. The sail is the size of the
-                // mainsail and then some.
-                profile: SailProfile::code_zero(genoa_area * 2.1, genoa_luff * 1.05),
-                area: genoa_area * 2.1,
+                // Sixty square metres against the genoa's twenty-six, which is not a
+                // typo: a Code 0 is measured as a spinnaker and cut like one, and the
+                // genoa on this boat is a small working jib. The sail is bigger than the
+                // mainsail.
+                //
+                // Raised from 2.1 of the genoa to 2.3 on the only evidence that settles
+                // a sail's size, which is somebody who has one: tacked on the sprit, a
+                // Code 0 on a boat this size sheets back nearly to the cockpit. The
+                // cockpit begins 0.9 m abaft the centre of gravity and the sprit end is
+                // 6.6 m forward of it, so "nearly to the cockpit" is a foot of about 7.2
+                // m — which is 55 square metres of flat triangle, 60 of cloth, and an LP
+                // of 148 percent of the base the sprit gives it.
+                profile: SailProfile::code_zero(genoa_area * 2.3, genoa_luff * 1.05),
+                area: genoa_area * 2.3,
                 z_ce: 5.60,
                 x_ce: 2.45,
             },
@@ -450,14 +458,25 @@ impl BoatConfig {
                 x_ce: 1.95,
             },
             code_zero: RiggedSail {
-                profile: SailProfile::code_zero(genoa_area * 1.5, genoa_luff * 1.05),
-                area: genoa_area * 1.5,
+                // Sixty square metres against the genoa's twenty-six, which is not a
+                // typo: a Code 0 is measured as a spinnaker and cut like one, and the
+                // genoa here is a small working jib. The sail is bigger than the main.
+                //
+                // Sized on the only evidence that settles a sail's size, which is
+                // somebody who owns one: tacked on the sprit, a Code 0 on a boat this
+                // size sheets back nearly to the cockpit. The cockpit begins 0.9 m abaft
+                // the centre of gravity and the sprit end is 6.6 m forward of it, so that
+                // is a foot of about 7.2 m — 55 square metres of flat triangle, 60 of
+                // cloth, an LP of 148 percent of the base the sprit gives it.
+                profile: SailProfile::code_zero(genoa_area * 2.3, genoa_luff * 1.05),
+                area: genoa_area * 2.3,
                 z_ce: 4.97,
                 x_ce: 2.50,
             },
             gennaker: RiggedSail {
-                profile: SailProfile::gennaker(genoa_area * 2.3, genoa_luff * 1.02),
-                area: genoa_area * 2.3,
+                // Eighty-eight. Twice the mainsail, which is what a running sail is.
+                profile: SailProfile::gennaker(genoa_area * 3.4, genoa_luff * 1.02),
+                area: genoa_area * 3.4,
                 z_ce: 5.37,
                 x_ce: 2.83,
             },
