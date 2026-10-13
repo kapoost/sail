@@ -336,6 +336,21 @@ pub fn leech_separation(camber: f64, chord_angle: f64, slot_support: f64) -> f64
     (WITHOUT_THE_SLOT + AND_THE_CUT * shortfall * shortfall) * (1.0 - support)
 }
 
+/// Which side of the boat a headsail's clew is sheeted to: −1 port, +1 starboard.
+///
+/// One definition, because the forces and the drawing both need it and a sail drawn on
+/// the other side from the one it is pulling on is the fault this project keeps being
+/// caught by. Normally to leeward, which is the side away from the wind. Aback, it is
+/// held on the wind's own side.
+pub fn clew_side(awa: f64, aback: bool) -> f64 {
+    let leeward = -awa.signum();
+    if aback {
+        -leeward
+    } else {
+        leeward
+    }
+}
+
 /// Where along the chord the force actually acts, as a fraction back from the luff.
 ///
 /// Until now every sail's force was applied at a point fixed in the configuration, as
@@ -928,7 +943,7 @@ pub fn sail_forces(
     camber: f64,
 ) -> SailForces {
     sail_forces_in_slot(
-        profile, awa, aws, sheet, area, heel, blanketing, camber, 1.0,
+        profile, awa, aws, sheet, area, heel, blanketing, camber, 1.0, false,
     )
 }
 
@@ -951,10 +966,29 @@ pub fn sail_forces_in_slot(
     blanketing: f64,
     camber: f64,
     slot_support: f64,
+    aback: bool,
 ) -> SailForces {
     let beta = awa.abs();
     let chord_angle = profile.chord_angle(sheet);
-    let alpha = beta - chord_angle;
+    // Backed, the chord is swung to the other side of the centreline, so the flow meets
+    // it at the *sum* of the two angles instead of the difference. That is the whole of
+    // why a backed sail works where a sheeted one does nothing: head to wind, a genoa on
+    // its track has two degrees of apparent wind against twelve of chord and the angle of
+    // attack is negative — it luffs, and no amount of it will turn the boat. Held to
+    // windward the same sail is at fifty-four degrees, which is a plate, and a plate
+    // forward of the keel pushes the bow off.
+    //
+    // Nothing else in the decomposition changes, which is worth saying because the first
+    // instinct is to flip the side force and that would be wrong. A sail's force always
+    // has a component downwind of it; a backed sail's lift is reversed with respect to
+    // its own cloth, but its cloth is mirrored too, so the two cancel and the side force
+    // comes out on the same side as ever. What *does* change is the drive, which goes
+    // negative — she is pushed astern, which is exactly what backing a headsail does.
+    let alpha = if aback {
+        beta + chord_angle
+    } else {
+        beta - chord_angle
+    };
     let separated = leech_separation(camber, chord_angle, slot_support);
     let mut coeffs = profile.coefficients_with_separation(alpha, camber, separated);
     coeffs.cd += alone_leech_drag(camber, chord_angle, slot_support);

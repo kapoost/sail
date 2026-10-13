@@ -62,6 +62,7 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
             ("T", "a hand on the sheet: once for the sail that leads"),
             (" ", "press again for the other — main first upwind, headsail off it"),
             ("R", "dump: hold it and the sheets run until she stands up"),
+            ("G", "back the headsail — hold it to push her head round"),
         ],
     ),
     (

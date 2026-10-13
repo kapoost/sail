@@ -156,6 +156,22 @@ pub struct Controls {
     pub main_sheet: f64,
     /// Genoa sheet: 0 hard in, 1 fully eased.
     pub jib_sheet: f64,
+    /// Whether the headsail's clew is held on the windward side — **aback**.
+    ///
+    /// The sheet is a rope made up on one side of the boat, and which side that is was
+    /// not a fact this model had: the sail was put to leeward by construction, every
+    /// substep, from the sign of the apparent wind. Which is where it is nine hundred
+    /// and ninety-nine times out of a thousand and is also the reason the thousandth
+    /// could not happen at all.
+    ///
+    /// The thousandth is the one that matters. A sail held to windward has the wind on
+    /// the front of it, and what that does is push the bow off — which is the only way
+    /// out of irons, the thing a crew does without being asked every time a tack fails,
+    /// and half of what it means to heave to. None of those existed here. She went head
+    /// to wind, stopped, and stayed there with a sail up doing nothing, which the engine
+    /// described to itself as "no steerage and goes nowhere — correct physics". It was
+    /// correct about the first half.
+    pub headsail_aback: bool,
     /// Outhaul: 0 eased right off for a deep, powerful main, 1 hard out for a flat
     /// one. Depth is power; flat is less heeling force and less drag. The call changes
     /// with the breeze, which is why it is a control and not a constant.
@@ -196,6 +212,7 @@ impl Default for Controls {
             rudder: 0.0,
             main_sheet: 0.0,
             jib_sheet: 0.0,
+            headsail_aback: false,
             outhaul: 0.5,
             vang: 0.6,
             genoa_car: 0.4,

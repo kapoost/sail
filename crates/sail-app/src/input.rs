@@ -334,6 +334,19 @@ pub fn gather(
     // the boat comes round, and that is what this does now — five seconds of somebody
     // trimming, which is about as long as a gybe takes and not nearly long enough to
     // sail the boat for you.
+    // --- Aback: the sheet on the wrong side, which is sometimes the right side -------
+    //
+    // Held, because it is a rope you are holding. Let go and the crew tacks it across to
+    // where it belongs, which is what a crew does without being asked.
+    //
+    // It is the only way out of irons and half of what it means to heave to. Head to
+    // wind with a genoa sheeted normally there is nothing to be done — the sail is at a
+    // negative angle of attack and luffs whatever you do with the helm — and the boat
+    // sits there going slowly backwards, which is a real and miserable state that this
+    // simulator could get into and not out of.
+    sim.controls.headsail_aback =
+        keys.pressed(KeyCode::KeyG) || pad.is_some_and(|p| p.pressed(GamepadButton::East));
+
     // --- Dump: the other half of the sheet, and the one you need in a hurry ---------
     //
     // `T` hauls towards the right trim. There was nothing that let it *go*, and letting

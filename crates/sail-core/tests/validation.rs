@@ -2876,6 +2876,85 @@ fn rolling_a_genoa_ruins_it_rather_than_reefing_it() {
     );
 }
 
+#[test]
+fn a_backed_headsail_pushes_her_head_round_and_a_sheeted_one_cannot() {
+    // In irons: head to wind, stopped, with sail up. The engine's own documentation
+    // called this "no steerage and goes nowhere — correct physics", and it was correct
+    // about the first half. What gets a boat out of irons is backing the headsail, and
+    // there was no way to express that here at all: the sail was put to leeward by
+    // construction, every substep, from the sign of the apparent wind.
+    //
+    // Head to wind a sheeted genoa is at a *negative* angle of attack — two degrees of
+    // apparent wind against twelve of sheeting angle — so it luffs and nothing anybody
+    // does with the helm will change that. Held to windward the same sail is at
+    // fifty-four degrees, which is a plate, and a plate forward of the keel pushes the
+    // bow off. That is the whole mechanism and it is one sign.
+    let cfg = BoatConfig::archipelago_packet();
+    let settle = |aback: bool| {
+        // Dead into it, with no way on: the worst case of the thing.
+        let heading = wrap_tau(0.0 - rad(2.0));
+        let mut sim = Simulation::new(
+            cfg,
+            BoatState::at_rest(heading),
+            Box::new(SteadyWind::new(0.0, kn_to_ms(10.0))) as Box<dyn WindField>,
+        );
+        let controls = Controls {
+            reef: 1.0,
+            furl: 0.0,
+            jib_sheet: 0.0,
+            headsail_aback: aback,
+            rudder: 0.0,
+            ..Default::default()
+        };
+        // What the sail does is read at the start, head to wind, because that is the
+        // question — by twenty seconds she has paid off and the two cases are not even
+        // at the same wind angle any more. Where she *gets to* is read at the end.
+        for _ in 0..(1.0 / SUBSTEP) as u64 {
+            sim.run(SUBSTEP, &controls);
+        }
+        let (drive, side) = (sim.telemetry.jib.drive, sim.telemetry.jib.side.abs());
+        for _ in 0..(19.0 / SUBSTEP) as u64 {
+            sim.run(SUBSTEP, &controls);
+        }
+        (deg(sim.telemetry.twa).abs(), drive, side)
+    };
+
+    // She does come out of it on her own eventually, which was not true this morning:
+    // the windage was given a lever today and it is centred forward, so a bare-poled
+    // boat weathercocks the *other* way and bears off. That is correct and it is not
+    // the same thing — it takes as long as it takes and you have no say in it, whereas
+    // backing the sail is something you *do*. So the test is on the difference, not on
+    // whether she is stuck.
+    // Sheeted normally she is not making *nothing* — a flogging sail is seventy-odd
+    // newtons of drag, and that is right. What she is not making is anything sideways,
+    // and sideways is what turns a boat.
+    let (drifted, sheeted_drive, sheeted_side) = settle(false);
+    assert!(
+        sheeted_drive < 0.0 && sheeted_drive > -200.0,
+        "a flogging headsail should be a little drag and nothing else: {sheeted_drive:.0} N"
+    );
+
+    // Backed, she pays off, and much faster, because now a sail is doing it.
+    let (paid_off, drive, side) = settle(true);
+    assert!(
+        side > 3.0 * sheeted_side.max(1.0),
+        "backed, the sail should be pushing her head round: {side:.0} N against \
+         {sheeted_side:.0} sheeted"
+    );
+    assert!(
+        paid_off > drifted + 15.0,
+        "backed, she should come round far faster than she drifts round: {paid_off:.0} \
+         deg against {drifted:.0}"
+    );
+    // And she does it going *backwards*, which is the other half of what backing a
+    // headsail is: the sail is a plate across the wind, so what drive it makes is
+    // negative. Anyone who has done it has felt the boat gather sternway first.
+    assert!(
+        drive < 0.0,
+        "a backed headsail drives her astern, not ahead: {drive:+.0} N"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Balance: what makes her gripe, and what actually cures it
 // ---------------------------------------------------------------------------

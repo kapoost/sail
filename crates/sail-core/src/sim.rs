@@ -463,6 +463,7 @@ impl Simulation {
             shadow,
             jib_camber,
             jib_slot_support,
+            controls.headsail_aback,
         )
         .scaled(jib_lift, jib_drag);
         // A sail that has collapsed is not a sail quietly making less force: it is cloth
@@ -485,6 +486,7 @@ impl Simulation {
             shadow_upper,
             jib_camber,
             jib_slot_support,
+            controls.headsail_aback,
         )
         .scaled(jib_upper_lift, jib_upper_drag);
         let mut jib_upper = jib_upper;

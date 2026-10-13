@@ -794,7 +794,17 @@ pub fn update_sails(
             }
             Sail::Headsail => (
                 t_.jib,
-                headsail_shape(&cfg, &sim.controls, side, t_.jib.chord_angle as f32),
+                // The headsail's own side, which is not always the leeward one: held
+                // aback its clew is to windward and the whole sail is over there. From
+                // `sail_core`, so the cloth is drawn on the side the force model is
+                // pulling from — two descriptions of one sheet is the fault this file
+                // has been caught by three times.
+                headsail_shape(
+                    &cfg,
+                    &sim.controls,
+                    sail_core::sail::clew_side(t_.awa, sim.controls.headsail_aback) as f32,
+                    t_.jib.chord_angle as f32,
+                ),
             ),
         };
         if let Some(mut mesh) = meshes.get_mut(&surface.mesh) {
