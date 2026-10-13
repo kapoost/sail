@@ -191,7 +191,22 @@ pub fn update(
             // -1 at the port edge, 0 down the middle, +1 at the starboard edge.
             let u = k as f64 / (ACROSS - 1) as f64 * 2.0 - 1.0;
             let at = sample.at + sample.across * half_width * u;
-            let height = sim.sim.water.height(at, t);
+            // AGAINST THE SURFACE THAT IS DRAWN, not the one the water has. The sea mesh
+            // carries nothing finer than four samples across a cell, so `update_sea` asks
+            // the field filtered to that; this asked the field itself, short chop and all.
+            // The disagreement is a few centimetres and the ribbon floats four — so on a
+            // short sea the wake spent half its length *under* the drawn skin, surfacing
+            // and vanishing as the triangles slid over it.
+            //
+            // `spray.rs` already learned this and says so at length; the two now read the
+            // same definition out of `world::drawn_resolution`.
+            // Measured from the BOAT, not from `RenderOrigin`: the sea grid is built
+            // around the boat, so it is distance from her that decides how coarse the
+            // cell is here. `spray.rs` reads it the same way.
+            let offset = at - st.pos;
+            let resolution =
+                crate::world::drawn_resolution(Vec2::new(offset.x as f32, -offset.y as f32));
+            let height = sim.sim.water.height_resolved(at, t, resolution);
             positions.push(origin.to_bevy(at, height as f32 + 0.04));
             // Bright down the middle where the hull churned it, and genuinely zero at
             // the edges. The old version set the full value on *both* edge vertices —

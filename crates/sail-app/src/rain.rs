@@ -130,6 +130,7 @@ fn scatter(rng: &mut sail_core::rng::Pcg32, top: f32) -> Vec3 {
 pub fn update(
     ink: Res<crate::world::Ink>,
     sim: Res<Sim>,
+    origin: Res<crate::frame::RenderOrigin>,
     time: Res<Time>,
     mut rain: ResMut<Rain>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -188,12 +189,29 @@ pub fn update(
         // Round the cylinder: a drop that leaves the far side comes back on the near
         // one, which keeps the curtain even however fast the wind is blowing it along.
         let flat = Vec2::new(drop.at.x, drop.at.z);
-        if drop.at.y < 0.0 || flat.length() > REACH * 1.25 {
+        // A DROP LANDS ON THE SEA, NOT ON SEA LEVEL. This cut the streak at y = 0, which
+        // is the water's *mean* — so on any sea at all the drop went on falling through
+        // the face of a crest and was drawn for another few centimetres underneath it.
+        // At half a metre of swell that is a curtain of rain visibly inside the water,
+        // which is the one place rain never is.
+        //
+        // Against the surface that is DRAWN, like the foam and the wake: the mesh is
+        // coarser than the field far from the boat, and a drop has to disappear into the
+        // skin the eye can see, not into the one the physics knows about.
+        let world_pos = glam::DVec2::new(
+            (eye.x + drop.at.x) as f64 + origin.offset.x,
+            -((eye.z + drop.at.z) as f64) + origin.offset.y,
+        );
+        let from_boat = world_pos - st.pos;
+        let resolution =
+            crate::world::drawn_resolution(Vec2::new(from_boat.x as f32, -from_boat.y as f32));
+        let surface = sim.sim.water.height_resolved(world_pos, st.time, resolution) as f32;
+        if drop.at.y < surface || flat.length() > REACH * 1.25 {
             let born = scatter(rng, CEILING);
             // Reborn at the top of the box when it has landed, and anywhere in it when
             // it has blown out the side — otherwise a strong wind empties the upwind
             // half of the cylinder and the rain only falls to leeward of you.
-            drop.at = if drop.at.y < 0.0 {
+            drop.at = if drop.at.y < surface {
                 Vec3::new(born.x, CEILING, born.z)
             } else {
                 born
