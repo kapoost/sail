@@ -233,6 +233,13 @@ pub struct SurfaceDrift {
     offset: glam::DVec2,
 }
 
+/// How far from the boat cloud shadows are drawn on the water, metres.
+///
+/// As much an honesty as an economy. The eye is two metres above the water: at three
+/// kilometres the surface is foreshortened into the horizon and a shadow out there is a
+/// line rather than a patch. Two kilometres is where it stops being worth asking.
+const SHADOW_REACH: f32 = 1900.0;
+
 /// How many tones the drawn sea is allowed.
 ///
 /// Four. Three is a poster and six is a photograph with a fault in it; four is what an
@@ -400,6 +407,7 @@ pub fn toggle_ink(
 #[allow(clippy::too_many_arguments)]
 pub fn update_sea(
     ink: Res<Ink>,
+    clouds: Option<Res<crate::clouds::Clouds>>,
     origin: Res<frame::RenderOrigin>,
     time: Res<Time>,
     mut drift: ResMut<SurfaceDrift>,
@@ -495,6 +503,14 @@ pub fn update_sea(
             (anchor.y / tile).round() * tile,
         );
 
+        // Where every cloud shadow falls, worked out once for the frame rather than per
+        // vertex. Forty thousand vertices times twenty clouds is a number that has to be
+        // cheap in the inner loop and does not have to be cheap out here.
+        let shadows = clouds
+            .as_ref()
+            .map(|c| c.shadows(st.pos, SHADOW_REACH as f64))
+            .unwrap_or_else(crate::clouds::ShadowField::clear);
+
         // Past this spacing the mesh carries nothing, so the water is never asked.
         // On a grid that runs to the horizon that is most of the vertices, and it is
         // what pays for the fine spacing close in.
@@ -579,6 +595,31 @@ pub fn update_sea(
                 )
             };
             let mut tone = (lift * 0.5 + 0.5).clamp(0.0, 1.0);
+            // Cloud shadow. Taken off the tone *before* it is quantised, which is the
+            // whole trick: in ink mode the shadow then lands on a tone boundary and
+            // comes out as a flat patch with a hard contour round it, which is what a
+            // painter does with a cloud shadow. Added afterwards it would be a grey
+            // wash over the drawing.
+            //
+            // The patch is nowhere near under the cloud that makes it — this sun is
+            // seventeen degrees up, so the shadow of a cell with its base at four
+            // hundred metres falls thirteen hundred metres to leeward. That offset is
+            // what reads as height, and getting it from the real sun angle is cheaper
+            // than faking it.
+            // Only near the boat, and this is as much an honesty as an economy. The
+            // eye is two metres above the water: at three kilometres the surface is
+            // foreshortened into the horizon and a shadow patch out there is a line, not
+            // a patch. Asking twenty clouds about forty thousand vertices cost five per
+            // cent of the frame to draw something you cannot see; faded out between one
+            // and two kilometres it costs almost nothing and looks the same.
+            let range = (offset.x * offset.x + offset.y * offset.y).sqrt();
+            let near = 1.0 - crate::clouds::step_between(SHADOW_REACH * 0.58, SHADOW_REACH, range);
+            let shade = if near > 0.0 {
+                near * shadows.shade_at(world)
+            } else {
+                0.0
+            };
+            tone = (tone - 0.42 * shade).clamp(0.0, 1.0);
             let mut edge = 1.0;
             if ink {
                 // Drawn water, not photographed water.
@@ -661,7 +702,10 @@ pub fn update_sea(
                 // from the material and does not want a second set fighting them.
                 let view = (eye - point).normalize_or_zero();
                 let half = (view + sun).normalize_or_zero();
-                if normal.dot(half) > GLINT_COS && stipple(parcel) < GLINT_STIPPLE {
+                // Not in a cloud shadow: there is no sun in there to glint off, and
+                // leaving the glitter path running through a shadow is the one thing
+                // that would give the shadow away as paint.
+                if shade < 0.45 && normal.dot(half) > GLINT_COS && stipple(parcel) < GLINT_STIPPLE {
                     colour = Vec3::new(1.0, 1.0, 0.97);
                 }
             }

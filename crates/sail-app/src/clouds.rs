@@ -27,6 +27,26 @@
 //!   anything in it ever visibly moving.
 //! * **Nothing twinkles.** Deliberately the opposite of the foam in `spray.rs`, which
 //!   seethes. Cloud at two kilometres is the slowest thing in the frame.
+//!
+//! # Shadows
+//!
+//! Cloud that does not shade anything is a sticker. Two consequences, from one
+//! definition — [`Clouds::shade_at`], which asks where the sun ray through a point
+//! crosses each cloud's own base:
+//!
+//! * **On the water.** The sea reads it per vertex and takes the tone down a step, so in
+//!   ink mode a cloud shadow is a flat tone patch with a hard contour, which is what a
+//!   painter does with one. Glints go out inside it, because there is no sun in there to
+//!   glint off. And the patch is nowhere near under the cloud: this sun sits seventeen
+//!   degrees up, so a cell with its base at four hundred metres throws its shadow
+//!   thirteen hundred metres to leeward of itself. That offset is the thing that reads
+//!   as height.
+//! * **In the air.** The shaft between the cloud and its shadow is drawn: a few narrow
+//!   ribbons per cell, parallel to the sun and ending where they meet the water. What
+//!   you see as sunbeams is the lit air *between* shadow cones, so drawing the cones is
+//!   the honest way round, and with a sun this low they run nearly horizontally and
+//!   reach for a kilometre and more — long diagonal shafts under a scattered cloud
+//!   deck, which is the thing you actually see at sea.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
@@ -61,6 +81,10 @@ const BASE_LOW: f32 = 260.0;
 const BASE_HIGH: f32 = 520.0;
 /// Texels across the puff.
 const PUFF: u32 = 128;
+/// Shafts drawn per cloud. Three narrow ones rather than one the width of the cell: a
+/// ray reads as a ray because it is narrow, and a single wedge as wide as the cloud is a
+/// grey smear.
+const BEAMS: usize = 3;
 
 /// One cloud.
 struct Cell {
@@ -72,6 +96,9 @@ struct Cell {
     spread: f32,
     /// How tall it is built.
     rise: f32,
+    /// Where across the cell each shaft starts, as a fraction of the spread, and how
+    /// wide it is in metres. Fixed with the cell so the shafts do not crawl about.
+    beams: [(f32, f32); BEAMS],
 }
 
 /// One billboard.
@@ -96,14 +123,122 @@ struct Puff {
 #[derive(Resource)]
 pub struct Clouds {
     mesh: Handle<Mesh>,
+    /// The shafts, a mesh of their own because they are a different shape and want a
+    /// different fade, and sharing a mesh would mean sharing a sort order with the
+    /// puffs — which is wrong, since a shaft is drawn behind the cloud that casts it.
+    shafts: Handle<Mesh>,
     cells: Vec<Cell>,
     puffs: Vec<Puff>,
     /// Scratch for sorting back to front, kept so the frame allocates nothing.
     order: Vec<(f32, usize)>,
 }
 
+/// Where the cloud shadows fall on the water, as a coarse map in metres.
+///
+/// The one definition of the shadow, read by the sea in `world.rs` and by the shafts
+/// drawn here. Two definitions would be two shadows, and they would not line up.
+///
+/// A map rather than a list of discs, and that is a measurement rather than a
+/// preference. Asked disc by disc, per vertex, this cost five per cent of the frame —
+/// because the sea grid is a few metres across near the boat and a cloud shadow varies
+/// over five hundred, so every shadow edge was being resolved a hundred times finer than
+/// it has any detail. Sixty metres a cell is finer than the edge is sharp; four
+/// thousand nodes built once a frame replaces forty thousand vertices each asking
+/// twenty clouds, and the inner loop becomes four array reads.
+pub struct ShadowField {
+    /// Shade at each node, row-major, `MAP` square. Empty when there is no cloud.
+    map: Vec<f32>,
+    /// Simulation coordinates of node (0, 0).
+    corner: glam::DVec2,
+    /// Metres between nodes.
+    pitch: f64,
+}
+
+/// Nodes across the shadow map, each way.
+const MAP: usize = 64;
+
+impl ShadowField {
+    /// No cloud, full sun. For the frames before the layer exists.
+    pub fn clear() -> Self {
+        Self {
+            map: Vec::new(),
+            corner: glam::DVec2::ZERO,
+            pitch: 1.0,
+        }
+    }
+
+    /// How shaded a point on the water is: 0 in full sun, 1 under the middle of a cloud.
+    pub fn shade_at(&self, at: glam::DVec2) -> f32 {
+        if self.map.is_empty() {
+            return 0.0;
+        }
+        let p = (at - self.corner) / self.pitch;
+        if p.x < 0.0 || p.y < 0.0 {
+            return 0.0;
+        }
+        let (ix, iy) = (p.x as usize, p.y as usize);
+        if ix + 1 >= MAP || iy + 1 >= MAP {
+            return 0.0;
+        }
+        let (fx, fy) = ((p.x - ix as f64) as f32, (p.y - iy as f64) as f32);
+        let at = |x: usize, y: usize| self.map[y * MAP + x];
+        let top = at(ix, iy) + (at(ix + 1, iy) - at(ix, iy)) * fx;
+        let bottom = at(ix, iy + 1) + (at(ix + 1, iy + 1) - at(ix, iy + 1)) * fx;
+        top + (bottom - top) * fy
+    }
+}
+
+impl Clouds {
+    /// Project the clouds onto the water along the sun, over a square of side `2 * reach`
+    /// centred on `boat`.
+    ///
+    /// Only the shadows that can reach that square are considered: a disc whose centre
+    /// is further off than its own radius plus the reach cannot touch it, which is exact
+    /// and leaves two or three clouds out of twenty to actually evaluate.
+    pub fn shadows(&self, boat: glam::DVec2, reach: f64) -> ShadowField {
+        // The sun's horizontal run per metre of height, in simulation coordinates.
+        // Bevy's -Z is simulation north, so the second component flips. A point is in
+        // shadow when the ray from it to the sun crosses a cloud, so the shadow sits
+        // *down*-sun of the cloud by the height over the tangent of the elevation —
+        // which at seventeen degrees is more than three times the altitude. That offset
+        // is what reads as height, and it comes from the real sun angle rather than
+        // from a guess at how far a shadow ought to be thrown.
+        let sun = crate::sky::SUN.normalize();
+        let run = glam::DVec2::new(sun.x as f64, -sun.z as f64) / sun.y.max(0.05) as f64;
+        let discs: Vec<(glam::DVec2, f32, f32)> = self
+            .cells
+            .iter()
+            .map(|cell| (cell.at - run * cell.base as f64, cell.spread * 0.95))
+            .filter(|(centre, outer)| (*centre - boat).length() < reach + *outer as f64)
+            .map(|(centre, outer)| (centre, outer * 0.45, outer))
+            .collect();
+        if discs.is_empty() {
+            return ShadowField::clear();
+        }
+
+        let pitch = 2.0 * reach / (MAP - 1) as f64;
+        let corner = boat - glam::DVec2::splat(reach);
+        let mut map = vec![0.0_f32; MAP * MAP];
+        for iy in 0..MAP {
+            for ix in 0..MAP {
+                let at = corner + glam::DVec2::new(ix as f64, iy as f64) * pitch;
+                let mut most = 0.0_f32;
+                for &(centre, inner, outer) in &discs {
+                    let r = (at - centre).length() as f32;
+                    // Soft at the rim, because the cloud is soft at the rim. The core is
+                    // wholly opaque, which is why the middle of a cloud shadow is as
+                    // dark as it is.
+                    most = most.max(1.0 - step_between(inner, outer, r));
+                }
+                map[iy * MAP + ix] = most.clamp(0.0, 1.0);
+            }
+        }
+        ShadowField { map, corner, pitch }
+    }
+}
+
 /// Smoothstep in `f32`, local because the core's is `f64` and this is texture work.
-fn step_between(a: f32, b: f32, x: f32) -> f32 {
+pub fn step_between(a: f32, b: f32, x: f32) -> f32 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -185,27 +320,58 @@ pub fn setup(
     mesh.insert_indices(Indices::U32(indices));
     let handle = meshes.add(mesh);
 
-    commands.spawn((
-        Mesh3d(handle.clone()),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            base_color_texture: Some(images.add(puff())),
-            // Blended, not added: cloud is opaque stuff seen against the sky, and the
-            // shadowed side of it is *darker* than the sky behind it. Added foam can
-            // never darken what it is drawn over, which is right for foam and would
-            // make this a layer of glowing cotton.
-            alpha_mode: AlphaMode::Blend,
-            unlit: true,
-            cull_mode: None,
-            double_sided: true,
-            ..default()
-        })),
-        Transform::default(),
-        // Never culled by its own bounds: the mesh is rebuilt in render coordinates
-        // every frame and its vertices move kilometres, so the automatic bounding box
-        // computed at startup is meaningless and will pop the whole deck out of view.
-        bevy::camera::visibility::NoFrustumCulling,
-    ));
+    // The shafts, same vertex layout, their own mesh.
+    let mut beam_mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    let beam_quads = CELLS * BEAMS;
+    let beam_vertices = beam_quads * 4;
+    beam_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![Vec3::ZERO; beam_vertices]);
+    beam_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![Vec3::Y; beam_vertices]);
+    beam_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![Vec2::ZERO; beam_vertices]);
+    beam_mesh.insert_attribute(
+        Mesh::ATTRIBUTE_COLOR,
+        vec![[1.0_f32, 1.0, 1.0, 0.0]; beam_vertices],
+    );
+    let mut beam_indices = Vec::with_capacity(beam_quads * 6);
+    for i in 0..beam_quads {
+        let a = (i * 4) as u32;
+        beam_indices.extend_from_slice(&[a, a + 1, a + 2, a, a + 2, a + 3]);
+    }
+    beam_mesh.insert_indices(Indices::U32(beam_indices));
+    let beam_handle = meshes.add(beam_mesh);
+
+    // One material for both. The shaft wants a soft edge across its width and nothing
+    // along its length, and the puff's own radial falloff sampled along one row is
+    // exactly that — so the texture is shared rather than a second one baked to do the
+    // same job.
+    let material = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        base_color_texture: Some(images.add(puff())),
+        // Blended, not added: cloud is opaque stuff seen against the sky, and the
+        // shadowed side of it is *darker* than the sky behind it. Added foam can never
+        // darken what it is drawn over, which is right for foam and would make this a
+        // layer of glowing cotton — and would make the shadow shafts impossible, since
+        // a shaft of shadow is the one thing in the frame that only subtracts.
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        cull_mode: None,
+        double_sided: true,
+        ..default()
+    });
+
+    for mesh in [handle.clone(), beam_handle.clone()] {
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material.clone()),
+            Transform::default(),
+            // Never culled by its own bounds: the mesh is rebuilt in render coordinates
+            // every frame and its vertices move kilometres, so the automatic bounding
+            // box computed at startup is meaningless and will pop the deck out of view.
+            bevy::camera::visibility::NoFrustumCulling,
+        ));
+    }
 
     let mut seed = sail_core::rng::Pcg32::new(0x5C_1D_0B);
     let boat = sim.sim.state.pos;
@@ -248,26 +414,51 @@ pub fn setup(
         p.sunward = across.dot(Vec3::new(sun.x, 0.0, sun.z).normalize_or_zero());
     }
 
-    // One line, because a layer that silently fails to appear is indistinguishable from
-    // a layer that is there and too faint, and the difference matters when the only way
-    // to look at this is to run it.
-    let nearest = cells
-        .iter()
-        .map(|c| (c.at - boat).length())
-        .fold(f64::INFINITY, f64::min);
-    info!(
-        "cloud: {CELLS} cells of {PER_CELL} puffs, bases {:.0}-{:.0} m, nearest {:.0} m",
-        cells.iter().map(|c| c.base).fold(f32::INFINITY, f32::min),
-        cells.iter().map(|c| c.base).fold(0.0, f32::max),
-        nearest
-    );
-
-    commands.insert_resource(Clouds {
+    let clouds = Clouds {
         mesh: handle,
+        shafts: beam_handle,
         cells,
         puffs,
         order: Vec::with_capacity(COUNT),
-    });
+    };
+
+    // One line, because a layer that silently fails to appear is indistinguishable from
+    // a layer that is there and too faint, and the difference matters when the only way
+    // to look at this is to run it. The shaded fraction is the other half of the same
+    // check: the shadow is projected along the sun, so a sign error in that projection
+    // puts every patch on the wrong side of its cloud, and nothing else in the frame
+    // would say so.
+    let nearest = clouds
+        .cells
+        .iter()
+        .map(|c| (c.at - boat).length())
+        .fold(f64::INFINITY, f64::min);
+    let field = clouds.shadows(boat, RANGE);
+    let mut shaded = 0;
+    const PROBE: i32 = 40;
+    for ix in -PROBE..=PROBE {
+        for iy in -PROBE..=PROBE {
+            let at = boat + glam::DVec2::new(ix as f64, iy as f64) * (RANGE / PROBE as f64);
+            if field.shade_at(at) > 0.5 {
+                shaded += 1;
+            }
+        }
+    }
+    let probes = (2 * PROBE + 1) * (2 * PROBE + 1);
+    info!(
+        "cloud: {CELLS} cells of {PER_CELL} puffs, bases {:.0}-{:.0} m, nearest {:.0} m, \
+         {:.0}% of the water in shadow",
+        clouds
+            .cells
+            .iter()
+            .map(|c| c.base)
+            .fold(f32::INFINITY, f32::min),
+        clouds.cells.iter().map(|c| c.base).fold(0.0, f32::max),
+        nearest,
+        100.0 * shaded as f32 / probes as f32
+    );
+
+    commands.insert_resource(clouds);
 }
 
 /// Place a cloud. With a drift given it comes in from upwind; without one it is
@@ -289,11 +480,20 @@ fn seeded_cell(
             boat + glam::DVec2::new(a.cos(), a.sin()) * r
         }
     };
+    let spread = 230.0 + seed.next_f64() as f32 * 280.0;
+    let mut beams = [(0.0, 0.0); BEAMS];
+    for b in &mut beams {
+        *b = (
+            (seed.next_f64() as f32 * 2.0 - 1.0) * 0.7,
+            spread * (0.16 + seed.next_f64() as f32 * 0.22),
+        );
+    }
     Cell {
         at,
         base: BASE_LOW + seed.next_f64() as f32 * (BASE_HIGH - BASE_LOW),
-        spread: 230.0 + seed.next_f64() as f32 * 280.0,
+        spread,
         rise: 90.0 + seed.next_f64() as f32 * 170.0,
+        beams,
     }
 }
 
@@ -307,10 +507,6 @@ pub fn update(
     camera: Query<&Transform, With<crate::camera::MainCamera>>,
 ) {
     let Ok(view) = camera.single() else {
-        return;
-    };
-    let handle = clouds.mesh.clone();
-    let Some(mut mesh) = meshes.get_mut(&handle) else {
         return;
     };
     let st = &sim.render_state();
@@ -404,9 +600,82 @@ pub fn update(
         }
     }
 
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    // Scoped, because the shafts are a second mesh out of the same store and two live
+    // mutable borrows of it is one more than there can be.
+    {
+        let handle = clouds.mesh.clone();
+        let Some(mut mesh) = meshes.get_mut(&handle) else {
+            return;
+        };
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    }
+
+    // --- The shafts ---------------------------------------------------------------
+    //
+    // A shadow cone, drawn from the cloud base down the sun to where it meets the
+    // water. Parallel beams in three dimensions, which is why they appear to converge
+    // on the sun when you look towards it and on the antisolar point when you look
+    // away: that is not an effect added here, it is what parallel lines do, and it is
+    // the reason this is worth drawing as geometry rather than painting into the sky.
+    let shafts = clouds.shafts.clone();
+    let Some(mut beam_mesh) = meshes.get_mut(&shafts) else {
+        return;
+    };
+    let sun = crate::sky::SUN.normalize();
+    let axis = -sun;
+    let mut positions = Vec::with_capacity(CELLS * BEAMS * 4);
+    let mut colours = Vec::with_capacity(CELLS * BEAMS * 4);
+    let mut uvs = Vec::with_capacity(CELLS * BEAMS * 4);
+    for cell in &clouds.cells {
+        // Across the sun, horizontally: the direction the beams are spread along.
+        let across = Vec3::new(-sun.z, 0.0, sun.x).normalize_or_zero();
+        let head = origin.to_bevy(cell.at, cell.base);
+        // Where it reaches the water. The whole visible length of a shaft is the bit
+        // between the cloud and the sea, and with the sun this low that is long.
+        let length = cell.base / sun.y.max(0.05);
+        for &(offset, width) in &cell.beams {
+            let start = head + across * (offset * cell.spread) + axis * (cell.spread * 0.25);
+            let end = start + axis * length;
+            let middle = (start + end) * 0.5;
+            let to_eye = (view.translation - middle).normalize_or_zero();
+            // A beam seen end-on is not a beam. This is most of what keeps the effect
+            // honest: look along the shafts and they go, which is what happens when you
+            // turn to face the sun with the shadows running away behind you.
+            let side_on = (1.0 - axis.dot(to_eye).abs()).clamp(0.0, 1.0);
+            let right = axis.cross(to_eye).normalize_or_zero() * (width * 0.5);
+            // Shadowed air: the haze colour with the light taken out of it. Not black,
+            // and not a colour of its own — a shaft is the same sky, unlit.
+            let mut tone = haze * 0.58;
+            let mut alpha = 0.16 * side_on * side_on;
+            if ink.0 {
+                // Two levels and a touch stronger, because a drawn beam is a wedge with
+                // an edge and not an airbrushed gradient.
+                tone = haze * 0.52;
+                alpha = ((alpha / 0.16 * 2.0).round() / 2.0) * 0.20;
+            }
+            // Thinning along its length: the far end of a shaft is filled in by the
+            // light scattered into it from everywhere else, so it fades out rather than
+            // stopping at the water.
+            for (point, fade, v) in [
+                (start - right, 1.0, 0.0),
+                (start + right, 1.0, 1.0),
+                (end + right, 0.0, 1.0),
+                (end - right, 0.0, 0.0),
+            ] {
+                positions.push(point);
+                colours.push([tone.x, tone.y, tone.z, alpha * fade]);
+                // Across the width only: the puff texture's radial falloff sampled
+                // along its middle row is a soft-edged band, which is the profile a
+                // shaft wants.
+                uvs.push(Vec2::new(v, 0.5));
+            }
+        }
+    }
+    beam_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    beam_mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
+    beam_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
 }
 
 /// Where a puff is this instant, in render coordinates.
