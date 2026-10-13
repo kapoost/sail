@@ -64,6 +64,85 @@ const TURNING: [usize; 4] = [0, 6, 3, 0];
 /// How long a phrase is, in bars. Eight, because every tune in this tradition is eight.
 const PHRASE: u32 = 8;
 
+/// The four notes the whole passage is made of.
+///
+/// This is what was missing, and it is the difference between generated notes and a
+/// tune. A random walk through a scale, however well weighted, is not music: there is
+/// nothing in it to recognise, so the ear has nothing to be satisfied by when it comes
+/// back. What folk music does instead — all of it, everywhere — is state a short cell
+/// and then turn it over: say it again, say it a step higher, say it upside down, say it
+/// slower, and finally say it once more and land. A listener who has heard bar one knows
+/// bar five is *about* bar one, and that recognition is the whole pleasure.
+///
+/// Four notes because that is the length of nearly every one that has lasted: the
+/// opening of a reel, of a hornpipe, of "Drunken Sailor". Long enough to have a shape,
+/// short enough to be turned over without the join showing.
+#[derive(Clone, Copy, Debug)]
+struct Motif {
+    /// Scale degrees relative to whatever it is being said on.
+    shape: [i32; 4],
+    /// Which of the eight quavers in a bar it speaks on. A rhythm is as much of an
+    /// identity as the pitches — more, if anything, which is why you can recognise a
+    /// tune somebody is drumming on a table.
+    voiced: [bool; 8],
+}
+
+impl Motif {
+    /// Make one, from the passage's own seed.
+    ///
+    /// Shaped rather than random: an opening leap or step, a turn, and a return. The
+    /// constraint is what makes it singable — four notes drawn uniformly from a scale is
+    /// four notes, not a motif.
+    fn invent(rng: &mut impl FnMut() -> f32) -> Self {
+        let openings: [[i32; 4]; 6] = [
+            [0, 2, 1, 0],  // a turn round the tonic: the commonest opening there is
+            [0, 1, 2, 4],  // a climb
+            [4, 2, 1, 0],  // and the fall that answers it
+            [0, 4, 2, 1],  // a leap, then filling in behind it
+            [0, 2, 4, 2],  // an arch
+            [2, 1, 0, -3], // dropping to the seventh below, which is very Nordic
+        ];
+        let shape = openings[(rng() * openings.len() as f32) as usize % openings.len()];
+        // Rhythms that leave the right silences. A cell that speaks on every quaver has
+        // no rhythm; what gives a tune its gait is where it does *not* play.
+        let rhythms: [[bool; 8]; 4] = [
+            [true, false, true, false, true, false, true, false],
+            [true, false, true, true, false, true, false, false],
+            [true, true, false, true, false, false, true, false],
+            [true, false, false, true, true, false, true, false],
+        ];
+        let voiced = rhythms[(rng() * rhythms.len() as f32) as usize % rhythms.len()];
+        Self { shape, voiced }
+    }
+
+    /// The degree this cell says at a given quaver, if it speaks at all.
+    fn at(&self, quaver: usize) -> Option<i32> {
+        if !self.voiced[quaver % 8] {
+            return None;
+        }
+        // The four notes are spread across the bar in the order they are voiced, so a
+        // cell with three notes in it says three and a cell with four says four — the
+        // rhythm chooses how much of the shape is heard.
+        let spoken = self.voiced[..=(quaver % 8)].iter().filter(|v| **v).count();
+        Some(self.shape[(spoken - 1).min(3)])
+    }
+}
+
+/// What a bar does with the motif.
+///
+/// The plan of a folk phrase, which is the same plan every time because it works:
+/// state it, state it again, go somewhere, come back and land.
+fn how_to_say_it(bar: u32) -> (i32, bool) {
+    match bar % PHRASE {
+        0 | 1 => (0, false),   // say it
+        2 | 3 => (2, false),   // say it a third higher
+        4 => (0, true),        // turn it over
+        5 => (-2, true),       // and again, lower
+        6 => (2, false),       // back towards home
+        _ => (0, false),       // and land
+    }
+}
+
 #[derive(Resource)]
 pub struct Music {
     /// Musical time, in beats since the passage began.
@@ -74,11 +153,10 @@ pub struct Music {
     /// key whenever the wind shifts is not a tune.
     tonic: f32,
     rng: u32,
-    /// The melody's position in the scale, so it walks rather than jumps.
+    /// The melody's position in the scale, for the passing notes between motif notes.
     degree: i32,
-    /// What was played in the first half of the phrase, to be answered in the second.
-    /// AABB is a form and not an ornament: the repeat is what makes it memorable.
-    said: [i32; 8],
+    /// The cell the whole passage is built from, invented once when she casts off.
+    motif: Option<Motif>,
 }
 
 impl Default for Music {
@@ -91,7 +169,7 @@ impl Default for Music {
             tonic: 146.83,
             rng: 0x5EA_5A11,
             degree: 0,
-            said: [0; 8],
+            motif: None,
         }
     }
 }
@@ -215,96 +293,113 @@ pub fn compose(
     music.last_step = step;
 
     if hush <= 0.0 {
-        for v in 0..3 {
-            p.set_voice(v, 0.0, 0.0);
-        }
         return;
     }
 
     let scale = if want.dorian { DORIAN } else { AEOLIAN };
     let per_bar = (want.beats * 2) as i64;
     let bar = step.div_euclid(per_bar) as u32 % PHRASE;
-    let in_bar = step.rem_euclid(per_bar);
+    let in_bar = step.rem_euclid(per_bar) as usize;
     let strong = in_bar == 0;
-    let chord = if want.dorian { TURNING } else { WALKING }[(bar % 4) as usize];
+    let chord = if want.dorian { TURNING } else { WALKING }[(bar % 4) as usize] as i32;
 
-    // The tune. First half of the phrase it is made up; second half it is answered, which
-    // is what AABB means and what the ear is waiting for.
-    let index = (in_bar as usize).min(7);
-    let degree = if bar < PHRASE / 2 {
-        // A walk, mostly by step, landing on a chord tone where the bar does.
-        let roll = music.next();
-        let jump = if roll < 0.44 {
-            -1
-        } else if roll < 0.88 {
-            1
-        } else if roll < 0.95 {
-            2
-        } else {
-            -2
+    // How hard she is going, as a fraction of what this hull can do.
+    //
+    // The most expressive single number a sailor has, and the one a soundtrack has no
+    // business ignoring: it is the difference between punching about and *sailing*. It
+    // does not change the notes — the tune is the tune — it changes how many of them
+    // there are. A boat ghosting along in four knots gets the bones of the motif; the
+    // same boat at seven gets it filled in with the passing notes between, which is
+    // exactly what a player does when the tune lifts.
+    let going = (sail_core::units::ms_to_kn(t.stw) / sail_core::units::ms_to_kn(cfg_hull(&sim)))
+        .clamp(0.0, 1.15) as f32;
+    let flying = going > 0.82;
+
+    // Invented once, when she casts off, and then said over and over for the whole
+    // passage. That is the point of it: by the third phrase you know this tune.
+    if music.motif.is_none() {
+        let mut seed = music.rng;
+        let mut rng = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed as f32 / u32::MAX as f32
         };
-        let mut d = (music.degree + jump).clamp(-3, 9);
-        if strong {
-            // Land on something that belongs to the chord under it, or the tune wanders.
-            d = chord as i32 + if music.next() < 0.5 { 0 } else { 2 };
-        }
-        music.degree = d;
-        if bar * per_bar as u32 / per_bar as u32 == bar {
-            music.said[index] = d;
-        }
-        d
-    } else {
-        music.said[index]
-    };
+        music.motif = Some(Motif::invent(&mut rng));
+        music.rng = seed;
+    }
+    let motif = music.motif.expect("just set");
 
+    let (lift, upside_down) = how_to_say_it(bar);
+    // Copied out, so the closure does not hold a borrow of the resource the notes are
+    // also writing to.
+    let tonic = music.tonic;
     let hz = |deg: i32, octave: f32| -> f32 {
         let d = deg.rem_euclid(7) as usize;
         let oct = (deg as f32 / 7.0).floor();
-        music.tonic
-            * 2.0_f32.powf(
-                scale[d] as f32 / 12.0 + oct + octave + want.register,
-            )
+        tonic * 2.0_f32.powf(scale[d] as f32 / 12.0 + oct + octave + want.register)
     };
 
-    // Lead. In the ink drawing it is quantised on to the pentatonic degrees — no fourth,
-    // no seventh — which is what a chip tune does and why those tunes never sound sour.
-    let lead_deg = if ink.0 {
-        const PENTATONIC: [i32; 5] = [0, 1, 2, 4, 5];
-        let oct = degree.div_euclid(7) * 7;
-        oct + PENTATONIC[(degree.rem_euclid(7) as usize * 5 / 7).min(4)]
-    } else {
-        degree
-    };
-    let swing = if want.beats == 6 && in_bar % 3 == 1 {
-        // The lilt of a jig: the middle of each triplet is lighter.
-        0.6
-    } else {
-        1.0
-    };
-    p.set_voice(
-        0,
-        hz(lead_deg, 1.0),
-        want.level * hush * swing * if strong { 1.0 } else { 0.78 },
-    );
+    // The tune. The motif, said the way this bar says it, on the chord this bar sits on.
+    let spoken = motif.at(in_bar).map(|d| {
+        let turned = if upside_down { -d } else { d };
+        chord + lift + turned
+    });
 
-    // The counter-line: a third below, and only when there is room for it.
-    let counter = want.fullness > 0.55 && in_bar % 2 == 0;
-    p.set_voice(
-        1,
-        hz(lead_deg - 2, 0.0),
-        if counter { want.level * 0.5 * hush } else { 0.0 },
-    );
+    if let Some(mut degree) = spoken {
+        // In the ink drawing it quantises on to the pentatonic degrees — no fourth and
+        // no seventh — which is why chip tunes never sound sour.
+        if ink.0 {
+            const PENTATONIC: [i32; 5] = [0, 1, 2, 4, 5];
+            let oct = degree.div_euclid(7) * 7;
+            degree = oct + PENTATONIC[(degree.rem_euclid(7) as usize * 5 / 7).min(4)];
+        }
+        music.degree = degree;
+        let weight = if strong { 1.0 } else { 0.72 };
+        p.strike(hz(degree, 1.0), want.level * weight * hush);
+        // Going well, the melody is doubled an octave up — the oldest way there is of
+        // saying the same thing brighter, and it arrives exactly when she does.
+        if flying && strong {
+            p.strike(hz(degree, 2.0), want.level * 0.4 * hush);
+        }
+    } else if going > 0.45 && !ink.0 {
+        // The passing notes: only when she is moving, and only in the vanilla picture,
+        // because a chip has no voices to spare for them. Between the motif's notes,
+        // stepping towards wherever it goes next.
+        let step_to = music.degree + if music.next() < 0.5 { 1 } else { -1 };
+        p.strike(hz(step_to, 1.0), want.level * 0.34 * going * hush);
+    }
 
-    // The bass walks the chord on the beat, and holds through a swell — a long note
-    // under a long sea is the oldest trick there is and it is right for the reason it is
-    // a trick: the music takes its length from the water.
+    // The left hand. A chord on the downbeat, which is what makes this a piano and not a
+    // whistle — and spread a little rather than struck dead together, because nobody's
+    // hand lands flat and the spread is most of what makes it sound played.
+    if strong && !ink.0 {
+        // Both of these modes are minor, so the third of the chord is the same in each —
+        // which is worth saying because it is the one interval somebody would expect to
+        // change with the mode and it does not. What dorian moves is the sixth, four
+        // degrees further up, and that note belongs to the tune rather than to this
+        // chord.
+        for (i, tone) in [0, 2, 4].iter().enumerate() {
+            let fatten = if want.fullness > 0.6 || i < 2 { 1.0 } else { 0.0 };
+            p.strike(
+                hz(chord + tone, -1.0),
+                want.level * 0.5 * fatten * hush * (1.0 - 0.1 * i as f32),
+            );
+        }
+    }
+
+    // And the bass, which holds under a long sea and walks under a short one.
     let swell = sim.sim.water.significant_height() > 1.2;
-    let bass_now = strong || (!swell && in_bar == per_bar / 2);
-    if bass_now {
-        p.set_voice(2, hz(chord as i32, -1.0), want.level * 0.8 * hush);
+    if strong || (!swell && in_bar == (per_bar / 2) as usize && going > 0.5) {
+        p.strike(hz(chord, -2.0), want.level * 0.7 * hush);
     }
 
-    if strong || (want.beats == 4 && in_bar == per_bar / 2) {
-        p.tick(0.5 * hush);
+    if strong || (want.beats == 4 && in_bar == (per_bar / 2) as usize) {
+        p.tick(0.4 * hush);
     }
+}
+
+/// This hull's own speed, which is what "going well" is measured against.
+fn cfg_hull(sim: &Sim) -> f64 {
+    sim.config().hull_speed()
 }

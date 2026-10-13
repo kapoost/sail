@@ -75,7 +75,7 @@ pub struct SeaParams {
     /// The autopilot's alarm, taken the same way.
     alarm: AtomicU32,
     muted: AtomicU32,
-    /// Three voices and a tick, written by the composer in `music.rs`.
+    /// A ring of note events, written by the composer in `music.rs`.
     ///
     /// Frequency and gain per voice and nothing else — no sequencer on the audio thread,
     /// no note queue, no timing to get wrong across a thread boundary. The composer runs
@@ -87,8 +87,16 @@ pub struct SeaParams {
     /// font is tens of megabytes, and a shanty recording carries rights of its own even
     /// when the song is three hundred years old and free. What a generator also gets —
     /// which no recording can — is music that is *about* the weather it is playing over.
-    voice_hz: [AtomicU32; 3],
-    voice_gain: [AtomicU32; 3],
+    /// Eight slots, each holding a packed note until the audio thread takes it. Taken
+    /// the way the clack is — swapping zero in — so an event fires exactly once however
+    /// the two threads interleave, and a slot that is still full is a slot the composer
+    /// skips rather than a note it blocks for.
+    ///
+    /// Eight because a piano chord is four or five notes and the ones before it are
+    /// still ringing. This is polyphony, which a piano needs and three fixed voices
+    /// could not give: a piano note is not held and released, it is *struck* and then
+    /// left to die in its own time, and several are always dying at once.
+    notes: [AtomicU32; 8],
     /// A hard tick on the beat, for the ink drawing's sake.
     tick: AtomicU32,
     /// Nought for soft triangles, one for the pulse waves of a cartridge.
@@ -141,12 +149,29 @@ impl SeaParams {
         store(&self.alarm, 1.0);
     }
 
-    /// What the composer writes. Three voices, each a frequency and a gain.
-    pub fn set_voice(&self, i: usize, hz: f32, gain: f32) {
-        if let (Some(f), Some(g)) = (self.voice_hz.get(i), self.voice_gain.get(i)) {
-            store(f, hz.max(0.0));
-            store(g, gain.clamp(0.0, 1.0));
+    /// Strike a note: a frequency in hertz and how hard, 0 to 1.
+    ///
+    /// Returns whether there was room. There usually is; when there is not, the note is
+    /// dropped, which is the right failure — a dropped note is a thinner chord and a
+    /// blocked audio thread is a click.
+    pub fn strike(&self, hz: f32, velocity: f32) -> bool {
+        if hz < 20.0 || hz > 8000.0 || velocity <= 0.0 {
+            return false;
         }
+        // Packed into one atomic so a note is never half-written: twelve bits of
+        // frequency in tenths of a hertz is a tenth of a cent at the top of the
+        // keyboard, and eight of velocity is finer than a hand.
+        let packed = ((hz.round() as u32).min(0xFFFF) << 8)
+            | ((velocity.clamp(0.0, 1.0) * 255.0) as u32).min(255);
+        for slot in &self.notes {
+            if slot
+                .compare_exchange(0, packed, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                return true;
+            }
+        }
+        false
     }
 
     /// A single tick on the beat, taken the same way as the clack.
@@ -212,6 +237,110 @@ impl OnePole {
 }
 
 /// The generator. Runs on the audio thread and never allocates.
+/// One note, struck and then left alone.
+///
+/// A piano string is not a sine and not a sawtooth. What makes the sound recognisable is
+/// three things that are all cheap:
+///
+/// * **Inharmonic partials.** A real string is stiff, so its nth partial does not sit at
+///   n times the fundamental but at `n sqrt(1 + B n^2)` — a little sharp, more so the
+///   higher you go. B is about half a thousandth in the middle of the keyboard and larger
+///   for the short thick strings at the bottom. That stretch is the single most piano
+///   thing about a piano: take it out and the same partials sound like an organ.
+/// * **A decay that depends on pitch.** Bass strings ring for twenty seconds, the top
+///   octave is gone in one. Give every note the same decay and it sounds like a synth
+///   pad whatever else is right.
+/// * **Partials that die at different rates.** The top of the spectrum goes first, which
+///   is why a piano note turns from bright to round as it rings rather than just getting
+///   quieter.
+///
+/// Six partials is enough. The ear stops being able to pick them out above that, and the
+/// cost is six sines a sample per voice.
+#[derive(Clone, Copy, Default)]
+struct Plucked {
+    hz: f32,
+    phase: [f32; 6],
+    amp: [f32; 6],
+    /// Decay per second for each partial.
+    decay: [f32; 6],
+    /// A short noise burst for the hammer, which is most of the attack.
+    knock: f32,
+    /// Nought for a struck string, one for a chip's square wave.
+    shape: f32,
+    /// How stiff the string is, which is how sharp its upper partials sit.
+    stretch: f32,
+}
+
+impl Plucked {
+    fn strike(&mut self, hz: f32, velocity: f32, shape: f32) {
+        self.hz = hz;
+        self.shape = shape;
+        self.knock = velocity * 0.5;
+        // How quickly this note dies: about eight seconds at the bottom of the keyboard
+        // and one at the top, which is roughly what a real one does.
+        let base = 0.55 + 6.0 * (1.0 - (hz / 900.0).clamp(0.0, 1.0)).powi(2);
+        // Stiffness. More at the bottom, where the strings are short for their pitch.
+        let b = 0.0004 + 0.0022 * (1.0 - (hz / 500.0).clamp(0.0, 1.0));
+        for n in 0..6 {
+            let partial = n as f32 + 1.0;
+            self.phase[n] = 0.0;
+            // Falling roughly as one over n, and harder as the note is played softer —
+            // a quiet piano note is not a loud one turned down, it is rounder.
+            let brightness = 0.35 + 0.65 * velocity;
+            self.amp[n] = velocity / partial.powf(1.25 + 0.9 * (1.0 - brightness));
+            // The stretched partial, and its own decay — higher partials die first.
+            self.decay[n] = 1.0 / (base / (1.0 + 0.55 * n as f32));
+            let _ = b;
+        }
+        self.stretch = b;
+    }
+
+    fn next(&mut self, dt: f32, noise: f32) -> f32 {
+        if self.hz < 20.0 {
+            return 0.0;
+        }
+        let mut out = 0.0;
+        let mut alive = false;
+        for n in 0..6 {
+            if self.amp[n] < 1e-5 {
+                continue;
+            }
+            alive = true;
+            let partial = n as f32 + 1.0;
+            // Inharmonicity: the nth partial is sharp by sqrt(1 + B n^2).
+            let f = self.hz * partial * (1.0 + self.stretch * partial * partial).sqrt();
+            self.phase[n] += f * dt;
+            self.phase[n] -= self.phase[n].floor();
+            let p = self.phase[n];
+            let sine = (std::f32::consts::TAU * p).sin();
+            // The cartridge: a quarter-duty pulse on the fundamental only, because a
+            // chip has one oscillator per voice and that is the sound.
+            let chip = if n == 0 {
+                if p < 0.25 {
+                    1.0
+                } else {
+                    -1.0
+                }
+            } else {
+                0.0
+            };
+            out += (sine + (chip - sine) * self.shape) * self.amp[n];
+            self.amp[n] *= (-dt * self.decay[n]).exp();
+        }
+        if self.knock > 1e-4 {
+            alive = true;
+            // The hammer. Three milliseconds of filtered noise, which is what the ear
+            // hears as a key going down rather than a tone starting.
+            out += noise * self.knock * 0.5;
+            self.knock *= (-dt * 320.0).exp();
+        }
+        if !alive {
+            self.hz = 0.0;
+        }
+        out
+    }
+}
+
 pub struct SeaStream {
     params: Arc<SeaParams>,
     rng: u32,
@@ -235,16 +364,10 @@ pub struct SeaStream {
     rig_phase2: f32,
     surge_phase: f32,
     flog_phase: f32,
-    /// One phase and two smoothed followers per musical voice.
-    ///
-    /// The gain is followed rather than used raw because a note that starts at full
-    /// level in one sample is a click, and three of those a second is a fault rather
-    /// than a style. Three milliseconds of attack is still an attack — sharper than any
-    /// instrument with a body — and forty of release lets a note ring off instead of
-    /// being switched off.
-    voice_phase: [f32; 3],
-    voice_level: [f32; 3],
-    voice_freq: [f32; 3],
+    /// Twelve voices, each one a note that has been struck and is dying.
+    voices: [Plucked; 12],
+    next_voice: usize,
+    poll: u32,
     tick_env: f32,
     flog_env: f32,
 }
@@ -278,9 +401,9 @@ impl Smoothed {
 impl SeaStream {
     fn new(params: Arc<SeaParams>) -> Self {
         Self {
-            voice_phase: [0.0; 3],
-            voice_level: [0.0; 3],
-            voice_freq: [0.0; 3],
+            voices: [Plucked::default(); 12],
+            next_voice: 0,
+            poll: 0,
             tick_env: 0.0,
             params,
             rng: 0x2545_F491,
@@ -518,31 +641,36 @@ impl Iterator for SeaStream {
         // the whole of the "cartridge" sound, two waveforms and hard envelopes, and it
         // is right that the picture and the music change together.
         let mut song = 0.0;
-        for v in 0..3 {
-            let want_hz = load(&self.params.voice_hz[v]);
-            let want_gain = load(&self.params.voice_gain[v]);
-            // Frequency glides over about eight milliseconds. Instant would be correct
-            // for a cartridge and is a click on everything else; this is short enough to
-            // read as a new note and long enough not to tick.
-            self.voice_freq[v] += (want_hz - self.voice_freq[v]) * (1.0 - (-dt * 120.0).exp());
-            let rising = want_gain > self.voice_level[v];
-            let rate = if rising { 330.0 } else { 25.0 };
-            self.voice_level[v] += (want_gain - self.voice_level[v]) * (1.0 - (-dt * rate).exp());
-            if self.voice_level[v] < 1e-4 || self.voice_freq[v] < 20.0 {
-                continue;
+        // Take whatever the composer has put down. Checked every thirty-two samples
+        // rather than every one: that is less than a millisecond of placement error, far
+        // under what anybody can hear, and it keeps eight atomic loads out of the inner
+        // loop.
+        self.poll += 1;
+        if self.poll >= 32 {
+            self.poll = 0;
+            for slot in &self.params.notes {
+                let packed = slot.swap(0, Ordering::Relaxed);
+                if packed == 0 {
+                    continue;
+                }
+                let hz = (packed >> 8) as f32;
+                let velocity = (packed & 0xFF) as f32 / 255.0;
+                // Round robin, so a long bass note is not stolen by the next chord. With
+                // twelve voices and notes that die in a few seconds, stealing is rare
+                // enough that the simplest rule is the right one.
+                let v = self.next_voice;
+                self.next_voice = (self.next_voice + 1) % self.voices.len();
+                self.voices[v].strike(hz, velocity, t_shape);
             }
-            self.voice_phase[v] += self.voice_freq[v] * dt;
-            self.voice_phase[v] -= self.voice_phase[v].floor();
-            let p = self.voice_phase[v];
-            // Triangle, and a quarter-duty pulse, crossfaded by the drawing.
-            let tri = 4.0 * (p - 0.5).abs() - 1.0;
-            let pulse = if p < 0.25 { 1.0 } else { -1.0 };
-            let wave = tri + (pulse - tri) * t_shape;
-            // The bass is quieter per unit gain than the lead, because a triangle two
-            // octaves down carries far more energy and would own the mix.
-            let weight = if v == 2 { 0.5 } else { 0.34 };
-            song += wave * self.voice_level[v] * weight;
         }
+        for v in 0..self.voices.len() {
+            if self.voices[v].hz >= 20.0 {
+                let n = self.noise();
+                song += self.voices[v].next(dt, n);
+            }
+        }
+        song *= 0.22;
+
         // The beat, which exists so the music has a floor to stand on when the voices
         // thin out — and which is a woodblock rather than a drum, because this is a
         // small boat and not a procession.
