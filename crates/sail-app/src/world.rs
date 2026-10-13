@@ -318,8 +318,27 @@ pub const DEEP: Vec3 = Vec3::new(0.035, 0.095, 0.150);
 ///
 /// The light end is the paper, which in a woodblock is not white but a warm off-cream,
 /// and the contrast between the two ends is what makes flat tone read as form.
-const PRUSSIAN: Vec3 = Vec3::new(0.030, 0.105, 0.330);
-const PAPER: Vec3 = Vec3::new(0.620, 0.660, 0.665);
+const PRUSSIAN: Vec3 = Vec3::new(0.012, 0.062, 0.260);
+const PAPER: Vec3 = Vec3::new(0.780, 0.800, 0.775);
+
+/// Where the water is thin: over a bank, and in the back of a wave.
+///
+/// A print has more than two ends to its range and this one had two, which is why the
+/// drawn sea read as flat however many bands were cut into it: four tones spread between
+/// a mid blue and a pale blue are four mid blues. The dark end goes down towards the
+/// pigment at full strength and the light end up towards the paper, and *between* them
+/// the water is allowed to be a different colour rather than a mixture of the two —
+/// because that is what water does. Thin water is not pale deep water. It is green,
+/// because what you are seeing is light that went down, hit something and came back
+/// rather than light that went down and did not return.
+///
+/// Two things make the water thin and they are the same thing at two scales. There is
+/// the bank underneath — a metre over sand is a different colour from forty metres over
+/// nothing, and the edge where one becomes the other is the single most useful mark on
+/// any chart drawn by eye. And there is the wave itself: the back of a crest is a lens
+/// of water with daylight coming through it from the other side, which is why a sea
+/// looks lit from within along its crests and why that is where a painter puts the green.
+const SHOAL: Vec3 = Vec3::new(0.090, 0.330, 0.300);
 
 /// The key line, struck on the dark side of each tone step.
 ///
@@ -723,6 +742,10 @@ pub fn update_sea(
             )
         };
         let far = if ink { deep } else { DEEP };
+        // The bank, where there is one to see. Only asked for in the drawn sea, where
+        // it is a tone the picture is built out of; the lit sea gets its shallows from
+        // the light instead.
+        let land = ink.then(|| sim.sim.land.clone()).flatten();
         let typical = (sim.sim.water.characteristic_slope() as f32).max(1e-4);
         // Steady surface drift: about two and a half percent of the wind speed,
         // downwind, which is the usual rule of thumb. This is a real current and it
@@ -915,7 +938,26 @@ pub fn update_sea(
                 // because afterwards the information is gone.
                 edge = on_step;
             }
-            let base = deep.lerp(shallow, tone);
+            let mut base = deep.lerp(shallow, tone);
+            if ink {
+                // How thin the water is here, from the two things that thin it.
+                //
+                // The wave's own lens first: a crest is water standing above the mean
+                // with daylight coming through it from behind, and the deeper the sea
+                // the less that is true of any given crest — so it is the elevation
+                // *relative to the wave height*, which is the same number whether this
+                // is a ripple or a gale.
+                let lens = (height / (0.9 * hs)).clamp(0.0, 1.0);
+                // And the bank underneath, which is the other scale of the same thing.
+                // Ten metres is where a sand bottom starts to show through on a clear
+                // day; below two it is all bottom.
+                let over_sand = land.as_ref().map_or(0.0, |l| {
+                    let d = l.depth(world) as f32;
+                    1.0 - smoothstep(2.0, 11.0, d)
+                });
+                let thin = (lens * 0.55).max(over_sand);
+                base = base.lerp(SHOAL, thin * thin);
+            }
             // Foam judged against this sea's own typical slope rather than a fixed
             // number. A long swell and a short chop of the same height are nothing
             // alike in steepness, so a threshold tuned on one gives either no foam at

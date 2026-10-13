@@ -2709,13 +2709,29 @@ fn she_will_not_point_under_headsail_alone() {
         "under headsail alone the best she should do is 48-56 deg true, got {alone}"
     );
 
-    // And not merely a flat optimum with the close angles nearly as good — pinching
-    // under headsail alone has to cost something a helmsman would notice.
-    let pinched = by_angle[&42];
+    // And a wall rather than a weight, which is the second half of it and took a second
+    // measurement to get right. The first version of the mechanism was the separation
+    // drag alone, and that is a load she *carries*: the sheet is already against its
+    // track stop, so luffing further separates no more of the leech and the penalty
+    // stops growing. She still made four fifths of her best at thirty-eight degrees, so
+    // a helmsman who luffed found her still going — which is not what "she will not
+    // point" means, and was reported from the deck in those words.
+    //
+    // What makes it a wall is that the two ends of a sail fail together: the leech lets
+    // go, the circulation goes with it, and the luff backwinds at an angle that would
+    // have kept it full. Luffing cannot separate more leech but it can and does take the
+    // luff away.
+    let close = by_angle[&42];
+    let pinched = by_angle[&38];
     assert!(
-        pinched < 0.90 * alone_vmg,
-        "at 42 deg under headsail alone she made {pinched:.2} kn against {alone_vmg:.2} \
+        close < 0.90 * alone_vmg,
+        "at 42 deg under headsail alone she made {close:.2} kn against {alone_vmg:.2} \
          at her best, which is not a boat that refuses to point"
+    );
+    assert!(
+        pinched < 0.70 * alone_vmg,
+        "at 38 deg she still made {pinched:.2} kn against {alone_vmg:.2} — that is a \
+         boat pointing badly, not one that will not point"
     );
 }
 

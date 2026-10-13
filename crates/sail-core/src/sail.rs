@@ -245,6 +245,27 @@ pub fn slot_interaction(main_cl: f64, jib_cl: f64) -> (f64, f64) {
 pub fn alone_leech_drag(camber: f64, chord_angle: f64, slot_support: f64) -> f64 {
     /// Drag coefficient with the after part of the sail fully separated.
     const SEPARATED: f64 = 2.10;
+    SEPARATED * leech_separation(camber, chord_angle, slot_support)
+}
+
+/// How much of the after part of a headsail has let go, 0 to 1.
+///
+/// The quantity behind [`alone_leech_drag`], pulled out because it has two consequences
+/// and they were not both being drawn from it. The drag is the obvious one. The other is
+/// that a sail whose after part has separated has lost most of its circulation — and
+/// circulation is what holds the stagnation point forward of the luff — so it backwinds
+/// at an angle of attack that would have kept it full. A separated leech raises the
+/// entry angle; see [`SailProfile::coefficients_with_separation`].
+///
+/// That second one is what makes the difference between a boat that points badly and a
+/// boat that will not point. Measured before it existed: under headsail alone her best
+/// velocity made good was at fifty degrees, which is right, but she still made four
+/// fifths of it at thirty-eight — so a helmsman who luffed up found her still going,
+/// which is not what "she will not point" means. The drag alone cannot do it, because
+/// the sheet is already against its track stop: luffing further does not separate any
+/// more of the sail, so the penalty is a weight she carries rather than a wall she
+/// meets. Backwinding is the wall, and it is where it should be.
+pub fn leech_separation(camber: f64, chord_angle: f64, slot_support: f64) -> f64 {
     let support = slot_support.clamp(0.0, 1.0);
     if support >= 1.0 {
         return 0.0;
@@ -256,7 +277,7 @@ pub fn alone_leech_drag(camber: f64, chord_angle: f64, slot_support: f64) -> f64
         return 0.0;
     }
     let shortfall = ((exit - chord_angle.max(0.0)) / exit).clamp(0.0, 1.0);
-    SEPARATED * shortfall * shortfall * (1.0 - support)
+    shortfall * shortfall * (1.0 - support)
 }
 
 /// Where along the chord the force actually acts, as a fraction back from the luff.
@@ -585,6 +606,24 @@ impl SailProfile {
     /// a deeper sail reaches a higher peak lift, reaches it at a *lower* angle of
     /// attack (the camber is already doing part of the work), and drags more.
     pub fn coefficients(&self, alpha: f64, camber: f64) -> SailCoeffs {
+        self.coefficients_with_separation(alpha, camber, 0.0)
+    }
+
+    /// The same, for a sail whose after part has let go — see [`leech_separation`].
+    ///
+    /// Two things follow and they are the same thing seen twice. The separated part of
+    /// the sail drags, and the circulation it is no longer making was what held the flow
+    /// on to the luff, so the entry angle it needs goes up with it. A fully separated
+    /// leech asks nearly two thirds more angle of attack before the luff will stay full,
+    /// which on a genoa sheeted to its track means the apparent wind has to be out
+    /// beyond thirty degrees — fifty true — before there is any point steering her at
+    /// all.
+    pub fn coefficients_with_separation(
+        &self,
+        alpha: f64,
+        camber: f64,
+        separated: f64,
+    ) -> SailCoeffs {
         // Camber scales three things at once. Values are relative to the shape the
         // profile was tuned at, so a reference-camber sail reproduces it exactly.
         let depth = self.depth_ratio(camber);
@@ -610,7 +649,23 @@ impl SailProfile {
         // A round entry cannot be sheeted close. Below the entry angle the flow starts
         // arriving on the windward side of the luff, and the sail answers by shaking
         // there and by dragging: a separation bubble, not attached flow.
-        let entry = self.entry_angle * camber.max(0.0) / CAMBER_REFERENCE;
+        /// How much more entry angle a separated leech asks for, per unit of it.
+        ///
+        /// Calibrated, like `SEPARATED` next door, on the one number a sailor gave for
+        /// this: a headsail alone will not point closer than fifty degrees. A genoa
+        /// sheeted to its track separates about three tenths of its leech, which this
+        /// turns into two and a third times the entry angle — twelve degrees becoming
+        /// twenty-eight — and twenty-eight degrees of attack behind a twelve degree
+        /// sheeting stop needs the apparent wind out past forty, which is fifty true.
+        ///
+        /// The shape is the mechanism and this is its size. What the shape says is that
+        /// losing the after part of a sail costs it the circulation that was holding the
+        /// flow on to its luff, so the two ends of the sail fail together — which is why
+        /// the wall is a wall rather than a weight: luffing further cannot separate any
+        /// more leech, but it can and does take the luff away.
+        const ENTRY_PER_SEPARATION: f64 = 4.5;
+        let entry = self.entry_angle * camber.max(0.0) / CAMBER_REFERENCE
+            * (1.0 + ENTRY_PER_SEPARATION * separated.clamp(0.0, 1.0));
         let backwinding = if entry > 0.0 {
             1.0 - smoothstep(0.5 * entry, entry, alpha)
         } else {
@@ -844,7 +899,8 @@ pub fn sail_forces_in_slot(
     let beta = awa.abs();
     let chord_angle = profile.chord_angle(sheet);
     let alpha = beta - chord_angle;
-    let mut coeffs = profile.coefficients(alpha, camber);
+    let separated = leech_separation(camber, chord_angle, slot_support);
+    let mut coeffs = profile.coefficients_with_separation(alpha, camber, separated);
     coeffs.cd += alone_leech_drag(camber, chord_angle, slot_support);
 
     // A heeled rig presents a smaller projected area to a horizontal wind. Applying
