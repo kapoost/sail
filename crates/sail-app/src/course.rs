@@ -23,6 +23,14 @@ use crate::sim::Sim;
 const ARRIVAL_RADIUS: f64 = 120.0;
 /// And slow enough to be stopping rather than passing through.
 const ARRIVAL_SPEED: f64 = 2.0;
+/// How long a consignment should be, metres.
+///
+/// A mile and three quarters. The clock runs at one to one with no compression, so this
+/// number *is* the length of a sitting: fifteen to twenty minutes with a fair wind, an
+/// hour if it has to be worked for. Anything much longer stops being a passage and
+/// becomes a commitment, and anything shorter is a ferry trip rather than a delivery.
+const LEG_TARGET: f64 = 3_240.0;
+
 /// Speed made good the deadline assumes, knots.
 ///
 /// Three and a half. The boat does better than that on a reach and much worse beating
@@ -143,18 +151,37 @@ impl Course {
             self.leg = Leg::Idle;
             return;
         }
-        // Somewhere other than here, and preferably not the nearest: a run should be
-        // a passage. Deterministic in the delivery count so a session replays.
-        let mut best = (self.from, 0.0);
+        // The harbour nearest to a *sailable* leg, which is not the same as the
+        // furthest one — and the furthest one is what this used to pick.
+        //
+        // The clock here runs at one to one and there is no compression, so the length
+        // of a consignment is the length of a sitting. Measured across seeds, the
+        // archipelago offers gaps from one and a half to twelve miles; taking the
+        // longest put the nearest harbour ten or twelve miles off, which at six knots on
+        // a reach is the better part of two hours and on a beat is an afternoon. That is
+        // not a passage, it is a commitment.
+        //
+        // A mile and three quarters is fifteen to twenty minutes with the wind where you
+        // want it, and an hour if you have to work for it — which is the right shape: the
+        // *reward for a fair wind* is the thing a delivery run is about, and it only
+        // exists if a fair wind finishes the job inside one sitting.
+        //
+        // A skipper does not sail to the furthest port on the chart either. He takes the
+        // job that is offered, and the jobs that exist on a coast like this are coastal
+        // runs between neighbours.
+        let mut best = (self.from, f64::INFINITY);
         for (i, h) in self.harbours.iter().enumerate() {
             if i == self.from {
                 continue;
             }
             let d = (h.at - from_pos).length();
-            // A cheap rotating preference, so the run does not shuttle between two.
-            let score = d * (0.6 + 0.4 * (((i as u32 ^ self.delivered) % 7) as f64 / 7.0));
-            if score > best.1 {
-                best = (i, score);
+            // A rotating nudge of a sixth either way, so consecutive runs are not the
+            // same two ports back and forth. Deterministic in the delivery count, so a
+            // session replays.
+            let nudge = 1.0 + 0.34 * ((((i as u32 ^ self.delivered) % 7) as f64 / 6.0) - 0.5);
+            let miss = (d - LEG_TARGET * nudge).abs();
+            if miss < best.1 {
+                best = (i, miss);
             }
         }
         self.to = best.0;
@@ -214,6 +241,30 @@ pub fn setup(
         .map(|l| l.harbours())
         .unwrap_or_default();
     let course = Course::new(harbours, sim.sim.state.pos);
+    // What the archipelago actually offers, in the units a passage is thought in. A
+    // consignment's length is a design decision and it cannot be made without this.
+    {
+        let mut gaps: Vec<f64> = Vec::new();
+        for (i, a) in course.harbours.iter().enumerate() {
+            for b in course.harbours.iter().skip(i + 1) {
+                gaps.push((a.at - b.at).length());
+            }
+        }
+        gaps.sort_by(f64::total_cmp);
+        let nm = |m: f64| m / 1852.0;
+        info!(
+            "course: {} harbours, {} pairs; gaps {:.1} / {:.1} / {:.1} nm (least, median, \
+             most); first leg {:.1} nm to {}, allowed {:.0} min",
+            course.harbours.len(),
+            gaps.len(),
+            gaps.first().copied().map_or(0.0, nm),
+            gaps.get(gaps.len() / 2).copied().map_or(0.0, nm),
+            gaps.last().copied().map_or(0.0, nm),
+            nm(course.to_target(sim.sim.state.pos).0),
+            course.destination_name(),
+            course.allowed / 60.0
+        );
+    }
 
     let buoy_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.95, 0.35, 0.08),

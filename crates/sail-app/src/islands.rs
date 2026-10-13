@@ -235,5 +235,20 @@ fn island_mesh(island: &Island, below: bool) -> Mesh {
 /// a passage rather than a hop, close enough that there is always something on the
 /// horizon to steer for.
 pub fn generate(seed: u64) -> Archipelago {
-    Archipelago::generate_around(seed ^ 0x15_1A_4D, 9_000.0, 26, 900.0)
+    // Five and a half kilometres each way rather than nine, which brings the harbours
+    // within a sailable leg of each other — measured, the median gap drops from six
+    // miles to under four and the nearest neighbour from three to under two.
+    //
+    // It also makes it an archipelago rather than a scatter: at nine kilometres the
+    // islands were mostly out of sight of one another, and an island group you can see
+    // across is the thing that makes coastal piloting a pleasure rather than a
+    // navigation exercise. The count stays at twenty-six and the generator's own
+    // rejection rule keeps the channels between them open, so what gives way is empty
+    // water and not the sailing room.
+    // Thirty-four rather than twenty-six, because the smaller square could not place
+    // twenty-six: the generator keeps a navigable channel between every pair and simply
+    // gives up on the ones that will not fit, so a tighter world with the same count
+    // came out with a third fewer islands and six harbours instead of nine. More
+    // candidates in means the same number of islands actually land.
+    Archipelago::generate_around(seed ^ 0x15_1A_4D, 5_600.0, 34, 900.0)
 }

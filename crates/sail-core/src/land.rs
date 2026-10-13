@@ -497,7 +497,12 @@ impl Archipelago {
     /// not a destination, and a run between two rocks a hundred metres apart is not a
     /// passage.
     pub fn harbours(&self) -> Vec<Harbour> {
-        const SETTLED: f64 = 320.0;
+        // Two hundred and forty metres rather than three hundred and twenty. A smaller
+        // archipelago has fewer islands over any given size, and the harbours are what
+        // the deliveries are *between* — six of them on a coast is a shuttle service.
+        // This is still comfortably above a skerry: a quarter-kilometre island has a
+        // beach, a bay to lie in and somewhere for somebody to live.
+        const SETTLED: f64 = 240.0;
         self.islands
             .iter()
             .enumerate()
