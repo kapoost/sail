@@ -1286,10 +1286,13 @@ const SHROUD_INFLUENCE: f32 = 0.9;
 /// Code 0 on a close reach, where the wire was pushing cloth that is never near it.
 ///
 /// * **A genoa is hanked to the forestay and sheets inside the rig**, to a track on the
-///   side deck. Its leech lies against the cap shroud on anything but a run, and that
-///   contact is real: it is what the leech takes its shape from when the sheet is hard
-///   in. Eased right out past the spreaders it swings clear and the wire stops being an
-///   obstacle, which is the angle test.
+///   side deck, and whether it reaches the wire is a question the force model already
+///   answers: [`sail_core::sail::rig_contact`]. Sheeted in it does not. The car runs
+///   inboard of the chainplate — on this boat the track stands 1.15 m off the
+///   centreline against the shroud's 1.53 — so a hard-sheeted genoa is inside the wire
+///   over its whole height and the wire is outboard of its leech rather than under the
+///   cloth. There is nothing there to crease over. That was reported from the deck in
+///   those words: the car works inside the shrouds, so the fold is impossible.
 /// * **A Code 0 and a gennaker are set flying.** Tacked to the sprit a metre and a half
 ///   ahead of the stem and sheeted to a block on the quarter, they live *outside*
 ///   everything by construction — that is what setting a sail flying means. There is no
@@ -1302,7 +1305,7 @@ pub fn feels_the_shrouds(
 ) -> bool {
     match kind {
         sail_core::state::Headsail::Genoa => {
-            chord_angle.abs() <= bears_at + sail_core::units::rad(30.0)
+            sail_core::sail::rig_contact(chord_angle, bears_at) > 0.0
         }
         sail_core::state::Headsail::Code0 | sail_core::state::Headsail::Gennaker => false,
     }
@@ -1836,20 +1839,37 @@ mod rigging_rules {
         }
     }
 
-    /// And a genoa does, because it is hanked to the stay and sheets inside the rig —
-    /// right up until it is eased far enough to swing clear of the spreaders.
+    /// And a genoa does, but only across the band where it actually reaches the wire:
+    /// not sheeted in, where it is inboard of everything, and not eased right out,
+    /// where it is outboard of everything.
     #[test]
-    fn a_genoa_lies_against_the_shroud_until_it_is_eased_clear() {
+    fn a_genoa_lies_against_the_shroud_only_while_it_reaches_it() {
         let bears_at = rad(28.0);
+        // Reported from the deck: the lead car runs on a track inboard of the
+        // chainplates, so a genoa strapped to it is inside the cap shroud over its whole
+        // height. The wire is outboard of the leech rather than under the cloth, and the
+        // crease the drawing used to put there is a fold no sail makes. The force model
+        // had been saying this all along — `rig_contact` is zero below `bears_at` — and
+        // the two now read the same definition instead of disagreeing.
         assert!(
-            feels_the_shrouds(Headsail::Genoa, rad(12.0), bears_at),
-            "sheeted in, the leech is against the cap shroud and takes its shape from it"
+            !feels_the_shrouds(Headsail::Genoa, rad(12.0), bears_at),
+            "sheeted to its track the sail is inboard of the wire: nothing touches it"
         );
         assert!(feels_the_shrouds(Headsail::Genoa, rad(45.0), bears_at));
         assert!(
-            !feels_the_shrouds(Headsail::Genoa, rad(75.0), bears_at),
+            !feels_the_shrouds(Headsail::Genoa, rad(95.0), bears_at),
             "eased past the spreaders it is flying clear and the wire is not an obstacle"
         );
+        // The drawing and the forces agree about where the sail is, at every angle, or
+        // there is a crease in the picture where the physics says clear air.
+        for degrees in [0.0_f64, 10.0, 20.0, 28.0, 35.0, 50.0, 70.0, 88.0] {
+            let angle = rad(degrees);
+            assert_eq!(
+                feels_the_shrouds(Headsail::Genoa, angle, bears_at),
+                sail_core::sail::rig_contact(angle, bears_at) > 0.0,
+                "at {degrees:.0} deg the picture and the force model disagree"
+            );
+        }
         // Both tacks, which is where a sign error would hide.
         assert_eq!(
             feels_the_shrouds(Headsail::Genoa, rad(-45.0), bears_at),

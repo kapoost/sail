@@ -114,23 +114,37 @@ pub fn twist_for_vang(vang: f64, chord_angle: f64) -> f64 {
 /// the effect is felt rather than guessed at precisely — and recorded as a number to
 /// argue with rather than a shrug.
 pub fn rig_interference(chord_angle: f64, bears_at: f64) -> (f64, f64) {
-    // It builds, and then it goes away again.
-    //
-    // The first version only built, which is wrong past a close reach and wrong in a
-    // way any sailor sees at once: ease far enough and the genoa does not press harder
-    // on the shrouds, it goes *outside* them. The clew swings out past the cap shroud,
-    // the belly follows, and the whole sail is flying clear of the rig with nothing
-    // touching it. That is the ordinary state of a genoa on a beam reach, and the model
-    // was charging it for a contact that had already ended.
-    //
-    // So the penalty is a hump. It starts where the leech first reaches the wire, peaks
-    // about twenty-five degrees later with the sail pressed hardest into the spreader,
-    // and is gone by sixty, by which point the sail is sheeted outboard of everything.
+    let t = rig_contact(chord_angle, bears_at);
+    (1.0 - 0.08 * t, 1.0 + 0.15 * t)
+}
+
+/// How hard the headsail is lying on the standing rigging, 0 to 1.
+///
+/// A hump: it builds, and then it goes away again, and it does not exist at all until
+/// the sail has been eased far enough to reach the wire in the first place.
+///
+/// * **Sheeted in, nothing touches.** The lead car runs on a track inboard of the
+///   chainplates, so a hard-sheeted headsail is *inside* the cap shroud over its whole
+///   height — the wire is outboard of the leech, not underneath the cloth, and there is
+///   nothing for a crease to form over. This is the correction: the drawing used to put
+///   a crease up a genoa strapped to its track, which is a fold no sail makes, and the
+///   force model standing a few hundred lines away had already said so.
+/// * **Eased, it bears.** The clew goes out and the belly follows until the leech
+///   fetches up on the wire and then on the spreader. From there, easing the sheet stops
+///   opening the sail and starts pressing it into steel. That is why a genoa has
+///   spreader patches sewn on it.
+/// * **Eased right out, it is clear again.** Past about sixty degrees the clew is
+///   outboard of the cap shroud and the whole sail is flying free of the rig. The first
+///   version of this only built, and charged a beam reach for a contact that had ended.
+///
+/// Now there is one definition of the band and both the forces and the drawing read it,
+/// because a sail creased in the picture where the physics says it is in clear air is
+/// the fault this project keeps being caught by.
+pub fn rig_contact(chord_angle: f64, bears_at: f64) -> f64 {
     let past = (chord_angle.abs() - bears_at).max(0.0);
     let on = smoothstep(0.0, rad(25.0), past);
     let off = smoothstep(rad(30.0), rad(60.0), past);
-    let t = on * (1.0 - off);
-    (1.0 - 0.08 * t, 1.0 + 0.15 * t)
+    on * (1.0 - off)
 }
 
 /// How hard two sails are lying on each other, 0 to 1.
