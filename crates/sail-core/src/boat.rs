@@ -72,6 +72,22 @@ pub struct BoatConfig {
     /// Depth of the centre of lateral resistance below the waterline, m. Together with
     /// a sail's `z_ce` this is the heeling arm.
     pub z_clr: f64,
+    /// Effective drag area of everything above water with no sail set, square metres.
+    ///
+    /// Windage, and it was missing entirely — with the main handed and the genoa rolled
+    /// away the model had *no* aerodynamic force at all, so a boat under bare poles in
+    /// twenty-five knots simply coasted, for a very long time, in whatever direction she
+    /// had been going. She could even make ground to windward, which nothing without
+    /// sails has ever done.
+    ///
+    /// A drag coefficient times an area, lumped: mast and boom, the standing and running
+    /// rigging, a rolled headsail on the stay, and the topsides. On a boat this size the
+    /// usual figure is one to two square metres head-on and nearer three beam-on, where
+    /// the whole side of the hull and the furled sail are presented. That is a hundred
+    /// and fifty newtons in twenty-five knots, which is what drives her off to leeward at
+    /// a knot or two with everything handed — and what lays her over when she is lying
+    /// a-hull in a gale, since it acts at the height of the rig.
+    pub windage_area: f64,
 
     // --- Inertia, including added mass ---
     pub surge_added_mass: f64,
@@ -287,6 +303,7 @@ impl BoatConfig {
             gm: 1.15,
             gz_peak_angle: rad(60.0),
             z_clr: 0.85,
+            windage_area: 1.6,
 
             surge_added_mass: 0.05 * displacement,
             sway_added_mass: 0.85 * displacement,
@@ -483,6 +500,7 @@ impl BoatConfig {
             gm: 1.42,
             gz_peak_angle: rad(65.0),
             z_clr: 0.90,
+            windage_area: 1.6,
 
             surge_added_mass: 0.05 * displacement,
             sway_added_mass: 0.85 * displacement,
@@ -715,6 +733,7 @@ impl BoatConfig {
             gm: 1.60,
             gz_peak_angle: rad(60.0),
             z_clr: 1.05,
+            windage_area: 1.6,
 
             surge_added_mass: 0.05 * displacement,
             sway_added_mass: 0.85 * displacement,

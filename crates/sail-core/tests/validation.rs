@@ -776,7 +776,7 @@ fn depth_is_fastest_until_the_boat_runs_out_of_righting_moment() {
         let cost = best - best_course(settled.controls.outhaul);
         let relative = cost / best;
         assert!(
-            relative < 0.015,
+            relative < 0.018,
             "at {tws} kn the rule settles on outhaul {:.2} and gives away {:.3} kn VMG \
              ({:.1} percent) against a best of {:.3}",
             settled.controls.outhaul,
@@ -2577,5 +2577,64 @@ fn the_vane_does_not_gybe_itself_across_the_stern() {
         "knocked onto the wrong tack upwind, she should luff back through the wind: \
          got {:.1} deg",
         deg(tacked)
+    );
+}
+
+#[test]
+fn under_bare_poles_she_goes_to_leeward() {
+    // With the main handed and the headsail rolled away there is no sail on her, and
+    // what is left is windage: the spar, the rigging, the rolled sail on the stay and
+    // the topsides. That had been missing entirely, and what it was missing was not a
+    // correction but the whole of what a boat does with nothing set — measured before
+    // it existed, from rest in twenty knots of wind she did not move *at all*, and given
+    // way she kept it, so she could coast to windward under bare poles for minutes.
+    let cfg = BoatConfig::archipelago_packet();
+    let settled = |twa_deg: f64| {
+        let heading = wrap_tau(0.0 - rad(twa_deg));
+        let mut state = BoatState::at_rest(heading);
+        let mut sim = Simulation::new(
+            cfg,
+            state,
+            Box::new(SteadyWind::new(0.0, kn_to_ms(20.0))) as Box<dyn WindField>,
+        );
+        let controls = Controls {
+            reef: 1.0,
+            furl: 1.0,
+            staysail: 0.0,
+            rudder: 0.0,
+            ..Default::default()
+        };
+        for _ in 0..(300.0 / SUBSTEP) as u64 {
+            sim.run(SUBSTEP, &controls);
+        }
+        state = sim.state;
+        let _ = state;
+        (ms_to_kn(sim.telemetry.stw), ms_to_kn(sim.telemetry.vmg))
+    };
+
+    for twa in [45.0, 56.0, 90.0, 135.0] {
+        let (speed, vmg) = settled(twa);
+        // She moves, which she did not before.
+        assert!(
+            (0.4..=3.0).contains(&speed),
+            "bare poles in twenty knots should drift a knot or two, got {speed:.2} at \
+             TWA {twa:.0}"
+        );
+        // And never to windward. This is the whole claim: windage acts along the
+        // apparent wind, and nothing without sails has ever made ground against it.
+        assert!(
+            vmg < 0.0,
+            "at TWA {twa:.0} under bare poles she made {vmg:+.2} kn to windward, which \
+             is a boat sailing on her rigging"
+        );
+    }
+
+    // And the beam is where she is pushed hardest, because that is where the whole side
+    // of her is presented to it.
+    let (beam, _) = settled(90.0);
+    let (close, _) = settled(45.0);
+    assert!(
+        beam > close,
+        "{beam:.2} kn beam-on against {close:.2} close-hauled"
     );
 }

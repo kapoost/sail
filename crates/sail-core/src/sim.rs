@@ -534,12 +534,34 @@ impl Simulation {
         // [`crate::sail::centre_of_pressure`].
         let main_cop = crate::sail::centre_of_pressure(main_camber, main.coeffs.stalled);
         let jib_cop = crate::sail::centre_of_pressure(jib_camber, jib.coeffs.stalled);
+        // Windage: everything above water that is not a sail.
+        //
+        // This was missing entirely, and what it was missing was not a correction — it
+        // was the whole of what a boat does with nothing set. Measured before adding it:
+        // with the main handed and the genoa rolled away, from rest, in twenty knots of
+        // wind, she did not move at all. Not slowly: *at all*. And given way she kept it,
+        // because nothing was taking it off her, so she could coast to windward under
+        // bare poles for several minutes.
+        //
+        // A drag coefficient times an area, acting along the apparent wind — which is to
+        // say the direction the air is *going*, so it pushes her bodily to leeward and
+        // backwards when she is head to wind. More of it beam-on than head-on, because
+        // beam-on presents the whole side of the hull and a rolled headsail as well as
+        // the spar.
+        let windage = crate::wind::q_air(lower_aws)
+            * cfg.windage_area
+            * (0.55 + 0.45 * lower_awa.sin() * lower_awa.sin());
+        let windage_drive = -windage * lower_awa.cos();
+        let windage_side = -windage * lower_awa.sin();
+
         let drive = (main.drive + main_upper.drive) * main_cost
             + (jib.drive + jib_upper.drive) * slot_cost
-            + stay_drive;
+            + stay_drive
+            + windage_drive;
         let sail_side = (main.side + main_upper.side) * main_cost
             + (jib.side + jib_upper.side) * slot_cost
-            + stay_side;
+            + stay_side
+            + windage_side;
 
         // --- Hull velocity direction in the body frame ----------------------------
         // Everything hydrodynamic resolves against this. Getting it wrong means
@@ -779,7 +801,12 @@ impl Simulation {
         // Each section heels on its own arm, which is the whole point: spilling the
         // top of the sail sheds heeling moment out of proportion to the force it
         // gives up, because the top is where the arm is longest.
-        let mut mx = main.side * (lower_z * heel_cos + cfg.z_clr)
+        // The windage heels her too, and at a storm's wind speeds that is most of why a
+        // boat lying a-hull lies over. Its centre is lower than the mainsail's: the spar
+        // is up there but so are the topsides, and they are not.
+        let windage_z = cfg.main.z_ce * 0.75;
+        let mut mx = windage_side * (windage_z * heel_cos + cfg.z_clr)
+            + main.side * (lower_z * heel_cos + cfg.z_clr)
             + main_upper.side * (upper_z * heel_cos + cfg.z_clr)
             + jib.side * (jib_lower_z * heel_cos + cfg.z_clr)
             + jib_upper.side * (jib_upper_z * heel_cos + cfg.z_clr)

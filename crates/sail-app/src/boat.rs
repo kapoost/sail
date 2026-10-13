@@ -1177,7 +1177,24 @@ pub fn staysail_tack() -> Vec3 {
 /// through the mast. An inner stay lands on a tang bolted to the front of the spar
 /// anyway; it has never been on the centreline of it.
 pub fn staysail_head() -> Vec3 {
-    Vec3::new(0.0, crate::rig::INNER_STAY_HEAD, MAST_FOOT_Z - 0.40)
+    // On the spar, which is where an inner forestay lands: a tang bolted to the mast,
+    // and the head of the sail within a hand's breadth of it.
+    //
+    // It was forty centimetres forward of the axis for a while, and that was a
+    // workaround for a problem that has since been fixed properly. The mast's clearance
+    // push used to shove any cloth near the spar sideways, head included, so the stay
+    // was moved forward to get the sail out of its way — which cured the crease and
+    // produced a head hanging in mid-air with daylight between it and the mast, which is
+    // what a halyard cannot do.
+    //
+    // The push now fades out along the luff and at the head, because cloth on a luff is
+    // *held* by the spar rather than pushed off it. So the stay goes back where it
+    // belongs: just clear of the mast's own radius.
+    Vec3::new(
+        0.0,
+        crate::rig::INNER_STAY_HEAD,
+        MAST_FOOT_Z - MAST_CLEARANCE,
+    )
 }
 
 /// The club boom's length, which is the sail's foot and therefore not a free choice.
@@ -1837,6 +1854,97 @@ mod rigging_rules {
         assert_eq!(
             feels_the_shrouds(Headsail::Genoa, rad(-45.0), bears_at),
             feels_the_shrouds(Headsail::Genoa, rad(45.0), bears_at)
+        );
+    }
+}
+
+#[cfg(test)]
+mod sails_and_rigging {
+    use super::*;
+    use sail_core::state::{Controls, Headsail};
+
+    /// Every sail's head has to be on the thing it is hoisted to.
+    ///
+    /// A halyard does not hold a sail in mid-air. This has now been reported twice from
+    /// the deck — the mainsail's head a metre and a third below its own masthead, and the
+    /// staysail's hanging forty centimetres forward of the spar with daylight behind it
+    /// — and both times the drawn corner and the fitting it belongs to were separate
+    /// numbers that had drifted apart. The fittings are the authority; this holds the
+    /// sails to them.
+    const AT_THE_FITTING: f32 = 0.2;
+
+    #[test]
+    fn every_head_is_on_its_spar_or_stay() {
+        let cfg = sail_core::boat::BoatConfig::archipelago_packet();
+
+        // The mainsail, to the top of the mast.
+        let main = main_head(1.0);
+        let masthead = Vec3::new(0.0, crate::rig::MAST_HEAD, MAST_FOOT_Z);
+        assert!(
+            (main - masthead).length() < AT_THE_FITTING,
+            "the mainsail's head is {:.2} m from the masthead",
+            (main - masthead).length()
+        );
+
+        // The staysail, to the inner stay's tang on the mast.
+        let stay = staysail_head();
+        let tang = Vec3::new(0.0, crate::rig::INNER_STAY_HEAD, MAST_FOOT_Z);
+        assert!(
+            (stay - tang).length() < AT_THE_FITTING,
+            "the staysail's head is {:.2} m from the mast — a halyard does not hold a \
+             sail in mid-air",
+            (stay - tang).length()
+        );
+
+        // The genoa, to the forestay's head; the flying sails to the masthead above it.
+        for (kind, fitting) in [
+            (
+                Headsail::Genoa,
+                Vec3::new(0.0, crate::rig::FORESTAY_HEAD, MAST_FOOT_Z),
+            ),
+            (Headsail::Code0, masthead),
+            (Headsail::Gennaker, masthead),
+        ] {
+            let controls = Controls {
+                headsail: kind,
+                furl: 0.0,
+                jib_sheet: 0.0,
+                ..Default::default()
+            };
+            let g = headsail_shape(&cfg, &controls, -1.0, sail_core::units::rad(14.0) as f32);
+            assert!(
+                (g.head - fitting).length() < AT_THE_FITTING,
+                "the {} head is {:.2} m from where it is hoisted",
+                kind.name(),
+                (g.head - fitting).length()
+            );
+        }
+    }
+
+    /// And the tacks are on their fittings too, which is the other end of the same claim.
+    #[test]
+    fn every_tack_is_on_its_fitting() {
+        let cfg = sail_core::boat::BoatConfig::archipelago_packet();
+        // The mainsail's tack is at the gooseneck, on the mast at the boom's height.
+        let tack = Vec3::new(0.0, crate::rig::BOOM_HEIGHT, MAST_FOOT_Z);
+        assert!(
+            (main_head(1.0) - tack).length() > 10.0,
+            "and the luff is a luff"
+        );
+
+        // A sail set flying is tacked to the end of the sprit, not to the stemhead —
+        // that metre and a half is the whole reason the sprit is there.
+        let controls = Controls {
+            headsail: Headsail::Gennaker,
+            furl: 0.0,
+            ..Default::default()
+        };
+        let g = headsail_shape(&cfg, &controls, -1.0, sail_core::units::rad(90.0) as f32);
+        let sprit = sprit_end(cfg.loa as f32);
+        assert!(
+            (g.tack - sprit).length() < AT_THE_FITTING,
+            "the gennaker is tacked {:.2} m from the sprit end",
+            (g.tack - sprit).length()
         );
     }
 }
