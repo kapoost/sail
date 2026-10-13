@@ -1002,9 +1002,21 @@ pub fn headsail_shape(
     // very top of the spar — above the forestay, which is where its extra hoist comes
     // from and half the reason it is worth setting.
     let head = Vec3::new(0.0, crate::rig::MAST_HEAD - 0.12, MAST_FOOT_Z);
-    // A gennaker's area is cloth, not triangle, and there is a great deal of cloth in
-    // it; a Code 0 is flatter and sits between the two.
-    let fullness = if gennaker { 1.45 } else { 1.25 };
+    // How much more cloth there is in the sail than in the flat triangle it spans, which
+    // is a question about how deeply it is cut and nothing else.
+    //
+    // A gennaker is a bag: half again. A Code 0 is *flat* — that is the whole of what
+    // makes it a Code 0 rather than a spinnaker, and what lets it be carried at
+    // forty-five degrees of apparent wind — so its cloth is only a few percent over its
+    // triangle. It was being given a quarter, which is a reaching spinnaker's number,
+    // and the sail came out small: measured against its own fore-triangle base it was
+    // setting at an LP of 116 percent when a Code 0 is 130 and up, and with the sheet
+    // hard in the clew did not even reach the mast.
+    //
+    //     cloth/triangle   1.25 -> foot 5.66 m, LP 116% of J
+    //                      1.15 ->      6.15     126%
+    //                      1.08 ->      6.55     136%
+    let fullness = if gennaker { 1.45 } else { 1.08 };
     let foot = foot_for_area(
         cfg.headsail(kind).area as f32,
         head - tack,
