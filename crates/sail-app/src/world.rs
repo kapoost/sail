@@ -24,6 +24,68 @@ use crate::sea_texture;
 use crate::sim::Sim;
 use crate::sky;
 
+/// How far the ring `i` stands from the boat, metres.
+///
+/// Free functions rather than closures inside the setup, because the spray has to ask
+/// the same questions: a mark of foam sitting on a surface worked out one way, drawn
+/// over a surface worked out another, is two descriptions of one thing and it blinks.
+fn half(i: usize) -> f32 {
+    if i <= NEAR_RINGS {
+        // Arithmetic spacing: the sum of a ramp, in closed form.
+        let n = i as f32;
+        let last = (NEAR_RINGS - 1) as f32;
+        SPACING_NEAR * n + (SPACING_FAR - SPACING_NEAR) * n * (n - 1.0) / (2.0 * last)
+    } else {
+        let rest = (GRID / 2 - NEAR_RINGS) as f32;
+        let step = (i - NEAR_RINGS) as f32;
+        NEAR_FIELD * (EXTENT / NEAR_FIELD).powf(step / rest)
+    }
+}
+
+fn grade(i: usize) -> f32 {
+    let centre = (GRID / 2) as i32;
+    let k = i as i32 - centre;
+    half(k.unsigned_abs() as usize) * (k.signum() as f32)
+}
+
+/// Spacing to the wider neighbour, per axis; the coarser axis decides.
+fn spacing(i: usize) -> f32 {
+    let lo = grade(i.saturating_sub(1));
+    let hi = grade((i + 1).min(GRID - 1));
+    let span = hi - lo;
+    let steps = ((i + 1).min(GRID - 1) - i.saturating_sub(1)).max(1) as f32;
+    span / steps
+}
+
+/// The shortest wave the *drawn* sea carries at this offset from the boat, metres.
+///
+/// What the surface is, as opposed to what the water is. The mesh cannot animate
+/// anything finer than four samples across it, so `update_sea` asks the water for the
+/// field filtered to this — and anything that has to sit on that surface has to ask for
+/// the same filtering or it will sit somewhere else. Near the boat the difference is
+/// the short chop, a few centimetres, which is exactly enough to put a mark of foam
+/// under the skin and leave it blinking there as the mesh slides over it.
+pub fn drawn_resolution(offset: Vec2) -> f64 {
+    let ring = |d: f32| -> usize {
+        // Monotone, so a short walk out from the boat finds it. Bounded by the grid.
+        let mut lo = 0usize;
+        let mut hi = GRID / 2;
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if half(mid) < d {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    };
+    let centre = GRID / 2;
+    let ix = centre + ring(offset.x.abs());
+    let iz = centre + ring(offset.y.abs());
+    4.0 * spacing(ix.min(GRID - 1)).max(spacing(iz.min(GRID - 1))) as f64
+}
+
 /// Vertices across the grid. Odd, so one sits under the boat.
 const GRID: usize = 201;
 /// How far out the grid reaches. Three kilometres is past the horizon from a cockpit,
@@ -171,33 +233,7 @@ pub fn setup(
     // sprint to three kilometres. Those outer rings cost almost nothing, because they
     // are too coarse to carry a wave and `update_sea` does not even ask the water
     // about them.
-    let half = |i: usize| -> f32 {
-        if i <= NEAR_RINGS {
-            // Arithmetic spacing: the sum of a ramp, in closed form.
-            let n = i as f32;
-            let last = (NEAR_RINGS - 1) as f32;
-            SPACING_NEAR * n + (SPACING_FAR - SPACING_NEAR) * n * (n - 1.0) / (2.0 * last)
-        } else {
-            let rest = (GRID / 2 - NEAR_RINGS) as f32;
-            let step = (i - NEAR_RINGS) as f32;
-            NEAR_FIELD * (EXTENT / NEAR_FIELD).powf(step / rest)
-        }
-    };
-    let centre = (GRID / 2) as i32;
-    let grade = |i: usize| -> f32 {
-        let k = i as i32 - centre;
-        half(k.unsigned_abs() as usize) * (k.signum() as f32)
-    };
-
     let mut offsets = Vec::with_capacity(GRID * GRID);
-    // Spacing to the wider neighbour, per axis; the coarser axis decides.
-    let spacing = |i: usize| -> f32 {
-        let lo = grade(i.saturating_sub(1));
-        let hi = grade((i + 1).min(GRID - 1));
-        let span = hi - lo;
-        let steps = ((i + 1).min(GRID - 1) - i.saturating_sub(1)).max(1) as f32;
-        span / steps
-    };
     let mut resolutions = Vec::with_capacity(GRID * GRID);
     for ix in 0..GRID {
         for iz in 0..GRID {

@@ -488,7 +488,13 @@ pub fn update(
         // the *texture* of broken water — hundreds of separate bright points — rather
         // than a handful of white splodges. At this resolution a speck is one or two
         // pixels, which is what foam is on a screen this size.
-        let size = (0.055 + 0.085 * life) * s.scale;
+        // Smaller than they were, and smaller again for the fine ones. What reads as
+        // broken water is the *number* of marks, not their size: at a couple of
+        // centimetres a speck is a pixel or two, which is foam, and at five it is a
+        // blob of paint. The claws keep their size, because a mark torn off a crest is
+        // a handful of foam and genuinely is that big.
+        let fine = if s.claw { 1.0 } else { 0.62 };
+        let size = (0.055 + 0.085 * life) * s.scale * fine;
         // And every one of them twinkles. Real broken water does not glow steadily: a
         // bubble catches the sky, turns, and goes out, and what the eye picks up from a
         // bow wave is that seething rather than any single bright patch. Two beats, not
@@ -500,6 +506,27 @@ pub fn update(
             + 0.38
                 * (0.6 * (s.age * 7.5 + s.phase).sin() + 0.4 * (s.age * 4.1 + s.phase * 2.1).sin());
         let alpha = (1.0 - life).powf(1.7) * 0.95 * twinkle.clamp(0.0, 1.4);
+        // The surface this mark has to sit on is the one that is *drawn*, which is not
+        // the one the water has. The mesh carries nothing finer than four samples
+        // across it, so `update_sea` asks the field filtered to that — and this asked
+        // the field itself, short chop and all. A few centimetres of disagreement, and
+        // a few centimetres is the whole height a speck floats at: half the foam on the
+        // sea spent its life just under the drawn skin, blinking in and out as the
+        // triangles slid over it.
+        //
+        // One definition now. `world::drawn_resolution` is what the grid was built
+        // from, and both the sea and the foam on it read it.
+        let offset = s.at - st.pos;
+        let resolution =
+            crate::world::drawn_resolution(Vec2::new(offset.x as f32, -offset.y as f32));
+        let surface = sim.sim.water.height_resolved(s.at, t, resolution);
+        // And it comes *up through* the surface rather than being pinned to it. Foam
+        // thrown by a breaking wave is under the water for a moment and then it is not;
+        // what the eye reads is the arrival. A mark rises its own height over the first
+        // quarter of its life and settles back, and because it is faded in across the
+        // skin rather than clipped by it, the arrival is a fade and not a switch.
+        let rise = (life * 4.0).min(1.0) * (1.0 - life * 0.55);
+        let height = surface + 0.02 + (0.3 + 0.9 * rise as f64) * size as f64;
         // Foam is not white. It starts as the sea with air beaten into it and whitens as
         // the bubbles rise, so a fresh speck carries the water's own colour and an old
         // one is nearly white — and between them is the whole range you see along a bow
@@ -509,7 +536,13 @@ pub fn update(
             Vec3::ONE,
             (life * 1.4 + (1.0 - s.tint) * 0.5).clamp(0.0, 1.0),
         );
-        let mut alpha = alpha;
+        // Faded in across the skin. A mark whose middle is still below the drawn
+        // surface is mostly hidden anyway, and the depth buffer hides it abruptly: this
+        // takes it out smoothly first so the last of it goes while there is nothing
+        // left to see. Over its own size, so a big claw emerges slowly and a speck is
+        // through in an instant.
+        let clear = ((height - surface) / (size as f64).max(1e-3)) as f32;
+        let mut alpha = alpha * crate::curve::smoothstep(0.0, 0.9, clear);
         if ink.0 {
             // Drawn foam is ink rather than airbrush, but ink is not a light switch.
             //
@@ -533,7 +566,6 @@ pub fn update(
         // metre or two across, and at the same lift the sea — which is drawn opaque —
         // hid its bottom half and what was left read as something sunk rather than
         // something floating.
-        let height = sim.sim.water.height(s.at, t) + 0.06 + 0.3 * size as f64;
         let centre = origin.to_bevy(s.at, height as f32);
         // Facing the eye, so a speck is a speck from everywhere rather than a flake
         // lying on the water that vanishes edge-on.
