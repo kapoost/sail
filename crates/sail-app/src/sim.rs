@@ -27,6 +27,10 @@ impl Sim {
         let cfg = BoatConfig::archipelago_packet();
         let mut wind = SyntheticWind::new(weather.wind_from, weather.tws, weather.seed ^ 0x5A11);
         wind.squall_interval = weather.squall_interval;
+        // The day opens at the cover the forecast quoted and relaxes towards the
+        // climatological middle over the next hour and a half, rather than starting
+        // wherever the draw happened to leave the process.
+        wind.synoptic.start_cover(weather.cover);
         // `SAIL_SQUALL=120` for a squall every two minutes. The same kind of switch as
         // `SAIL_HEADSAIL`: you cannot look at a thing that happens every twenty-five
         // minutes often enough to get it right, and a knob beats sitting and waiting.

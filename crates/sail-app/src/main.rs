@@ -110,6 +110,11 @@ fn main() {
         .init_resource::<clutch::Bank>()
         .init_resource::<input::Pilot>()
         .init_resource::<frame::RenderOrigin>()
+        .insert_resource(sky::Sky::at(
+            weather.start_hour as f32,
+            weather.cover as f32,
+        ))
+        .init_resource::<sky::Baking>()
         .insert_resource(retro::Retro::from_env())
         .insert_resource(world::Ink::from_env())
         .init_resource::<world::SeaFilm>()
@@ -180,6 +185,8 @@ fn main() {
                 ),
                 (
                     // The weather you can see, after everything that places it.
+                    sky::drift,
+                    sky::light,
                     rain::update,
                     rain::shroud,
                     camera::toggle,

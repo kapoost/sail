@@ -99,6 +99,15 @@ pub struct Weather {
     /// the three above, kept here so the forecast can be stated without recomputing.
     pub hs: f64,
     pub tp: f64,
+    /// Local time at the start, hours since midnight.
+    ///
+    /// Morning, always, and that is a design decision rather than a limitation: a
+    /// delivery leg starts at a civilised hour, and it means the sun climbs through the
+    /// session instead of setting in it. Night sailing is a different game — instrument
+    /// lights, navigation lights, a sea you cannot read — and it is not written yet.
+    pub start_hour: f64,
+    /// Cloud cover the day settles about, 0 clear to 1 solid.
+    pub cover: f64,
     /// Mean interval between squalls, seconds, or infinite for a day with none.
     ///
     /// A property of the day rather than of the wind model. Some days are a procession
@@ -158,6 +167,18 @@ impl Weather {
             OVERPOWERED_HEEL,
         );
 
+        // The hour and the cloud. Both drawn last, with the squalls, for the same
+        // reason: a new call earlier in the sequence shifts every draw after it.
+        // Six thirty to eight thirty, which at this latitude in spring is a sun between
+        // eight and twenty-three degrees up. Deliberately the low end: a low sun is what
+        // gives the long cloud shadows, the shafts under the squalls and the warm light
+        // the whole look was built on, and it climbs through the session anyway.
+        let start_hour = 6.5 + rng.next_f64() * 2.0;
+        // Beta-ish: most days are broken cloud and the extremes are rarer, which is
+        // what a coastal sky does. Two draws averaged is the cheapest way to get that
+        // shape and it is exact, not an approximation of one.
+        let cover = 0.5 * (rng.next_f64() + rng.next_f64()) * 0.9 + 0.08;
+
         // How squally. Three kinds of day, in roughly the proportion a coast hands them
         // out: most are clear of them, some have one or two go by, and a few are one
         // after another. Drawn last on purpose — a new call anywhere earlier shifts
@@ -171,6 +192,8 @@ impl Weather {
 
         Self {
             seed,
+            start_hour,
+            cover,
             tws,
             wind_from,
             fetch,
@@ -185,8 +208,11 @@ impl Weather {
     /// The forecast, as a watch leader would hand it over.
     pub fn report(&self) -> String {
         format!(
-            "{:.0} kn from {:03.0}, {} — sea {:.1} m at {:.1} s over {:.0} km of fetch; \
-             starting {} on {} tack{}{} [seed {}]",
+            "{:02.0}{:02.0}, {} oktas — {:.0} kn from {:03.0}, {}; sea {:.1} m at {:.1} s \
+             over {:.0} km of fetch; starting {} on {} tack{}{} [seed {}]",
+            self.start_hour.floor(),
+            self.start_hour.fract() * 60.0,
+            (self.cover * 8.0).round(),
             ms_to_kn(self.tws),
             deg(self.wind_from),
             beaufort(ms_to_kn(self.tws)),

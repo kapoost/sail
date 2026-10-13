@@ -70,6 +70,13 @@ pub trait WindField: Send + Sync {
         0.0
     }
 
+    /// Cloud cover, 0 clear to 1 solid. Weather, so it lives with the rest of the slow
+    /// weather rather than in the renderer: a front brings cloud and wind together, and
+    /// a sky that clears while the breeze builds is a sky nobody believes.
+    fn cover(&self) -> f64 {
+        0.55
+    }
+
     /// How much harder than the mean it is blowing at a point, as a fraction: 0.2 is a
     /// twenty percent gust and −0.2 a lull. Zero for a field with no structure in it.
     ///
@@ -109,9 +116,24 @@ pub struct Synoptic {
     pub direction_swing: f64,
     /// Relaxation time of the direction trend, seconds.
     pub direction_timescale: f64,
+    /// Cloud cover the day settles about, and how far it wanders from it.
+    pub cover_mean: f64,
+    pub cover_swing: f64,
+    /// Relaxation time of the cover, seconds. Slower than the wind: cloud comes and
+    /// goes over a watch, not over a tack.
+    pub cover_timescale: f64,
     speed_trend: f64,
     direction_trend: f64,
+    cover_trend: f64,
 }
+
+/// How much of the wind's trend shows up in the cloud cover.
+///
+/// They are correlated in the weather and not independent dials: the cloud comes with
+/// the front that brings the breeze, so a building wind thickens the sky and a dying one
+/// lets it open up. A fifth of the trend, which at the usual spread is about a tenth of
+/// the sky.
+const COVER_FROM_WIND: f64 = 0.45;
 
 /// How far the mean wind is allowed to wander from the drawn day, as a multiple.
 ///
@@ -130,9 +152,13 @@ impl Synoptic {
             speed_timescale: 2_400.0,
             direction_swing: 20.0_f64.to_radians(),
             direction_timescale: 3_600.0,
+            cover_mean: 0.55,
+            cover_swing: 0.22,
+            cover_timescale: 9_000.0,
             // From the stationary distribution, so the day is already under way.
             speed_trend: 0.22 * rng.next_normal(),
             direction_trend: 20.0_f64.to_radians() * rng.next_normal(),
+            cover_trend: 0.22 * rng.next_normal(),
         }
     }
 
@@ -151,6 +177,33 @@ impl Synoptic {
             dt,
             rng,
         );
+        ou_step(
+            &mut self.cover_trend,
+            self.cover_swing,
+            self.cover_timescale,
+            dt,
+            rng,
+        );
+    }
+
+    /// Set the cover to a given value *now*, leaving it free to wander afterwards.
+    ///
+    /// Needed because the day's cover is drawn in one place and the process that moves
+    /// it lives in another. Setting the mean alone does not do it: the trend is drawn
+    /// from its stationary distribution so the weather is already under way, and the
+    /// wind coupling adds its own slice — so a day forecast at two oktas opened at
+    /// eight, and the forecast on the dock was contradicted by the sky above it inside
+    /// two minutes. Solve for the trend instead, and the two agree at t=0 and diverge
+    /// honestly after it.
+    pub fn start_cover(&mut self, cover: f64) {
+        self.cover_trend = cover - self.cover_mean - COVER_FROM_WIND * self.speed_trend;
+    }
+
+    /// Cover now. Correlated with the wind, because they are correlated in the weather:
+    /// the cloud comes with the front that brings the breeze, so a building wind brings
+    /// a thickening sky and a dying one lets it open up.
+    fn cover(&self) -> f64 {
+        (self.cover_mean + self.cover_trend + COVER_FROM_WIND * self.speed_trend).clamp(0.0, 1.0)
     }
 
     fn speed(&self) -> f64 {
@@ -176,6 +229,8 @@ impl Synoptic {
         self.direction_swing = 0.0;
         self.speed_trend = 0.0;
         self.direction_trend = 0.0;
+        self.cover_swing = 0.0;
+        self.cover_trend = 0.0;
     }
 
     /// Expected change over the next hour. For `dX = −X/tau dt + noise` the mean path
@@ -581,6 +636,10 @@ impl WindField for SyntheticWind {
 
     fn outlook(&self) -> (f64, f64) {
         self.synoptic.outlook()
+    }
+
+    fn cover(&self) -> f64 {
+        self.synoptic.cover()
     }
 
     fn step(&mut self, dt: f64) {

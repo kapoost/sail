@@ -238,24 +238,24 @@ pub fn update(
 /// clear down to about four hundred metres in the heart of one, which is a real figure
 /// for heavy rain and quite enough to lose a coastline in.
 pub fn shroud(
-    sim: Res<Sim>,
+    sky: Res<crate::sky::Sky>,
     rain: Res<Rain>,
     mut fog: Query<&mut DistanceFog, With<crate::camera::MainCamera>>,
 ) {
     let Ok(mut fog) = fog.single_mut() else {
         return;
     };
-    let _ = &sim;
     let shut = rain.fall.clamp(0.0, 1.0);
     let visibility = 2600.0 * (1.0 - shut) + 420.0 * shut;
     // Darker as well as thicker. Rain does not only hide the distance, it takes the
     // light out of it, and a squall that closes the view without dimming it looks like
     // fog on a sunny day.
-    let clear = crate::sky::haze_colour().to_linear();
+    let clear = crate::sky::haze_colour(&sky).to_linear();
     let wet = Color::linear_rgb(clear.red * 0.62, clear.green * 0.66, clear.blue * 0.74);
-    let colour = mix(crate::sky::haze_colour(), wet, shut);
+    let colour = mix(crate::sky::haze_colour(&sky), wet, shut);
     fog.color = colour;
-    fog.falloff = FogFalloff::from_visibility_colors(visibility, crate::sky::haze_near(), colour);
+    fog.falloff =
+        FogFalloff::from_visibility_colors(visibility, crate::sky::haze_near(&sky), colour);
 }
 
 fn mix(a: Color, b: Color, t: f32) -> Color {

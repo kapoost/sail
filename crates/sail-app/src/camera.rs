@@ -153,11 +153,31 @@ impl ChaseState {
     }
 }
 
-pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+pub fn setup(
+    mut commands: Commands,
+    sky_state: Res<crate::sky::Sky>,
+    mut images: ResMut<Assets<Image>>,
+) {
     // One cubemap, two jobs: drawn as the sky, and filtered on the GPU into the
     // environment light the water reflects. Sharing the image is what guarantees the
     // sun you can see and the sun glittering off the wave faces are the same sun.
-    let sky = images.add(crate::sky::cubemap());
+    let started = std::time::Instant::now();
+    let sky = images.add(crate::sky::cubemap(&sky_state));
+    info!(
+        "sky: cubemap baked in {:.3} s at {:02.0}:{:02.0}, cover {:.0}%, \
+         sun {:.0} deg up bearing {:03.0}",
+        started.elapsed().as_secs_f32(),
+        sky_state.hour.floor(),
+        sky_state.hour.fract() * 60.0,
+        sky_state.cover * 100.0,
+        sky_state.elevation().to_degrees(),
+        sky_state
+            .sun
+            .x
+            .atan2(-sky_state.sun.z)
+            .to_degrees()
+            .rem_euclid(360.0)
+    );
     commands.spawn((
         MainCamera,
         Camera3d::default(),
@@ -179,6 +199,7 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         // giving the sky its real luminance is the fix; dimming the sky to suit an
         // indoor exposure would only have hidden it.
         Exposure::SUNLIGHT,
+        crate::sky::SkyImage(sky.clone()),
         Skybox {
             image: Some(sky.clone()),
             // A clear sky runs five to ten thousand candela per square metre.
@@ -208,11 +229,11 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         // at a finite piece of geometry. Real visibility at sea is rarely better than
         // this anyway.
         DistanceFog {
-            color: crate::sky::haze_colour(),
+            color: crate::sky::haze_colour(&sky_state),
             falloff: FogFalloff::from_visibility_colors(
                 2600.0,
-                crate::sky::haze_near(),
-                crate::sky::haze_colour(),
+                crate::sky::haze_near(&sky_state),
+                crate::sky::haze_colour(&sky_state),
             ),
             ..default()
         },

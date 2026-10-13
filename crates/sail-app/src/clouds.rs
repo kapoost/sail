@@ -115,10 +115,7 @@ struct Puff {
     period: f32,
     phase: f32,
     radius: f32,
-    /// How far round the sunward side of its cell it sits, −1 to 1. This is the only
-    /// lighting a billboard can have, and it is enough: a cloud is lit from one side and
-    /// what you read is the shadowed flank against the bright one.
-    sunward: f32,
+
     /// Its own tone, so the cell is not one flat grey.
     tone: f32,
 }
@@ -198,7 +195,7 @@ impl Clouds {
     /// Only the shadows that can reach that square are considered: a disc whose centre
     /// is further off than its own radius plus the reach cannot touch it, which is exact
     /// and leaves two or three clouds out of twenty to actually evaluate.
-    pub fn shadows(&self, boat: glam::DVec2, reach: f64) -> ShadowField {
+    pub fn shadows(&self, boat: glam::DVec2, reach: f64, sun: Vec3) -> ShadowField {
         // The sun's horizontal run per metre of height, in simulation coordinates.
         // Bevy's -Z is simulation north, so the second component flips. A point is in
         // shadow when the ray from it to the sun crosses a cloud, so the shadow sits
@@ -206,7 +203,7 @@ impl Clouds {
         // which at seventeen degrees is more than three times the altitude. That offset
         // is what reads as height, and it comes from the real sun angle rather than
         // from a guess at how far a shadow ought to be thrown.
-        let sun = crate::sky::SUN.normalize();
+        let sun = sun.normalize_or_zero();
         let run = glam::DVec2::new(sun.x as f64, -sun.z as f64) / sun.y.max(0.05) as f64;
         let discs: Vec<(glam::DVec2, f32, f32)> = self
             .cells
@@ -404,17 +401,9 @@ pub fn setup(
                 period: 42.0 + seed.next_f64() as f32 * 58.0,
                 phase: seed.next_f64() as f32 * std::f32::consts::TAU,
                 radius: 70.0 + seed.next_f64() as f32 * 95.0,
-                sunward: 0.0,
                 tone: 0.82 + seed.next_f64() as f32 * 0.18,
             });
         }
-    }
-    // Which flank of its cell each puff is on, measured against the sun. Done once:
-    // the sun does not move and neither do the offsets.
-    let sun = crate::sky::SUN.normalize();
-    for p in &mut puffs {
-        let across = Vec3::new(p.offset.x, 0.0, p.offset.z);
-        p.sunward = across.dot(Vec3::new(sun.x, 0.0, sun.z).normalize_or_zero());
     }
 
     let clouds = Clouds {
@@ -436,7 +425,7 @@ pub fn setup(
         .iter()
         .map(|c| (c.at - boat).length())
         .fold(f64::INFINITY, f64::min);
-    let field = clouds.shadows(boat, RANGE);
+    let field = clouds.shadows(boat, RANGE, crate::sky::Sky::default().sun);
     let mut shaded = 0;
     const PROBE: i32 = 40;
     for ix in -PROBE..=PROBE {
@@ -521,8 +510,10 @@ fn seeded_cell(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     origin: Res<frame::RenderOrigin>,
+    sky: Res<crate::sky::Sky>,
     ink: Res<crate::world::Ink>,
     sim: Res<Sim>,
     time: Res<Time>,
@@ -606,7 +597,7 @@ pub fn update(
     }
     order.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
 
-    let haze = crate::sky::haze_colour().to_linear();
+    let haze = crate::sky::haze_colour(&sky).to_linear();
     let haze = Vec3::new(haze.red, haze.green, haze.blue);
     let mut positions = Vec::with_capacity(COUNT * 4);
     let mut colours = Vec::with_capacity(COUNT * 4);
@@ -621,7 +612,13 @@ pub fn update(
         // Lit on the sunward flank, shadowed on the other, and the base of the cell
         // darker than its top. That is the whole of the shading, and it is the whole of
         // what a cloud's shading is at this distance.
-        let lit = (0.5 + 0.5 * p.sunward).clamp(0.0, 1.0);
+        // Which flank of its cell this puff is on, measured against the sun. Done per
+        // frame now rather than once at startup, because the sun moves: a cloud lit
+        // from the side it was lit from this morning is a cloud with the light painted
+        // on it.
+        let across = Vec3::new(p.offset.x, 0.0, p.offset.z);
+        let sunward = across.dot(Vec3::new(sky.sun.x, 0.0, sky.sun.z).normalize_or_zero());
+        let lit = (0.5 + 0.5 * sunward).clamp(0.0, 1.0);
         let height = p.offset.y.clamp(0.0, 1.0);
         let mut light = (0.30 + 0.52 * lit + 0.34 * height).clamp(0.0, 1.0);
         // A squall is dark underneath and bright on top, and it is one cloud: the base
@@ -688,7 +685,7 @@ pub fn update(
     let Some(mut beam_mesh) = meshes.get_mut(&shafts) else {
         return;
     };
-    let sun = crate::sky::SUN.normalize();
+    let sun = sky.sun.normalize();
     let axis = -sun;
     let mut positions = Vec::with_capacity(CELLS * BEAMS * 4);
     let mut colours = Vec::with_capacity(CELLS * BEAMS * 4);

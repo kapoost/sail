@@ -35,9 +35,6 @@ const SIZE: u32 = 1024;
 /// lookups in a shader. This is still the honest half-measure, just a bigger one.
 pub const TILE_METRES: f32 = 24.0;
 
-/// Re-export so the lighting and the sky cannot disagree about where the sun is.
-pub use crate::sky::SUN as SUN_FROM_SKY;
-
 /// Resolution of the animated frames.
 ///
 /// Half the still map's. Forty-eight frames is the whole cost of this feature and it is

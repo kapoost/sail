@@ -72,7 +72,9 @@ pub fn setup(
         },
         // Pointed from the one definition of where the sun is, so the drawn disc and
         // the light cannot drift apart.
-        Transform::default().looking_to(-sea_texture::SUN_FROM_SKY, Vec3::Y),
+        // Pointed from the one definition of where the sun is, and followed every frame
+        // by `sky::light` so the drawn disc and the light cannot drift apart.
+        Transform::default().looking_to(-sky::Sky::default().sun, Vec3::Y),
     ));
     // Much dimmer than before: the environment map now supplies the sky's own
     // contribution properly, and leaving the old flat ambient term in place on top of
@@ -407,6 +409,7 @@ pub fn toggle_ink(
 #[allow(clippy::too_many_arguments)]
 pub fn update_sea(
     ink: Res<Ink>,
+    sky_state: Res<sky::Sky>,
     clouds: Option<Res<crate::clouds::Clouds>>,
     origin: Res<frame::RenderOrigin>,
     time: Res<Time>,
@@ -417,7 +420,7 @@ pub fn update_sea(
     mut q: Query<(&SeaSurface, &mut Transform)>,
 ) {
     let ink = ink.0;
-    let sun = sky::SUN.normalize();
+    let sun = sky_state.sun.normalize();
     let st = &sim.render_state();
     let centre = origin.to_bevy(st.pos, 0.0);
     let t = st.time;
@@ -508,7 +511,7 @@ pub fn update_sea(
         // cheap in the inner loop and does not have to be cheap out here.
         let shadows = clouds
             .as_ref()
-            .map(|c| c.shadows(st.pos, SHADOW_REACH as f64))
+            .map(|c| c.shadows(st.pos, SHADOW_REACH as f64, sky_state.sun))
             .unwrap_or_else(crate::clouds::ShadowField::clear);
 
         // Past this spacing the mesh carries nothing, so the water is never asked.

@@ -29,7 +29,97 @@ const FACE: u32 = 256;
 /// west: a low sun puts a long glitter path across the water, which is both the most
 /// flattering light for a sea and the most useful, since the path shows you the wave
 /// shape all the way to the horizon.
-pub const SUN: Vec3 = Vec3::new(-0.62, 0.30, -0.72);
+/// Where the sun is and how much cloud there is, right now.
+///
+/// This was two constants, and they had to stop being constants for the same reason:
+/// a passage is hours long and the sky is the one thing in the frame that was not
+/// allowed to change over them. The sun was welded to a single bearing and elevation,
+/// and the cloud cover was welded into the cubemap at startup, so a front could arrive
+/// in the wind and in the sea and the sky would not notice.
+///
+/// One definition, read by the cubemap, the directional light, the cloud layer, the
+/// cloud shadows, the shafts and the sea's own glints. The whole point is that they
+/// cannot disagree about where the sun is.
+#[derive(bevy::prelude::Resource, Clone, Copy, Debug)]
+pub struct Sky {
+    /// Unit vector towards the sun.
+    pub sun: Vec3,
+    /// Cover of the low deck, 0 clear to 1 solid.
+    pub cover: f32,
+    /// Local time, hours since midnight.
+    pub hour: f32,
+}
+
+/// Latitude the sun is worked out for, degrees. Nordic, which is the whole reason the
+/// light looks like this: at fifty-seven degrees the sun never gets high enough in the
+/// morning or the evening to flatten anything, and that long low light is most of what
+/// the sky is doing.
+const LATITUDE: f32 = 57.0;
+/// Solar declination, degrees. Fixed for the season rather than worked out from a date,
+/// because there is no date in this game. Five degrees is early spring — the Irish
+/// spring the islands were drawn for.
+const DECLINATION: f32 = 5.0;
+
+impl Sky {
+    /// The sky at a given local hour, under a given cover.
+    ///
+    /// Real solar geometry, which costs two sines and is the difference between a sun
+    /// that moves and a sun that is dragged about. The elevation falls out of the hour
+    /// angle and the azimuth out of the elevation, so morning light comes from the east
+    /// and climbs, which is the behaviour and not a number anyone chose.
+    pub fn at(hour: f32, cover: f32) -> Self {
+        let lat = LATITUDE.to_radians();
+        let dec = DECLINATION.to_radians();
+        // Hour angle: zero at local noon, fifteen degrees an hour either side.
+        let h = ((hour - 12.0) * 15.0).to_radians();
+        let sin_el = lat.sin() * dec.sin() + lat.cos() * dec.cos() * h.cos();
+        let elevation = sin_el.clamp(-1.0, 1.0).asin();
+        // Azimuth from north, measured the way a compass does. The arc cosine only
+        // gives the half of the circle between north and south, so the hour angle picks
+        // the side: a negative hour angle is morning and the sun is to the *east*, which
+        // is a plus sign and was a minus for one run — a ten o'clock sun in the
+        // south-west, which is the sort of thing that looks merely odd until you notice
+        // every shadow on the boat is pointing the wrong way.
+        let cos_az = (dec.sin() - sin_el * lat.sin()) / (lat.cos() * elevation.cos()).max(1e-4);
+        let azimuth = cos_az.clamp(-1.0, 1.0).acos() * if h < 0.0 { 1.0 } else { -1.0 };
+        // Into the world: Bevy's −Z is north, so a compass bearing becomes
+        // (sin, _, −cos) with the elevation lifting it out of the plane.
+        let (ce, se) = (elevation.cos(), elevation.sin());
+        Self {
+            sun: Vec3::new(ce * azimuth.sin(), se, -ce * azimuth.cos()).normalize(),
+            cover: cover.clamp(0.0, 1.0),
+            hour,
+        }
+    }
+
+    /// How high the sun is, radians. Negative is below the horizon.
+    pub fn elevation(&self) -> f32 {
+        self.sun.y.clamp(-1.0, 1.0).asin()
+    }
+
+    /// Colour of the direct sunlight. Low sun is warm because its light has come a long
+    /// way through the atmosphere and the blue end has been scattered out of it — the
+    /// same physics that makes the sky blue, seen from the other end.
+    pub fn sunlight(&self) -> Vec3 {
+        let low = (1.0 - (self.elevation() / 0.52).clamp(0.0, 1.0)).powf(1.4);
+        Vec3::new(1.0, 1.0, 1.0).lerp(Vec3::new(1.0, 0.76, 0.55), low)
+    }
+
+    /// And how strong it is: thinner through cloud, and weaker with a low sun for the
+    /// same reason it is redder.
+    pub fn illuminance(&self) -> f32 {
+        let height = (self.elevation() / 0.52).clamp(0.0, 1.0);
+        let clear = 32_000.0 + 70_000.0 * height;
+        clear * (1.0 - 0.62 * self.cover)
+    }
+}
+
+impl Default for Sky {
+    fn default() -> Self {
+        // The morning this was all drawn against: a low sun and a broken sky.
+        Self::at(8.0, 0.55)
+    }
+}
 
 /// Zenith and horizon sky colours, in relative units.
 ///
@@ -174,7 +264,7 @@ fn deck(dir: Vec3, sun: Vec3, height: f32, scale: f32, cover: f32, drift: f32) -
 /// They only show near the sun and only where the air between is thick with haze, so
 /// the result is multiplied by both: a tight angular falloff and the same forward
 /// scattering the sky already uses.
-fn shafts(dir: Vec3, sun: Vec3) -> f32 {
+fn shafts(dir: Vec3, sun: Vec3, cover: f32) -> f32 {
     let alignment = dir.dot(sun);
     if alignment <= 0.55 || dir.y <= 0.0 {
         return 0.0;
@@ -184,8 +274,15 @@ fn shafts(dir: Vec3, sun: Vec3) -> f32 {
     for i in 1..=STEPS {
         let f = i as f32 / STEPS as f32;
         let at = dir.lerp(sun, f * 0.85).normalize();
-        let (low, _) = deck(at, sun, CLOUD_LOW, SCALE_LOW, COVER_LOW, 3.0);
-        let (storm, _) = deck(at, sun, CLOUD_STORM, SCALE_STORM, COVER_STORM, 23.0);
+        let (low, _) = deck(at, sun, CLOUD_LOW, SCALE_LOW, cover, 3.0);
+        let (storm, _) = deck(
+            at,
+            sun,
+            CLOUD_STORM,
+            SCALE_STORM,
+            COVER_STORM * cover / COVER_LOW,
+            23.0,
+        );
         clear += (1.0 - (low + storm).min(1.0)) / STEPS as f32;
     }
     // Sharpened: a shaft is a shaft because it has an edge. And faded out towards the
@@ -195,8 +292,9 @@ fn shafts(dir: Vec3, sun: Vec3) -> f32 {
 }
 
 /// Build the sky cubemap.
-pub fn cubemap() -> Image {
-    let sun = SUN.normalize();
+pub fn cubemap(sky: &Sky) -> Image {
+    let sun = sky.sun.normalize();
+    let cover = sky.cover;
     let n = FACE as f32;
     // Six faces stacked vertically, then reinterpreted as array layers.
     let mut data: Vec<u8> = Vec::with_capacity((FACE * FACE * 6 * 16) as usize);
@@ -208,7 +306,7 @@ pub fn cubemap() -> Image {
                 let u = (x as f32 + 0.5) / n * 2.0 - 1.0;
                 let v = (y as f32 + 0.5) / n * 2.0 - 1.0;
                 let dir = face_direction(face, u, v).normalize();
-                let colour = sky_colour(dir, sun);
+                let colour = sky_colour(dir, sun, cover);
                 for c in [colour.x, colour.y, colour.z, 1.0] {
                     data.extend_from_slice(&c.to_le_bytes());
                 }
@@ -251,7 +349,7 @@ fn face_direction(face: u32, u: f32, v: f32) -> Vec3 {
 }
 
 /// Sky radiance in a direction, relative units.
-fn sky_colour(dir: Vec3, sun: Vec3) -> Vec3 {
+fn sky_colour(dir: Vec3, sun: Vec3, cover: f32) -> Vec3 {
     let up = dir.y;
     let sky = if up >= 0.0 {
         // Pale at the horizon, deep overhead. The exponent is doing the work of
@@ -265,9 +363,27 @@ fn sky_colour(dir: Vec3, sun: Vec3) -> Vec3 {
     };
 
     // Two cloud decks, the high one laid in first so the low one runs in front of it.
-    let (storm_d, storm_l) = deck(dir, sun, CLOUD_STORM, SCALE_STORM, COVER_STORM, 23.0);
-    let (high_d, high_l) = deck(dir, sun, CLOUD_HIGH, SCALE_HIGH, COVER_HIGH, 11.0);
-    let (low_d, low_l) = deck(dir, sun, CLOUD_LOW, SCALE_LOW, COVER_LOW, 3.0);
+    // Cover scales all three decks about their drawn proportions, so a clearing sky
+    // opens from the bottom up — the low deck goes first and the high cirrus is the
+    // last to leave, which is what clearing weather actually looks like.
+    let shade = cover / COVER_LOW;
+    let (storm_d, storm_l) = deck(
+        dir,
+        sun,
+        CLOUD_STORM,
+        SCALE_STORM,
+        COVER_STORM * shade,
+        23.0,
+    );
+    let (high_d, high_l) = deck(
+        dir,
+        sun,
+        CLOUD_HIGH,
+        SCALE_HIGH,
+        COVER_HIGH * (0.45 + 0.55 * shade),
+        11.0,
+    );
+    let (low_d, low_l) = deck(dir, sun, CLOUD_LOW, SCALE_LOW, cover, 3.0);
     // How high up this direction is looking, which stands in for how far up a cell it
     // is seeing. A squall is dark underneath and brilliant on top, and that is one
     // cloud, not two: the base is in its own shadow and the anvil is in the sun.
@@ -312,7 +428,7 @@ fn sky_colour(dir: Vec3, sun: Vec3) -> Vec3 {
     let warm = Vec3::new(1.0, 0.94, 0.82);
     // And the shafts, which are the haze lit along a clear line to the sun. Added rather
     // than mixed, because that is what light does to air.
-    let rays = shafts(dir, sun) * 0.5;
+    let rays = shafts(dir, sun, cover) * 0.5;
     sky + warm * (disc + corona) + warm * haze + warm * rays
 }
 
@@ -329,8 +445,8 @@ fn sky_colour(dir: Vec3, sun: Vec3) -> Vec3 {
 /// Averaged over a ring of directions just above the horizon, which is where everything
 /// far away actually sits. A hundred and twenty-eight samples of the same function the
 /// cubemap is painted with, so the two cannot disagree about what colour the distance is.
-fn horizon_average() -> Vec3 {
-    let sun = SUN.normalize();
+fn horizon_average(sky: &Sky) -> Vec3 {
+    let sun = sky.sun.normalize();
     let mut sum = Vec3::ZERO;
     const N: usize = 128;
     for i in 0..N {
@@ -338,20 +454,173 @@ fn horizon_average() -> Vec3 {
         // A couple of degrees up: low enough to be the distance, high enough not to be
         // sampling the sea's own reflection band.
         let dir = Vec3::new(a.cos(), 0.04, a.sin()).normalize();
-        sum += sky_colour(dir, sun);
+        sum += sky_colour(dir, sun, sky.cover);
     }
     // The sun's disc and corona are in there and would drag the mean towards white if a
     // sample landed on them; clamped, because haze is haze and not a light source.
     (sum / N as f32).min(Vec3::splat(1.0))
 }
 
-pub fn haze_colour() -> Color {
-    let c = horizon_average();
+pub fn haze_colour(sky: &Sky) -> Color {
+    let c = horizon_average(sky);
     Color::linear_rgb(c.x, c.y, c.z)
 }
 
 /// Slightly deeper, for the near end of the fog gradient.
-pub fn haze_near() -> Color {
-    let c = horizon_average() * 0.88;
+pub fn haze_near(sky: &Sky) -> Color {
+    let c = horizon_average(sky) * 0.88;
     Color::linear_rgb(c.x, c.y, c.z)
+}
+
+/// Marks the camera's copy of the cubemap handle, so the rebake can find the image to
+/// write into without going through the skybox or the environment light.
+#[derive(bevy::prelude::Component)]
+pub struct SkyImage(pub Handle<Image>);
+
+/// A rebake in flight.
+///
+/// The bake is fifty-nine milliseconds. That is nothing once an hour and far too much
+/// in a frame, so it goes to the task pool and the result is swapped in when it lands.
+/// Spreading it over frames instead would mean ten milliseconds a frame for six frames,
+/// which is a stutter rather than a saving.
+#[derive(bevy::prelude::Resource, Default)]
+pub struct Baking {
+    task: Option<bevy::tasks::Task<Image>>,
+    /// The sky the last bake was made for, so the next one is only started when the
+    /// picture has actually moved.
+    baked: Option<Sky>,
+}
+
+/// How long a passage hour takes. One to one, like everything else here.
+///
+/// The sun moves fifteen degrees of hour angle an hour, which at this latitude is about
+/// five degrees of elevation in the morning. Over a two hour leg that is a visible
+/// change in the light and nowhere near a different time of day — which is right: a
+/// delivery is hours, and the sun should move like it.
+const HOURS_PER_SECOND: f32 = 1.0 / 3_600.0;
+
+/// How far the sun has to move, or the cover change, before it is worth sixty
+/// milliseconds of someone's core to repaint the sky.
+const SUN_STEP: f32 = 0.6_f32.to_radians();
+const COVER_STEP: f32 = 0.04;
+
+/// Advance the clock and the weather, and repaint the sky when either has moved.
+pub fn drift(
+    sim: bevy::prelude::Res<crate::sim::Sim>,
+    time: bevy::prelude::Res<Time>,
+    mut sky: bevy::prelude::ResMut<Sky>,
+    mut baking: bevy::prelude::ResMut<Baking>,
+    mut images: bevy::prelude::ResMut<Assets<Image>>,
+    held: bevy::prelude::Query<&SkyImage>,
+) {
+    let hour = sky.hour + time.delta_secs() * HOURS_PER_SECOND;
+    // Cover comes from the same slow weather that moves the mean wind, plus whatever
+    // squall is overhead — which is how a squall manages to darken the whole sky rather
+    // than only the patch its own cloud is drawn on.
+    let overcast = sim.sim.wind.cover() as f32;
+    let under = sim.sim.wind.squall_at(sim.sim.state.pos) as f32;
+    *sky = Sky::at(hour, (overcast + 0.45 * under).clamp(0.0, 1.0));
+
+    // Collect a finished bake first, so a slow frame cannot leave one waiting.
+    if let Some(task) = &mut baking.task {
+        if let Some(image) = bevy::tasks::block_on(bevy::tasks::poll_once(task)) {
+            baking.task = None;
+            if let Some(handle) = held.iter().next() {
+                if let Some(mut slot) = images.get_mut(&handle.0) {
+                    // Written into the same asset, so the skybox and the environment
+                    // light both follow without being told: one image, two jobs, and
+                    // the sun you can see stays the sun the water reflects.
+                    *slot = image;
+                    debug!(
+                        "sky: repainted at {:02.0}:{:02.0}, cover {:.0}%, sun {:.0} deg up",
+                        sky.hour.floor(),
+                        sky.hour.fract() * 60.0,
+                        sky.cover * 100.0,
+                        sky.elevation().to_degrees()
+                    );
+                }
+            }
+        }
+        return;
+    }
+
+    let moved = baking.baked.is_none_or(|was| {
+        was.sun.angle_between(sky.sun) > SUN_STEP || (was.cover - sky.cover).abs() > COVER_STEP
+    });
+    if moved {
+        let want = *sky;
+        baking.baked = Some(want);
+        baking.task =
+            Some(bevy::tasks::AsyncComputeTaskPool::get().spawn(async move { cubemap(&want) }));
+    }
+}
+
+/// Point the sun at where the sun is, and colour it for how high it is.
+///
+/// The light and the drawn sky come from the same `Sky`, which is the only arrangement
+/// in which a shadow can be trusted to fall the way the sky says it should.
+pub fn light(
+    sky: bevy::prelude::Res<Sky>,
+    mut lamp: bevy::prelude::Query<(&mut Transform, &mut DirectionalLight)>,
+) {
+    let Ok((mut t, mut light)) = lamp.single_mut() else {
+        return;
+    };
+    t.look_to(-sky.sun, Vec3::Y);
+    let tint = sky.sunlight();
+    light.color = Color::linear_rgb(tint.x, tint.y, tint.z);
+    light.illuminance = sky.illuminance();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sun has to be in the east in the morning and the west in the afternoon.
+    ///
+    /// Trivial, and it is here because it was wrong. The arc cosine in `Sky::at` only
+    /// gives half the circle and the hour angle picks the side; the sign was inverted,
+    /// which put a ten o'clock sun in the south-west. Nothing in the picture says
+    /// "wrong" at a glance — it just quietly lights the boat from the wrong quarter and
+    /// points every shadow the wrong way.
+    #[test]
+    fn the_sun_rises_in_the_east() {
+        let bearing = |hour: f32| {
+            let s = Sky::at(hour, 0.5);
+            s.sun.x.atan2(-s.sun.z).to_degrees().rem_euclid(360.0)
+        };
+        assert!(
+            (70.0..140.0).contains(&bearing(7.0)),
+            "a seven o'clock sun should bear east-south-east, got {:03.0}",
+            bearing(7.0)
+        );
+        assert!(
+            (220.0..290.0).contains(&bearing(17.0)),
+            "a five o'clock sun should bear west-south-west, got {:03.0}",
+            bearing(17.0)
+        );
+        // And it is highest at noon, which is what "noon" means.
+        assert!(Sky::at(12.0, 0.5).elevation() > Sky::at(9.0, 0.5).elevation());
+        assert!(Sky::at(12.0, 0.5).elevation() > Sky::at(15.0, 0.5).elevation());
+    }
+
+    /// The cover has to reach the paint. It is threaded through four functions to get
+    /// there, and a dropped argument anywhere along the way would leave a sky that
+    /// never changes while every number in the game says it has.
+    #[test]
+    fn cover_and_sun_both_change_the_painted_sky() {
+        let brightness = |sky: &Sky| {
+            cubemap(sky)
+                .data
+                .as_ref()
+                .map(|d| d.iter().map(|&b| b as u64).sum::<u64>())
+                .unwrap_or(0)
+        };
+        let clear = brightness(&Sky::at(8.0, 0.1));
+        let solid = brightness(&Sky::at(8.0, 0.95));
+        assert_ne!(clear, solid, "cover must change the sky");
+        let morning = brightness(&Sky::at(7.0, 0.5));
+        let noon = brightness(&Sky::at(12.0, 0.5));
+        assert_ne!(morning, noon, "the sun moving must change the sky");
+    }
 }
