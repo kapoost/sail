@@ -1276,6 +1276,22 @@ pub fn shroud_polyline(beam: f32, starboard: bool, heel: f32, lee: f32) -> Vec<V
 const SHROUD_RADIUS: f32 = 0.05;
 /// How far either side of the wire the sail is dragged into the crease, metres.
 const SHROUD_INFLUENCE: f32 = 0.9;
+/// The most the wire may move the cloth, metres.
+///
+/// Without a cap the push is the cloth's *whole* distance to leeward of the wire, which
+/// for an eased genoa is a metre and more — and the sail's panels are a metre apart, so
+/// one vertex came back onto the wire while its neighbour, a hand's breadth outside the
+/// lateral falloff, did not move at all. A metre and a half of displacement across one
+/// panel is ninety degrees between them: the broken plane that was reported from the
+/// deck, found by a sweep that tries every sail at every angle at every sheet.
+///
+/// A cap is the right shape for it as well as the safe one. A shroud is eight
+/// millimetres of wire: what it does to a sail lying on it is a crease a hand's breadth
+/// deep, not a repositioning. Cloth whose own shape has it a metre to leeward of the
+/// wire is not being held off by the wire at all — it is somewhere the wire has no
+/// opinion about, and the wire is drawn over it, which is what a wire lying on a sail
+/// looks like.
+const SHROUD_STANDOFF: f32 = 0.13;
 
 /// Hold a point of sailcloth off the standing rigging.
 ///
@@ -1344,7 +1360,7 @@ fn clear_of_shrouds(point: Vec3, normal: Vec3, shrouds: &[Vec3]) -> Vec3 {
         // corner in it — and a corner in a displacement is a crease in the cloth. Same
         // fault as the hard floor over the deck, in the second of the three places that
         // shove a sail about.
-        p -= normal * soft_push(along + SHROUD_RADIUS, 0.10) * weight;
+        p -= normal * soft_push(along + SHROUD_RADIUS, 0.10).min(SHROUD_STANDOFF) * weight;
     }
     p
 }
@@ -1373,7 +1389,7 @@ const MAST_CLEARANCE: f32 = 0.16;
 pub fn constrained(point: Vec3, normal: Vec3, shrouds: &[Vec3], clear_mast: bool) -> Vec3 {
     let point = clear_of_shrouds(point, normal, shrouds);
     let point = if clear_mast {
-        clear_of_mast(point)
+        clear_of_mast(point, normal)
     } else {
         point
     };
@@ -1406,25 +1422,56 @@ fn soft_push(depth: f32, band: f32) -> f32 {
     }
 }
 
-fn clear_of_mast(point: Vec3) -> Vec3 {
+/// Hold cloth out of the spar — along one direction, not away from the axis.
+///
+/// A radial clamp is not a projection. It pushes every point away from the axis along
+/// its own radius, so two neighbouring vertices that straddle the mast are flung to
+/// opposite sides of it and the cloth between them doubles back: a hundred and eighty
+/// degrees between two panels, found by a test that sweeps every sail through every
+/// angle rather than by sailing into it, and reported from the deck before that as a
+/// sail with a broken plane.
+///
+/// The shroud next door has had this right since it was written and says so in its own
+/// comment: *the cloth may not be further to leeward than the wire*. One direction,
+/// the one the wind is pressing the sail in, so neighbours move together and a surface
+/// stays a surface. The mast was the one of the three that never got the argument.
+///
+/// So: find how far along the sail's own leeward normal this point has to travel to
+/// leave the spar's circle, which is a quadratic, and move it that far.
+fn clear_of_mast(point: Vec3, normal: Vec3) -> Vec3 {
+    // How much spar there is at this height. Not *whether* there is any, which is what
+    // this asked: a point a hand's breadth below the masthead was shoved out to the
+    // full clearance radius and one a hand's breadth above was left alone, so the cloth
+    // between them had to span the whole of that in one triangle. A displacement with a
+    // corner in it is a fold, wherever the corner is — the radial push here was rounded
+    // off when this was written and the ends were not.
+    let reach = crate::curve::smoothstep(DECK - 0.5, DECK, point.y)
+        * (1.0
+            - crate::curve::smoothstep(
+                crate::rig::MAST_HEAD - 0.5,
+                crate::rig::MAST_HEAD,
+                point.y,
+            ));
     let radial = Vec2::new(point.x, point.z - MAST_FOOT_Z);
-    let d = radial.length();
-    if point.y < DECK || point.y > crate::rig::MAST_HEAD || d >= MAST_CLEARANCE + 0.5 {
+    if reach <= 0.0 || radial.length() >= MAST_CLEARANCE {
         return point;
     }
-    // Dead on the axis: nothing to push along, so nudge it forward out of the spar.
-    let out = if d < 1e-4 {
-        Vec2::new(0.0, -1.0)
-    } else {
-        radial / d
-    };
-    // The same rounding again: pushed to the clearance radius when it is inside, left
-    // alone when it is well outside, and eased between the two instead of snapping to
-    // the circle at a point.
-    let eased = MAST_CLEARANCE + soft_push(d - MAST_CLEARANCE, 0.12);
-    Vec3::new(out.x * eased, point.y, MAST_FOOT_Z + out.y * eased)
+    // The push direction, flattened: cloth is held off a vertical spar sideways, and a
+    // vertical component would lift the sail up the mast instead of out around it.
+    let mut push = Vec2::new(normal.x, normal.z);
+    if push.length_squared() < 1e-6 {
+        // Nothing to push along — a normal pointing straight up, which no sail has.
+        // Forward, out of the spar, which is where a headsail's cloth came from.
+        push = Vec2::new(0.0, -1.0);
+    }
+    let push = push.normalize();
+    // Smallest step along `push` that puts the point on the circle.
+    let b = radial.dot(push);
+    let c = radial.length_squared() - MAST_CLEARANCE * MAST_CLEARANCE;
+    let t = -b + (b * b - c).max(0.0).sqrt();
+    let moved = radial + push * (t * reach);
+    Vec3::new(moved.x, point.y, MAST_FOOT_Z + moved.y)
 }
-
 /// A sail is a piece of cloth and cloth does not stretch.
 ///
 /// This replaced the thing that was wrong with every headsail in the file. The clew was
@@ -1965,6 +2012,157 @@ mod sails_and_rigging {
             (g.tack - sprit).length() < AT_THE_FITTING,
             "the gennaker is tacked {:.2} m from the sprit end",
             (g.tack - sprit).length()
+        );
+    }
+}
+
+#[cfg(test)]
+mod cloth_stays_cloth {
+    use super::*;
+    use sail_core::state::{Controls, Headsail};
+
+    /// Build one sail and report the sharpest angle anywhere in its surface, degrees.
+    ///
+    /// A sail is a membrane. It curves, it folds along the mast when it has to, and it
+    /// shakes — but at the scale of one panel it is smooth, and a hard angle between two
+    /// neighbouring panels is not a shape cloth takes. It is a fault in whatever pushed
+    /// it there, and on the water it reads as a plane broken across the sail.
+    fn sharpest(kind: Headsail, awa_deg: f32, sheet: f32, furl: f32) -> f32 {
+        let cfg = sail_core::boat::BoatConfig::archipelago_packet();
+        let controls = Controls {
+            headsail: kind,
+            furl: furl as f64,
+            jib_sheet: sheet as f64,
+            ..Default::default()
+        };
+        let side = -(awa_deg.signum());
+        let chord = cfg.headsail(kind).profile.chord_angle(sheet as f64) as f32;
+        let g = headsail_shape(&cfg, &controls, side, chord);
+        // The *leeward* one, exactly as `update_sails` picks it. Handing the sail the
+        // windward wire is the fault the constraint's own comment warns about, and it
+        // showed here as a single vertex thrown a metre and nine across the boat —
+        // which looked like a fold in the cloth and was a fold in the test.
+        let shrouds = shroud_polyline(cfg.beam as f32, side > 0.0, 0.0, side);
+        let trim = SailTrim {
+            lee: side,
+            twist: 0.18,
+            luffing: 0.0,
+            draft: 0.11,
+            now: 0.0,
+            foot_sag: 0.2,
+            draft_at: 0.42,
+            // On the same rule the app uses, which is a statement about the sail and not
+            // about the angle: a sail set flying lives outside everything and is handed
+            // no wires at all. Giving them to it anyway dragged a vertex four metres aft
+            // onto the shroud — a fold of a hundred and forty-eight degrees in a Code 0
+            // that in the program has nothing to fold against.
+            shrouds: if feels_the_shrouds(kind, chord as f64, cfg.headsail_bears_at) {
+                &shrouds
+            } else {
+                &[]
+            },
+            clear_mast: true,
+        };
+        let mut mesh = Mesh::new(
+            bevy::mesh::PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        build_sail(&mut mesh, &g, &trim);
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("the sail has no positions");
+        };
+        // `build_sail` runs u on the outside and v on the inside, so this is the order
+        // the positions are in. Reading it transposed gave a hundred and eighty degrees
+        // for every sail at every sheet and every angle, which is not a sail breaking —
+        // it is a test measuring the distance between two points that are not
+        // neighbours. A check that fails everywhere is usually checking itself.
+        let at = |u: usize, v: usize| Vec3::from(p[u * SAIL_V + v]);
+        let mut worst: f32 = 0.0;
+        let mut where_ = (0usize, 0usize, ' ');
+        // Along both directions: three points in a row, and the turn between them.
+        for v in 0..SAIL_V {
+            for u in 1..SAIL_U - 1 {
+                let t = turn(at(u - 1, v), at(u, v), at(u + 1, v));
+                if t > worst {
+                    worst = t;
+                    where_ = (u, v, 'u');
+                }
+            }
+        }
+        for u in 0..SAIL_U {
+            for v in 1..SAIL_V - 1 {
+                let t = turn(at(u, v - 1), at(u, v), at(u, v + 1));
+                if t > worst {
+                    worst = t;
+                    where_ = (u, v, 'v');
+                }
+            }
+        }
+        if std::env::var("SAIL_FOLD").is_ok() {
+            let (u, v, dir) = where_;
+            let (a, b, c) = if dir == 'u' {
+                (at(u - 1, v), at(u, v), at(u + 1, v))
+            } else {
+                (at(u, v - 1), at(u, v), at(u, v + 1))
+            };
+            println!("  worst {worst:5.1} at u{u} v{v} along {dir}  {a:?} {b:?} {c:?}");
+        }
+        worst
+    }
+
+    /// The angle between two consecutive segments, degrees.
+    fn turn(a: Vec3, b: Vec3, c: Vec3) -> f32 {
+        // A triangular sail's head is one point, so its whole top row of the grid sits
+        // on top of itself. The segments there are a few millionths of a metre long and
+        // point wherever the arithmetic left them — which read as a hundred and eighty
+        // degrees at every sheet of every sail, and is the apex rather than a fold. A
+        // centimetre is the shortest piece of sail that is a piece of sail.
+        let (first, second) = (b - a, c - b);
+        if first.length() < 0.01 || second.length() < 0.01 {
+            return 0.0;
+        }
+        first
+            .normalize()
+            .dot(second.normalize())
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees()
+    }
+
+    /// Reported from the deck as a sail with a broken plane, with a collision guessed at
+    /// as the cause — which was the right guess. This looks for it everywhere instead of
+    /// waiting for it to be sailed into.
+    #[test]
+    fn no_sail_is_folded_by_anything_it_passes() {
+        // Forty-five degrees of turn between two neighbouring panels. A sail genuinely
+        // wraps round things, so this cannot be small; a *crease* is far sharper than
+        // this and nothing smooth comes near it.
+        const ALLOWED: f32 = 45.0;
+        let mut worst = (0.0_f32, Headsail::Genoa, 0.0_f32, 0.0_f32);
+        for kind in [Headsail::Genoa, Headsail::Code0, Headsail::Gennaker] {
+            for tenths in -17..=17 {
+                let awa = tenths as f32 * 10.0;
+                if awa == 0.0 {
+                    continue;
+                }
+                for sheet in [0.0_f32, 0.2, 0.45, 0.7, 1.0] {
+                    let angle = sharpest(kind, awa, sheet, 0.0);
+                    if angle > worst.0 {
+                        worst = (angle, kind, awa, sheet);
+                    }
+                }
+            }
+        }
+        assert!(
+            worst.0 < ALLOWED,
+            "{:?} folds {:.0} deg between two panels at awa {:.0}, sheet {:.2} — cloth \
+             does not do that, so something is pushing it",
+            worst.1,
+            worst.0,
+            worst.2,
+            worst.3
         );
     }
 }

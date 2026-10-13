@@ -205,7 +205,10 @@ pub fn update(
         let from_boat = world_pos - st.pos;
         let resolution =
             crate::world::drawn_resolution(Vec2::new(from_boat.x as f32, -from_boat.y as f32));
-        let surface = sim.sim.water.height_resolved(world_pos, st.time, resolution) as f32;
+        let surface = sim
+            .sim
+            .water
+            .height_resolved(world_pos, st.time, resolution) as f32;
         if drop.at.y < surface || flat.length() > REACH * 1.25 {
             let born = scatter(rng, CEILING);
             // Reborn at the top of the box when it has landed, and anywhere in it when

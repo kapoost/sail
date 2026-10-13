@@ -13,8 +13,8 @@
 //! produces the dark patches and bright patches a real surface has — cat's paws,
 //! where a gust has ruffled the water and the rest is still slick.
 
-use bevy::asset::RenderAssetUsages;
 use crate::curve::smoothstep;
+use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -372,7 +372,11 @@ pub fn spray_marks() -> Image {
             let claw = x >= W;
             let u = ((x % W) as f32 + 0.5) / W as f32 * 2.0 - 1.0;
             let v = (y as f32 + 0.5) / W as f32 * 2.0 - 1.0;
-            let value = if claw { claw_mark(u, v) } else { drop_mark(u, v) };
+            let value = if claw {
+                claw_mark(u, v)
+            } else {
+                drop_mark(u, v)
+            };
             let i = ((y * W * 2 + x) * 4) as usize;
             let byte = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
             data[i] = byte;
