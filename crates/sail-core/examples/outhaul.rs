@@ -1,15 +1,18 @@
 //! Where is the outhaul actually fastest, and does the recommendation agree?
 //!
-//! `outhaul_for_heel` drives the HUD advice, the trim-assist key, and the outhaul the
+//! `outhaul_for` drives the HUD advice, the trim-assist key, and the outhaul the
 //! polar solver settles on — so if it disagrees with the model's own optimum then the
 //! game tells the player to do something slow, and the reference polar is beatable by
 //! ignoring it. This sweep is the check.
 //!
-//! It is also the measurement that corrected a wrong assumption: depth wins at every
-//! wind speed the boat can still hold a course at, exactly as a velocity prediction
-//! program would say, and flattening only pays once righting moment is the binding
-//! constraint. The first version of the rule crossed over at fourteen knots on the
-//! strength of folklore and gave away real VMG for it.
+//! **The sweep itself was wrong once, and this is the correction.** It used to hold the
+//! true wind angle at forty-five degrees, and concluded from that that depth wins at
+//! every wind speed — which is what you must conclude, because the one thing a flat sail
+//! buys upwind is the ability to sail *closer*, and a fixed course cannot see it. VMG is
+//! a projection: at forty-five degrees, one degree of extra pointing is worth about one
+//! and a half percent of VMG for nothing. So each outhaul now gets its own best course,
+//! which is what a crew sailing the boat would find, and the comparison is between two
+//! properly sailed boats rather than between two trims of one badly sailed one.
 //!
 //!   cargo run -p sail-core --release --example outhaul
 
@@ -32,43 +35,66 @@ fn main() {
 
 fn sweep(cfg: BoatConfig) {
     println!(
-        "\n{} — best upwind VMG by outhaul, TWA 45, reef 0\n",
+        "\n{} — best upwind VMG by outhaul, each at its own best course, reef 0\n",
         cfg.name
     );
     print!("{:>7}", "TWS");
     for o in 0..=5 {
-        print!("{:>9}", format!("{:.1}", o as f64 / 5.0));
+        print!("{:>11}", format!("{:.1}", o as f64 / 5.0));
     }
-    println!("{:>8}{:>8}{:>10}{:>9}", "best", "rule", "cost", "heel@best");
+    println!(
+        "{:>8}{:>8}{:>10}{:>9}{:>8}",
+        "best", "rule", "cost", "heel@best", "twa"
+    );
 
     for tws in [5.0, 8.0, 12.0, 16.0, 20.0, 24.0, 28.0] {
         print!("{tws:>7.0}");
-        let mut best = (0.0, f64::NEG_INFINITY);
+        let mut best = (0.0, f64::NEG_INFINITY, 0.0);
         for o in 0..=5 {
             let outhaul = o as f64 / 5.0;
-            let vmg = vmg_at(cfg, tws, outhaul);
-            print!("{:>9.3}", ms_to_kn(vmg));
+            let (vmg, twa) = best_course(cfg, tws, outhaul);
+            // The course each trim can hold is half the story, so it is printed: a flat
+            // sail that points two degrees higher is faster to windward at the same
+            // speed through the water, and a table of speeds alone hides that.
+            print!("{:>11}", format!("{:.2}/{:.0}", ms_to_kn(vmg), deg(twa)));
             if vmg > best.1 {
-                best = (outhaul, vmg);
+                best = (outhaul, vmg, twa);
             }
         }
         // What the heel-based rule settles on, found by letting the solver run it.
         let settled = settled_outhaul(cfg, tws);
-        let at_recommended = vmg_at(cfg, tws, settled);
+        let at_recommended = best_course(cfg, tws, settled).0;
         println!(
-            "{:>8.1}{:>8.2}{:>9.3} kn{:>8.1}",
+            "{:>8.1}{:>8.2}{:>9.3} kn{:>8.1}{:>8.0}",
             best.0,
             settled,
             ms_to_kn(best.1 - at_recommended),
-            deg(heel_at(cfg, tws, best.0))
+            deg(heel_at(cfg, tws, best.0, best.2)),
+            deg(best.2)
         );
     }
     println!("`cost` is the VMG the recommendation gives away against the sweep's best.");
 }
 
-/// Heel at a given outhaul, for working out where the model actually turns over.
-fn heel_at(cfg: BoatConfig, tws_knots: f64, outhaul: f64) -> f64 {
-    run_at(cfg, tws_knots, outhaul).1
+/// Heel at a given outhaul and course, for working out where the model turns over.
+fn heel_at(cfg: BoatConfig, tws_knots: f64, outhaul: f64, twa: f64) -> f64 {
+    run_at(cfg, tws_knots, outhaul, twa).1
+}
+
+/// The best VMG this outhaul can reach, and the course it reaches it on.
+///
+/// Letting each trim pick its own course is the whole point: a flattened main holds a
+/// closer course without stalling, and that is most of what flattening is for.
+fn best_course(cfg: BoatConfig, tws_knots: f64, outhaul: f64) -> (f64, f64) {
+    let mut best = (f64::NEG_INFINITY, rad(45.0));
+    for step in 0..=7 {
+        let twa = rad(36.0 + 2.0 * step as f64);
+        let vmg = run_at(cfg, tws_knots, outhaul, twa).0;
+        if vmg > best.0 {
+            best = (vmg, twa);
+        }
+    }
+    best
 }
 
 /// The outhaul the heel-based rule converges on at this wind speed.
@@ -78,13 +104,8 @@ fn settled_outhaul(cfg: BoatConfig, tws_knots: f64) -> f64 {
     s.controls.outhaul
 }
 
-fn vmg_at(cfg: BoatConfig, tws_knots: f64, outhaul: f64) -> f64 {
-    run_at(cfg, tws_knots, outhaul).0
-}
-
 /// Returns (VMG, heel); VMG is -inf when the boat could not be held on course.
-fn run_at(cfg: BoatConfig, tws_knots: f64, outhaul: f64) -> (f64, f64) {
-    let twa = rad(45.0);
+fn run_at(cfg: BoatConfig, tws_knots: f64, outhaul: f64, twa: f64) -> (f64, f64) {
     let heading = wrap_tau(0.0 - twa);
     let mut state = BoatState::at_rest(heading);
     state.surge = 0.6 * cfg.hull_speed();

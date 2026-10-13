@@ -156,18 +156,18 @@ pub fn draw(
             // The outhaul is a shape control, not a sheet: depth is power, flat is
             // less heeling force. Showing the draft as a percentage is how a sailmaker
             // talks about it, and it is the number the player is actually changing.
-            let want_outhaul = outhaul_for_heel(t.heel, OVERPOWERED_HEEL);
+            let want_outhaul = outhaul_for(t.awa, t.heel, OVERPOWERED_HEEL);
             ui.label(format!(
-                "outhaul {:.2} ({:.0}% draft)   for this heel {:.2} — {}",
+                "outhaul {:.2} ({:.0}% draft)   for this course {:.2} — {}",
                 c.outhaul,
                 t.main.camber * 100.0,
                 want_outhaul,
                 if (c.outhaul - want_outhaul).abs() < 0.12 {
                     "about right"
                 } else if c.outhaul < want_outhaul {
-                    "overpowered, haul it out"
+                    "too full to point, haul it out"
                 } else {
-                    "too flat for this heel, ease it off"
+                    "flatter than this course wants, ease it off"
                 }
             ));
             // The vang reads inert upwind on purpose: with the boom near the

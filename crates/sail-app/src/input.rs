@@ -316,7 +316,8 @@ pub fn gather(
     if *assisting > 0.0 {
         *assisting -= time.delta_secs();
         let awa = sim.sim.telemetry.awa;
-        sim.controls.outhaul = outhaul_for_heel(
+        sim.controls.outhaul = outhaul_for(
+            awa,
             sim.sim.telemetry.heel,
             sail_core::autopilot::OVERPOWERED_HEEL,
         );

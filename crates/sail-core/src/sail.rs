@@ -285,21 +285,41 @@ pub fn twist_for_lead(car: f64) -> f64 {
     MAX_LEAD_TWIST * car.clamp(0.0, 1.0)
 }
 
-/// Outhaul a trimmer would carry, given how hard the boat is already heeling.
+/// Outhaul a trimmer would carry on this course, at this much heel.
 ///
-/// Keyed on heel rather than wind speed, which is both what a trimmer actually reacts
-/// to and what a velocity prediction program does: full sail is fastest until the boat
-/// becomes limited by its righting moment, and only then does reducing force start to
-/// *increase* VMG. An earlier version of this crossed over around fourteen knots on the
-/// strength of received wisdom; sweeping the model (see `examples/outhaul.rs`) showed
-/// depth winning at every wind speed the boat could still hold a course at, which is
-/// the same answer an ORC VPP gives. The function was wrong, not the physics.
+/// Two inputs, and the first one used to be missing. The rule was keyed on heel alone,
+/// which made it the same rule close-hauled and on a broad reach — so the boat sailed
+/// upwind with a foot eased right off, which is not a trim any crew would carry and not
+/// one the sail can hold: a deep entry cannot be sheeted close without backwinding
+/// behind the mast (see [`SailProfile::entry_angle`]). Upwind the outhaul goes on. Off
+/// the wind it comes off, because there the sail wants depth and the entry has all the
+/// angle it needs.
+///
+/// The heel term on top is the old rule and it stays: full sail is fastest until
+/// righting moment is the binding constraint, and only then does reducing force start
+/// to *increase* VMG — which is the answer an ORC VPP gives and the answer the sweep in
+/// `examples/outhaul.rs` gives. The upwind baseline is set where that sweep says it
+/// costs almost nothing: two hundredths of a knot of VMG at twelve knots of true wind,
+/// against a sail shape a sailor will not accept.
 ///
 /// `target_heel` is the angle past which the boat is judged overpowered — around
 /// twenty degrees for a cruising crew.
-pub fn outhaul_for_heel(heel: f64, target_heel: f64) -> f64 {
-    smoothstep(target_heel, target_heel + rad(9.0), heel.abs())
+pub fn outhaul_for(awa: f64, heel: f64, target_heel: f64) -> f64 {
+    let upwind = 1.0 - smoothstep(rad(38.0), rad(72.0), awa.abs());
+    // In a drifter you leave shape in it even upwind: there is no heel to get rid of
+    // and the boat needs every square metre working. Heel is the pressure gauge the
+    // function already has, and the sweep agrees — the measured best in five knots of
+    // true wind is a touch of depth, not a strapped-down foot.
+    let pressure = 0.3 + 0.7 * smoothstep(rad(4.0), rad(12.0), heel.abs());
+    let pressed = smoothstep(target_heel, target_heel + rad(9.0), heel.abs());
+    (UPWIND_OUTHAUL * upwind * pressure + pressed).clamp(0.0, 1.0)
 }
+
+/// Outhaul carried close-hauled before heel asks for any more than that.
+///
+/// Not 1.0: a foot strapped down hard is a light-air mistake, and the sweep agrees —
+/// the measured best upwind in five knots is a touch of depth, not none.
+pub const UPWIND_OUTHAUL: f64 = 0.45;
 
 /// Aerodynamic character of one sail.
 #[derive(Clone, Copy, Debug)]
@@ -317,6 +337,23 @@ pub struct SailProfile {
     pub aspect_ratio: f64,
     /// Below this angle of attack the sail starts to shake, radians.
     pub luff_margin: f64,
+    /// Entry angle of the cut at reference draft: the angle the forward of the sail
+    /// makes with its own chord, radians. Zero disables the effect.
+    ///
+    /// This is the number that stops depth being free. A sail is a membrane with a
+    /// sharp luff, and the flow has to arrive within a few degrees of the tangent at
+    /// that luff or it separates on the windward side — which is backwinding, the
+    /// shaking patch behind the mast that every sailor has seen on a main sheeted hard
+    /// with the outhaul eased. The entry angle grows with draft, roughly in proportion,
+    /// so a deep sail needs *more* angle of attack to keep its entry full, and
+    /// therefore cannot be sheeted close. That single fact is why the outhaul is pulled
+    /// on going upwind and eased off the wind, and without it the model said depth was
+    /// free at every wind speed and every course.
+    ///
+    /// Left at zero for the gennaker: two and twenty percent of draft is not a shape
+    /// any law calibrated on upwind sails describes, and what actually limits a
+    /// gennaker is collapse, which `fills_above` already models.
+    pub entry_angle: f64,
     /// Normal-force coefficient once fully separated. A flat plate is 2.0; a sail with
     /// camber and a mast in the way runs nearer 1.5.
     pub cn_separated: f64,
@@ -348,6 +385,7 @@ impl SailProfile {
             cd0: 0.055,
             aspect_ratio: luff_height * luff_height / area,
             luff_margin: rad(4.0),
+            entry_angle: rad(16.0),
             cn_separated: 1.5,
             max_chord_angle: rad(90.0),
             min_chord_angle: 0.0,
@@ -364,6 +402,7 @@ impl SailProfile {
             cd0: 0.045,
             aspect_ratio: luff_height * luff_height / area,
             luff_margin: rad(3.5),
+            entry_angle: rad(12.0),
             cn_separated: 1.45,
             max_chord_angle: rad(85.0),
             min_chord_angle: rad(12.0),
@@ -391,6 +430,7 @@ impl SailProfile {
             cd0: 0.050,
             aspect_ratio: luff_height * luff_height / area,
             luff_margin: rad(3.5),
+            entry_angle: rad(12.0),
             cn_separated: 1.45,
             // Seventy-five, not sixty-two. The limit on a self-tacker is its own track
             // and nothing else: the sail and its boom live forward of the shrouds, with
@@ -422,6 +462,7 @@ impl SailProfile {
             cd0: 0.040,
             aspect_ratio: luff_height * luff_height / area,
             luff_margin: rad(3.0),
+            entry_angle: rad(11.0),
             cn_separated: 1.45,
             max_chord_angle: rad(86.0),
             min_chord_angle: rad(10.0),
@@ -449,6 +490,7 @@ impl SailProfile {
             cd0: 0.075,
             aspect_ratio: luff_height * luff_height / area,
             luff_margin: rad(5.0),
+            entry_angle: rad(0.0),
             cn_separated: 1.62,
             // Eighty-eight degrees, not the hundred and eight this had.
             //
@@ -499,7 +541,16 @@ impl SailProfile {
             };
         }
 
-        let luffing = 1.0 - smoothstep(0.0, self.luff_margin, alpha);
+        // A round entry cannot be sheeted close. Below the entry angle the flow starts
+        // arriving on the windward side of the luff, and the sail answers by shaking
+        // there and by dragging: a separation bubble, not attached flow.
+        let entry = self.entry_angle * camber.max(0.0) / CAMBER_REFERENCE;
+        let backwinding = if entry > 0.0 {
+            1.0 - smoothstep(0.5 * entry, entry, alpha)
+        } else {
+            0.0
+        };
+        let luffing = (1.0 - smoothstep(0.0, self.luff_margin, alpha)).max(0.55 * backwinding);
 
         // Attached flow: rise to the peak, then a soft post-peak decay. The decay is
         // gentle because a sail is a cambered membrane with a flexible leech, not a
@@ -530,7 +581,8 @@ impl SailProfile {
         // 0.60 puts L/D at 1.5 where the measurements put it.
         let cd_attached = cd0
             + cl_attached * cl_attached / (std::f64::consts::PI * self.aspect_ratio.max(0.5))
-            + 0.60 * past_peak * past_peak;
+            + 0.60 * past_peak * past_peak
+            + 0.25 * backwinding;
 
         // Fully separated: a cambered plate presenting its area to the flow. This is
         // what a mainsail squared off on a run is actually doing.
@@ -568,7 +620,15 @@ impl SailProfile {
     /// peak — a silent, hard-to-see wrongness. One function, two callers.
     #[inline]
     pub fn alpha_opt_for(&self, camber: f64) -> f64 {
-        self.alpha_opt + ALPHA_SHIFT_PER_DEPTH * (1.0 - self.depth_ratio(camber))
+        // Thin-aerofoil theory says a deeper section peaks earlier, and for a rigid
+        // wing it does. For a sail the entry constraint overrules it once the sail is
+        // set deep enough: you cannot trim to an angle of attack at which your own luff
+        // is backwinding, so the best *usable* angle is the entry angle and a little
+        // more. This is why a crew with the outhaul eased trims to a wider chord angle
+        // and sails a wider course, rather than pointing the same and going faster.
+        let theoretical = self.alpha_opt + ALPHA_SHIFT_PER_DEPTH * (1.0 - self.depth_ratio(camber));
+        let entry = self.entry_angle * camber.max(0.0) / CAMBER_REFERENCE;
+        theoretical.max(entry + rad(1.5))
     }
 
     /// Boom angle for a sheet position, where 0 is hard in and 1 fully eased.

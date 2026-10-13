@@ -285,10 +285,11 @@ where
     let mut speed_before = 0.0;
 
     for i in 0..steps {
-        // Flatten only once the boat is overpowered — a slow outer loop, because the
-        // outhaul is a cleated line and not something anyone plays with. Rate limited
-        // so it settles rather than chasing the heel it is itself changing.
-        let want = crate::sail::outhaul_for_heel(sim.state.heel, OVERPOWERED_HEEL);
+        // On going upwind, off coming down, and further on once the boat is
+        // overpowered — a slow outer loop, because the outhaul is a cleated line and
+        // not something anyone plays with. Rate limited so it settles rather than
+        // chasing the heel it is itself changing.
+        let want = crate::sail::outhaul_for(sim.telemetry.awa, sim.state.heel, OVERPOWERED_HEEL);
         let step = (want - controls.outhaul).clamp(-0.25 * SUBSTEP, 0.25 * SUBSTEP);
         controls.outhaul = (controls.outhaul + step).clamp(0.0, 1.0);
 

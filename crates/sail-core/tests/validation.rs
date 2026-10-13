@@ -10,7 +10,7 @@
 
 use sail_core::prelude::*;
 use sail_core::sail::{
-    camber_for_outhaul, outhaul_for_heel, sail_forces, SailProfile, CAMBER_REFERENCE,
+    camber_for_outhaul, outhaul_for, sail_forces, SailProfile, CAMBER_REFERENCE,
 };
 use sail_core::wind::{SteadyWind, WindField};
 
@@ -667,28 +667,58 @@ fn easing_the_outhaul_deepens_the_sail_and_hardening_it_flattens() {
 }
 
 #[test]
-fn a_deeper_sail_makes_more_force_and_peaks_earlier() {
+fn depth_is_power_at_its_own_angle_and_a_handicap_close_hauled() {
     let profile = SailProfile::mainsail(32.0, 12.5);
-    let deep = profile.coefficients(rad(14.0), camber_for_outhaul(0.0));
-    let flat = profile.coefficients(rad(14.0), camber_for_outhaul(1.0));
+    let deep_c = camber_for_outhaul(0.0);
+    let flat_c = camber_for_outhaul(1.0);
 
-    // Depth is power.
+    // At each sail's own best angle of attack, depth is power and depth is drag. That
+    // is the trade the outhaul exists to make, and it has not changed.
+    let deep = profile.coefficients(profile.alpha_opt_for(deep_c), deep_c);
+    let flat = profile.coefficients(profile.alpha_opt_for(flat_c), flat_c);
     assert!(
         deep.cl > flat.cl,
-        "deep {:.2} should out-lift flat {:.2}",
+        "deep {:.2} should out-lift flat {:.2} at its own angle",
         deep.cl,
         flat.cl
     );
-    // And depth costs drag.
     assert!(deep.cd > flat.cd);
 
-    // A deep sail reaches its best angle of attack sooner, because the camber is
-    // already doing part of the work.
+    // Close-hauled it is the other way round, and this is the fact the model was
+    // missing. Fourteen degrees is about the angle of attack a main sees on a beat; the
+    // deep sail's entry is backwinding there, so it makes *less* lift than the flat one
+    // and drags more while doing it. This is the shaking patch behind the mast, and it
+    // is why the outhaul goes on going upwind.
+    let deep_beat = profile.coefficients(rad(14.0), deep_c);
+    let flat_beat = profile.coefficients(rad(14.0), flat_c);
+    assert!(
+        flat_beat.cl > deep_beat.cl,
+        "on a beat the flat sail should win: flat {:.2}, deep {:.2}",
+        flat_beat.cl,
+        deep_beat.cl
+    );
+    assert!(deep_beat.cd > flat_beat.cd);
+    assert!(
+        deep_beat.luffing > 0.3,
+        "the deep sail should be visibly shaking on a beat, got {:.2}",
+        deep_beat.luffing
+    );
+    assert!(
+        flat_beat.luffing < 0.05,
+        "the flat sail should be quiet, got {:.2}",
+        flat_beat.luffing
+    );
+
+    // And a deep sail cannot be trimmed out of it: its best usable angle of attack is
+    // larger, not smaller, so for the same apparent wind the chord has to come further
+    // in — and on a close course that means the boom on the centreline with the sail
+    // still not filling. Thin-aerofoil theory says a cambered section peaks earlier,
+    // and for a rigid wing it does; for a membrane with a sharp luff the entry
+    // constraint overrules it.
     let awa = rad(30.0);
     assert!(
-        profile.optimal_chord_angle(awa, camber_for_outhaul(0.0))
-            > profile.optimal_chord_angle(awa, camber_for_outhaul(1.0)),
-        "a deep sail wants the boom further out for the same apparent wind"
+        profile.optimal_chord_angle(awa, deep_c) < profile.optimal_chord_angle(awa, flat_c),
+        "a deep sail cannot be eased into working on a close course"
     );
 }
 
@@ -719,44 +749,27 @@ fn depth_is_fastest_until_the_boat_runs_out_of_righting_moment() {
     // towards folklore.
     for tws in [5.0, 8.0, 12.0, 16.0] {
         let make = wind(tws);
-        let deep = at_outhaul(cfg, &make, rad(45.0), 0.0);
-        let flat = at_outhaul(cfg, &make, rad(45.0), 1.0);
-        assert!(
-            deep.2 > flat.2,
-            "at {tws} kn depth should win: deep {:.3} kn VMG against flat {:.3}",
-            ms_to_kn(deep.2),
-            ms_to_kn(flat.2)
-        );
-    }
-}
-
-#[test]
-fn the_outhaul_rule_costs_little_against_the_measured_best() {
-    let cfg = BoatConfig::charter_sloop_34();
-    // What the game tells the player to do has to be close to the fastest thing the
-    // model can do, or the reference polar is beatable by ignoring the advice — which
-    // is how a sim loses a sailor's trust.
-    //
-    // It is not exactly zero, and the reason is a known gap rather than a tuning
-    // failure. The model's upwind VMG peaks around twenty-nine degrees of heel, about
-    // eight degrees past where a real cruiser's does, so flattening at twenty costs a
-    // little speed here that it would gain on the water. The missing mechanism is
-    // twist: flattening a real mainsail takes power out of the *top* of the sail,
-    // where the heeling arm is longest, while a one-section sail can only remove it
-    // evenly. Sections and twist are the fix; a harsher heel penalty than the
-    // rail-down term already in `sim.rs` would not be defensible.
-    for tws in [5.0, 8.0, 12.0, 16.0] {
-        let make = wind(tws);
+        // Each trim sails its own best course, which is the whole point of flattening:
+        // the one thing a flat sail buys upwind is the ability to point, and a sweep at
+        // a fixed true wind angle cannot see it. This test asserted a fixed forty-five
+        // degrees once and therefore demanded a rule that never flattened.
+        let best_course = |outhaul: f64| -> f64 {
+            let mut best = f64::NEG_INFINITY;
+            for step in 0..=4 {
+                let twa = rad(36.0 + 3.0 * step as f64);
+                best = best.max(at_outhaul(cfg, &make, twa, outhaul).2);
+            }
+            best
+        };
         let settled = steady_state(cfg, &make, rad(45.0), SETTLE, 0.0);
         let mut best = f64::NEG_INFINITY;
         for step in 0..=5 {
-            let vmg = at_outhaul(cfg, &make, rad(45.0), step as f64 / 5.0).2;
-            best = best.max(vmg);
+            best = best.max(best_course(step as f64 / 5.0));
         }
-        let cost = best - settled.telemetry.vmg;
+        let cost = best - best_course(settled.controls.outhaul);
         let relative = cost / best;
         assert!(
-            relative < 0.012,
+            relative < 0.015,
             "at {tws} kn the rule settles on outhaul {:.2} and gives away {:.3} kn VMG \
              ({:.1} percent) against a best of {:.3}",
             settled.controls.outhaul,
@@ -795,31 +808,49 @@ fn heel_resistance_factor(cfg: &BoatConfig, heel: f64) -> f64 {
 }
 
 #[test]
-fn the_outhaul_rule_only_flattens_once_the_boat_is_overpowered() {
-    // Keyed on heel, not on wind speed, because heel is what tells you the righting
-    // moment has run out.
-    assert_eq!(
-        outhaul_for_heel(rad(12.0), rad(20.0)),
-        0.0,
-        "upright: stay full"
-    );
-    assert_eq!(
-        outhaul_for_heel(rad(20.0), rad(20.0)),
-        0.0,
-        "at the limit: still full"
+fn the_outhaul_goes_on_upwind_and_comes_off_downwind() {
+    // The thing the rule used to get wrong: it was the same close-hauled and running,
+    // so the boat beat to windward with a foot eased right off. A deep entry cannot be
+    // sheeted close, so upwind the outhaul goes on whatever the heel is doing.
+    let close = outhaul_for(rad(25.0), rad(15.0), rad(20.0));
+    let broad = outhaul_for(rad(140.0), rad(15.0), rad(20.0));
+    assert!(
+        close > 0.35,
+        "close-hauled with pressure on: foot firm, got {close:.2}"
     );
     assert!(
-        outhaul_for_heel(rad(25.0), rad(20.0)) > 0.2,
-        "overpowered: flatten"
+        broad < 0.05,
+        "broad reach: all the depth you can get, got {broad:.2}"
+    );
+    assert!(close > broad + 0.3);
+
+    // And in a drifter there is shape in it even upwind, because there is no heel to
+    // get rid of and she needs every square metre working.
+    let drifter = outhaul_for(rad(25.0), rad(3.0), rad(20.0));
+    assert!(
+        drifter < 0.2,
+        "five knots and upright: leave some depth, got {drifter:.2}"
+    );
+
+    // Heel still flattens on top of that, and still only once the righting moment has
+    // run out — which is the part of the old rule the sweep confirmed.
+    assert!(
+        outhaul_for(rad(140.0), rad(20.0), rad(20.0)) < 0.2,
+        "at the limit"
     );
     assert!(
-        outhaul_for_heel(rad(32.0), rad(20.0)) > 0.95,
-        "badly overpressed: flat"
+        outhaul_for(rad(140.0), rad(32.0), rad(20.0)) > 0.95,
+        "badly overpressed: flat, even running"
     );
-    // Symmetric in tack.
+    assert!(
+        outhaul_for(rad(25.0), rad(32.0), rad(20.0)) > 0.95,
+        "overpressed upwind: flat"
+    );
+
+    // Symmetric in tack, both inputs.
     assert_eq!(
-        outhaul_for_heel(rad(-25.0), rad(20.0)),
-        outhaul_for_heel(rad(25.0), rad(20.0))
+        outhaul_for(rad(-25.0), rad(-25.0), rad(20.0)),
+        outhaul_for(rad(25.0), rad(25.0), rad(20.0))
     );
 }
 

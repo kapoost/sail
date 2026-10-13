@@ -55,7 +55,7 @@ pub mod prelude {
     pub use crate::boat::{BoatConfig, RiggedSail};
     pub use crate::hull::Foil;
     pub use crate::hydrostatics::HullForm;
-    pub use crate::sail::{camber_for_outhaul, outhaul_for_heel, SailForces, SailProfile};
+    pub use crate::sail::{camber_for_outhaul, outhaul_for, SailForces, SailProfile};
     pub use crate::sim::{Simulation, SUBSTEP};
     pub use crate::state::{BoatState, Controls, Telemetry};
     pub use crate::units::{deg, kn_to_ms, ms_to_kn, rad, wrap_pi, wrap_tau};
