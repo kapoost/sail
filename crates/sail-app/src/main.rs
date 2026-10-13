@@ -39,6 +39,7 @@ mod windstreaks;
 mod world;
 
 use bevy::prelude::*;
+use bevy::window::EnabledButtons;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 /// No time compression — the clock runs at one to one.
@@ -159,6 +160,20 @@ fn main() {
                     primary_window: Some(Window {
                         title: "sail".into(),
                         resolution: (1440u32, 880u32).into(),
+                        // The window is fixed at this size on purpose. The instruments are
+                        // not a responsive layout: the console, the chart and the gauges are
+                        // drawn at known pixel sizes into a 480-line image that is then
+                        // scaled, and at any other aspect the needles sit off their dials and
+                        // the chart corner crawls out of the frame. A resizable window offers
+                        // a promise the picture cannot keep, so it is withdrawn.
+                        resizable: false,
+                        // Resizing is also reachable past `resizable` on macOS: the green
+                        // button zooms the window to the display. Turning the button off is
+                        // part of the same decision, not a separate nicety.
+                        enabled_buttons: EnabledButtons {
+                            maximize: false,
+                            ..default()
+                        },
                         ..default()
                     }),
                     ..default()
