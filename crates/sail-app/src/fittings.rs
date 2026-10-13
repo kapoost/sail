@@ -82,19 +82,42 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     // this is where a flush-decked boat puts it anyway.
     let fwd = deck::cockpit_fwd();
     let at = Vec3::new(0.0, deck::deck_height(fwd) + 0.20, fwd + 0.30);
+    // The bowl stands upright and the card hangs level inside it, which is the whole of
+    // what makes a compass an instrument rather than a dial. A card bolted to the boat
+    // reads her heel as a change of heading and is useless in the conditions you most
+    // want it; a card on gimbals stays with the horizon and tells the truth at thirty
+    // degrees of heel with the boat pitching.
+    //
+    // The bowl used to be tilted sixty degrees towards the helm with the card bolted
+    // across it, which is a dial painted on a slope.
     b.spawn((
-        Mesh3d(w.meshes.add(Cylinder::new(0.115, 0.10))),
+        Mesh3d(w.meshes.add(Cylinder::new(0.115, 0.13))),
         MeshMaterial3d(metal.clone()),
-        Transform::from_translation(at).with_rotation(Quat::from_rotation_x(1.05)),
+        Transform::from_translation(at),
     ))
     .with_children(|bowl| {
+        // The lubber line: a mark on the *bowl*, which is bolted to the boat, and
+        // therefore the one part of a compass that points where she is going. Reading
+        // one is reading the card against this, and without it there is nothing to read
+        // against.
         bowl.spawn((
-            CompassCard,
-            Mesh3d(w.meshes.add(disc(0.098))),
-            MeshMaterial3d(card_mat.clone()),
-            Transform::from_xyz(0.0, 0.052, 0.0),
+            Mesh3d(w.meshes.add(Cuboid::new(0.008, 0.02, 0.055))),
+            MeshMaterial3d(w.materials.add(StandardMaterial {
+                base_color: Color::srgb(0.68, 0.14, 0.10),
+                perceptual_roughness: 0.7,
+                ..default()
+            })),
+            Transform::from_xyz(0.0, 0.066, -0.088),
         ));
     });
+    // Hung from the boat rather than from the bowl, so undoing her attitude is one
+    // quaternion rather than two, and so that a change to the mount cannot tilt the card.
+    b.spawn((
+        CompassCard,
+        Mesh3d(w.meshes.add(disc(0.098))),
+        MeshMaterial3d(card_mat.clone()),
+        Transform::from_translation(at + Vec3::new(0.0, 0.062, 0.0)),
+    ));
 
     // --- The tiller ----------------------------------------------------------
     //
@@ -269,10 +292,22 @@ fn compass_card() -> Image {
             if r > 0.58 && near(30.0) < 1.3 {
                 shade = Vec3::new(0.12, 0.12, 0.14);
             }
-            // North: a red arrowhead rather than a letter.
+            // North: a red arrowhead rather than a letter. Widened, because at the
+            // resolution this is played at the whole card is a dozen pixels across and
+            // the only mark that can possibly read is the one that says which way is
+            // north — which is also the only mark a helmsman needs at a glance.
             let from_north = (bearing.min(360.0 - bearing)) * r;
-            if r > 0.22 && r < 0.80 && from_north < 7.0 {
-                shade = Vec3::new(0.72, 0.16, 0.12);
+            if r > 0.18 && r < 0.86 && from_north < 11.0 {
+                shade = Vec3::new(0.74, 0.15, 0.11);
+            }
+            // East, south and west as dark wedges. Letters would be mush; a wedge at a
+            // quarter turn is legible as long as it is a wedge, and three of them tell
+            // you which way the card is round even when the red one is hidden by the rim.
+            for cardinal in [90.0_f32, 180.0, 270.0] {
+                let off = (bearing - cardinal).abs().min(360.0 - (bearing - cardinal).abs());
+                if r > 0.46 && r < 0.86 && off * r < 6.0 {
+                    shade = Vec3::new(0.14, 0.14, 0.16);
+                }
             }
             if r > 0.88 {
                 shade *= 0.80;
@@ -303,9 +338,17 @@ fn compass_card() -> Image {
 /// compass does, and it is why the numbers appear to run backwards to anyone who has
 /// only ever read a digital heading.
 pub fn update_compass(sim: Res<Sim>, mut q: Query<&mut Transform, With<CompassCard>>) {
-    let heading = sim.render_state().heading as f32;
+    let st = sim.render_state();
+    // The exact inverse of the boat's own attitude, which is how a gimbal works: whatever
+    // she does, the card does the opposite and stays where the world is. `attitude` is
+    // yaw then roll then pitch, so undoing it is pitch then roll then yaw, each negated
+    // and in the other order — and getting that order wrong gives a card that is right
+    // upright and swims as soon as she heels, which is the failure that looks like it
+    // works.
     for mut t in &mut q {
-        t.rotation = Quat::from_rotation_y(heading);
+        t.rotation = Quat::from_rotation_x(-st.pitch as f32)
+            * Quat::from_rotation_z(st.heel as f32)
+            * Quat::from_rotation_y(st.heading as f32);
     }
 }
 
