@@ -304,17 +304,42 @@ fn sky_colour(dir: Vec3, sun: Vec3) -> Vec3 {
     sky + warm * (disc + corona) + warm * haze + warm * rays
 }
 
-/// The colour the haze has to be.
+/// The colour the haze has to be: the sky's own average along the horizon.
 ///
-/// Derived from the sky's own horizon rather than picked separately. If the two
-/// differ, the sea fades towards one colour while the sky above it is another, and the
-/// join shows as a band exactly where the eye is looking hardest.
+/// Derived rather than picked, and now derived from the *rendered* sky rather than from
+/// the constant it starts out as. The difference matters since there is weather in it.
+/// Distance fades everything towards this colour, so an island ten miles off is this
+/// colour — and if the sky behind it is a squall while this is a clear-day horizon, the
+/// island comes out brighter than its own background and cuts a hard white shape out of
+/// it. Which is exactly what it did: a pale silhouette against dark cloud, with an edge
+/// no amount of distance would ever produce.
+///
+/// Averaged over a ring of directions just above the horizon, which is where everything
+/// far away actually sits. A hundred and twenty-eight samples of the same function the
+/// cubemap is painted with, so the two cannot disagree about what colour the distance is.
+fn horizon_average() -> Vec3 {
+    let sun = SUN.normalize();
+    let mut sum = Vec3::ZERO;
+    const N: usize = 128;
+    for i in 0..N {
+        let a = std::f32::consts::TAU * i as f32 / N as f32;
+        // A couple of degrees up: low enough to be the distance, high enough not to be
+        // sampling the sea's own reflection band.
+        let dir = Vec3::new(a.cos(), 0.04, a.sin()).normalize();
+        sum += sky_colour(dir, sun);
+    }
+    // The sun's disc and corona are in there and would drag the mean towards white if a
+    // sample landed on them; clamped, because haze is haze and not a light source.
+    (sum / N as f32).min(Vec3::splat(1.0))
+}
+
 pub fn haze_colour() -> Color {
-    Color::linear_rgb(HORIZON.x, HORIZON.y, HORIZON.z)
+    let c = horizon_average();
+    Color::linear_rgb(c.x, c.y, c.z)
 }
 
 /// Slightly deeper, for the near end of the fog gradient.
 pub fn haze_near() -> Color {
-    let c = HORIZON * 0.88;
+    let c = horizon_average() * 0.88;
     Color::linear_rgb(c.x, c.y, c.z)
 }
