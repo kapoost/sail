@@ -80,16 +80,6 @@ jobs:
             The hull model and the font are inside the executable; `Sail.exe --licences`
             or `Sail.app/Contents/MacOS/sail --licences` prints their terms.
 
-            **At the helm.** Arrow keys are the tiller and hold their angle, `Space`
-            centres it, `Shift` makes any trim fine. `W`/`S` the mainsheet, `Q`/`E` the
-            genoa winch. `1`/`2` pick a line out of the clutch bank and `A`/`D` work it —
-            outhaul, vang, genoa car, reef, furl, staysail. `X`/`Z` change headsail, which
-            furls first, because a sail that teleports into another sail while drawing is
-            the one thing nobody would believe. `T` trims both sheets for you for five
-            seconds, which is what makes a gybe manageable single-handed. `P` the
-            autopilot and `O` switches it between a compass course and a wind angle.
-
-            **Looking at it.** `C` swaps between the helm and a view from astern, `V`
-            cycles the picture from sharp down to 480 pixels, `B` turns on the ink
-            drawing, `M` the chart with `[` and `]` to zoom, `Tab` the diagnostic panel,
-            `H` hides the console, `K` mutes, `L` asks for a new consignment.
+            **The keys** are on the `?` in the bottom-right corner of the window, or
+            press `?` or `F1`. They live in the program rather than here, because the
+            first version of this list had three of them wrong.

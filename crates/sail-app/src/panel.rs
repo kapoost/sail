@@ -399,6 +399,18 @@ pub fn draw(
                                 );
                             }
                         }
+                        // The vane cannot drop out, so when it is beaten it has to say so
+                        // some other way: there is no alarm to sound and no relay to
+                        // click. It says it here, and it says it on the transom, where
+                        // the blade is lying on its stop.
+                        if pilot.engaged() && pilot.struggling() && !pilot.can_let_go() {
+                            ui.label(
+                                egui::RichText::new("the vane is not coping")
+                                    .color(paint::BAD)
+                                    .monospace()
+                                    .size(10.0),
+                            );
+                        }
                         let engaged = pilot.engaged();
                         if lamp_button(ui, if engaged { "ENGAGED" } else { "STANDBY" }, engaged)
                             .clicked()

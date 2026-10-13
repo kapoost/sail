@@ -2786,3 +2786,23 @@ fn heel_is_most_of_it_once_she_is_pressed() {
     // and the sine of the heel at once.
     assert!(pressed.2 > easy.2 * 2.0);
 }
+
+#[test]
+fn a_vane_has_nothing_to_let_go_with() {
+    use sail_core::autopilot::{Autopilot, PilotMode};
+    // An electric pilot is a ram with a controller on it: six seconds on the stops and
+    // the controller knows it is braking rather than steering, so it drops out and
+    // alarms. A vane gear is a blade, a linkage and the water — no controller, no relay,
+    // nothing to decide anything. Overpowered it does not disengage, it simply stops
+    // coping: the vane lies on its stop, the boat wanders further off the wind she was
+    // set to, and in the end she tacks or gybes herself and the gear patiently steers
+    // the new course. Being caught out by that is a different thing to being caught out
+    // by a pilot switching off, and the two must not be modelled as one.
+    let mut pilot = Autopilot::new();
+    pilot.mode = PilotMode::Heading(rad(40.0));
+    assert!(pilot.can_let_go(), "an electric pilot can drop out");
+    pilot.mode = PilotMode::ApparentWind(rad(40.0));
+    assert!(!pilot.can_let_go(), "a vane gear cannot");
+    pilot.mode = PilotMode::Standby;
+    assert!(pilot.can_let_go());
+}

@@ -16,6 +16,7 @@ mod deck;
 mod deck_texture;
 mod fittings;
 mod frame;
+mod help;
 mod horizon;
 mod hud;
 mod ink;
@@ -188,6 +189,7 @@ fn main() {
         ))
         .init_resource::<sky::Baking>()
         .init_resource::<settings::Settings>()
+        .init_resource::<help::Help>()
         .insert_resource(retro::Retro::from_env())
         .insert_resource(world::Ink::from_env())
         .init_resource::<world::SeaFilm>()
@@ -266,6 +268,7 @@ fn main() {
                     rain::update,
                     rain::shroud,
                     settings::toggle,
+                    help::toggle,
                     camera::toggle,
                     camera::aim,
                     hud::toggle,
@@ -289,6 +292,7 @@ fn main() {
                 retro::scale_instruments,
                 panel::draw,
                 settings::draw,
+                help::draw,
                 chart::draw,
                 hud::draw,
             )

@@ -189,7 +189,7 @@ pub fn gather(
     // and a machine that beeps at you for doing what you meant to do gets ignored within
     // the hour. Losing the course is the one you need telling about, usually because you
     // are below and the boat is now steering herself.
-    if pilot.engaged() && pilot.struggling() {
+    if pilot.engaged() && pilot.struggling() && pilot.can_let_go() {
         pilot.drop_out("it could not hold the course — rudder was hard over");
         sound.0.alarm();
     }

@@ -449,6 +449,22 @@ impl Autopilot {
         self.saturated_seconds() > 6.0
     }
 
+    /// Whether this is a thing that *can* let go.
+    ///
+    /// The electric pilot is a ram with a controller on it, and when it has been on the
+    /// stops for six seconds the controller knows it is braking rather than steering and
+    /// drops out — with an alarm, because you are probably below.
+    ///
+    /// The vane gear has nothing to let go *with*. It is a blade, a linkage and the
+    /// water: no controller, no relay, nothing to decide anything. Overpowered, it does
+    /// not disengage — it simply stops coping. The vane lies over on its stop, the boat
+    /// wanders further and further off the wind she was set to, and in the end she tacks
+    /// or gybes herself and the gear goes on patiently steering the new course. That is
+    /// the failure mode, and it is a different one to be caught out by.
+    pub fn can_let_go(&self) -> bool {
+        !matches!(self.mode, PilotMode::ApparentWind(_))
+    }
+
     /// How long the rudder has been hard over, for diagnostics.
     pub fn saturated_seconds(&self) -> f64 {
         self.loop_.saturated_for()
