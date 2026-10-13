@@ -340,6 +340,55 @@ const GLINT_COS: f32 = 0.985;
 /// rides the wave through instead of flickering as the grid slides underneath.
 const GLINT_STIPPLE: f32 = 0.42;
 
+/// How much of a tone band is the step between it and the one below, 0 to 1.
+///
+/// The drawn sea shimmered, and this is why. A tone band was a `floor`: a vertex whose
+/// tone crept across a boundary changed colour by a *whole band* between one frame and
+/// the next, and since there are forty thousand of them and the water under them never
+/// stops moving, some were always crossing. Thirty per cent of the brightness range,
+/// flipped, sixty times a second, scattered over the surface.
+///
+/// The fault was already known in this file and already fixed once, a dozen lines
+/// further down, where the hatching softens its own stroke edge "or the lines crawl with
+/// the vertex grid instead of lying still on the water". The reasoning was never carried
+/// back to the bands, the contour or the foam, which are the same hard threshold on the
+/// same moving grid, and between them they cover the whole sea rather than a stroke.
+///
+/// So the staircase keeps its treads and grows a riser. Eighty-four per cent of each
+/// band is dead flat, which is what makes the drawing a drawing; the remaining sixth is
+/// a smooth climb to the next tone, so a vertex crossing it moves instead of jumping.
+/// The worst a hundredth of tone can now do is two hundredths of a band, against a third
+/// of the whole range before.
+const INK_RISE: f32 = 0.16;
+
+/// The drawn sea's tone, and how near this vertex is to a step in it.
+///
+/// Returns the quantised tone in 0..1 and the strength of the contour line, which is
+/// the same quantity read differently: the line marks where the tone changes, so it is
+/// brightest on the riser and gone by the middle of a tread.
+///
+/// The line straddles the step rather than sitting above it, which is the one visible
+/// change. One-sided it could not be continuous — it would have to appear at full
+/// strength the instant a vertex crossed, which is the flicker again, one band narrower.
+fn ink_tone(tone: f32) -> (f32, f32) {
+    let bands = INK_BANDS as f32;
+    let x = (tone * bands).clamp(0.0, bands);
+    let f = x - x.floor();
+    // Flat, then a climb, and the climb lands exactly where the next band's floor
+    // begins — so the two agree at the join and the staircase is continuous.
+    let level = x.floor() + smoothstep(0.0, INK_RISE, f) - 1.0;
+    let tone = (level / (INK_BANDS - 1) as f32).clamp(0.0, 1.0);
+    // Distance to the nearest step, the short way round.
+    let to_step = f.min(1.0 - f);
+    (tone, 1.0 - smoothstep(0.0, CONTOUR, to_step))
+}
+
+/// Hermite between two edges. The same curve `smoothstep` means everywhere else.
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a).max(1e-6)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Stable per-parcel hash, used to decide which facets catch the light.
 fn stipple(parcel: glam::DVec2) -> f32 {
     let x = (parcel.x * 0.37).floor() as i64;
@@ -739,7 +788,7 @@ pub fn update_sea(
                 0.0
             };
             tone = (tone - 0.42 * shade).clamp(0.0, 1.0);
-            let mut edge = 1.0;
+            let mut edge = 0.0;
             if ink {
                 // Drawn water, not photographed water.
                 //
@@ -751,11 +800,11 @@ pub fn update_sea(
                 // It is the right place for it, too: this colour is already computed
                 // per vertex on the processor every frame, so a style that would
                 // normally want a shader costs one rounding here.
-                let banded = (tone * INK_BANDS as f32).floor();
-                // How far into its band this vertex sits, kept before the tone is
-                // flattened, because afterwards the information is gone.
-                edge = tone * INK_BANDS as f32 - banded;
-                tone = (banded / (INK_BANDS - 1) as f32).clamp(0.0, 1.0);
+                let (banded, on_step) = ink_tone(tone);
+                tone = banded;
+                // How near a step this vertex sits, kept before the tone is flattened,
+                // because afterwards the information is gone.
+                edge = on_step;
             }
             let base = deep.lerp(shallow, tone);
             // Foam judged against this sea's own typical slope rather than a fixed
@@ -770,7 +819,10 @@ pub fn update_sea(
                 // whitecap is a shape with an outline rather than a soft bloom. And
                 // thrown earlier, since a hard-edged mark has to be large enough to
                 // read as a mark.
-                foam = if foam > 0.18 { 1.0 } else { 0.0 };
+                // Over a narrow range rather than at a point: still a mark with an
+                // edge to it at any one moment, and no longer a crest that switches
+                // itself on and off as the sea breathes under the grid.
+                foam = smoothstep(0.15, 0.21, foam);
             }
             let mut colour = base.lerp(
                 if ink {
@@ -801,9 +853,10 @@ pub fn update_sea(
                     colour *= 1.0 - HATCH_DEPTH * bite;
                 }
             }
-            if ink && edge < CONTOUR {
-                // The contour line along the step between two tones.
-                colour = colour.lerp(Vec3::new(0.97, 0.99, 1.0), CONTOUR_INK);
+            if ink && edge > 0.0 {
+                // The contour line along the step between two tones, struck as hard as
+                // the vertex is near one.
+                colour = colour.lerp(Vec3::new(0.97, 0.99, 1.0), CONTOUR_INK * edge);
             }
             if ink {
                 // Glints off the wave faces.
@@ -923,5 +976,107 @@ pub fn report_frame_times(time: Res<Time>, mut window: Local<(f32, u32, f32)>) {
             );
         }
         *window = (0.0, 0, 0.0);
+    }
+}
+
+/// What the drawn sea is allowed to do between one frame and the next.
+#[cfg(test)]
+mod drawn_sea {
+    use super::{ink_tone, smoothstep, INK_BANDS};
+
+    /// The shimmer, stated as a number: a vertex whose tone creeps may not change
+    /// colour by a whole band because of it.
+    ///
+    /// This is the test the old code fails, and it fails it by a factor of a hundred.
+    /// `(tone * 4.0).floor()` moves a third of the brightness range the instant its
+    /// argument crosses an integer, and across forty thousand vertices of moving water
+    /// some are always crossing — which is exactly what was reported from the deck as
+    /// the drawn sea glittering where the lit one does not.
+    #[test]
+    fn a_creeping_tone_may_not_jump_a_band() {
+        const STEP: f32 = 0.001;
+        // The arithmetic, because I got it wrong by a factor of four first time and
+        // the measurement said so. A smoothstep of width `INK_RISE` has a steepest
+        // slope of 1.5/INK_RISE; the argument is the tone times the number of bands and
+        // the result is divided by the bands less one, so the gain from input to output
+        // is 1.5 * 4 / (0.16 * 3), which is twelve and a half. A thousandth of tone can
+        // therefore move the drawn tone by 0.0125, and does.
+        //
+        // Which is the point rather than a disappointment: it is *bounded and
+        // proportional*. Halve the creep and the flicker halves. A `floor` moves a
+        // third of the whole range for an input change of any size at all, however
+        // small, and no amount of slowing the water down would have quietened it.
+        const ALLOWED: f32 = 0.02;
+        let mut worst: f32 = 0.0;
+        let mut x = 0.0_f32;
+        while x < 1.0 {
+            let (a, line_a) = ink_tone(x);
+            let (b, line_b) = ink_tone(x + STEP);
+            worst = worst.max((b - a).abs());
+            // And the contour line with it, which was the second hard threshold: it
+            // used to switch on at full strength the moment a vertex crossed.
+            assert!(
+                (line_b - line_a).abs() < 0.12,
+                "the contour jumped {:.3} at tone {x:.3}",
+                (line_b - line_a).abs()
+            );
+            x += STEP;
+        }
+        assert!(
+            worst < ALLOWED,
+            "a tone creeping by {STEP} moved the drawn tone by {worst:.4}, which is \
+             a vertex flickering between two bands"
+        );
+        // The old way, for the record, so the number above is a comparison and not an
+        // assertion about nothing.
+        let floored =
+            |t: f32| ((t * INK_BANDS as f32).floor() / (INK_BANDS - 1) as f32).clamp(0.0, 1.0);
+        let jump = (floored(0.25 + STEP) - floored(0.25 - STEP)).abs();
+        assert!(
+            jump > 0.3,
+            "the fault this replaces moved {jump:.2} of the range in one step"
+        );
+    }
+
+    /// And it is still a drawing: most of the sea sits on one of four flat tones,
+    /// because that is the whole of the style. A staircase with no treads is a ramp.
+    #[test]
+    fn the_treads_are_still_flat() {
+        let mut flat = 0;
+        let mut total = 0;
+        let mut x = 0.0_f32;
+        while x < 1.0 {
+            let (a, _) = ink_tone(x);
+            let (b, _) = ink_tone(x + 0.001);
+            if (b - a).abs() < 1e-6 {
+                flat += 1;
+            }
+            total += 1;
+            x += 0.001;
+        }
+        let share = flat as f32 / total as f32;
+        assert!(
+            share > 0.75,
+            "only {:.0}% of the tone range is a flat band, which is a gradient with \
+             steps in it rather than a drawing",
+            share * 100.0
+        );
+        // The treads are where they always were: four tones evenly spread, so the
+        // picture is the same picture.
+        for (i, at) in [0.20_f32, 0.45, 0.70, 0.95].iter().enumerate() {
+            let (tone, _) = ink_tone(*at);
+            let want = i as f32 / (INK_BANDS - 1) as f32;
+            assert!(
+                (tone - want).abs() < 1e-4,
+                "band {i} sits at {tone:.3} and should be at {want:.3}"
+            );
+        }
+    }
+
+    #[test]
+    fn smoothstep_is_the_usual_curve() {
+        assert_eq!(smoothstep(0.0, 1.0, -1.0), 0.0);
+        assert_eq!(smoothstep(0.0, 1.0, 2.0), 1.0);
+        assert!((smoothstep(0.0, 1.0, 0.5) - 0.5).abs() < 1e-6);
     }
 }
