@@ -414,26 +414,28 @@ fn drop_mark(u: f32, v: f32) -> f32 {
     1.0 - smoothstep(0.12, 0.92, r)
 }
 
-/// A handful of foam: a body with fingers torn off its top.
+/// A handful of foam: round, with a lobed rim and a little reach to it.
 ///
-/// Built rather than drawn, out of the one thing that makes foam look like foam — the
-/// edge is a lobed curve instead of a circle, and the lobes grow where the water is
-/// thrown. Five fingers, reaching further at the top than at the sides, because that is
-/// the way a crest tears: the water goes up and over and comes down in claws.
+/// Five deep lobes made a *star*, which is what it was reported as, and a star is the
+/// one shape loose foam never takes — a point needs something to hold it out and foam
+/// has nothing. Six shallow ones instead: enough to keep the rim from reading as a
+/// circle stamped out with a punch, nowhere near enough to make corners. What is left
+/// is a soft blob that is slightly not round, which is what a handful of water with air
+/// in it looks like from ten metres.
+///
+/// It keeps a little more reach upwards than down, because the water is thrown over the
+/// top of the wave and comes down, so the mark is not quite symmetrical about its own
+/// middle. That asymmetry does more for it than the lobes do.
 fn claw_mark(u: f32, v: f32) -> f32 {
     let r = (u * u + v * v).sqrt().max(1e-4);
     let angle = v.atan2(u);
-    // Lobes round the rim. The phase puts a finger pointing up rather than a gap.
-    let lobes = (angle * 5.0 - std::f32::consts::FRAC_PI_2).cos();
-    // Reaching further upwards: the fingers are thrown, and what throws them is gravity
-    // acting on water that has already gone over the top.
+    // Six, shallow, and offset so no lobe sits square on an axis.
+    let lobes = (angle * 6.0 + 0.4).cos();
     let up = (v * 0.5 + 0.5).clamp(0.0, 1.0);
-    let rim = 0.40 + 0.30 * lobes.max(0.0) * (0.35 + 0.65 * up);
-    // Hard on the outside, because this is a *mark* and a mark has an edge, and softer
-    // on the inside where the foam is thick.
-    let body = 1.0 - smoothstep(rim * 0.55, rim, r);
-    let fingers = 1.0 - smoothstep(rim, rim + 0.10, r);
-    (body * 0.65 + fingers * 0.45).min(1.0)
+    let rim = 0.74 + 0.07 * lobes + 0.07 * up;
+    // Soft all the way out. The hard outer edge was half of why it read as a drawn
+    // shape rather than as foam; what an edge of foam does is get thinner.
+    1.0 - smoothstep(rim * 0.35, rim, r)
 }
 
 /// The tile has to repeat, and the mesh's UVs run to hundreds of tiles across.

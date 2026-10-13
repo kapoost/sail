@@ -561,10 +561,14 @@ pub fn update(
         // drop that spreads a little as it falls. A mark off a crest *blooms*: it comes
         // out small and hard and ends up four times the size and gone, which is what a
         // handful of foam does when the air comes out of it.
+        // Smaller, both of them. The mark reads by *how many* there are, and a big one
+        // is a splodge of paint however good its shape: the claw now starts at three
+        // centimetres and ends under twenty, which at the distance a crest breaks from
+        // the boat is a handful of foam rather than a bedsheet.
         let size = if s.claw {
-            (0.05 + 0.30 * life) * s.scale
+            (0.03 + 0.16 * life) * s.scale
         } else {
-            (0.055 + 0.085 * life) * s.scale * 0.62
+            (0.04 + 0.06 * life) * s.scale * 0.62
         };
         // And every one of them twinkles. Real broken water does not glow steadily: a
         // bubble catches the sky, turns, and goes out, and what the eye picks up from a
