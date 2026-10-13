@@ -75,6 +75,11 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
         base_color: Color::WHITE,
         base_color_texture: Some(w.images.add(compass_card())),
         perceptual_roughness: 0.55,
+        // Lit and visible from either face. A gimballed card turns to whatever the
+        // horizon is doing, and a single-sided disc that happens to tip past the
+        // vertical vanishes — which from the helm is a compass with nothing in it.
+        double_sided: true,
+        cull_mode: None,
         ..default()
     });
     // On the forward coaming, facing aft, so it is read from the tiller without
@@ -116,7 +121,9 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
         CompassCard,
         Mesh3d(w.meshes.add(disc(0.098))),
         MeshMaterial3d(card_mat.clone()),
-        Transform::from_translation(at + Vec3::new(0.0, 0.062, 0.0)),
+        // Just proud of the rim, where it can be read from the tiller rather than only
+        // from directly overhead.
+        Transform::from_translation(at + Vec3::new(0.0, 0.072, 0.0)),
     ));
 
     // --- The tiller ----------------------------------------------------------
