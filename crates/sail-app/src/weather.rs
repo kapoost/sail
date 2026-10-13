@@ -209,7 +209,7 @@ impl Weather {
     pub fn report(&self) -> String {
         format!(
             "{:02.0}{:02.0}, {} oktas — {:.0} kn from {:03.0}, {}; sea {:.1} m at {:.1} s \
-             over {:.0} km of fetch; starting {} on {} tack{}{} [seed {}]",
+             over {:.0} km of fetch ({}); starting {} on {} tack{}{} [seed {}]",
             self.start_hour.floor(),
             self.start_hour.fract() * 60.0,
             (self.cover * 8.0).round(),
@@ -219,6 +219,7 @@ impl Weather {
             self.hs,
             self.tp,
             self.fetch / 1000.0,
+            sea_state(self.hs),
             point_of_sail(self.start_twa),
             if self.start_twa > 0.0 {
                 "starboard"
@@ -240,8 +241,71 @@ impl Weather {
     }
 }
 
+/// Which force this wind is.
+///
+/// Beaufort is a *wind* scale and it is the one every sailor thinks in — nobody says
+/// "seventeen knots", they say "a fresh breeze" or "a five". The bands are the real
+/// ones, and the boundaries matter: force six is where a cruising boat puts a reef in,
+/// force seven is where she puts the second one, and force eight is where she stops
+/// going where she wanted to go.
+pub fn force(knots: f64) -> u8 {
+    match knots {
+        k if k < 1.0 => 0,
+        k if k < 4.0 => 1,
+        k if k < 7.0 => 2,
+        k if k < 11.0 => 3,
+        k if k < 17.0 => 4,
+        k if k < 22.0 => 5,
+        k if k < 28.0 => 6,
+        k if k < 34.0 => 7,
+        k if k < 41.0 => 8,
+        k if k < 48.0 => 9,
+        _ => 10,
+    }
+}
+
+/// A representative wind for a force, knots: the middle of its band.
+///
+/// For a dial, so that asking for a six gives you a six rather than its edge — a slider
+/// that lands on 21.9 knots is a five, and the person who moved it will say the dial is
+/// broken rather than that they are a knot short.
+pub fn force_wind(force: u8) -> f64 {
+    match force.min(10) {
+        0 => 0.5,
+        1 => 2.0,
+        2 => 5.0,
+        3 => 9.0,
+        4 => 13.5,
+        5 => 19.0,
+        6 => 24.5,
+        7 => 30.5,
+        8 => 37.0,
+        9 => 44.0,
+        _ => 52.0,
+    }
+}
+
+/// What a sea of this height is called.
+///
+/// Douglas, which is the *sea* scale and is not Beaufort — a point worth keeping
+/// straight on a panel that carries both. A force six over twenty miles of fetch and a
+/// force six over two hundred are the same wind and quite different afternoons, and the
+/// only honest way to say which is to name the sea separately.
+pub fn sea_state(hs: f64) -> &'static str {
+    match hs {
+        h if h < 0.1 => "glassy",
+        h if h < 0.5 => "smooth",
+        h if h < 1.25 => "slight",
+        h if h < 2.5 => "moderate",
+        h if h < 4.0 => "rough",
+        h if h < 6.0 => "very rough",
+        h if h < 9.0 => "high",
+        _ => "very high",
+    }
+}
+
 /// The scale a sailor actually thinks in.
-fn beaufort(knots: f64) -> &'static str {
+pub fn beaufort(knots: f64) -> &'static str {
     match knots {
         k if k < 4.0 => "force 2, light breeze",
         k if k < 7.0 => "force 3, gentle breeze",
@@ -261,5 +325,67 @@ fn point_of_sail(twa: f64) -> &'static str {
         a if a < 100.0 => "on a beam reach",
         a if a < 140.0 => "on a broad reach",
         _ => "running",
+    }
+}
+
+#[cfg(test)]
+mod scales {
+    use super::*;
+
+    /// The force bands have to be the real ones, and the dial has to land inside the
+    /// band it says. A slider that gives you 21.9 knots when you asked for a six is a
+    /// slider you will say is broken — and it would be right, because 21.9 is a five.
+    #[test]
+    fn asking_for_a_force_gives_you_that_force() {
+        for f in 0..=10u8 {
+            let knots = force_wind(f);
+            assert_eq!(
+                force(knots),
+                f,
+                "force {f} is quoted as {knots:.1} kn, which reads back as a {}",
+                force(knots)
+            );
+        }
+    }
+
+    /// And the boundaries are where the sailing decisions are.
+    #[test]
+    fn the_bands_are_where_a_sailor_expects_them() {
+        assert_eq!(force(16.9), 4, "a fresh breeze starts at seventeen");
+        assert_eq!(force(17.0), 5);
+        assert_eq!(
+            force(21.9),
+            5,
+            "and a strong breeze at twenty-two — the first reef"
+        );
+        assert_eq!(force(22.0), 6);
+        assert_eq!(force(27.9), 6);
+        assert_eq!(force(28.0), 7, "a near gale, and the second reef");
+        assert_eq!(
+            force(34.0),
+            8,
+            "a gale, and you are not going where you wanted"
+        );
+    }
+
+    /// Douglas is the *sea* scale and is not Beaufort, which is a distinction worth
+    /// keeping on a panel that carries both: the same force over twenty miles of fetch
+    /// and over two hundred is the same wind and quite a different afternoon.
+    #[test]
+    fn the_sea_is_named_by_its_height() {
+        assert_eq!(sea_state(0.05), "glassy");
+        assert_eq!(sea_state(0.4), "smooth");
+        assert_eq!(sea_state(1.0), "slight");
+        assert_eq!(sea_state(2.0), "moderate");
+        assert_eq!(sea_state(3.0), "rough");
+        assert_eq!(sea_state(5.0), "very rough");
+        // A force six over a short fetch is a slight sea; over a long one it is rough.
+        let short = sail_core::water::fetch_limited_sea(kn_to_ms(24.5), 15_000.0).0;
+        let long = sail_core::water::fetch_limited_sea(kn_to_ms(24.5), 300_000.0).0;
+        assert_ne!(
+            sea_state(short),
+            sea_state(long),
+            "the same wind over 15 and 300 km of fetch should not be the same sea              ({short:.1} m against {long:.1} m)"
+        );
     }
 }

@@ -146,10 +146,18 @@ pub fn draw(
                     let (hs, tp) = sail_core::water::fetch_limited_sea(tws, sea.fetch());
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(format!("building towards {hs:.1} m at {tp:.1} s"))
-                                .color(egui::Color32::from_rgb(150, 150, 130))
-                                .monospace()
-                                .size(10.0),
+                            // Named as well as measured. Douglas is the *sea* scale and
+                            // it is not Beaufort — the same force over twenty miles of
+                            // fetch and over two hundred is the same wind and quite a
+                            // different afternoon, and naming the sea separately is the
+                            // only honest way to say which one you have asked for.
+                            egui::RichText::new(format!(
+                                "building towards {} — {hs:.1} m at {tp:.1} s",
+                                crate::weather::sea_state(hs)
+                            ))
+                            .color(egui::Color32::from_rgb(150, 150, 130))
+                            .monospace()
+                            .size(10.0),
                         );
                         // Because the real thing takes two and a half hours to build and
                         // five to lie down, which is right and is exactly what you do not
@@ -173,14 +181,32 @@ pub fn draw(
                     footer(ui, &mut close);
                     return;
                 };
-                let mut knots = sail_core::units::ms_to_kn(wind.synoptic.base_speed) as f32;
+                // In Beaufort, because that is what a sailor thinks in: nobody says
+                // "seventeen knots", they say "a fresh breeze" or "a five". The knots are
+                // printed beside it because the instruments are in knots and the two have
+                // to be connectable, and the slider lands on the *middle* of a force
+                // rather than its edge — a dial that gives you 21.9 knots when you asked
+                // for a six is a dial you will say is broken.
+                let knots = sail_core::units::ms_to_kn(wind.synoptic.base_speed);
+                let mut force = crate::weather::force(knots);
                 if ui
-                    .add(egui::Slider::new(&mut knots, 4.0..=40.0).text("wind, kn"))
+                    .add(egui::Slider::new(&mut force, 1..=9).text("wind, force"))
                     .changed()
                 {
-                    wind.synoptic.base_speed = sail_core::units::kn_to_ms(knots as f64);
+                    wind.synoptic.base_speed =
+                        sail_core::units::kn_to_ms(crate::weather::force_wind(force));
                     settings.weather_touched = true;
                 }
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} — {:.0} kn",
+                        crate::weather::beaufort(knots),
+                        knots
+                    ))
+                    .color(egui::Color32::from_rgb(150, 150, 130))
+                    .monospace()
+                    .size(10.0),
+                );
                 let mut oktas = (wind.synoptic.cover() * 8.0).round() as u8;
                 if ui
                     .add(egui::Slider::new(&mut oktas, 0..=8).text("cloud, oktas"))
