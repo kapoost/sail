@@ -94,6 +94,16 @@ const KEY_HELM_FINE: f64 = 0.28;
 /// How fast Space brings the helm back amidships.
 const KEY_HELM_CENTRE: f64 = 2.2;
 
+/// What one press moves the autopilot's target, and what it moves with Shift held.
+///
+/// The same two numbers serve the compass and the wind vane, because the pilot takes a
+/// *target* either way and the hand asking for it is the same hand. They live here, in
+/// the input, rather than in the autopilot: how far a key moves something is a property
+/// of the key, and `Autopilot::adjust` is given an angle and does not care where it came
+/// from. The panel reaches for them so its buttons and the keys cannot drift apart.
+pub const PILOT_STEP: f64 = rad(10.0);
+pub const PILOT_FINE: f64 = rad(1.0);
+
 fn deadzone(v: f32) -> f32 {
     if v.abs() < STICK_DEADZONE {
         0.0
@@ -145,10 +155,16 @@ pub fn gather(
             _ => pilot.hold_heading(&sim.sim.state),
         }
     }
+    // Ten degrees a press, one with Shift held — the same way round as the helm, where
+    // Shift is the small bite. A degree at a time was the wrong default: putting the
+    // pilot thirty degrees onto a new course meant thirty presses, and nobody steers a
+    // boat in single degrees except in the last moments of lining something up. Ten is
+    // a point of the compass and change, which is how a course alteration is actually
+    // thought about, and the fine step is still there under Shift for the lining-up.
     let nudge = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
-        rad(5.0)
+        PILOT_FINE
     } else {
-        rad(1.0)
+        PILOT_STEP
     };
     if keys.just_pressed(KeyCode::Period) {
         pilot.adjust(nudge);

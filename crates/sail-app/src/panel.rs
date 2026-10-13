@@ -438,12 +438,19 @@ pub fn draw(
                                 pilot.hold_wind(&telemetry);
                             }
                         }
+                        // The same two steps the keys use, from the same constants, and
+                        // the doubled arrow is the coarse one in every piece of marine
+                        // electronics ever built.
                         ui.horizontal(|ui| {
-                            if small_button(ui, "<").clicked() {
-                                pilot.adjust(-rad(1.0));
-                            }
-                            if small_button(ui, ">").clicked() {
-                                pilot.adjust(rad(1.0));
+                            for (label, delta) in [
+                                ("<<", -crate::input::PILOT_STEP),
+                                ("<", -crate::input::PILOT_FINE),
+                                (">", crate::input::PILOT_FINE),
+                                (">>", crate::input::PILOT_STEP),
+                            ] {
+                                if small_button(ui, label).clicked() {
+                                    pilot.adjust(delta);
+                                }
                             }
                         });
                     });

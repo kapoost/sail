@@ -728,7 +728,12 @@ impl Simulation {
             head.x_ce - crate::sail::chordwise_shift(&head.profile, head.area, jib_chord, jib_cop);
         let mut mz = main_x * (main.side + main_upper.side)
             + jib_x * (jib.side + jib_upper.side) * slot_cost
-            + cfg.staysail.x_ce * stay_side;
+            + cfg.staysail.x_ce * stay_side
+            // The windage has a lever too. Small — about sixty newton-metres in twenty
+            // knots against the sails' thousands — but under bare poles it is the only
+            // yaw moment on her, and a force carried at the origin because nobody said
+            // where it acted is an accident rather than a model.
+            + cfg.windage_x * windage_side;
         // Heel swings the centre of effort out to leeward, so the driving force now
         // acts on a lever arm and luffs the boat up. This is weather helm.
         // Two things put a sail's centre of effort out to leeward, and the second one

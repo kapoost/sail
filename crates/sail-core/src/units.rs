@@ -18,14 +18,17 @@ pub fn ms_to_kn(ms: f64) -> f64 {
     ms / KNOT
 }
 
+// Both are `const`, which is not decoration: a step size or a limit written in degrees
+// wants to be a constant where it is used, and `to_radians` is a multiplication, so
+// there is no reason for the conversion to wait until run time.
 #[inline]
-pub fn deg(rad: f64) -> f64 {
-    rad.to_degrees()
+pub const fn deg(rad: f64) -> f64 {
+    rad * (180.0 / std::f64::consts::PI)
 }
 
 #[inline]
-pub fn rad(deg: f64) -> f64 {
-    deg.to_radians()
+pub const fn rad(deg: f64) -> f64 {
+    deg * (std::f64::consts::PI / 180.0)
 }
 
 /// Wrap to (-pi, pi]. Used for every heading and wind-angle difference; forgetting it

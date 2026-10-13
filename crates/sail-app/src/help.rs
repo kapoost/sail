@@ -48,6 +48,7 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
                 "O",
                 "and whether it steers a compass course or a wind angle",
             ),
+            (", .", "move its target ten degrees — one with Shift"),
         ],
     ),
     (

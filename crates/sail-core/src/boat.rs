@@ -88,6 +88,34 @@ pub struct BoatConfig {
     /// a knot or two with everything handed — and what lays her over when she is lying
     /// a-hull in a gale, since it acts at the height of the rig.
     pub windage_area: f64,
+    /// And where it acts, fore and aft, metres — bow positive.
+    ///
+    /// A force with no moment is a force applied at the origin, which is an accident
+    /// rather than a decision, and that is what this was until somebody asked where the
+    /// push from the boom goes. With no sail set it is the *only* yaw moment on her, so
+    /// it decides how a bare-poled boat lies, which is a real question with a real
+    /// answer: forward of the lateral resistance and she bears away and runs off; aft of
+    /// it and she weathercocks head to wind and sits there in irons, which is what a
+    /// mizzen is for and what a sloop does not do.
+    ///
+    /// Added up from the pieces rather than chosen, frontal area times lever:
+    ///
+    /// | piece                      | area   | at     |
+    /// |----------------------------|--------|--------|
+    /// | mast, 17.8 m by 0.18       | 3.2 m² | +1.8 m |
+    /// | boom and the main on it    | 1.9 m² | −0.8 m |
+    /// | rolled genoa on the stay   | 3.2 m² | +3.5 m |
+    /// | topsides                   | 10 m²  |  0.0 m |
+    ///
+    /// which comes to about three quarters of a metre forward — the topsides dominating
+    /// the area and sitting amidships is what keeps the answer modest. So she bears away
+    /// under bare poles and lies stern-to, which is the commoner of the two things a
+    /// sloop does and the safer one.
+    ///
+    /// The *moment* is small against the sails: sixty-odd newton-metres in twenty knots
+    /// of apparent wind, against the two to four thousand the rig makes. This will not
+    /// be the reason anything gripes.
+    pub windage_x: f64,
 
     // --- Inertia, including added mass ---
     pub surge_added_mass: f64,
@@ -304,6 +332,7 @@ impl BoatConfig {
             gz_peak_angle: rad(60.0),
             z_clr: 0.85,
             windage_area: 1.6,
+            windage_x: 0.85,
 
             surge_added_mass: 0.05 * displacement,
             sway_added_mass: 0.85 * displacement,
@@ -501,6 +530,7 @@ impl BoatConfig {
             gz_peak_angle: rad(65.0),
             z_clr: 0.90,
             windage_area: 1.6,
+            windage_x: 0.85,
 
             surge_added_mass: 0.05 * displacement,
             sway_added_mass: 0.85 * displacement,
@@ -734,6 +764,7 @@ impl BoatConfig {
             gz_peak_angle: rad(60.0),
             z_clr: 1.05,
             windage_area: 1.6,
+            windage_x: 0.85,
 
             surge_added_mass: 0.05 * displacement,
             sway_added_mass: 0.85 * displacement,

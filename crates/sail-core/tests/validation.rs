@@ -2581,20 +2581,29 @@ fn the_vane_does_not_gybe_itself_across_the_stern() {
 }
 
 #[test]
-fn under_bare_poles_she_goes_to_leeward() {
+fn under_bare_poles_she_bears_away_and_lies_stern_to() {
     // With the main handed and the headsail rolled away there is no sail on her, and
     // what is left is windage: the spar, the rigging, the rolled sail on the stay and
     // the topsides. That had been missing entirely, and what it was missing was not a
     // correction but the whole of what a boat does with nothing set — measured before
     // it existed, from rest in twenty knots of wind she did not move *at all*, and given
     // way she kept it, so she could coast to windward under bare poles for minutes.
+    //
+    // The first version of this test asked what she did at a *given* true wind angle,
+    // and that stopped being a question the moment the windage was given a lever to act
+    // on: she no longer stays where she is pointed, and that is the interesting part.
+    // The windage is centred about three quarters of a metre forward of where the keel
+    // holds her — the rolled genoa on the stay and the mast against the boom, with the
+    // topsides amidships keeping the answer modest — so with the helm amidships she
+    // bears away until she is running, and lies there. Forward of the lateral
+    // resistance is bearing away; aft of it is weathercocking head to wind and sitting
+    // in irons, which is what a mizzen is for and what a sloop does not do.
     let cfg = BoatConfig::archipelago_packet();
-    let settled = |twa_deg: f64| {
-        let heading = wrap_tau(0.0 - rad(twa_deg));
-        let mut state = BoatState::at_rest(heading);
+    let lying = |start_twa: f64| {
+        let heading = wrap_tau(0.0 - rad(start_twa));
         let mut sim = Simulation::new(
             cfg,
-            state,
+            BoatState::at_rest(heading),
             Box::new(SteadyWind::new(0.0, kn_to_ms(20.0))) as Box<dyn WindField>,
         );
         let controls = Controls {
@@ -2604,39 +2613,39 @@ fn under_bare_poles_she_goes_to_leeward() {
             rudder: 0.0,
             ..Default::default()
         };
-        for _ in 0..(300.0 / SUBSTEP) as u64 {
+        for _ in 0..(400.0 / SUBSTEP) as u64 {
             sim.run(SUBSTEP, &controls);
         }
-        state = sim.state;
-        let _ = state;
-        (ms_to_kn(sim.telemetry.stw), ms_to_kn(sim.telemetry.vmg))
+        (
+            deg(sim.telemetry.twa).abs(),
+            ms_to_kn(sim.telemetry.stw),
+            ms_to_kn(sim.telemetry.vmg),
+        )
     };
 
-    for twa in [45.0, 56.0, 90.0, 135.0] {
-        let (speed, vmg) = settled(twa);
-        // She moves, which she did not before.
+    for start in [20.0, 45.0, 90.0, 135.0, 170.0] {
+        let (twa, speed, vmg) = lying(start);
+        // She moves, which she did not before the windage existed.
         assert!(
-            (0.4..=3.0).contains(&speed),
-            "bare poles in twenty knots should drift a knot or two, got {speed:.2} at \
-             TWA {twa:.0}"
+            (0.8..=3.0).contains(&speed),
+            "bare poles in twenty knots should drift a knot or two, got {speed:.2} from \
+             a start at TWA {start:.0}"
         );
         // And never to windward. This is the whole claim: windage acts along the
         // apparent wind, and nothing without sails has ever made ground against it.
         assert!(
             vmg < 0.0,
-            "at TWA {twa:.0} under bare poles she made {vmg:+.2} kn to windward, which \
-             is a boat sailing on her rigging"
+            "from TWA {start:.0} under bare poles she made {vmg:+.2} kn to windward, \
+             which is a boat sailing on her rigging"
+        );
+        // And wherever she was pointed, she ends up with the wind behind her rather
+        // than weathercocking into it.
+        assert!(
+            twa > 120.0,
+            "started at TWA {start:.0} she should bear away and run off, not settle at \
+             {twa:.0} with the wind forward"
         );
     }
-
-    // And the beam is where she is pushed hardest, because that is where the whole side
-    // of her is presented to it.
-    let (beam, _) = settled(90.0);
-    let (close, _) = settled(45.0);
-    assert!(
-        beam > close,
-        "{beam:.2} kn beam-on against {close:.2} close-hauled"
-    );
 }
 
 // ---------------------------------------------------------------------------
