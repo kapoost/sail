@@ -5042,7 +5042,7 @@ dependencies = [
 
 [[package]]
 name = "sail-app"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "bevy",
  "bevy_egui",
@@ -5052,7 +5052,7 @@ dependencies = [
 
 [[package]]
 name = "sail-core"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "glam 0.34.1",
 ]
