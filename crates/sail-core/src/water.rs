@@ -123,6 +123,15 @@ pub trait WaterSurface: Send + Sync {
         fallback
     }
 
+    /// The sea's own dials, if it has any.
+    ///
+    /// The same seam as `WindField::adjustable` and for the same reason: a sea handed
+    /// over as a fixed spectrum, or read off a measurement, answers `None` and the panel
+    /// says so rather than offering a control that does nothing.
+    fn adjustable(&mut self) -> Option<&mut WindSea> {
+        None
+    }
+
     /// Let the sea follow the wind, which it does slowly and asymmetrically.
     ///
     /// A sea is not a function of the wind now; it is a function of the wind for the
@@ -340,6 +349,37 @@ impl WindSea {
             .collect();
     }
 
+    /// How much open water is upwind, metres.
+    ///
+    /// The honest dial for the sea, and the *only* one. Wave height is a consequence of
+    /// wind speed, fetch and how long it has blown; a control that set the height
+    /// directly could produce three metres at six knots or flat water at thirty, either
+    /// of which a sailor spots instantly. So the panel moves the fetch — which is a real
+    /// property of where you are — and the height follows from the same relations the
+    /// waves themselves use.
+    pub fn fetch(&self) -> f64 {
+        self.fetch
+    }
+
+    pub fn set_fetch(&mut self, metres: f64) {
+        self.fetch = metres.max(500.0);
+    }
+
+    /// Jump the sea to whatever this wind and fetch would eventually make of it.
+    ///
+    /// For the practice dial, and it is honest about what it is: the real sea takes two
+    /// and a half hours to build and five to lie down, which is right and is exactly what
+    /// you do not want when you have moved a slider to look at something. The phases are
+    /// kept, so the water changes size rather than being replaced — no jump, just a sea
+    /// that has suddenly had all afternoon.
+    pub fn settle(&mut self, tws: f64, t: f64) {
+        let (hs, tp) = fetch_limited_sea(tws, self.fetch);
+        let was: [f64; BANDS] = std::array::from_fn(|i| self.components[i].omega);
+        self.hs = hs;
+        self.tp = tp;
+        self.reshape(t, &was);
+    }
+
     pub fn components(&self) -> &[WaveComponent] {
         &self.components
     }
@@ -443,6 +483,10 @@ impl WaterSurface for WindSea {
             d -= c.direction * (c.amplitude * c.theta(pos, t).sin());
         }
         d
+    }
+
+    fn adjustable(&mut self) -> Option<&mut WindSea> {
+        Some(self)
     }
 
     fn peak_period_or(&self, _fallback: f64) -> f64 {

@@ -122,6 +122,45 @@ pub fn draw(
                     settings.weather_touched = true;
                 }
 
+                // The sea. One dial and only one, because wave height is a *consequence*
+                // — of the wind, the fetch and how long it has blown — and a control that
+                // set it directly could make three metres at six knots or flat water at
+                // thirty, either of which a sailor spots instantly. Fetch is the honest
+                // one: it is a real property of where you are, and the height follows
+                // from the same relations the waves themselves use.
+                let tws = sim.sim.telemetry.tws;
+                let t = sim.sim.state.time;
+                if let Some(sea) = sim.sim.water.adjustable() {
+                    let mut km = (sea.fetch() / 1000.0) as f32;
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut km, 3.0..=320.0)
+                                .logarithmic(true)
+                                .text("fetch, km"),
+                        )
+                        .changed()
+                    {
+                        sea.set_fetch(km as f64 * 1000.0);
+                        settings.weather_touched = true;
+                    }
+                    let (hs, tp) = sail_core::water::fetch_limited_sea(tws, sea.fetch());
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("building towards {hs:.1} m at {tp:.1} s"))
+                                .color(egui::Color32::from_rgb(150, 150, 130))
+                                .monospace()
+                                .size(10.0),
+                        );
+                        // Because the real thing takes two and a half hours to build and
+                        // five to lie down, which is right and is exactly what you do not
+                        // want when you have just moved a slider to look at something.
+                        if ui.button("SETTLE NOW").clicked() {
+                            sea.settle(tws, t);
+                            settings.weather_touched = true;
+                        }
+                    });
+                }
+
                 // And the wind, if whatever is behind the field has dials on it. A real
                 // forecast would not, and would say so here rather than pretending.
                 let Some(wind) = sim.sim.wind.adjustable() else {

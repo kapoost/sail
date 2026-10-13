@@ -28,7 +28,7 @@ use crate::frame;
 use crate::sim::Sim;
 
 /// How many streaks are alive at once.
-const COUNT: usize = 600;
+const COUNT: usize = 1000;
 /// Points across the little grid of wind the streaks are carried by.
 ///
 /// They cannot each ask the wind field directly. `ShelteredWind` answers by tracing
@@ -163,7 +163,13 @@ pub fn update(
 
     // Top up, scattered round the boat. More of them in more wind, because that is
     // what the water does — a calm has no cat's paws in it at all.
-    let density = (sail_core::units::ms_to_kn(sim.sim.telemetry.tws) / 22.0).clamp(0.0, 1.0);
+    // Twenty-two knots used to fill the field and that is far too late: the water starts
+    // showing the wind long before it is blowing hard, and a fresh breeze over open water
+    // is *covered* in cat's paws. Full at fourteen now, with a floor so a drifting day
+    // still has something moving on it — the one condition where you are reading the
+    // water hardest is the one where there is least to read.
+    let knots = sail_core::units::ms_to_kn(sim.sim.telemetry.tws);
+    let density = (0.12 + knots / 14.0).clamp(0.0, 1.0);
     let want = (COUNT as f64 * density as f64) as usize;
     while streaks.live.len() < want {
         let a = streaks.seed.next_f64() * std::f64::consts::TAU;
