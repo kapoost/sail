@@ -374,7 +374,9 @@ impl Simulation {
         // its vang in one fitting. A sail set flying has no car and no such control: its
         // depth is cut into it by the sailmaker and nothing on board changes it.
         let jib_camber = match flying {
-            crate::state::Headsail::Genoa => camber_for_lead(controls.genoa_car),
+            crate::state::Headsail::Genoa => {
+                crate::sail::camber_rolled(camber_for_lead(controls.genoa_car), controls.furl)
+            }
             crate::state::Headsail::Code0 => crate::sail::CAMBER_CODE_ZERO,
             crate::state::Headsail::Gennaker => crate::sail::CAMBER_GENNAKER,
         };

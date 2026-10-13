@@ -8,13 +8,15 @@ pub const RHO_AIR: f64 = 1.225; // kg/m^3 at 15 C
 pub const RHO_SEA: f64 = 1025.0; // kg/m^3
 pub const NU_SEA: f64 = 1.188e-6; // kinematic viscosity, m^2/s at 15 C
 
+// `const`, for the same reason `rad` is: a sail's limit or a boat's hull speed written
+// in knots wants to be a constant where it is used, and this is one multiplication.
 #[inline]
-pub fn kn_to_ms(kn: f64) -> f64 {
+pub const fn kn_to_ms(kn: f64) -> f64 {
     kn * KNOT
 }
 
 #[inline]
-pub fn ms_to_kn(ms: f64) -> f64 {
+pub const fn ms_to_kn(ms: f64) -> f64 {
     ms / KNOT
 }
 

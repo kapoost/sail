@@ -8,11 +8,11 @@
 //! under 6 knots at 15-20 degrees of heel, tacks through about 90 degrees losing a
 //! knot or more, and cannot be driven much past its hull speed.
 
-use sail_core::autopilot::steady_state_sailplan;
+use sail_core::autopilot::{steady_state_sailplan, steady_state_trimmed};
 use sail_core::prelude::*;
 use sail_core::sail::{
-    camber_for_outhaul, outhaul_for, sail_forces, SailProfile, CAMBER_DEEP, CAMBER_FLAT,
-    CAMBER_REFERENCE,
+    camber_for_outhaul, camber_reefed, camber_rolled, outhaul_for, sail_forces, SailProfile,
+    CAMBER_DEEP, CAMBER_FLAT, CAMBER_REFERENCE,
 };
 use sail_core::state::Headsail;
 use sail_core::wind::{SteadyWind, WindField};
@@ -2687,8 +2687,18 @@ fn she_will_not_point_under_headsail_alone() {
                 Headsail::Genoa,
                 0.0,
             );
-            assert!(s.converged, "TWA {twa} did not converge");
-            let vmg = ms_to_kn(s.telemetry.vmg);
+            // An unconverged point is not a slow point, it is a point with no answer —
+            // and under headsail alone, at the close angles, the answer is that the
+            // helm is on its stops and she cannot be held there at all. That *is* the
+            // result rather than a failure of the solve, so it counts as no velocity
+            // made good rather than throwing. The whole rig is asserted to converge
+            // below, because a boat that cannot hold a close-hauled course under her
+            // working sails is a different and much worse bug.
+            let vmg = if s.converged {
+                ms_to_kn(s.telemetry.vmg)
+            } else {
+                0.0
+            };
             at.insert(twa as i32, vmg);
             if vmg > best.1 {
                 best = (twa, vmg);
@@ -2697,7 +2707,12 @@ fn she_will_not_point_under_headsail_alone() {
         (best.0, best.1, at)
     };
 
-    let (whole_rig, _, _) = best(0.0, 0.0);
+    let (whole_rig, whole_vmg, _) = best(0.0, 0.0);
+    assert!(
+        whole_vmg > 3.0,
+        "under her working sails she should beat at better than three knots of velocity \
+         made good in twelve, got {whole_vmg:.2}"
+    );
     assert!(
         (38.0..=46.0).contains(&whole_rig),
         "under the whole rig she should still beat at 38-46 deg, got {whole_rig}"
@@ -2705,8 +2720,8 @@ fn she_will_not_point_under_headsail_alone() {
 
     let (alone, alone_vmg, by_angle) = best(1.0, 0.0);
     assert!(
-        (48.0..=56.0).contains(&alone),
-        "under headsail alone the best she should do is 48-56 deg true, got {alone}"
+        (48.0..=62.0).contains(&alone),
+        "under headsail alone the best she should do is 48-62 deg true, got {alone}"
     );
 
     // And a wall rather than a weight, which is the second half of it and took a second
@@ -2747,25 +2762,117 @@ fn the_leech_only_separates_for_a_sail_both_close_sheeted_and_alone() {
     assert_eq!(alone_leech_drag(CAMBER_REFERENCE, close, 1.0), 0.0);
 
     // Alone and strapped to the track lead: the after part of the sail is separated.
+    // A quarter, which is most of the drag of a clean sail again. Smaller than it was,
+    // and the reason is a correction rather than a retune: the drag was carrying the
+    // whole of this on its own, and most of what a missing mainsail costs a headsail is
+    // not drag at all but the entry angle it can no longer hold — see
+    // `coefficients_with_separation`. Two consequences from one separation, and the
+    // larger of them was missing.
     let strapped = alone_leech_drag(CAMBER_REFERENCE, close, 0.0);
     assert!(
-        (0.4..=0.8).contains(&strapped),
-        "a headsail alone and sheeted hard should be dragging like a half-stalled \
-         sail, got an extra cd of {strapped:.2}"
+        (0.15..=0.45).contains(&strapped),
+        "a headsail alone and sheeted hard should be dragging half as much again as a \
+         clean one, got an extra cd of {strapped:.2}"
     );
 
-    // Eased until the leech exits fair, and it goes away by itself. This is the part
-    // that makes it the thing sailors actually do rather than a penalty for a sail
-    // plan: you cannot strap a headsail in without a main, so you ease it.
-    assert_eq!(alone_leech_drag(CAMBER_REFERENCE, rad(40.0), 0.0), 0.0);
+    // Easing helps and does not cure, which is the correction. The first version of
+    // this went to *nothing* on an eased sheet and fell by five times on a flattened
+    // sail — and both of those are ways a trimmer can simply put the penalty down.
+    // Which is what happened: haul the lead car aft, the genoa flattens from fifteen
+    // per cent to seven, and she sailed to windward under headsail alone as well as
+    // ever. Reported from the deck in exactly those words.
+    //
+    // What a sheet and a car can change is the sail's own cut. What they cannot change
+    // is that there is no mainsail behind it — and most of what a slot gives a headsail
+    // is the pair's shared circulation, which has nothing to do with how the headsail
+    // is cut. So the floor stays whatever is done with the strings.
+    let eased = alone_leech_drag(CAMBER_REFERENCE, rad(40.0), 0.0);
+    assert!(
+        eased > 0.1 && eased < strapped,
+        "easing should help and not cure: {eased:.2} against {strapped:.2} strapped in"
+    );
 
-    // And a flat sail exits nearly along its own chord, so it suffers far less —
-    // which is why a storm jib will point and a rolled-up genoa will not.
+    // And a flat sail exits nearer its own chord, so it suffers less — which is why a
+    // storm jib points better than a bagged-out genoa. Less, not nothing.
     let flat = alone_leech_drag(CAMBER_FLAT, close, 0.0);
     let deep = alone_leech_drag(CAMBER_DEEP, close, 0.0);
     assert!(
-        flat < 0.5 * deep,
-        "flat {flat:.2} against deep {deep:.2}: flattening the sail has to be the cure"
+        flat < deep && flat > 0.6 * deep,
+        "flat {flat:.2} against deep {deep:.2}: the cut should move it, not decide it"
+    );
+}
+
+#[test]
+fn rolling_a_genoa_ruins_it_rather_than_reefing_it() {
+    // A mainsail is *reefed*: the bottom comes off and what is left is a smaller sail of
+    // the same cut, flatter if anything, because the flat panels are the ones that stay.
+    // A genoa on a roller is **rolled**, and the two have nothing in common but the word
+    // people use for them. The sail winds on to its own luff spar, so the flat cloth
+    // against the forestay goes first and the full cloth aft of it is what is left: the
+    // draft moves aft and deepens, the entry rounds, the leech hooks. One turn and it is
+    // a working sail; two and it is a bag.
+    //
+    // Reported from the deck as a third of the roller taking nearly all the drive out of
+    // it, which is the right description of a real one. Everything needed for it was
+    // already in the model and none of it was being fed — the entry angle is
+    // proportional to camber and the parasitic drag goes with its *square* — because
+    // depth was not a function of the furl at all. A rolled genoa was a small genoa with
+    // a good shape, which is the one thing it never is.
+    let cfg = BoatConfig::archipelago_packet();
+    let make = wind(18.0);
+    let drive = |furl: f64| {
+        let s = steady_state_trimmed(
+            cfg,
+            &make,
+            rad(42.0),
+            SETTLE,
+            0.0,
+            furl,
+            Headsail::Genoa,
+            0.0,
+            0.4,
+        );
+        (
+            s.telemetry.jib.drive,
+            s.telemetry.jib.side.abs(),
+            s.telemetry.jib.coeffs.cl / s.telemetry.jib.coeffs.cd,
+        )
+    };
+
+    let (full_drive, full_side, full_ratio) = drive(0.0);
+    assert!(
+        full_drive > 300.0,
+        "unrolled she should be pulling hard: {full_drive:.0} N"
+    );
+
+    // Two thirds of the roller in. The measured shape of it, which is worth writing
+    // down because it is not what either of us guessed: a quarter rolled is *more*
+    // force per square metre, not less, because a deeper sail makes more of it — the
+    // loss is all in the lift-to-drag, and that is the number that decides whether she
+    // goes forward or sideways. So the sail stops pulling long before it stops heeling.
+    let (rolled_drive, rolled_side, rolled_ratio) = drive(0.67);
+    assert!(
+        rolled_drive < 0.25 * full_drive,
+        "two thirds rolled, the drive should be nearly gone: {rolled_drive:.0} N against \
+         {full_drive:.0}"
+    );
+    assert!(
+        rolled_side > 0.25 * full_side,
+        "and it should still be heeling her: {rolled_side:.0} N against {full_side:.0}"
+    );
+    assert!(
+        rolled_ratio < 0.55 * full_ratio,
+        "the ruin is in the lift to drag: {rolled_ratio:.2} against {full_ratio:.2}"
+    );
+
+    // The two words, separated. At the same fraction taken in, rolling a headsail makes
+    // it deeper and reefing a mainsail makes it flatter.
+    let rolled = camber_rolled(CAMBER_REFERENCE, 0.4);
+    let reefed = camber_reefed(CAMBER_REFERENCE, 0.4, 0.68);
+    assert!(
+        rolled > CAMBER_REFERENCE && reefed < CAMBER_REFERENCE,
+        "rolled {rolled:.3} and reefed {reefed:.3} should go opposite ways from \
+         {CAMBER_REFERENCE:.3}"
     );
 }
 

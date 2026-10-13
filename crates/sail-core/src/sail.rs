@@ -70,6 +70,38 @@ pub fn camber_reefed(camber: f64, reef: f64, max_reef: f64) -> f64 {
     camber - (camber - CAMBER_FLAT) * 0.45 * taken
 }
 
+/// What rolling a genoa up does to its shape.
+///
+/// It ruins it, and that is the whole point of the control. A mainsail is *reefed*: the
+/// bottom of it is taken off and what is left is a smaller sail of the same cut, flatter
+/// if anything, because the flat panels are the ones that stay. A genoa on a roller is
+/// not reefed, it is **rolled**, and the two have nothing in common but the word people
+/// use for them. The sail winds on to its own luff spar, so the flat cloth near the
+/// forestay is what disappears first and the full cloth further aft is what is left;
+/// the draft goes aft and deepens, the entry rounds, the leech hooks to windward. One
+/// turn and it is a working sail. Two and it is a bag.
+///
+/// Reported from the deck as a genoa with a third of the roller in losing nearly all of
+/// its drive, which is the right description of a real one. Every mechanism needed for
+/// it was already here and none of it was being fed: the entry angle is proportional to
+/// camber, so a rounder sail backwinds at an angle that would have kept a flat one full,
+/// and the parasitic drag goes with the *square* of camber. Depth was simply not a
+/// function of the furl, so a rolled genoa was a small genoa with a good shape — which
+/// is the one thing it never is.
+///
+/// Half the roller takes it to very near the deepest shape in the book. Past that it is
+/// off the end of anything a sailmaker would describe, which is also true on the water.
+pub fn camber_rolled(camber: f64, furl: f64) -> f64 {
+    let turns = furl.clamp(0.0, 1.0);
+    // Fast at first, and *very* fast: the flattest cloth in the sail is the panel
+    // against the stay, so the first turn takes the whole of the sail's flat entry and
+    // leaves the full cloth aft of it. A third of the roller is already past anything a
+    // sailmaker would put a number on, which is why the answer to a headsail that needs
+    // reefing is a smaller headsail and not a smaller setting of this one.
+    let spoilt = turns.powf(0.6);
+    camber + (CAMBER_DEEP * 1.8 - camber) * spoilt
+}
+
 /// Largest twist the leech will fall off to with the vang eased right off, radians.
 pub const MAX_TWIST: f64 = 20.0 * std::f64::consts::PI / 180.0;
 
@@ -239,12 +271,15 @@ pub fn slot_interaction(main_cl: f64, jib_cl: f64) -> (f64, f64) {
 /// the arctangent of drag over lift — so this is the right place for it and not a
 /// coincidence.
 ///
-/// `SEPARATED` is the one calibrated number: set so this boat will not point closer
-/// than fifty degrees true under headsail alone, which is the figure the sailor who
-/// asked for it gives. The shape around it is geometry.
+/// `SEPARATED` is calibrated rather than derived, and what it is calibrated on moved
+/// once while this was being built. The figure first given for it was fifty degrees,
+/// which is what a sailor says when asked how close a headsail alone will point; the
+/// figure given after sailing it was "sixty sounds right — a genoa is a poor sail on
+/// her own upwind", which is a stronger statement and the one the numbers are set to
+/// now. The shape around the constant is geometry either way.
 pub fn alone_leech_drag(camber: f64, chord_angle: f64, slot_support: f64) -> f64 {
     /// Drag coefficient with the after part of the sail fully separated.
-    const SEPARATED: f64 = 2.10;
+    const SEPARATED: f64 = 0.75;
     SEPARATED * leech_separation(camber, chord_angle, slot_support)
 }
 
@@ -277,7 +312,28 @@ pub fn leech_separation(camber: f64, chord_angle: f64, slot_support: f64) -> f64
         return 0.0;
     }
     let shortfall = ((exit - chord_angle.max(0.0)) / exit).clamp(0.0, 1.0);
-    shortfall * shortfall * (1.0 - support)
+    /// What a headsail loses for having no mainsail behind it at all, whatever its cut.
+    ///
+    /// The leech-exit term alone could be *trimmed away*, which is the hole this closes
+    /// and it was reported from the deck as her still sailing beautifully to windward
+    /// under the genoa. Haul the lead car aft and the sail flattens from fifteen per
+    /// cent to seven; a flat sail exits near its own chord, so the shortfall falls by
+    /// five times and with it the whole penalty. The physics of that is right — a flat
+    /// sail genuinely does take a harder sheet — but it cannot be the *whole* of what a
+    /// missing mainsail costs, because most of what the slot gives a headsail has
+    /// nothing to do with how the headsail is cut.
+    ///
+    /// Two sails in a slot are one aerofoil with more circulation than the sum of them
+    /// apart: the main's upwash turns the flow into the headsail's luff, and the
+    /// headsail's exit is received instead of having to find its own way back. Take the
+    /// main away and that is gone for a flat sail and a full one alike. So half of it is
+    /// a floor, and the cut decides the rest.
+    const WITHOUT_THE_SLOT: f64 = 0.30;
+    /// And how much the cut adds on top of that. Small, deliberately: it is the part a
+    /// trimmer can change, and if it were the larger part the whole effect would come
+    /// and go with the lead car — which is what happened, and is how this was found.
+    const AND_THE_CUT: f64 = 0.12;
+    (WITHOUT_THE_SLOT + AND_THE_CUT * shortfall * shortfall) * (1.0 - support)
 }
 
 /// Where along the chord the force actually acts, as a fraction back from the luff.
@@ -663,7 +719,7 @@ impl SailProfile {
         /// flow on to its luff, so the two ends of the sail fail together — which is why
         /// the wall is a wall rather than a weight: luffing further cannot separate any
         /// more leech, but it can and does take the luff away.
-        const ENTRY_PER_SEPARATION: f64 = 4.5;
+        const ENTRY_PER_SEPARATION: f64 = 4.3;
         let entry = self.entry_angle * camber.max(0.0) / CAMBER_REFERENCE
             * (1.0 + ENTRY_PER_SEPARATION * separated.clamp(0.0, 1.0));
         let backwinding = if entry > 0.0 {

@@ -20,6 +20,34 @@ pub struct RiggedSail {
     pub z_ce: f64,
     /// Centre of effort fore-and-aft relative to the centre of gravity, m, bow positive.
     pub x_ce: f64,
+    /// Apparent wind this sail is built to carry, m/s.
+    ///
+    /// The number a sailmaker gives you, and the one every sail has — which nothing in
+    /// this model did, so a boat could carry a half-ounce gennaker into forty knots and
+    /// go faster for it. What actually happens is the cloth lets go, and which sail it
+    /// is decides when: a kite is cut for light airs and a working jib is cut to be
+    /// forgotten about.
+    ///
+    /// *Apparent*, because that is the only wind a sail knows about, and it is why a
+    /// kite is at its most dangerous when the boat slows down — bear away and it eases,
+    /// round up and it builds twice.
+    pub limit_aws: f64,
+}
+
+/// What each sail is built to carry, apparent, in metres a second.
+///
+/// Off a cruising wardrobe. A gennaker is good for twenty knots and people hang on to
+/// twenty-five; a Code 0 is heavier cloth for a closer angle and takes a little more; a
+/// dacron genoa and a cruising main are sails you reef rather than blow out, so their
+/// number is high and the reef is what saves them; a staysail is the small heavy one
+/// that is still there when everything else has gone away.
+mod cloth {
+    use crate::units::kn_to_ms;
+    pub const GENNAKER: f64 = kn_to_ms(22.0);
+    pub const CODE_ZERO: f64 = kn_to_ms(27.0);
+    pub const GENOA: f64 = kn_to_ms(42.0);
+    pub const MAIN: f64 = kn_to_ms(45.0);
+    pub const STAYSAIL: f64 = kn_to_ms(60.0);
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -249,6 +277,7 @@ fn wardrobe(genoa: &RiggedSail, genoa_luff: f64) -> (RiggedSail, RiggedSail, Rig
         area: area * 2.3,
         z_ce: genoa.z_ce * 1.22,
         x_ce: genoa.x_ce * 1.29,
+        limit_aws: cloth::CODE_ZERO,
     };
     let gennaker = RiggedSail {
         // Twice the mainsail, which is what a running sail is.
@@ -256,12 +285,14 @@ fn wardrobe(genoa: &RiggedSail, genoa_luff: f64) -> (RiggedSail, RiggedSail, Rig
         area: area * 3.4,
         z_ce: genoa.z_ce * 1.30,
         x_ce: genoa.x_ce * 1.47,
+        limit_aws: cloth::GENNAKER,
     };
     let staysail = RiggedSail {
         profile: SailProfile::staysail(area * 0.54, genoa_luff * 0.62),
         area: area * 0.54,
         z_ce: genoa.z_ce * 0.78,
         x_ce: genoa.x_ce * 0.55,
+        limit_aws: cloth::STAYSAIL,
     };
     (code_zero, gennaker, staysail)
 }
@@ -291,6 +322,7 @@ impl BoatConfig {
             area: genoa_area,
             z_ce: 4.60,
             x_ce: 1.90,
+            limit_aws: cloth::GENOA,
         };
         let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
 
@@ -356,6 +388,7 @@ impl BoatConfig {
                 area: main_area,
                 z_ce: 6.20,
                 x_ce: -0.30,
+                limit_aws: cloth::MAIN,
             },
             genoa,
             code_zero,
@@ -465,6 +498,7 @@ impl BoatConfig {
             area: genoa_area,
             z_ce: 4.40,
             x_ce: 1.95,
+            limit_aws: cloth::GENOA,
         };
         let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
 
@@ -557,6 +591,7 @@ impl BoatConfig {
                 area: main_area,
                 z_ce: 6.60,
                 x_ce: -0.35,
+                limit_aws: cloth::MAIN,
             },
             genoa,
             code_zero,
@@ -720,6 +755,7 @@ impl BoatConfig {
             area: genoa_area,
             z_ce: 6.40,
             x_ce: 2.90,
+            limit_aws: cloth::GENOA,
         };
         let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
 
@@ -788,6 +824,7 @@ impl BoatConfig {
                 area: main_area,
                 z_ce: 8.60,
                 x_ce: -0.45,
+                limit_aws: cloth::MAIN,
             },
             genoa,
             code_zero,

@@ -262,8 +262,40 @@ pub fn steady_state_rigged<F>(
 where
     F: Fn() -> Box<dyn WindField>,
 {
-    let furl = (reef * 0.85).clamp(0.0, 1.0);
+    // Half, not five sixths. A crew shortening down takes the mainsail in first and
+    // rolls the headsail as little as it can get away with, because rolling a genoa is
+    // not reefing it: the flat cloth goes first and what is left is a bag that heels her
+    // without driving her. See `sail::camber_rolled`. The old coupling put forty-two per
+    // cent of the roller in for one slab in the main, which is a shape no one carries on
+    // purpose, and that only stopped being free the moment the model knew what a rolled
+    // sail looks like.
+    let furl = (reef * 0.5).clamp(0.0, 1.0);
     steady_state_sailplan(cfg, make_wind, twa, seconds, reef, furl, head, staysail)
+}
+
+/// The same again, with the headsail's lead car set as well.
+///
+/// Because the car is how a headsail's depth is trimmed, and depth is what decides
+/// whether a sail alone can be sheeted close — so a question about sailing under
+/// headsail alone that cannot set the car is not asking the whole question.
+#[allow(clippy::too_many_arguments)]
+pub fn steady_state_trimmed<F>(
+    cfg: BoatConfig,
+    make_wind: F,
+    twa: f64,
+    seconds: f64,
+    reef: f64,
+    furl: f64,
+    head: crate::state::Headsail,
+    staysail: f64,
+    car: f64,
+) -> Steady
+where
+    F: Fn() -> Box<dyn WindField>,
+{
+    steady_state_full(
+        cfg, make_wind, twa, seconds, reef, furl, head, staysail, car,
+    )
 }
 
 /// The same, with the reef and the furl set independently.
@@ -286,6 +318,26 @@ pub fn steady_state_sailplan<F>(
 where
     F: Fn() -> Box<dyn WindField>,
 {
+    steady_state_full(
+        cfg, make_wind, twa, seconds, reef, furl, head, staysail, 0.0,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn steady_state_full<F>(
+    cfg: BoatConfig,
+    make_wind: F,
+    twa: f64,
+    seconds: f64,
+    reef: f64,
+    furl: f64,
+    head: crate::state::Headsail,
+    staysail: f64,
+    car: f64,
+) -> Steady
+where
+    F: Fn() -> Box<dyn WindField>,
+{
     let wind = make_wind();
     let sample = wind.sample(DVec2::ZERO, 0.0);
     let wind_direction = direction_of(sample);
@@ -304,6 +356,7 @@ where
         outhaul: 0.0,
         reef,
         furl,
+        genoa_car: car,
         headsail: head,
         staysail,
         ..Default::default()
