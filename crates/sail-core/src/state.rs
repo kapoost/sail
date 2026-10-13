@@ -429,6 +429,10 @@ pub struct Telemetry {
     ///   speed and the sine of the heel, and it is the one that reefing cures.
     /// * **The hull**, meaning the lateral plane and what is left of the bare-hull
     ///   damping.
+    pub yaw_from_rig: f64,
+    pub yaw_from_heel: f64,
+    pub yaw_from_hull: f64,
+
     /// The surge ledger, in newtons: what pushes her along her own axis and what holds
     /// her back, signed so forward is positive and the three of them sum to the net.
     ///
@@ -447,9 +451,6 @@ pub struct Telemetry {
     pub surge_from_sails: f64,
     pub surge_from_hull: f64,
     pub surge_from_foils: f64,
-    pub yaw_from_rig: f64,
-    pub yaw_from_heel: f64,
-    pub yaw_from_hull: f64,
     /// Righting arm at the current heel, m.
     pub righting_arm: f64,
 }
