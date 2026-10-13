@@ -157,6 +157,22 @@ pub struct Music {
     degree: i32,
     /// The cell the whole passage is built from, invented once when she casts off.
     motif: Option<Motif>,
+    /// What is being played now, as opposed to what the weather is asking for.
+    ///
+    /// The two are different on purpose. Music that changed the instant the wind did
+    /// would never be in any metre long enough to be in it — a tune has to *be*
+    /// somewhere before leaving is worth anything.
+    playing: Option<Asking>,
+    /// And where it is going, once the weather has asked for somewhere else.
+    pending: Option<Asking>,
+    /// Semiquavers of bridge left to play, counted down at the new tempo.
+    bridge: i32,
+    /// The step the bridge last struck, so each semiquaver sounds once.
+    bridge_step: i64,
+    /// The bridge's own clock, in semiquavers of the tempo being *arrived at*.
+    bridge_clock: f64,
+    /// Phrases since the last key change, so a tune sits somewhere before it leaves.
+    phrases_here: u32,
 }
 
 impl Default for Music {
@@ -170,6 +186,12 @@ impl Default for Music {
             rng: 0x5EA_5A11,
             degree: 0,
             motif: None,
+            playing: None,
+            pending: None,
+            bridge: 0,
+            bridge_step: -1,
+            bridge_clock: 0.0,
+            phrases_here: 0,
         }
     }
 }
@@ -184,6 +206,7 @@ impl Music {
 }
 
 /// What the weather is asking for, worked out once and then turned into notes.
+#[derive(Clone, Copy, PartialEq)]
 struct Asking {
     /// Beats a minute.
     tempo: f32,
@@ -197,13 +220,63 @@ struct Asking {
     level: f32,
     /// How far up or down the whole thing sits, in octaves.
     register: f32,
+    /// The tonic, in hertz. Changed only at a phrase end and only by an interval the
+    /// tradition uses — see `modulate`.
+    tonic: f32,
+}
+
+impl Asking {
+    /// Whether this is a different *kind* of music, as opposed to a slightly different
+    /// one. A tempo that has drifted two beats a minute is not worth a bridge; a change
+    /// of metre always is.
+    fn worth_moving_for(&self, other: &Self) -> bool {
+        self.beats != other.beats
+            || self.dorian != other.dorian
+            || (self.tempo - other.tempo).abs() > 7.0
+            || (self.tonic - other.tonic).abs() > 1.0
+    }
+}
+
+/// Where a tune may go when it goes somewhere.
+///
+/// Not an arbitrary transposition. Every tradition that has lasted moves by the same
+/// handful of intervals, and the reason is that they share notes with where you were:
+/// the ear hears the new key as a *place in the old one* before it hears it as new. Up a
+/// fifth is the oldest move in music and takes six of the seven notes with it; down a
+/// fifth is the same journey the other way. The relative major — up a minor third from a
+/// minor tonic — shares *all* of them, which is why it is the one that sounds like the
+/// sun coming out rather than like a modulation at all. And down a whole tone is the
+/// Nordic one, the step every slått and every polska takes when it wants to sound older.
+///
+/// Which of them is chosen is the weather's: more wind lifts, less drops, and a long
+/// settled passage goes to the relative major because nothing is happening and that is a
+/// pleasant place for nothing to happen in.
+fn modulate(from: f32, rising: bool, settled: bool) -> f32 {
+    let semitones = if settled {
+        3.0 // the relative major
+    } else if rising {
+        7.0 // up a fifth
+    } else {
+        -2.0 // down a tone, which is the northern move
+    };
+    let moved = from * 2.0_f32.powf(semitones / 12.0);
+    // Kept inside an octave of where this boat's music lives, by dropping or lifting a
+    // whole octave rather than refusing the move — the interval is the music, the
+    // register is only comfort.
+    if moved > 220.0 {
+        moved * 0.5
+    } else if moved < 110.0 {
+        moved * 2.0
+    } else {
+        moved
+    }
 }
 
 /// Read the boat and the sky, and decide what kind of music this is.
 ///
 /// Every line of this is a relation somebody could argue with on the water, which is the
 /// only way a soundtrack earns the right to change.
-fn asking(sim: &Sim, hour: f32) -> Asking {
+fn asking(sim: &Sim, hour: f32, tonic: f32) -> Asking {
     let t = &sim.sim.telemetry;
     let wind = sail_core::units::ms_to_kn(t.tws) as f32;
     let force = crate::weather::force(wind as f64) as f32;
@@ -239,6 +312,7 @@ fn asking(sim: &Sim, hour: f32) -> Asking {
         } else {
             0.0
         },
+        tonic,
     }
 }
 
@@ -254,7 +328,16 @@ pub fn compose(
     let p = &sound.0;
     p.set_shape(if ink.0 { 1.0 } else { 0.0 });
 
-    let want = asking(&sim, sky.hour);
+    // What the weather is asking for, against what is being played.
+    //
+    // A key change is not asked for by the weather directly — nothing out there is in a
+    // key. It is asked for by *time*: a tune that has been in one place for a few phrases
+    // wants to go somewhere, and where it goes is chosen by whether the day is making up
+    // or lying down. That is the one part of this that is a musician's decision rather
+    // than a sailor's, and it belongs to the form rather than to the sea.
+    let here = music.playing.map_or(music.tonic, |p| p.tonic);
+    let asked = asking(&sim, sky.hour, here);
+    let want = music.playing.unwrap_or(asked);
     let t = &sim.sim.telemetry;
 
     // Three things stop the music, and each of them is the sea taking the floor.
@@ -281,6 +364,43 @@ pub fn compose(
         1.0
     };
 
+    // --- Getting from one kind of music to another -------------------------------
+    //
+    // The boat's own noises do it, which is the idea this came from and a better one
+    // than anything a drum could manage here: a run of semiquavers on her gear, in the
+    // tempo being arrived at, over the last bar of the phrase. That is what a fill is
+    // for — it is not decoration, it is the ear being taught the new pulse before the
+    // tune has to land in it, and a bar of it is enough to re-lock on a different metre
+    // entirely. Doing it with the winch and the clutches rather than a drum means the
+    // transition is made of things that are actually on the boat, so it reads as the
+    // crew getting ready rather than as music changing by itself.
+    if music.bridge > 0 {
+        let to = music.pending.unwrap_or(want);
+        music.bridge_clock += time.delta_secs_f64() * (to.tempo as f64 / 60.0) * 4.0;
+        let tick = music.bridge_clock.floor() as i64;
+        if tick > music.bridge_step {
+            music.bridge_step = tick;
+            music.bridge -= 1;
+            // Accented on the beat, so the new metre is in the fill and not only the new
+            // speed — four semiquavers to a beat, and the first of each is the one the
+            // ear counts.
+            let on_the_beat = tick % 4 == 0;
+            p.clack(if on_the_beat { 0.5 } else { 0.22 } * hush);
+            if music.bridge <= 0 {
+                // Arrived. The new plan starts on a phrase boundary, which is where the
+                // bridge was put so that it would.
+                if let Some(to) = music.pending.take() {
+                    music.playing = Some(to);
+                    music.tonic = to.tonic;
+                    music.beat = 0.0;
+                    music.last_step = -1;
+                    music.phrases_here = 0;
+                }
+            }
+        }
+        return;
+    }
+
     music.beat += time.delta_secs_f64() * (want.tempo as f64 / 60.0);
     // Two notes to the beat, which is a quaver — the unit nearly every tune in this
     // idiom is actually made of.
@@ -292,6 +412,37 @@ pub fn compose(
 
     if hush <= 0.0 {
         return;
+    }
+
+    // At the end of a phrase, see whether the weather has asked for somewhere else — and
+    // whether the tune has sat here long enough to be worth moving at all.
+    let per_bar_now = (want.beats * 2) as i64;
+    if step.rem_euclid(per_bar_now) == 0 {
+        let bar_now = step.div_euclid(per_bar_now) as u32 % PHRASE;
+        if bar_now == PHRASE - 1 && music.pending.is_none() {
+            if step > 0 {
+                music.phrases_here += 1;
+            }
+            let mut going = asked;
+            // A key change is the form's own business and happens when the tune has been
+            // in one place for four phrases, whether or not the weather has moved.
+            if music.phrases_here >= 4 {
+                let rising = sim.sim.wind.outlook().0 > 0.0;
+                let settled = !asked.worth_moving_for(&want);
+                going.tonic = modulate(want.tonic, rising, settled);
+            }
+            if going.worth_moving_for(&want) {
+                music.pending = Some(going);
+                // One bar of the new metre, in semiquavers.
+                music.bridge = (going.beats * 4) as i32;
+                music.bridge_clock = 0.0;
+                music.bridge_step = -1;
+                return;
+            }
+        }
+    }
+    if music.playing.is_none() {
+        music.playing = Some(asked);
     }
 
     let scale = if want.dorian { DORIAN } else { AEOLIAN };
