@@ -34,6 +34,19 @@ pub fn q_air(speed: f64) -> f64 {
 }
 
 pub trait WindField: Send + Sync {
+    /// Where the weather is going: expected change in the mean wind over the next hour,
+    /// as (metres per second, radians). Zero for a field with no trend in it.
+    ///
+    /// This is the barometer. A skipper does not sail the wind that is blowing, he sails
+    /// the one he thinks will be blowing in an hour — whether to put the reef in now
+    /// while it is easy, whether this shift is worth tacking on or will come back. The
+    /// number is honest rather than clairvoyant: for a relaxing process the expected
+    /// change is just how far the trend currently is from zero, so this says what the
+    /// weather is *doing*, not what it will do.
+    fn outlook(&self) -> (f64, f64) {
+        (0.0, 0.0)
+    }
+
     /// True wind flow vector in world ENU at the reference height, in m/s.
     /// `pos` is in metres, `t` in seconds since simulation start.
     fn sample(&self, pos: DVec2, t: f64) -> DVec2;
@@ -51,6 +64,98 @@ pub trait WindField: Send + Sync {
     /// decorations that happen to be on screen together.
     fn gust_at(&self, _pos: DVec2, _t: f64) -> f64 {
         0.0
+    }
+}
+
+/// The slow weather: the mean wind is not a constant either.
+///
+/// Without this the simulator hands you a wind and that is the wind, for ever. Every
+/// decision the genre is about — reef now or carry on, go out at all, which side of the
+/// island — needs the weather to be *going* somewhere, and a day that cannot change is
+/// one long trim exercise.
+///
+/// Two relaxing processes on top of the drawn day, at the scale real synoptic
+/// variability runs at: the speed on forty minutes and the direction on an hour. They
+/// start from their stationary distribution rather than from zero, so there is a trend
+/// in the first minute instead of forty minutes of artificial calm before the weather
+/// remembers to start — which also means the forecast handed over at the dock can
+/// honestly say "building, veering", because it is reading a trend that already exists.
+#[derive(Clone, Copy, Debug)]
+pub struct Synoptic {
+    /// The day as drawn: the mean the trends wander about.
+    pub base_speed: f64,
+    pub base_direction: f64,
+    /// Standard deviation of the speed trend, as a fraction of the base.
+    pub speed_swing: f64,
+    /// Relaxation time of the speed trend, seconds.
+    pub speed_timescale: f64,
+    /// Standard deviation of the direction trend, radians.
+    pub direction_swing: f64,
+    /// Relaxation time of the direction trend, seconds.
+    pub direction_timescale: f64,
+    speed_trend: f64,
+    direction_trend: f64,
+}
+
+/// How far the mean wind is allowed to wander from the drawn day, as a multiple.
+///
+/// Not a taste decision in either direction. The floor keeps the player out of the
+/// light-air regime the model is known to handle badly (see `weather.rs`), and the
+/// ceiling keeps a drawn gale from becoming a storm the boat has no answer to.
+const SYNOPTIC_FLOOR: f64 = 0.55;
+const SYNOPTIC_CEILING: f64 = 1.75;
+
+impl Synoptic {
+    pub fn new(direction: f64, speed: f64, rng: &mut Pcg32) -> Self {
+        Self {
+            base_speed: speed,
+            base_direction: direction,
+            speed_swing: 0.22,
+            speed_timescale: 2_400.0,
+            direction_swing: 20.0_f64.to_radians(),
+            direction_timescale: 3_600.0,
+            // From the stationary distribution, so the day is already under way.
+            speed_trend: 0.22 * rng.next_normal(),
+            direction_trend: 20.0_f64.to_radians() * rng.next_normal(),
+        }
+    }
+
+    fn step(&mut self, dt: f64, rng: &mut Pcg32) {
+        ou_step(
+            &mut self.speed_trend,
+            self.speed_swing,
+            self.speed_timescale,
+            dt,
+            rng,
+        );
+        ou_step(
+            &mut self.direction_trend,
+            self.direction_swing,
+            self.direction_timescale,
+            dt,
+            rng,
+        );
+    }
+
+    fn speed(&self) -> f64 {
+        (self.base_speed * (1.0 + self.speed_trend)).clamp(
+            self.base_speed * SYNOPTIC_FLOOR,
+            self.base_speed * SYNOPTIC_CEILING,
+        )
+    }
+
+    fn direction(&self) -> f64 {
+        wrap_tau(self.base_direction + self.direction_trend)
+    }
+
+    /// Expected change over the next hour. For `dX = −X/tau dt + noise` the mean path
+    /// is `X exp(−t/tau)`, so this is exact rather than an estimate.
+    fn outlook(&self) -> (f64, f64) {
+        let decay = |tau: f64| 1.0 - (-3_600.0 / tau).exp();
+        (
+            -self.base_speed * self.speed_trend * decay(self.speed_timescale),
+            -self.direction_trend * decay(self.direction_timescale),
+        )
     }
 }
 
@@ -106,12 +211,19 @@ impl GustField {
     }
 
     /// The anomaly at a point, as a fraction of the mean wind speed.
-    pub fn at(&self, pos: DVec2, t: f64, carried_by: DVec2) -> f64 {
+    ///
+    /// `carried` is how far the pattern has been moved downwind so far — an integral,
+    /// not a speed times a time, and the difference is a bug this cost before it was a
+    /// comment. Written as `flow * advection * t` it seemed equivalent and was not: the
+    /// moment the mean wind changes, *every* past second is re-advected at the new
+    /// speed, so the whole pattern teleports. At an hour in, a hundredth of a knot of
+    /// change jumps the field metres per frame, and the gusts turn into a buzz. Caught
+    /// by `gusts_are_gusty_but_not_noise`, which counts exactly that.
+    pub fn at(&self, pos: DVec2, carried: DVec2) -> f64 {
         if self.intensity <= 0.0 || self.cell <= 0.0 {
             return 0.0;
         }
-        let drifted = pos - carried_by * (self.advection * t);
-        self.shape(drifted / self.cell) * (self.intensity / SHAPE_SIGMA)
+        self.shape((pos - carried) / self.cell) * (self.intensity / SHAPE_SIGMA)
     }
 
     /// Unit-ish noise: two octaves, the second small and turned off-lattice so the two
@@ -195,8 +307,11 @@ impl WindField for SteadyWind {
 ///     Sailors steer on this, so an unveering gust reads as fake immediately.
 #[derive(Clone, Debug)]
 pub struct SyntheticWind {
+    /// The mean the gusts are measured against, which the slow weather moves.
     pub mean_direction: f64,
     pub mean_speed: f64,
+    /// The slow weather that moves them.
+    pub synoptic: Synoptic,
     /// The gusts, as a field in space rather than a wobble in time.
     pub gusts: GustField,
     /// Standard deviation of direction, radians.
@@ -207,27 +322,30 @@ pub struct SyntheticWind {
     pub veer_coupling: f64,
 
     direction_anomaly: f64,
+    /// How far the gust pattern has been carried downwind, metres. Integrated, so a
+    /// change in the wind changes where the pattern is *going* and not where it has
+    /// been.
+    carried: DVec2,
     rng: Pcg32,
 }
 
 impl SyntheticWind {
     /// A plausible open-water day: moderate breeze, moderate gustiness.
     pub fn new(mean_direction: f64, mean_speed: f64, seed: u64) -> Self {
+        let mut rng = Pcg32::new(seed);
+        let synoptic = Synoptic::new(mean_direction, mean_speed, &mut rng);
         Self {
-            mean_direction,
-            mean_speed,
+            mean_direction: synoptic.direction(),
+            mean_speed: synoptic.speed(),
+            synoptic,
             gusts: GustField::new(seed ^ 0x6057),
             direction_spread: 6.0_f64.to_radians(),
             shift_timescale: 90.0,
             veer_coupling: 7.0_f64.to_radians(),
             direction_anomaly: 0.0,
-            rng: Pcg32::new(seed),
+            carried: DVec2::ZERO,
+            rng,
         }
-    }
-
-    /// Where the pattern of gusts is being carried, which is the mean flow.
-    fn carried_by(&self) -> DVec2 {
-        flow_from(self.mean_direction, self.mean_speed)
     }
 
     /// Speed at a point and an instant, at the reference height.
@@ -255,6 +373,10 @@ impl SyntheticWind {
         self.gusts.intensity = 0.0;
         self.direction_spread = 0.0;
         self.direction_anomaly = 0.0;
+        self.synoptic.speed_swing = 0.0;
+        self.synoptic.direction_swing = 0.0;
+        self.mean_speed = self.synoptic.base_speed;
+        self.mean_direction = self.synoptic.base_direction;
         self
     }
 }
@@ -264,12 +386,27 @@ impl WindField for SyntheticWind {
         flow_from(self.direction_at(pos, t), self.speed_at(pos, t))
     }
 
-    fn gust_at(&self, pos: DVec2, t: f64) -> f64 {
-        self.gusts.at(pos, t, self.carried_by())
+    fn gust_at(&self, pos: DVec2, _t: f64) -> f64 {
+        self.gusts.at(pos, self.carried)
+    }
+
+    fn outlook(&self) -> (f64, f64) {
+        self.synoptic.outlook()
     }
 
     fn step(&mut self, dt: f64) {
-        // Only the slow wander of the mean direction is a process in time now. The
+        // The slow weather first, because it moves the mean everything else is measured
+        // against — including where the gusts are carried to.
+        self.synoptic.step(dt, &mut self.rng);
+        self.mean_speed = self.synoptic.speed();
+        self.mean_direction = self.synoptic.direction();
+
+        // Carry the gust pattern downwind. A gust patch travels a little slower than
+        // the air it is a structure in.
+        self.carried +=
+            flow_from(self.mean_direction, self.mean_speed) * (self.gusts.advection * dt);
+
+        // Only the fast wander of the direction is a process in time now. The
         // gusts are a pattern in space and need no stepping — they arrive because the
         // wind carries them past, which is both cheaper and the actual mechanism.
         //
@@ -312,7 +449,7 @@ mod tests {
         for i in 0..400 {
             for j in 0..400 {
                 let p = DVec2::new(i as f64 * 17.37, j as f64 * 13.11);
-                let x = field.at(p, 0.0, DVec2::ZERO);
+                let x = field.at(p, DVec2::ZERO);
                 sum += x;
                 sum_sq += x * x;
                 n += 1.0;
@@ -339,11 +476,11 @@ mod tests {
     fn a_gust_arrives_from_upwind() {
         let field = GustField::new(7);
         let flow = flow_from(0.0, 8.0); // from the north, so flowing south
+        let carried = flow * (field.advection * 60.0);
         let here = DVec2::ZERO;
-        // Where the air at this point will be in a minute, upstream of us now.
-        let upwind = here - flow * (field.advection * 60.0);
-        let now = field.at(upwind, 0.0, flow);
-        let later = field.at(here, 60.0, flow);
+        // What is upwind of us now is what we will be in a minute.
+        let now = field.at(here - carried, DVec2::ZERO);
+        let later = field.at(here, carried);
         assert!(
             (now - later).abs() < 1e-9,
             "what is upwind now should be here later: {now:.4} then {later:.4}"

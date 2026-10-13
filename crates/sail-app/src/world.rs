@@ -748,6 +748,7 @@ fn crest_weight(lift: f32) -> f32 {
 /// If they sit flat and the picture stops anyway, it is not ours, and that is worth
 /// knowing before a day is spent looking.
 pub fn report_vitals(
+    sim: Res<Sim>,
     time: Res<Time>,
     meshes: Res<Assets<Mesh>>,
     images: Res<Assets<Image>>,
@@ -760,13 +761,23 @@ pub fn report_vitals(
         return;
     }
     *since = 0.0;
+    // The weather is in here because the weather now moves, and a frame-time report
+    // without it cannot be read: the cost of the sea goes up with the sea, so "slow at
+    // minute forty" means nothing unless you know what it was blowing at minute forty.
+    let (building, turning) = sim.sim.wind.outlook();
     info!(
-        "vitals at {:.0} min: {} entities, {} meshes, {} images, {} materials",
+        "vitals at {:.0} min: {} entities, {} meshes, {} images, {} materials; \
+         {:.0} kn, sea {:.2} m at {:.1} s, outlook {:+.1} kn/h {:+.0} deg/h",
         time.elapsed_secs() / 60.0,
         entities.iter().count(),
         meshes.len(),
         images.len(),
         materials.len(),
+        sail_core::units::ms_to_kn(sim.sim.telemetry.tws),
+        sim.sim.telemetry.significant_height,
+        sim.sim.water.peak_period_or(0.0),
+        sail_core::units::ms_to_kn(building),
+        sail_core::units::deg(turning),
     );
 }
 

@@ -118,6 +118,25 @@ pub trait WaterSurface: Send + Sync {
     /// no land to be sheltered by.
     fn set_shelter(&mut self, _shelter: f64) {}
 
+    /// Peak period if the surface has one, else the fallback. For reporting only.
+    fn peak_period_or(&self, fallback: f64) -> f64 {
+        fallback
+    }
+
+    /// Let the sea follow the wind, which it does slowly and asymmetrically.
+    ///
+    /// A sea is not a function of the wind now; it is a function of the wind for the
+    /// last few hours. That lag is most of what a seaway feels like. A new breeze over
+    /// flat water is fast and easy for an hour before it gets lumpy, and a wind that
+    /// drops leaves its sea behind — the nastiest motion a small boat sees is a dying
+    /// gale, when there is no wind left to steady her and the whole sea is still
+    /// running. Build and decay therefore get different time constants, and the slower
+    /// one is the decay.
+    ///
+    /// Default does nothing, which is right for flat water and for any sea handed over
+    /// as a fixed spectrum.
+    fn follow_wind(&mut self, _tws: f64, _direction: f64, _t: f64, _dt: f64) {}
+
     /// Longest wavelength present, metres.
     ///
     /// A presentation layer that band-limits by vertex spacing can ask this and skip
@@ -219,72 +238,106 @@ impl WaveComponent {
 #[derive(Clone, Debug)]
 pub struct WindSea {
     components: Vec<WaveComponent>,
+    /// Significant height, metres: the sea as it is *now*, which lags the wind.
     hs: f64,
+    /// Peak period, seconds, likewise.
+    tp: f64,
+    /// Direction the waves run towards, radians. Follows the wind, slowly.
+    run: f64,
+    /// How much open water is upwind of here, metres. A property of the place, so it
+    /// does not change as the wind does.
+    fetch: f64,
+    /// Fixed per component, so a relaxation reshapes the sea without reshuffling it.
+    phases: [f64; BANDS],
+    /// Seconds owed to the relaxation, so it can be driven from a 200 Hz substep
+    /// without evaluating the fetch relations two hundred times a second for a process
+    /// whose time constant is hours.
+    owed: f64,
     /// How much of the open sea reaches here; 1 in clear water, less in a lee.
     shelter: f64,
 }
+
+/// Components in the sea: the peak, a long pair and a short pair.
+const BANDS: usize = 5;
+
+/// Direction of each component relative to the mean, radians.
+///
+/// Both members of a pair sit on the same side of the peak in period and on opposite
+/// sides of it in direction, so there is nothing left to correlate. The widths follow
+/// the physics they were always meant to: spreading is narrowest at the spectral peak
+/// and opens up away from it, more on the short side than the long, which is the
+/// Mitsuyasu result.
+const SPREAD: [f64; BANDS] = [0.0, -0.38, 0.38, -0.66, 0.66];
+/// Period of each component as a multiple of the peak. The two members of a pair are
+/// given slightly different periods so they cannot lock into a regular diamond.
+const PERIOD_RATIO: [f64; BANDS] = [1.0, 1.26, 1.21, 0.82, 0.78];
+/// Energy weighting, so the peak dominates and the sum lands on the right Hs.
+const WEIGHT: [f64; BANDS] = [1.0, 0.60, 0.58, 0.32, 0.30];
+
+/// How long a sea takes to build towards the one the wind would make, seconds.
+///
+/// Two and a half hours. Duration-limited growth is a real relation and this is the
+/// right order for a coastal fetch: a fresh breeze over flat water gives you an hour
+/// of easy sailing before it gets lumpy, which is a thing every sailor has used.
+const SEA_BUILD: f64 = 9_000.0;
+/// And how long it takes to lie down, seconds. Twice as long, and the asymmetry is the
+/// point: a dying gale is the worst motion a small boat sees, because the wind has gone
+/// and the sea has not.
+const SEA_DECAY: f64 = 18_000.0;
 
 impl WindSea {
     /// `tws` in m/s, `fetch` in metres, `direction` the wind's compass direction (the
     /// one it comes *from*; the sea runs the other way).
     pub fn new(tws: f64, fetch: f64, direction: f64, seed: u64) -> Self {
         let (hs, tp) = fetch_limited_sea(tws, fetch);
-        // Waves travel downwind, which is the reciprocal of the meteorological
-        // direction the wind is quoted in.
-        let run = direction + std::f64::consts::PI;
-
-        // Five components: the peak, a long pair and a short pair, fanned either side
-        // of the mean direction. Enough to stop the surface looking like corduroy,
-        // cheap enough to sample a dozen times a frame.
-        //
-        // The pairing is the part that had to be fixed, and the fault is worth keeping
-        // written down because it was invisible in every number and obvious from the
-        // deck. The components used to run
-        //
-        //     peak 0°, longer −24°, shorter +24°, longest −41°, shortest +41°
-        //
-        // which ties direction to period: every long wave went one side of the wind
-        // and every short wave the other. Energy-weighted, the whole long band ran
-        // 27.8° to port of the wind and stayed there. A real sea has no such
-        // correlation — long and short waves are spread about the same mean — and the
-        // eye reads a seaway by its longest waves, so what it saw was a swell
-        // marching permanently across the wind. Reported as foam moving at an angle to
-        // the wind the boat was sailing in, which is exactly what it was.
-        //
-        // Now both members of a pair sit on the same side of the peak in period and on
-        // opposite sides of it in direction, so there is nothing left to correlate.
-        // The widths follow the physics they were always meant to: spreading is
-        // narrowest at the spectral peak and opens up away from it, more on the short
-        // side than the long, which is the Mitsuyasu result. The two members of a pair
-        // are given slightly different periods and amplitudes so they cannot lock into
-        // a perfectly regular diamond.
         let mut rng = crate::rng::Pcg32::new(seed);
-        let spread = [0.0_f64, -0.38, 0.38, -0.66, 0.66];
-        let period_ratio = [1.0_f64, 1.26, 1.21, 0.82, 0.78];
-        // Energy-weighted so the peak dominates and the sum lands on the right Hs.
-        let weight = [1.0_f64, 0.60, 0.58, 0.32, 0.30];
-        let norm: f64 = weight.iter().map(|w| w * w).sum::<f64>().sqrt();
+        let mut phases = [0.0; BANDS];
+        for p in &mut phases {
+            *p = rng.next_f64() * std::f64::consts::TAU;
+        }
+        let mut sea = Self {
+            components: Vec::new(),
+            hs,
+            tp,
+            // Waves travel downwind, which is the reciprocal of the meteorological
+            // direction the wind is quoted in.
+            run: direction + std::f64::consts::PI,
+            fetch,
+            phases,
+            owed: 0.0,
+            shelter: 1.0,
+        };
+        sea.reshape(0.0, &[0.0; BANDS]);
+        sea
+    }
 
-        let components = (0..5)
+    /// Build the components from the sea state. The single definition of the spectrum's
+    /// shape, called by the constructor and by every relaxation — which is the only
+    /// reason a sea that changes is not a second sea model.
+    ///
+    /// `was` is each component's angular frequency before the reshape. A Gerstner phase
+    /// is `k·x − ωt + φ`, so changing ω would step the surface by `Δω·t` — at an hour
+    /// in, a jump of several wavelengths. Folding that into the stored phase keeps the
+    /// water continuous where the boat is, which is the only place anyone can tell.
+    fn reshape(&mut self, t: f64, was: &[f64; BANDS]) {
+        let norm: f64 = WEIGHT.iter().map(|w| w * w).sum::<f64>().sqrt();
+        self.components = (0..BANDS)
             .map(|i| {
                 // Hs is four times the root-mean-square elevation, and for a sum of
                 // sinusoids the rms is the quadrature sum of the amplitudes over
                 // root two — so scale the set to land on the requested Hs.
-                let amplitude = (hs / 2.0) * weight[i] / norm;
-                WaveComponent::from_period(
+                let amplitude = (self.hs / 2.0) * WEIGHT[i] / norm;
+                let mut c = WaveComponent::from_period(
                     amplitude,
-                    tp * period_ratio[i],
-                    run + spread[i],
-                    rng.next_f64() * std::f64::consts::TAU,
-                )
+                    self.tp * PERIOD_RATIO[i],
+                    self.run + SPREAD[i],
+                    self.phases[i],
+                );
+                c.phase = crate::units::wrap_tau(self.phases[i] + (c.omega - was[i]) * t);
+                self.phases[i] = c.phase;
+                c
             })
             .collect();
-
-        Self {
-            components,
-            hs,
-            shelter: 1.0,
-        }
     }
 
     pub fn components(&self) -> &[WaveComponent] {
@@ -390,6 +443,41 @@ impl WaterSurface for WindSea {
             d -= c.direction * (c.amplitude * c.theta(pos, t).sin());
         }
         d
+    }
+
+    fn peak_period_or(&self, _fallback: f64) -> f64 {
+        self.peak_period()
+    }
+
+    fn follow_wind(&mut self, tws: f64, direction: f64, t: f64, dt: f64) {
+        // Driven from the substep, acted on once a second. The time constants are
+        // hours; evaluating the fetch relations two hundred times a second to move a
+        // sea by a ten-thousandth of a millimetre is not a calculation, it is a bill.
+        self.owed += dt;
+        if self.owed < 1.0 {
+            return;
+        }
+        let step = self.owed;
+        self.owed = 0.0;
+
+        let (hs_target, tp_target) = fetch_limited_sea(tws, self.fetch);
+        let tau = if hs_target > self.hs {
+            SEA_BUILD
+        } else {
+            SEA_DECAY
+        };
+        let blend = 1.0 - (-step / tau).exp();
+        let was: [f64; BANDS] = std::array::from_fn(|i| self.components[i].omega);
+        self.hs += (hs_target - self.hs) * blend;
+        self.tp += (tp_target - self.tp) * blend;
+        // The sea swings round to a shift on the same clock, and that lag is a thing
+        // you sail in: an hour after a front goes through, the wind is in the new
+        // quarter and the old sea is still running across it. Shortest way round, so a
+        // veer through north does not take the sea the long way.
+        let want = direction + std::f64::consts::PI;
+        self.run =
+            crate::units::wrap_tau(self.run + crate::units::wrap_pi(want - self.run) * blend);
+        self.reshape(t, &was);
     }
 
     fn set_shelter(&mut self, shelter: f64) {

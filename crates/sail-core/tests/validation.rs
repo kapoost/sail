@@ -2095,3 +2095,138 @@ fn the_staysail_earns_its_place_only_under_a_flying_sail() {
         upwind[1] - upwind[0]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Weather: the day is going somewhere, and the sea is behind it
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_sea_lags_the_wind_and_lies_down_slower_than_it_gets_up() {
+    use sail_core::water::{WaterSurface, WindSea};
+    const FETCH: f64 = 60_000.0;
+    let settled = |tws: f64| fetch_limited_sea(tws, FETCH).0;
+
+    // A sea built for ten knots, and then it blows twenty-five.
+    let mut sea = WindSea::new(kn_to_ms(10.0), FETCH, 0.0, 3);
+    let start = sea.significant_height();
+    let mut t = 0.0;
+    let mut after_ten_minutes = 0.0;
+    while t < 3.0 * 3600.0 {
+        sea.follow_wind(kn_to_ms(25.0), 0.0, t, 1.0);
+        t += 1.0;
+        if (t - 600.0).abs() < 0.5 {
+            after_ten_minutes = sea.significant_height();
+        }
+    }
+    let target = settled(kn_to_ms(25.0));
+    // Ten minutes of gale on a calm sea is still a calm sea. This is the thing the
+    // model could not say before: the first hour of a new breeze is the easy hour.
+    let ten_minute_share = (after_ten_minutes - start) / (target - start);
+    assert!(
+        ten_minute_share < 0.12,
+        "ten minutes should barely move it, got {:.0}% of the way there",
+        ten_minute_share * 100.0
+    );
+    // Three hours of it, and most of the sea is there.
+    let three_hour_share = (sea.significant_height() - start) / (target - start);
+    assert!(
+        three_hour_share > 0.55,
+        "three hours should build most of it, got {:.0}%",
+        three_hour_share * 100.0
+    );
+
+    // Now the gale dies. The sea must take longer to go than it took to come, because
+    // a dying gale is the worst motion a small boat sees and that asymmetry is why.
+    let built = sea.significant_height();
+    let floor = settled(kn_to_ms(10.0));
+    let mut t2 = t;
+    while t2 < t + 3.0 * 3600.0 {
+        sea.follow_wind(kn_to_ms(10.0), 0.0, t2, 1.0);
+        t2 += 1.0;
+    }
+    let decayed = (built - sea.significant_height()) / (built - floor);
+    assert!(
+        decayed < three_hour_share,
+        "the sea should lie down slower than it builds: {:.0}% down against {:.0}% up",
+        decayed * 100.0,
+        three_hour_share * 100.0
+    );
+}
+
+#[test]
+fn a_shift_takes_the_sea_round_with_it_but_not_at_once() {
+    use sail_core::water::{WaterSurface, WindSea};
+    let mut sea = WindSea::new(kn_to_ms(18.0), 60_000.0, 0.0, 5);
+    // The wind veers ninety degrees, as it does behind a front.
+    let mut t = 0.0;
+    while t < 1800.0 {
+        sea.follow_wind(kn_to_ms(18.0), rad(90.0), t, 1.0);
+        t += 1.0;
+    }
+    // Half an hour later the sea is on its way round and nowhere near there — which is
+    // the cross sea you actually sail in after a frontal passage.
+    // The component's unit vector, turned back into a compass bearing. It started
+    // running due south, which is where a northerly puts it.
+    let run = sea.components()[0].direction;
+    // As a compass bearing: a unit vector (sin, cos) of a bearing, read back the same
+    // way round. Reading it as a mathematical angle instead flips the sign, which is
+    // its own small lesson about having one convention.
+    let moved = wrap_pi(run.x.atan2(run.y) - std::f64::consts::PI);
+    assert!(
+        deg(moved) > 5.0 && deg(moved) < 60.0,
+        "the sea should have started round and not arrived: {:.0} deg of 90",
+        deg(moved)
+    );
+}
+
+#[test]
+fn the_weather_goes_somewhere_and_says_where() {
+    use sail_core::wind::{SyntheticWind, WindField};
+    // Over a dozen drawn days, the mean wind has to move enough to matter and not so
+    // much that the day becomes a different day.
+    let mut swings = Vec::new();
+    for seed in 0..12u64 {
+        let mut w = SyntheticWind::new(rad(200.0), kn_to_ms(16.0), seed);
+        let mut lowest = f64::INFINITY;
+        let mut highest: f64 = 0.0;
+        let mut t = 0.0;
+        while t < 4.0 * 3600.0 {
+            w.step(1.0);
+            t += 1.0;
+            lowest = lowest.min(w.mean_speed);
+            highest = highest.max(w.mean_speed);
+        }
+        swings.push((highest - lowest) / kn_to_ms(16.0));
+        assert!(
+            w.mean_speed > kn_to_ms(16.0) * 0.5 && w.mean_speed < kn_to_ms(16.0) * 1.8,
+            "seed {seed}: the day wandered off, {:.1} kn",
+            ms_to_kn(w.mean_speed)
+        );
+    }
+    let typical = swings.iter().sum::<f64>() / swings.len() as f64;
+    assert!(
+        (0.15..=1.0).contains(&typical),
+        "a four hour watch should see the wind move by a fifth or so of itself, got {:.2}",
+        typical
+    );
+
+    // And the outlook has to agree with what actually happens. Not clairvoyance — the
+    // expected path of a relaxing process — but the sign has to be right more often
+    // than not, or the forecast on the console is a coin toss with a compass rose.
+    let mut right = 0;
+    for seed in 0..40u64 {
+        let mut w = SyntheticWind::new(rad(200.0), kn_to_ms(16.0), seed);
+        let (speed_outlook, _) = w.outlook();
+        let before = w.mean_speed;
+        for _ in 0..3600 {
+            w.step(1.0);
+        }
+        if (w.mean_speed - before).signum() == speed_outlook.signum() {
+            right += 1;
+        }
+    }
+    assert!(
+        right >= 26,
+        "the outlook called the next hour right {right} times in 40, which is a guess"
+    );
+}

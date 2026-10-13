@@ -186,6 +186,10 @@ impl Simulation {
         let wind_ref = self.wind.sample(st.pos, st.time);
         let tws = wind_ref.length();
         let twd = direction_of(wind_ref);
+        // And the sea follows the wind, hours behind it. Fed the instantaneous reading
+        // rather than a mean, which is correct and costs nothing: the relaxation's time
+        // constant is hours, so gusts average out inside it on their own.
+        self.water.follow_wind(tws, twd, st.time, dt);
 
         let velocity = st.velocity_world();
         let heel_cos = st.heel.cos().abs();

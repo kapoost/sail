@@ -104,11 +104,13 @@ pub fn draw(
                     ui.vertical(|ui| {
                         gauge(ui, "LOG", ms_to_kn(telemetry.stw), 0.0, 10.0, "kn");
                         gauge(ui, "WIND", ms_to_kn(telemetry.aws), 0.0, 30.0, "kn");
-                        // The sea you were handed. Not an instrument a boat carries,
-                        // but the forecast is, and knowing whether the slamming is a
-                        // metre or two is the difference between carrying on and
-                        // bearing away.
-                        gauge(ui, "SEA", sim.weather.hs, 0.0, 4.0, "m");
+                        // The sea as it *is*, not as it was drawn. Not an instrument a
+                        // boat carries, but the forecast is, and knowing whether the
+                        // slamming is a metre or two is the difference between carrying
+                        // on and bearing away. This read `weather.hs` until the sea
+                        // started following the wind, at which point it became a number
+                        // from the start of the passage with a label claiming otherwise.
+                        gauge(ui, "SEA", telemetry.significant_height, 0.0, 4.0, "m");
                         // The sounder. The one instrument that turns a shoal from an
                         // ambush into a decision, which is the whole difference
                         // between land being a hazard and land being a wall.
@@ -134,6 +136,13 @@ pub fn draw(
                 readout(ui, "HDG", &format!("{:03.0}", deg(heading)));
                 readout(ui, "TWA", &format!("{:+.0}", deg(telemetry.twa)));
                 readout(ui, "VMG", &format!("{:.2} kn", ms_to_kn(telemetry.vmg)));
+                // The barometer. A skipper does not sail the wind that is blowing, he
+                // sails the one he thinks will be blowing in an hour: whether to reef
+                // now while it is easy, whether this shift is worth tacking on. The
+                // weather is going somewhere now, so the instrument that says where is
+                // worth more than any of the ones above it.
+                let (building, turning) = sim.sim.wind.outlook();
+                readout(ui, "OUTLOOK", &outlook_words(building, turning));
 
                 ui.add_space(4.0);
                 ui.separator();
@@ -655,6 +664,33 @@ fn readout(ui: &mut egui::Ui, label: &str, value: &str) {
 }
 
 /// The tiller: drag it, and it stays.
+/// The hour ahead, in the words a forecast uses.
+///
+/// Knots per hour and degrees per hour are not how anyone thinks about weather, and a
+/// console full of signed numbers is a console nobody reads. "Easing, backing" is what
+/// a watch leader says, and it is what this says, with the figures only when they are
+/// big enough to act on.
+fn outlook_words(building: f64, turning: f64) -> String {
+    let knots = ms_to_kn(building);
+    let degrees = deg(turning);
+    let wind = match knots {
+        k if k > 3.0 => format!("building {:.0}", k),
+        k if k > 1.0 => "building".to_string(),
+        k if k < -3.0 => format!("easing {:.0}", -k),
+        k if k < -1.0 => "easing".to_string(),
+        _ => "steady".to_string(),
+    };
+    // Veering is clockwise and backing is anticlockwise. Every sailor knows the words
+    // and nobody has ever been sure which is which, which is a good reason to print the
+    // figure next to them.
+    let shift = match degrees {
+        d if d > 5.0 => format!(", veer {:.0}", d),
+        d if d < -5.0 => format!(", back {:.0}", -d),
+        _ => String::new(),
+    };
+    format!("{wind}{shift}")
+}
+
 /// A compass repeater: the same card as the one in the bowl, on the console.
 ///
 /// The card turns and the lubber line does not, which is the one thing that makes a

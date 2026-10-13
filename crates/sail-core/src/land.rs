@@ -306,6 +306,10 @@ impl crate::wind::WindField for ShelteredWind {
         self.inner.gust_at(pos, t) * (0.2 + 0.8 * self.land.shelter(pos, from))
     }
 
+    fn outlook(&self) -> (f64, f64) {
+        self.inner.outlook()
+    }
+
     fn sample(&self, pos: DVec2, t: f64) -> DVec2 {
         let flow = self.inner.sample(pos, t);
         let speed = flow.length();
