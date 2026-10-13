@@ -122,6 +122,7 @@ pub fn gather(
     mut helm_source: ResMut<HelmSource>,
     mut pilot: ResMut<Pilot>,
     mut assisting: Local<f32>,
+    mut stage: Local<u8>,
 ) {
     let dt = time.delta_secs_f64();
     let cfg = sim.config();
@@ -333,24 +334,57 @@ pub fn gather(
     // the boat comes round, and that is what this does now — five seconds of somebody
     // trimming, which is about as long as a gybe takes and not nearly long enough to
     // sail the boat for you.
-    if keys.just_pressed(KeyCode::KeyT) || pad.is_some_and(|p| p.just_pressed(GamepadButton::North))
-    {
+    // One sail at a time, and the order is the order a crew works in.
+    //
+    // It took both sheets at once, which is two people and this boat has one of you. A
+    // press is a pair of hands going to *a* winch: the first press puts them on one
+    // sail and the next press moves them to the other, which is also how you sail her
+    // — you set one, look at it, and then set the other against what the first is
+    // doing.
+    //
+    // Which one comes first is not a preference. Upwind the mainsail is the sail you
+    // steer to and the headsail is set to the slot it leaves, so the main goes first.
+    // From the broad reach on, the headsail is the engine and the main is a thing you
+    // ease until it stops backwinding, so the headsail goes first. The changeover is at
+    // the broad reach because that is where the headsail takes over the driving, and it
+    // is read off the *true* wind angle — the apparent one moves with the boat's own
+    // speed, and the point of sail does not.
+    let pressed = keys.just_pressed(KeyCode::KeyT)
+        || pad.is_some_and(|p| p.just_pressed(GamepadButton::North));
+    if pressed {
+        // A second press soon after the first moves to the other sail; after a pause the
+        // hands have left the winch and a press starts the sequence again.
+        *stage = if *assisting > 2.0 { 1 - *stage } else { 0 };
         *assisting = 5.0;
     }
     if *assisting > 0.0 {
         *assisting -= time.delta_secs();
         let awa = sim.sim.telemetry.awa;
-        sim.controls.outhaul = outhaul_for(
-            awa,
-            sim.sim.telemetry.heel,
-            sail_core::autopilot::OVERPOWERED_HEEL,
-        );
+        let headsail_first = sim.sim.telemetry.twa.abs() >= rad(120.0);
+        let on_the_main = (*stage == 0) == !headsail_first;
+        if on_the_main {
+            // The outhaul goes with the mainsail, because it is the mainsail's.
+            sim.controls.outhaul = outhaul_for(
+                awa,
+                sim.sim.telemetry.heel,
+                sail_core::autopilot::OVERPOWERED_HEEL,
+            );
+        }
         let (m, j) = optimal_sheets_with(&cfg, awa, sim.controls.outhaul, sim.controls.headsail);
-        // Hands, not servos: the sheets are hauled towards the right place at a winch's
+        // Hands, not servos: the sheet is hauled towards the right place at a winch's
         // pace rather than teleported to it. Through a gybe that is the difference
         // between a crew and a cheat.
         let haul = (SHEET_RATE * 2.2 * dt).min(1.0);
-        sim.controls.main_sheet += (m - sim.controls.main_sheet) * haul;
-        sim.controls.jib_sheet += (j - sim.controls.jib_sheet) * haul;
+        if on_the_main {
+            sim.controls.main_sheet += (m - sim.controls.main_sheet) * haul;
+        } else {
+            sim.controls.jib_sheet += (j - sim.controls.jib_sheet) * haul;
+        }
+        if pressed {
+            info!(
+                "on the {}",
+                if on_the_main { "mainsheet" } else { "headsail sheet" }
+            );
+        }
     }
 }

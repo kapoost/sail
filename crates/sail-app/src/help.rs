@@ -59,7 +59,8 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
             ("1 2", "pick a line out of the clutch bank"),
             ("A D", "and work the one you picked"),
             ("X Z", "change headsail — she furls what is up first"),
-            ("T", "trim both sheets for you, for five seconds"),
+            ("T", "a hand on the sheet: once for the sail that leads"),
+            (" ", "press again for the other — main first upwind, headsail off it"),
         ],
     ),
     (
