@@ -626,13 +626,24 @@ fn navigation_lamp(
 
 /// Which of the two anchors this is.
 enum Stowage {
-    /// The bower: the one she anchors on, on the foredeck, head forward.
+    /// The bower, on the starboard side deck forward, where a hand can walk it to the
+    /// stemhead.
     Bower,
-    /// The kedge: smaller, lying flat on the counter, under the tiller's sweep.
+    /// The kedge: smaller, on the port side deck abreast the helm, where the hand that
+    /// has to row it out is already standing.
     Kedge,
 }
 
-/// A fisherman anchor lashed on deck.
+/// A fisherman anchor lashed along the rail.
+///
+/// **Along the rail rather than on the deck**, which is where these were and which was
+/// wrong twice over: the middle of a foredeck is the one part of it everybody walks on,
+/// and an anchor lying there is a shin broken in the dark. A boat stows them against the
+/// toe rail, fore and aft, on the strip of side deck nothing else uses.
+///
+/// And smaller. A fisherman for a boat this size is about fifteen kilogrammes with a
+/// shank a bit over half a metre; the first pair were drawn to a full metre and read as
+/// ground tackle off a trawler.
 fn anchor(
     w: &mut Workshop,
     b: &mut ChildSpawnerCommands,
@@ -640,16 +651,14 @@ fn anchor(
     loa: f32,
     which: Stowage,
 ) {
-    // The bower: far enough forward to be out of the way and far enough aft that the
-    // deck is still wide enough to lash it down. The kedge: on the counter, between the
-    // cockpit and the vane.
-    let (z, scale, lie) = match which {
-        Stowage::Bower => (-loa * 0.28, 1.0, std::f32::consts::FRAC_PI_2),
-        // Flat, and turned so it lies along her rather than across: the counter is half
-        // a metre wide back there and an anchor athwartships would hang over both sides.
-        Stowage::Kedge => (4.25, 0.72, 0.0),
+    // A strip of side deck on each of them that nothing else is using: forward of the
+    // sail bags to starboard, and abreast the helm to port.
+    let (z, side, scale) = match which {
+        Stowage::Bower => (-loa * 0.30, 1.0, 0.60),
+        Stowage::Kedge => (3.70, -1.0, 0.46),
     };
     let deck = deck::deck_height(z);
+    let x = side * (deck::deck_half_beam(z) - 0.26);
     let galv = w.materials.add(StandardMaterial {
         base_color: Color::srgb(0.46, 0.47, 0.49),
         perceptual_roughness: 0.68,
@@ -661,11 +670,13 @@ fn anchor(
     let fluke = w.meshes.add(Cuboid::new(0.015, 0.20, 0.30));
     let ring = w.meshes.add(Torus::new(0.018, 0.055));
     b.spawn((
-        Transform::from_xyz(0.0, deck + 0.07 * scale, z)
-            // Lying on its side on the deck, head forward, which is how one is stowed so
-            // that it can be walked to the stemhead and dropped without being turned.
+        Transform::from_xyz(x, deck + 0.06 * scale, z)
+            // Flat on the deck with its shank fore and aft, which is how one lies against
+            // a toe rail: the stock stands off the planking and the flukes are what the
+            // lashing goes round.
             .with_rotation(
-                Quat::from_rotation_z(std::f32::consts::FRAC_PI_2) * Quat::from_rotation_y(lie),
+                Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)
+                    * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
             )
             .with_scale(Vec3::splat(scale)),
         Visibility::default(),

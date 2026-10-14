@@ -109,8 +109,45 @@ const RACK_Z: f32 = 4.30;
 /// How big a lifebuoy is: a ring three quarters of a metre across, with a tube as thick
 /// as a wrist.
 const RING: (f32, f32) = (0.24, 0.37);
-/// Half that tube, which is how far the ring stands proud of whatever it is lashed to.
-const TUBE: f32 = (RING.1 - RING.0) * 0.5;
+/// The strop it hangs on, metres. Short, and it has to be: a boat with a metre of
+/// freeboard aft and a ring three quarters of a metre across has no room for a lanyard —
+/// hang it on a fathom of line and it is in the sea before she has rolled once. A hand's
+/// breadth of strop, and the ring still ends up a foot off the water, which is why it
+/// dips when she puts her quarter down. Which is what was asked for.
+const STROP: f32 = 0.10;
+/// And the pendulum's own length, which is the distance to what is swinging rather than
+/// to the top of it: the strop plus the ring's radius is where its weight is.
+const LANYARD: f32 = STROP + RING.1;
+
+/// What the lanyard is carrying, for the pendulum in `swing`.
+///
+/// `buoyant` is the one number not to copy from the creel beside it: a wicker basket lets
+/// the sea through and keeps almost none of its weight off the line, while a lifebuoy is
+/// *trying* to float. At one and a bit it dips, checks, and comes out lagging instead of
+/// swinging on through — which is the whole of what a ring of closed-cell foam looks like
+/// when a wave takes it.
+fn on_the_lanyard() -> crate::swing::Hung {
+    crate::swing::Hung {
+        length: LANYARD,
+        // From its middle to its bottom edge, which is the part that finds the water.
+        reach: RING.1,
+        // How far it comes in before it is against her planking. The hull falls away
+        // below the gunwale, so there is room for most of a hand's breadth of swing and
+        // then it knocks.
+        inboard: 0.30,
+        outboard: 0.55,
+        // Closed-cell foam in a canvas cover on planking: it knocks rather than thuds,
+        // and it comes back.
+        bounce: 0.45,
+        buoyant: 1.05,
+        damp: 0.9,
+        damp_wet: 4.2,
+    }
+}
+
+/// Where the ring has got to, swinging on its lanyard.
+#[derive(Resource, Default)]
+pub struct Hanging(crate::swing::Swing);
 
 // How wide the drawn hull is where the ring hangs is `deck::HULL_ON_THE_QUARTER`, and it
 // lives there rather than here on purpose: it is a fact about the boat's planking, not
@@ -330,50 +367,58 @@ pub fn setup(
     // resource, or every system that reads one fails on every frame for ever instead of
     // the deck merely being bare.
     commands.init_resource::<Overboard>();
+    commands.init_resource::<Hanging>();
     let Ok(root) = boat.single() else {
         warn!("no boat to lash a lifebuoy to");
         return;
     };
 
-    // Lashed **flat against her topsides** on the starboard quarter: the ring's own plane
-    // lies along the side of the boat, its top a hand above the rail and the rest of it
-    // down the planking, well above the waterline. That is how one is carried on a boat
-    // with nothing to hang it from, and outboard of the sheer it is the only place clear
-    // of the tiller, which sweeps every station inboard of here.
+    // **Hung on a lanyard from a cleat at the rail**, not bolted flat to her side.
     //
-    // It hangs *outside her planking*, which took two goes and a measurement. The first
-    // version put its centre on the sheer line, which buries half of it; the second moved
-    // it outboard of `deck_half_beam`, which is still inside the boat, because back here
-    // the deck is drawn a quarter of a metre inside the scanned hull — see
-    // `crate::deck::HULL_ON_THE_QUARTER`. It is placed off the hull now, not off the deck.
+    // Asked for from the deck, and it is the right answer: a lifebuoy made fast to a boat
+    // is on a line with a slip in it, because the one thing it has to do is leave in a
+    // hurry. What that buys is the thing you actually see from the helm — a ring that
+    // swings as she rolls, knocks against the planking, and dips into the sea when she
+    // puts her quarter down.
+    //
+    // The cleat goes on the gunwale rather than the deck edge: back here the drawn hull
+    // stands a quarter of a metre outboard of the deck it carries (see
+    // `deck::HULL_ON_THE_QUARTER`), so a fitting put on the deck line would be inside the
+    // planking and the ring would swing through her.
     let deck = crate::deck::deck_height(RACK_Z);
-    let x = crate::deck::HULL_ON_THE_QUARTER + TUBE + 0.02;
+    let gunwale = crate::deck::HULL_ON_THE_QUARTER - 0.02;
     commands.entity(root).with_children(|b| {
+        // The cleat itself does not move.
+        b.spawn((
+            Mesh3d(w.meshes.add(Cuboid::new(0.05, 0.035, 0.14))),
+            MeshMaterial3d(tape.clone()),
+            Transform::from_xyz(gunwale - 0.03, deck + 0.02, RACK_Z),
+        ));
         b.spawn((
             Stowed,
-            Transform::from_xyz(x, deck - 0.22, RACK_Z),
+            Transform::from_xyz(gunwale, deck + 0.03, RACK_Z),
             Visibility::default(),
         ))
         .with_children(|p| {
-            // A torus lies in its own XZ plane with its axis up, so a right angle about
-            // the fore-and-aft axis lays that plane along her side.
+            // The lanyard, hanging from the cleat.
+            p.spawn((
+                Mesh3d(w.meshes.add(Cylinder::new(0.010, STROP))),
+                MeshMaterial3d(tape.clone()),
+                Transform::from_xyz(0.0, -STROP * 0.5, 0.0),
+            ));
+            // And the ring under it, hanging in its own plane — along her side, so it
+            // knocks on the planking edge-on the way one does.
             p.spawn((
                 Mesh3d(ring.clone()),
                 MeshMaterial3d(orange.clone()),
-                Transform::from_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                Transform::from_xyz(0.0, -LANYARD, 0.0)
+                    .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2))
+                    // Pressed a little out of round, which is what one hanging on a strop
+                    // does: a ring of foam in a canvas cover is not a machined part, and
+                    // its own weight pulls it long. Six per cent — enough to read as
+                    // cloth and rope, not enough to look broken.
+                    .with_scale(Vec3::new(1.06, 1.0, 0.94)),
             ));
-            // And the two straps over it, at its fore and after ends, reaching inboard to
-            // her side. They are the difference between a lifebuoy fastened to a boat and
-            // a lifebuoy drawn next to one — and they are what makes the small gap at the
-            // bottom of it read as chocks rather than as a mistake.
-            for at in [-RING.1 + 0.07, RING.1 - 0.07] {
-                p.spawn((
-                    Mesh3d(w.meshes.add(Cylinder::new(0.013, TUBE * 2.0 + 0.09))),
-                    MeshMaterial3d(tape.clone()),
-                    Transform::from_xyz(-(TUBE + 0.03), 0.0, at)
-                        .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
-                ));
-            }
         });
     });
 
@@ -493,8 +538,12 @@ type RingAfloat<'w, 's> = Query<
 >;
 
 /// And the pole in its tube, which only needs to know whether it is still aboard.
-type InItsTube<'w, 's> =
-    Query<'w, 's, &'static mut Visibility, (With<Stowed>, Without<Oscar>, Without<Horseshoe>)>;
+type InItsTube<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Visibility, &'static mut Transform),
+    (With<Stowed>, Without<Oscar>, Without<Horseshoe>),
+>;
 
 /// The drift, the search, and getting him back.
 ///
@@ -505,6 +554,7 @@ pub fn update(
     sim: Res<Sim>,
     time: Res<Time>,
     mut over: ResMut<Overboard>,
+    mut hanging: ResMut<Hanging>,
     mut oscar: OscarAfloat,
     mut ring: RingAfloat,
     mut stowed: InItsTube,
@@ -516,12 +566,38 @@ pub fn update(
     // The lashings are empty once the ring has gone over the side, and not before: it is
     // the gear leaving the boat that takes it out of them, not the man leaving the boat.
     let thrown = matches!(over.drill, Drill::Overboard { ring: Some(_), .. });
-    if let Ok(mut vis) = stowed.single_mut() {
+    if let Ok((mut vis, mut at)) = stowed.single_mut() {
         *vis = if thrown {
             Visibility::Hidden
         } else {
             Visibility::Inherited
         };
+        // And it swings. The cleat is a pivot, the ring is a pendulum on a short lanyard,
+        // and what it hangs over is her planking on one side and the sea underneath —
+        // both of which it knocks against, which is the whole reason this is a pendulum
+        // and not a filter on the heel angle.
+        let st = sim.render_state();
+        let heel = st.heel as f32;
+        let wave = sim.sim.water.height(st.pos, st.time) as f32;
+        // How far the cleat is above the water. The deck height is from the waterline, so
+        // what moves it is her heave against the wave under her — and the heel, which on
+        // a fitting this far outboard buries it or lifts it by most of a half-beam. The
+        // sign is the other way round from the creel's because this is the other side of
+        // the boat: she heels to starboard and the starboard rail goes *down*.
+        let clearance = crate::deck::deck_height(RACK_Z) + st.heave as f32
+            - wave
+            - crate::deck::HULL_ON_THE_QUARTER * heel.sin();
+        hanging.0.step(
+            &on_the_lanyard(),
+            heel,
+            st.roll_rate as f32,
+            clearance,
+            time.delta_secs().min(0.05),
+        );
+        // Drawn the other way round too, so that "inboard" in the pendulum is inboard on
+        // this side: a right-handed turn about the fore-and-aft axis takes a thing hung to
+        // starboard *outboard*.
+        at.rotation = Quat::from_rotation_z(-hanging.0.angle);
     }
     // And the ring that was thrown is picked up with him, or left floating while the
     // debrief for a man who was not. What it must not do is stay in the water for the
@@ -657,49 +733,53 @@ mod tests {
     use super::*;
     use sail_core::units::kn_to_ms;
 
-    /// The lifebuoy is where one goes, and nothing on the boat sweeps through it.
+    /// The lifebuoy hangs where one hangs: clear of the tiller, clear of her planking,
+    /// and low enough that the sea reaches it when she puts her quarter down.
     ///
-    /// The tiller is the whole constraint: it pivots at the stock, reaches a metre and a
-    /// quarter forward and swings forty degrees each way, so it sweeps every station
-    /// between the companionway and the transom. Three quarters of a metre of ring does
-    /// not fit beside it anywhere inboard — tried, and the arithmetic refused every
-    /// position before anything was drawn. Outboard on the quarter it is clear of the
-    /// sweep by the width of the side deck.
+    /// The tiller is the constraint that put it here. It pivots at the stock, reaches a
+    /// metre and a quarter forward and swings forty degrees each way, so it sweeps every
+    /// station between the companionway and the transom — three quarters of a metre of
+    /// ring does not fit beside it anywhere inboard, and the arithmetic refused every
+    /// position before anything was drawn.
     #[test]
-    fn nothing_aboard_sweeps_through_the_lifebuoy() {
+    fn the_lifebuoy_hangs_clear_of_her_and_into_the_sea() {
         let stock = 4.60_f32;
-        let out = crate::deck::HULL_ON_THE_QUARTER + TUBE + 0.02;
-        // Outboard of anything the tiller can reach at that station.
+        // Outboard of anything the tiller can reach at that station — and it is hung off
+        // the gunwale, which is outboard of the deck entirely.
         let sweep = (stock - RACK_Z).max(0.0) * (40.0_f32).to_radians().tan();
+        let pivot = crate::deck::HULL_ON_THE_QUARTER - 0.02;
         assert!(
-            out > sweep + 0.15,
-            "the tiller reaches {sweep:.2} m out at z {RACK_Z:.2} and the ring is at \
-             {out:.2}"
+            pivot > sweep + 0.15,
+            "the tiller reaches {sweep:.2} m out at z {RACK_Z:.2} and the cleat is at \
+             {pivot:.2}"
         );
-        // To starboard, because the creel hangs off the port quarter and the two would
-        // otherwise swing through each other.
-        assert!(out > 0.0, "the lifebuoy is on the creel's side");
-        // And outside her *planking* rather than through it, which is not the same
-        // question as outside her deck: aft of the cockpit the scanned hull stands a
-        // quarter of a metre outboard of the sheer the deck is drawn to, and measuring
-        // this against the deck is what buried the ring in the boat twice.
-        let inboard_face = out - TUBE;
+        // To starboard, because the creel hangs off the port quarter.
+        assert!(pivot > 0.0, "the lifebuoy is on the creel's side");
+
+        let hung = on_the_lanyard();
+        // Hanging plumb, the bottom of it is below the rail and above the water: it has
+        // to dip when she rolls and not drag when she does not.
+        let deck = crate::deck::deck_height(RACK_Z);
+        let bottom = deck + 0.03 - (hung.length + hung.reach);
         assert!(
-            inboard_face >= crate::deck::HULL_ON_THE_QUARTER,
-            "the ring reaches {:.3} m into her planking",
-            crate::deck::HULL_ON_THE_QUARTER - inboard_face
+            (0.2..0.6).contains(&bottom),
+            "the ring hangs with its bottom {bottom:.2} m over the water, which never \
+             touches it or never leaves it"
         );
-        // Not standing off in the air either: a hand's breadth at most.
-        assert!(inboard_face - crate::deck::HULL_ON_THE_QUARTER < 0.06);
-        // The hull really is outboard of the deck back there. If somebody re-fairs the
-        // sheer table and the two lines meet again, this is the line that says so.
+        // It can swing in until it is against her planking and no further, and the hull
+        // falls away below the gunwale so there is room for some of a swing first.
         assert!(
-            crate::deck::HULL_ON_THE_QUARTER > crate::deck::deck_half_beam(RACK_Z),
-            "the deck is now as wide as the hull at z {RACK_Z:.2}; re-measure the scan"
+            (0.15..0.45).contains(&hung.inboard),
+            "{:.2} rad of swing before it knocks is not a lanyard",
+            hung.inboard
         );
-        // Forward of the wind vane, which stands on the centreline right aft.
-        assert!(RACK_Z + RING.1 < stock + 0.34 + RING.1);
-        // And it is a lifebuoy rather than a bracelet: three quarters of a metre across.
+        // And it floats. A ring of closed-cell foam is the one thing hung off this boat
+        // whose weight the water takes completely.
+        assert!(
+            hung.buoyant >= 1.0,
+            "a lifebuoy that sinks is not a lifebuoy"
+        );
+        // A lifebuoy rather than a bracelet: three quarters of a metre across.
         assert!(
             (0.60..0.85).contains(&(RING.1 * 2.0)),
             "a ring {:.2} m across is not a lifebuoy",
