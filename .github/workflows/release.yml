@@ -114,9 +114,24 @@ jobs:
 
             ## Windows
 
-            Download `Sail.exe` and run it. Windows will say *"Windows protected your
-            PC"* because the file is not signed: click **More info**, then **Run
-            anyway**.
+            Paste this into PowerShell:
+
+            ```
+            irm https://raw.githubusercontent.com/kapoost/sail/main/dist/install.ps1 | iex
+            ```
+
+            It puts the game in `%LOCALAPPDATA%\Sail`, brings `sail-server.exe` with
+            it, adds a Start menu entry, and asks for no administrator rights. Run
+            the same line again for the next version.
+
+            **Why a line in PowerShell and not just the exe.** *"Windows protected
+            your PC"* comes from the mark of the web — a tag the program doing the
+            *downloading* attaches. A browser attaches it; `Invoke-WebRequest` does
+            not. So a copy that arrives through that line has nothing on it for
+            SmartScreen to object to.
+
+            By hand instead: download `Sail.exe`, run it, click **More info** and
+            then **Run anyway**.
 
             ## Sailing together
 

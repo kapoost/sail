@@ -64,7 +64,17 @@ there is otherwise no straightforward way past "Sail is damaged and can't be ope
 an application nobody has paid Apple to vouch for. See `dist/install.sh`, which explains
 itself at length.
 
-On Windows, `Sail.exe` from the releases page.
+On Windows, the same idea in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/kapoost/sail/main/dist/install.ps1 | iex
+```
+
+and for the same reason: *"Windows protected your PC"* comes from the mark of the web,
+which the program doing the downloading attaches — a browser does, `Invoke-WebRequest`
+does not. Piped into `iex` the script is a string in memory, so the execution policy has
+nothing to refuse either. `Sail.exe` from the releases page still works if you would
+rather click **More info** and **Run anyway**.
 
 From source:
 
