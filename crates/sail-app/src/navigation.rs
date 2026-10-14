@@ -21,13 +21,18 @@ use sail_core::units::{kn_to_ms, ms_to_kn, rad};
 
 use crate::sim::Sim;
 
-/// How long a fix is worth looking at, seconds of simulated time.
+/// How long a fix is worth looking at, seconds — **and this is the backstop rather than
+/// the rule.**
 ///
-/// Six minutes. A fix is a statement about a moment and it ages at the speed the boat
-/// moves: at five knots six minutes is half a mile, which is about the error a careful
-/// plot has in it anyway. Longer than that and the chart is showing you where you were,
-/// which is the one lie a chart must not tell.
-pub const FIX_HOLDS: f64 = 360.0;
+/// What really keeps a position is being able to see the marks it was taken on: while
+/// two of them are still there to be recognised you can re-fix whenever you like, so you
+/// are not lost in any sense that matters. Asked for from the deck in exactly those
+/// words, and it is better seamanship than a clock.
+///
+/// The clock is still here for the case the marks never go: a fix an hour old on marks
+/// you have been watching the whole time is still an hour-old fix, and she has sailed
+/// four miles since. Twenty minutes, after which you take another one.
+pub const FIX_HOLDS: f64 = 1_200.0;
 
 #[derive(Resource, Default)]
 pub struct Navigation {
@@ -42,12 +47,25 @@ pub struct Navigation {
     /// The bearings taken and not yet thrown away. Three is a fix; four is a navigator
     /// who has stopped sailing the boat.
     pub sights: Vec<sail_core::fix::Sight>,
+    /// The marks the last fix was taken on, and whether they can still be made out.
+    /// While two of them can, the position holds.
+    pub fixed_on: Vec<(glam::DVec2, sail_core::land::Mark)>,
+    /// How many of them are in sight now, for the chart to say so.
+    pub still_in_sight: usize,
 }
 
 impl Navigation {
     /// Whether the chart may show where she is.
+    ///
+    /// Two things, and the first is the real one: the marks the fix was taken on are
+    /// still there to be recognised, so another fix is a minute's work whenever she
+    /// wants one. The clock is only the backstop for a fix that would otherwise last all
+    /// afternoon.
     pub fn shows_position(&self, now: f64) -> bool {
-        !self.lost || now - self.last_fix < FIX_HOLDS
+        if !self.lost {
+            return true;
+        }
+        self.still_in_sight >= 2 && now - self.last_fix < FIX_HOLDS
     }
 
     /// How much of the fix's life is left, for drawing something that empties.
@@ -170,6 +188,8 @@ pub fn lost_at_sea(
     nav.last_fix = f64::NEG_INFINITY;
     nav.fixed_at = None;
     nav.sights.clear();
+    nav.fixed_on.clear();
+    nav.still_in_sight = 0;
     track.clear();
     pilot.disengage();
 
@@ -205,6 +225,21 @@ pub fn enter_in_the_log(
     const GOOD_ENOUGH: f64 = 460.0;
     let truth = sim.sim.state.pos;
     let out_by = (said - truth).length();
+    // Which marks it was taken on, kept so that the position can hold for as long as
+    // they can be made out.
+    let on: Vec<(DVec2, sail_core::land::Mark)> = match sim.sim.land.as_ref() {
+        Some(land) => nav
+            .sights
+            .iter()
+            .filter_map(|s| {
+                land.landmarks()
+                    .into_iter()
+                    .find(|m| (m.at - s.mark).length() < 1.0)
+                    .map(|m| (m.at, m.kind))
+            })
+            .collect(),
+        None => Vec::new(),
+    };
     nav.sights.clear();
     // The lines come off the chart the moment the fix is in the log, which is what a
     // navigator does with them: they were working, the fix is the answer, and leaving
@@ -216,6 +251,7 @@ pub fn enter_in_the_log(
     if out_by < GOOD_ENOUGH {
         nav.last_fix = sim.sim.state.time;
         nav.fixed_at = Some(said);
+        nav.fixed_on = on.clone();
         // And it goes on the chart where it was worked out, which is where a fix goes:
         // a cross, and the time beside it, so an hour later you can see what you were
         // working from.
@@ -231,4 +267,35 @@ pub fn enter_in_the_log(
         nav.fixed_at = None;
         info!("fix entered: {:.0} m out — she is still lost", out_by);
     }
+}
+
+/// Whether the marks the fix was taken on can still be made out.
+///
+/// A position is not a thing that decays on a clock; it is a thing you can renew as long
+/// as the coast is still telling you where you are. So this counts, every frame, how many
+/// of the marks the last fix was worked from are still inside the range at which they
+/// could be identified — and while two of them are, the chart goes on knowing where she
+/// is, because another fix is a minute's work whenever she wants one.
+///
+/// When the second one goes — round a headland, into the rain, over the horizon — the
+/// chart stops saying. That is the moment a navigator starts keeping a dead-reckoning
+/// plot, and it arrives by itself rather than on a timer.
+pub fn the_fix_holds(sim: Res<Sim>, mut nav: ResMut<Navigation>) {
+    if !nav.lost || nav.fixed_on.is_empty() {
+        if !nav.lost {
+            nav.still_in_sight = usize::MAX;
+        }
+        return;
+    }
+    let here = sim.sim.state.pos;
+    // What the weather is doing to the view. Rain and the murk under a squall take the
+    // coast away long before the curve of the earth does, and the one that takes it away
+    // first is the one that decides.
+    let murk = sim.sim.wind.squall_at(here).clamp(0.0, 1.0);
+    let through_it = 1.0 - 0.75 * murk;
+    nav.still_in_sight = nav
+        .fixed_on
+        .iter()
+        .filter(|(at, kind)| (*at - here).length() < kind.identified_from() * through_it)
+        .count();
 }

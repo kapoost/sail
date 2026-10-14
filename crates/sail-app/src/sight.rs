@@ -43,27 +43,6 @@ pub struct Sighting {
 /// about the accuracy of the reading.
 const NOTCH: f64 = 0.044;
 
-/// How far off a mark can be identified.
-///
-/// Seeing a thing and *knowing which thing it is* are different questions, and the second
-/// one is the whole difficulty of coastal navigation. A lighthouse is a white tower from
-/// six miles and the lighthouse on the chart from three; past that you have a bearing on
-/// "a white tower", which is a line through nothing.
-fn identifiable(kind: Mark) -> f64 {
-    match kind {
-        // A tower on a bare rock, painted to be told apart, and lit.
-        Mark::Lighthouse => 9_000.0,
-        // A spire over a village: conspicuous a long way, and the village under it tells
-        // you which village.
-        Mark::Spire => 7_000.0,
-        // A pole with a topmark. You have to be close enough to see the topmark, or it
-        // is a stick.
-        Mark::Beacon => 3_200.0,
-        // Stones. Honestly, stones.
-        Mark::Cairn => 2_000.0,
-    }
-}
-
 /// Raise and lower it, and read what it is on.
 pub fn aim(
     keys: Res<ButtonInput<KeyCode>>,
@@ -120,7 +99,7 @@ pub fn aim(
     for mark in land.landmarks() {
         let off = mark.at - here;
         let range = off.length();
-        if range > identifiable(mark.kind).min(mark.visible_from(2.0)) {
+        if range > mark.kind.identified_from().min(mark.visible_from(2.0)) {
             continue;
         }
         let to_it = wrap_tau(off.x.atan2(off.y));

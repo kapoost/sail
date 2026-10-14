@@ -353,6 +353,7 @@ fn main() {
                         course::restart,
                         navigation::lost_at_sea,
                         navigation::enter_in_the_log,
+                        navigation::the_fix_holds,
                         sight::aim,
                     ),
                     chart::toggle,

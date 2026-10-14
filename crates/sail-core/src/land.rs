@@ -559,6 +559,26 @@ impl Mark {
     pub fn lit(&self) -> bool {
         matches!(self, Mark::Lighthouse)
     }
+
+    /// How far off you can tell *which* mark this is, metres.
+    ///
+    /// Seeing a thing and knowing which thing it is are different questions, and the
+    /// second one is the whole difficulty of coastal navigation — a bearing on "a white
+    /// tower" is a line through nothing. A lighthouse is painted to be told apart and is
+    /// lit; a spire has a village under it that names it; a beacon has to be close
+    /// enough for its topmark to be read, or it is a stick; and a cairn is stones.
+    ///
+    /// Here rather than in the drawing because two places need it and they must agree:
+    /// the instrument that decides whether you may take the bearing, and the plot that
+    /// decides whether the fix you took from it still holds.
+    pub fn identified_from(&self) -> f64 {
+        match self {
+            Mark::Lighthouse => 9_000.0,
+            Mark::Spire => 7_000.0,
+            Mark::Beacon => 3_200.0,
+            Mark::Cairn => 2_000.0,
+        }
+    }
 }
 
 impl Landmark {

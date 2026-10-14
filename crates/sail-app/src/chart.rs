@@ -455,6 +455,25 @@ pub fn draw(
         // statement about a moment and this is the moment running out — drawn rather
         // than counted, because a bar is read without being looked at.
         if nav.lost && knows && spread {
+            // How many of the marks this fix was taken on can still be made out, which
+            // is what is actually keeping the position: while two of them are there,
+            // another fix is a minute's work and she is not lost in any sense that
+            // matters. The clock behind it is only a backstop.
+            p.text(
+                egui::pos2(rect.left() + 24.0, rect.top() + 84.0),
+                egui::Align2::LEFT_CENTER,
+                format!(
+                    "{} of {} marks still in sight",
+                    nav.still_in_sight.min(nav.fixed_on.len()),
+                    nav.fixed_on.len()
+                ),
+                egui::FontId::monospace(11.0),
+                if nav.still_in_sight > 2 {
+                    ink::COAST
+                } else {
+                    ink::BOAT
+                },
+            );
             let left = nav.fix_left(sim.sim.state.time);
             let bar = egui::Rect::from_min_size(
                 egui::pos2(rect.left() + 24.0, rect.top() + 66.0),
