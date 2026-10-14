@@ -216,6 +216,7 @@ pub fn lost_at_sea(
 /// like close enough to go between two rocks on.
 pub fn enter_in_the_log(
     sim: Res<Sim>,
+    coast: Res<crate::marks::Coast>,
     mut nav: ResMut<Navigation>,
     mut chart: ResMut<crate::chart::Chart>,
 ) {
@@ -227,19 +228,17 @@ pub fn enter_in_the_log(
     let out_by = (said - truth).length();
     // Which marks it was taken on, kept so that the position can hold for as long as
     // they can be made out.
-    let on: Vec<(DVec2, sail_core::land::Mark)> = match sim.sim.land.as_ref() {
-        Some(land) => nav
-            .sights
-            .iter()
-            .filter_map(|s| {
-                land.landmarks()
-                    .into_iter()
-                    .find(|m| (m.at - s.mark).length() < 1.0)
-                    .map(|m| (m.at, m.kind))
-            })
-            .collect(),
-        None => Vec::new(),
-    };
+    let on: Vec<(DVec2, sail_core::land::Mark)> = nav
+        .sights
+        .iter()
+        .filter_map(|s| {
+            coast
+                .marks
+                .iter()
+                .find(|m| (m.at - s.mark).length() < 1.0)
+                .map(|m| (m.at, m.kind))
+        })
+        .collect();
     nav.sights.clear();
     // The lines come off the chart the moment the fix is in the log, which is what a
     // navigator does with them: they were working, the fix is the answer, and leaving

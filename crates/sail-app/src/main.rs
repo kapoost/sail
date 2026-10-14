@@ -238,6 +238,7 @@ fn main() {
         .init_resource::<camera::ViewAim>()
         .init_resource::<navigation::Navigation>()
         .init_resource::<sight::Sighting>()
+        .init_resource::<marks::Coast>()
         // `SAIL_TUTORIAL=1` starts the drill on the first frame, which is how it gets
         // looked at twenty times in an afternoon without clicking through a panel.
         .insert_resource(tutorial::Tutorial::asked_for(
@@ -291,7 +292,11 @@ fn main() {
                 world::report_vitals,
                 world::report_frame_times,
                 chart::record,
-                (islands::follow_origin, marks::follow_origin),
+                (
+                    islands::follow_origin,
+                    marks::follow_origin,
+                    marks::keep_the_coast,
+                ),
                 // Everybody else's boats: told where they are, given their hulls, then
                 // placed and dressed like any other thing in the scene. One group of its
                 // own because the four have to happen in that order and because a tuple

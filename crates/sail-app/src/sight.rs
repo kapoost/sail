@@ -44,6 +44,7 @@ pub struct Sighting {
 const NOTCH: f64 = 0.044;
 
 /// Raise and lower it, and read what it is on.
+#[allow(clippy::too_many_arguments)]
 pub fn aim(
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -52,6 +53,7 @@ pub fn aim(
     mut sighting: ResMut<Sighting>,
     mut nav: ResMut<Navigation>,
     mut chart: ResMut<crate::chart::Chart>,
+    coast: Res<crate::marks::Coast>,
 ) {
     // **Shift and N has the compass in your hand; N shoots what is in the notch.**
     //
@@ -79,9 +81,6 @@ pub fn aim(
     let Ok(eye) = camera.single() else {
         return;
     };
-    let Some(land) = sim.sim.land.as_ref() else {
-        return;
-    };
 
     // Where the notch is pointing, as a true bearing. The camera looks down its own
     // negative z, and the world's north is the simulation's +y — which in Bevy's frame is
@@ -96,7 +95,7 @@ pub fn aim(
     // of the notch of the line you are looking down.
     let here = sim.sim.state.pos;
     let mut best: Option<(String, Mark, f64, f64)> = None;
-    for mark in land.landmarks() {
+    for mark in &coast.marks {
         let off = mark.at - here;
         let range = off.length();
         if range > mark.kind.identified_from().min(mark.visible_from(2.0)) {
@@ -120,7 +119,7 @@ pub fn aim(
     // what you did: you put the notch *on the lighthouse*.
     if buttons.just_pressed(MouseButton::Left) || shoot_key {
         if let Some((name, _, _, _)) = best {
-            if let Some(mark) = land.landmarks().into_iter().find(|m| m.name == name) {
+            if let Some(mark) = coast.marks.iter().find(|m| m.name == name) {
                 let off = mark.at - here;
                 // **With the error a hand bearing compass actually has.**
                 //

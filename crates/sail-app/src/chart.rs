@@ -90,6 +90,16 @@ impl Tool {
     }
 }
 
+/// The instruments, in the order a hand reaches for them. One list, because the palette
+/// is drawn from it and the click targets are worked out from it, and those two being
+/// two lists is how a button ends up somewhere other than where it looks.
+pub const TOOLS: [Tool; 4] = [
+    Tool::Dividers,
+    Tool::ParallelRule,
+    Tool::Pencil,
+    Tool::Rubber,
+];
+
 /// Something drawn on the chart in pencil.
 #[derive(Clone, Copy, Debug)]
 pub enum Plotted {
@@ -212,6 +222,7 @@ pub fn draw(
     course: Res<Course>,
     track: Res<Track>,
     nav: Res<crate::navigation::Navigation>,
+    coast: Res<crate::marks::Coast>,
 ) -> Result {
     if !chart.open {
         return Ok(());
@@ -339,7 +350,7 @@ pub fn draw(
         // can tell apart at a glance, a name, and for a light its character — which
         // is the only thing that identifies it in the dark and is therefore the one
         // piece of text on a chart that is worth more than the name beside it.
-        for mark in land.landmarks() {
+        for mark in &coast.marks {
             let at = to_screen(mark.at);
             if !rect.contains(at) {
                 continue;
@@ -540,12 +551,39 @@ pub fn draw(
         // Only on the table. On the folded chart there is no room to put a hand down,
         // and a measurement you cannot read is worse than none.
         if spread {
+            // **Where the furniture is, before anything reacts to a click.**
+            //
+            // The instruments and the log button are drawn *on* the chart, and the chart
+            // is one widget — so a click on a button was also a click on the water under
+            // it: picking up the rubber rubbed something out, and entering a fix in the
+            // log left a pencil cross under the button that did it. Found in review.
+            //
+            // The slots are worked out here and the drawing below uses the same ones, so
+            // what you can click and what you can see are the same rectangles.
+            let mut furniture: Vec<egui::Rect> = Vec::new();
+            let mut x = rect.left() + 24.0;
+            for tool in TOOLS {
+                let wide = 11.0 + tool.name().len() as f32 * 7.4;
+                furniture.push(egui::Rect::from_min_size(
+                    egui::pos2(x, rect.top() + 14.0),
+                    egui::vec2(wide, 20.0),
+                ));
+                x += wide + 8.0;
+            }
+            let log_button = egui::Rect::from_min_size(
+                egui::pos2(rect.left() + 24.0, rect.top() + 66.0),
+                egui::vec2(188.0, 22.0),
+            );
+            let on_furniture = response.interact_pointer_pos().is_some_and(|at| {
+                furniture.iter().any(|slot| slot.contains(at)) || log_button.contains(at)
+            });
+
             // What a drag means depends on what is in your hand, which is how a chart
             // table works: the dividers measure, the rule plots, the pencil marks and
             // the rubber takes it off again.
             match chart.tool {
                 Tool::Dividers | Tool::ParallelRule => {
-                    if response.drag_started() {
+                    if response.drag_started() && !on_furniture {
                         if let Some(at) = response.interact_pointer_pos() {
                             set_dividers = Some((to_water(at), to_water(at)));
                         }
@@ -578,14 +616,14 @@ pub fn draw(
                     }
                 }
                 Tool::Pencil => {
-                    if response.clicked() {
+                    if response.clicked() && !on_furniture {
                         if let Some(at) = response.interact_pointer_pos() {
                             draw_on = Some(Plotted::Cross { at: to_water(at) });
                         }
                     }
                 }
                 Tool::Rubber => {
-                    if response.clicked() {
+                    if response.clicked() && !on_furniture {
                         if let Some(at) = response.interact_pointer_pos() {
                             rub_out = Some(to_water(at));
                         }
@@ -693,19 +731,9 @@ pub fn draw(
                 ink::COAST,
             );
             // The instruments, along the top of the table where a hand reaches for them.
-            let mut x = rect.left() + 24.0;
-            for tool in [
-                Tool::Dividers,
-                Tool::ParallelRule,
-                Tool::Pencil,
-                Tool::Rubber,
-            ] {
+            for (tool, slot) in TOOLS.iter().zip(&furniture) {
+                let (tool, slot) = (*tool, *slot);
                 let text = tool.name();
-                let wide = 11.0 + text.len() as f32 * 7.4;
-                let slot = egui::Rect::from_min_size(
-                    egui::pos2(x, rect.top() + 14.0),
-                    egui::vec2(wide, 20.0),
-                );
                 let on = chart.tool == tool;
                 p.rect_filled(slot, 2.0, if on { ink::MARK } else { ink::PAPER });
                 p.rect_stroke(
@@ -728,7 +756,6 @@ pub fn draw(
                 {
                     pick = Some(tool);
                 }
-                x += wide + 8.0;
             }
 
             // --- The fix -----------------------------------------------------
@@ -762,10 +789,7 @@ pub fn draw(
                 // And the button that says you believe it. A fix is not a measurement
                 // until somebody writes it in the log, which is the moment it becomes the
                 // position the boat is working from — and the moment it can be wrong.
-                let slot = egui::Rect::from_min_size(
-                    egui::pos2(rect.left() + 24.0, rect.top() + 66.0),
-                    egui::vec2(188.0, 22.0),
-                );
+                let slot = log_button;
                 p.rect_filled(slot, 2.0, ink::PAPER);
                 p.rect_stroke(
                     slot,

@@ -25,6 +25,38 @@ use sail_core::land::Mark;
 use crate::frame;
 use crate::sim::Sim;
 
+/// The marks, worked out once rather than every frame.
+///
+/// `Archipelago::landmarks` walks every island, names each mark and builds a `String`
+/// for it. That is nothing once and forty allocations a frame three times over when the
+/// chart, the bearing compass and the plot all ask for the list sixty times a second —
+/// which is what they were doing. Found in review rather than in a profile, which is the
+/// cheaper way to find it.
+///
+/// Rebuilt when the land underneath it is not the same land: joining somebody else's
+/// game puts her in a different archipelago, and a coast cached across that would be a
+/// chart of somewhere else.
+#[derive(Resource, Default)]
+pub struct Coast {
+    pub marks: Vec<sail_core::land::Landmark>,
+    from: Option<std::sync::Arc<sail_core::land::Archipelago>>,
+}
+
+/// Keep it in step with the water she is actually in.
+pub fn keep_the_coast(sim: Res<Sim>, mut coast: ResMut<Coast>) {
+    let Some(land) = sim.sim.land.as_ref() else {
+        return;
+    };
+    let same = coast
+        .from
+        .as_ref()
+        .is_some_and(|had| std::sync::Arc::ptr_eq(had, land));
+    if !same {
+        coast.marks = land.landmarks();
+        coast.from = Some(land.clone());
+    }
+}
+
 /// One mark standing on the coast.
 #[derive(Component)]
 pub struct Standing {
