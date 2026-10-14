@@ -62,6 +62,28 @@ pub struct Hung {
     pub damp_wet: f32,
 }
 
+/// The furthest in a hanging thing can swing before it is on her planking, radians.
+///
+/// **State the geometry; do not guess the angle.** This exists because the angle has now
+/// been guessed three times by two people and been wrong every time — a lifebuoy twice
+/// and a creel once — and the guesses were not slightly wrong. Measured: the ring sat
+/// eighty-five millimetres inside the planking at rest and two hundred and twenty-four at
+/// its inboard limit, and the creel a hundred and twenty at rest. Both files carried a
+/// comment explaining that this was the thing not to get wrong.
+///
+/// `out` is how far the hanging point is from the centreline, `half` is the thing's own
+/// half-width across the boat, `length` is to its middle, and `hull` is where the
+/// planking is at that height — [`crate::deck::HULL_ON_THE_QUARTER`] back aft.
+///
+/// **The answer is usually negative**, and that is not an error to clamp away: it means
+/// the thing cannot hang plumb at all, because plumb would be inside the boat. What it
+/// does instead is rest leaning outboard with its inboard side against the topsides,
+/// which is exactly what a basket or a ring hung over a rail does and is why they knock
+/// when she rolls.
+pub fn against_the_planking(out: f32, half: f32, length: f32, hull: f32) -> f32 {
+    (((out - half - hull) / length.max(1e-3)).clamp(-1.0, 1.0)).asin()
+}
+
 /// Gravity, for the restoring term.
 const G: f32 = 9.81;
 
@@ -209,6 +231,60 @@ mod tests {
         assert!(
             in_water < in_air * 0.5,
             "wet {in_water} against dry {in_air}"
+        );
+    }
+
+    /// The limit comes out of the geometry, and it comes out negative for anything hung
+    /// off a gunwale — which is the whole point: it cannot hang plumb, so it rests
+    /// leaning out with its inboard side on the planking.
+    #[test]
+    fn a_thing_hung_on_the_gunwale_cannot_hang_plumb() {
+        // The creel: hung a hand's breadth outboard of the planking, and most of a foot
+        // across.
+        let limit = against_the_planking(0.86, 0.19, 0.62, 0.79);
+        assert!(limit < 0.0, "it was allowed to hang inside the boat");
+        // And at that angle its inboard face is exactly on the planking, which is the
+        // thing being asserted rather than the number.
+        // Measured from the centreline outwards, which is the frame the hull is in:
+        // the thing's centre is `out − L·sin θ` off the middle and its inboard face is
+        // half a width further in. A negative θ therefore puts it *further out*.
+        let face = 0.86 - 0.62 * limit.sin() - 0.19;
+        assert!((face - 0.79).abs() < 1e-4, "its edge is at {face}");
+    }
+
+    /// Hung far enough out — off a davit, or a boom — it can hang plumb and swing both
+    /// ways, and the same arithmetic says so rather than needing a second case.
+    #[test]
+    fn hung_clear_of_her_it_swings_both_ways() {
+        assert!(against_the_planking(1.4, 0.19, 0.62, 0.79) > 0.0);
+    }
+
+    /// Nothing it is given can make it swing *through* her, whatever is swinging and
+    /// however hard the roll throws it.
+    #[test]
+    fn it_never_gets_inside_the_planking() {
+        const OUT: f32 = 0.86;
+        const HALF: f32 = 0.19;
+        const HULL: f32 = 0.79;
+        let hung = Hung {
+            inboard: against_the_planking(OUT, HALF, 0.62, HULL),
+            ..creel()
+        };
+        let mut s = Swing::default();
+        let mut worst = f32::MAX;
+        // Rolled hard both ways for ten seconds, which is a worse sea than the model
+        // makes.
+        for step in 0..1200 {
+            let t = step as f32 / 120.0;
+            let heel = 0.5 * (t * 2.0).sin();
+            s.step(&hung, -heel, (t * 2.0).cos(), 0.9, 1.0 / 120.0);
+            // Its inboard face, measured from the centreline in the boat's own frame —
+            // which is the frame her planking is in, so the heel does not come into it.
+            worst = worst.min(OUT - hung.length * s.angle.sin() - HALF);
+        }
+        assert!(
+            worst >= HULL - 1e-3,
+            "it reached {worst} against a hull at {HULL}"
         );
     }
 

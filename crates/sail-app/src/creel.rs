@@ -32,6 +32,13 @@ const LANYARD: f32 = 0.62;
 /// How many fish are drawn. A creel this size holds about this many and the rest of the
 /// catch is a number on the console.
 const VISIBLE: usize = 7;
+/// How far out the lanyard is made fast, and how wide the basket is at its mouth.
+///
+/// Both measured against her planking rather than her deck — see
+/// [`crate::deck::HULL_ON_THE_QUARTER`], which is a quarter of a metre outboard of the
+/// deck line back here.
+const HANGS_AT: f32 = crate::deck::HULL_ON_THE_QUARTER + 0.07;
+const MOUTH: f32 = 0.19;
 
 #[derive(Component)]
 pub struct Creel;
@@ -60,9 +67,19 @@ fn as_hung() -> crate::swing::Hung {
     crate::swing::Hung {
         length: LANYARD,
         reach: 0.26,
-        // Seven centimetres of clearance over a lanyard this long is about a tenth of a
-        // radian before the wicker is on her planking; outboard it can go where it likes.
-        inboard: 0.11,
+        // Worked out from the geometry rather than guessed, and the guess was a tenth of
+        // a radian *inboard* when the answer is a fifth of one **outboard**: a basket
+        // nearly four tenths of a metre across, hung a hand's breadth outside the
+        // planking, cannot hang plumb at all — plumb is inside the boat. It rests leaning
+        // out with its inboard side on her topsides, which is what a basket hung over a
+        // rail does, and the old number had it a hundred and twenty millimetres into the
+        // planking before it had swung anywhere.
+        inboard: crate::swing::against_the_planking(
+            HANGS_AT,
+            MOUTH,
+            LANYARD,
+            crate::deck::HULL_ON_THE_QUARTER,
+        ),
         outboard: 0.85,
         bounce: 0.22,
         buoyant: 0.25,
@@ -174,11 +191,7 @@ fn basket_mesh(bottom: f32, mouth: f32, depth: f32) -> Mesh {
 /// are two different lines a quarter of a metre apart — this hung inside the boat until
 /// somebody measured the hull, which is the whole of what that constant is for.
 fn cleat() -> Vec3 {
-    Vec3::new(
-        -(crate::deck::HULL_ON_THE_QUARTER + 0.07),
-        crate::deck::deck_height(CLEAT_Z) + 0.02,
-        CLEAT_Z,
-    )
+    Vec3::new(-HANGS_AT, crate::deck::deck_height(CLEAT_Z) + 0.02, CLEAT_Z)
 }
 
 pub fn setup(
