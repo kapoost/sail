@@ -57,8 +57,8 @@ impl Default for Settings {
             // you hear and becomes something you are in, which is what the sea is, and
             // the gear and the music come up over it where they can be made out.
             volume: 0.70,
-            music: 0.70,
-            sea: 0.22,
+            music: 1.00,
+            sea: 0.08,
             boat: 0.70,
             weather_touched: false,
         }

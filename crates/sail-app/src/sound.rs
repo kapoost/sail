@@ -1281,13 +1281,13 @@ mod tests {
     #[test]
     fn where_the_music_sits_against_the_sea() {
         let rate = SAMPLE_RATE as f32;
-        let sea_only = |music_on: bool| -> f32 {
+        let sea_only = |music_on: bool| -> (f32, f32) {
             let p = Arc::new(SeaParams::default());
             // The defaults the settings panel starts at.
-            p.set_master(0.70);
-            p.set_sea(0.22);
-            p.set_boat(0.70);
-            p.set_music(0.70);
+            p.set_master(crate::settings::Settings::default().volume);
+            p.set_sea(crate::settings::Settings::default().sea);
+            p.set_boat(crate::settings::Settings::default().boat);
+            p.set_music(crate::settings::Settings::default().music);
             // A fresh breeze: eighteen knots apparent, five and a half through the water.
             store(&p.wind_level, (18.0f32 / 20.0).powf(1.5));
             store(&p.wind_cutoff, 320.0 + 95.0 * 18.0);
@@ -1299,9 +1299,15 @@ mod tests {
             // Settle the mute ramp and the slews.
             let mut sum = 0.0f64;
             let mut n = 0usize;
+            let mut peak = 0.0f32;
             let every = (rate * 0.35) as usize;
             for i in 0..(rate as usize * 12) {
                 if music_on && i > (rate as usize * 4) && i % every == 0 {
+                    // A chord under the tune, which is what the left hand actually does
+                    // and what decides whether the limiter has to work.
+                    p.strike(147.0, 0.5);
+                    p.strike(220.0, 0.45);
+                    p.strike(262.0, 0.4);
                     // A melody note at the level the composer actually asks for: 0.55
                     // from `Asking`, times a sail that is working well.
                     p.strike_damped(330.0, 0.55 * 0.85, 0.76);
@@ -1309,34 +1315,43 @@ mod tests {
                 let out = s.next().unwrap_or(0.0);
                 if i > (rate as usize * 4) {
                     sum += (out * out) as f64;
+                    peak = peak.max(out.abs());
                     n += 1;
                 }
             }
-            (sum / n as f64).sqrt() as f32
+            ((sum / n as f64).sqrt() as f32, peak)
         };
-        let sea = sea_only(false);
-        let both = sea_only(true);
+        let (sea, _) = sea_only(false);
+        let (both, peak) = sea_only(true);
         // The music's own contribution, pulled out of the sum of squares.
         let music = (both * both - sea * sea).max(0.0).sqrt();
         let db = 20.0 * (music / sea).log10();
         let bed = 20.0 * sea.log10();
-        // Where a bed belongs. Measured at -39.9 dBFS to begin with, which is why the
-        // whole game sounded like it was playing in the next room and why a change inside
-        // the music could not be heard at all: everything was within a few decibels of
-        // nothing. A game's ambience sits around -24 dBFS, and the rest of the mix is
-        // placed against that rather than against the headroom.
+        // The sea is deliberately a long way down, and that is a decision by the person
+        // who actually sails this rather than a mixing rule: the sea here is a *monotone*.
+        // It is the same hiss for an hour, it carries no information once you have heard
+        // the first second of it, and the things that do carry information — the rig, the
+        // gear, the band — are all over it. So it is held at the level of a room tone and
+        // the music is the subject.
+        //
+        // It started at -39.9 dBFS with everything else down there with it, which was the
+        // whole mix being too quiet rather than the sea being right. Now the bed is here
+        // and the music is well above it.
         assert!(
-            (-27.0..=-20.0).contains(&bed),
-            "the sea should be a bed at about -24 dBFS, measured {bed:.1}"
+            (-37.0..=-28.0).contains(&bed),
+            "the sea is a bed and a quiet one, around -32 dBFS: measured {bed:.1}"
         );
-        // And the music a few decibels under it in average level, because its notes are
-        // sparse and peaky: what makes a piano audible over rain is the peaks standing
-        // clear, not the average being loud. Reported from the deck as wanting it louder
-        // *or* much quieter, which is what a mix sounds like when the absolute level is
-        // wrong and the balance is roughly right.
         assert!(
-            (-12.0..=-2.0).contains(&db),
-            "music should sit a few dB under the sea in RMS, measured {db:+.1}"
+            (10.0..=22.0).contains(&db),
+            "the music is the subject and should stand well over it: measured {db:+.1} dB"
+        );
+        // And the limiter is not doing the mixing. A four-note chord with the tune over it
+        // is the loudest thing the composer asks for, and it has to arrive without `tanh`
+        // leaning on it — a soft clip that is working is the thing that was reported, long
+        // ago, as the music interrupting the sea.
+        assert!(
+            peak < 0.8,
+            "the loudest chord should leave the soft clip alone: peak {peak:.2}"
         );
     }
 
