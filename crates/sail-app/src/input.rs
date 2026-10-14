@@ -395,8 +395,7 @@ pub fn gather(
             let run = (0.7 * (0.35 + 0.65 * over) * dt as f32).min(1.0);
             let main_room = 1.0 - sim.controls.main_sheet as f32;
             if main_room > 0.01 {
-                sim.controls.main_sheet =
-                    (sim.controls.main_sheet + run as f64).clamp(0.0, 1.0);
+                sim.controls.main_sheet = (sim.controls.main_sheet + run as f64).clamp(0.0, 1.0);
             } else {
                 sim.controls.jib_sheet = (sim.controls.jib_sheet + run as f64).clamp(0.0, 1.0);
             }
@@ -459,7 +458,11 @@ pub fn gather(
         if pressed {
             info!(
                 "on the {}",
-                if on_the_main { "mainsheet" } else { "headsail sheet" }
+                if on_the_main {
+                    "mainsheet"
+                } else {
+                    "headsail sheet"
+                }
             );
         }
     }

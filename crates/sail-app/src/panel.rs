@@ -70,7 +70,6 @@ pub fn draw(
     // How long the screen has been up, so it can surface rather than appear.
     mut dying: Local<f32>,
 ) -> Result {
-
     if keys.just_pressed(KeyCode::KeyH) {
         console.hidden = !console.hidden;
     }

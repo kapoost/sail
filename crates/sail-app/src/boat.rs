@@ -1222,11 +1222,7 @@ pub fn staysail_tack(cfg: &sail_core::boat::BoatConfig) -> Vec3 {
     // which is what leaves room to tack a genoa across in front of it and is the whole
     // reason the stay is inner rather than another forestay.
     let stem = -(cfg.loa as f32) * 0.49;
-    Vec3::new(
-        0.0,
-        DECK + 0.12,
-        stem + 0.45 * (MAST_FOOT_Z - stem),
-    )
+    Vec3::new(0.0, DECK + 0.12, stem + 0.45 * (MAST_FOOT_Z - stem))
 }
 
 /// And the head of it: as high as the sail's own luff reaches from that tack.
@@ -1242,7 +1238,6 @@ pub fn staysail_head(cfg: &sail_core::boat::BoatConfig) -> Vec3 {
     let rise = (luff * luff - along * along).max(1.0).sqrt();
     Vec3::new(0.0, tack.y + rise, MAST_FOOT_Z)
 }
-
 
 /// The club boom's length, which is the sail's foot and therefore not a free choice.
 ///
@@ -1260,11 +1255,7 @@ pub fn staysail_boom_length(cfg: &sail_core::boat::BoatConfig) -> f32 {
 
 /// Where the end of that boom is, which is also the sail's clew. One definition, so
 /// the spar and the cloth cannot end up in different places.
-pub fn staysail_boom_end(
-    cfg: &sail_core::boat::BoatConfig,
-    angle: f32,
-    length: f32,
-) -> Vec3 {
+pub fn staysail_boom_end(cfg: &sail_core::boat::BoatConfig, angle: f32, length: f32) -> Vec3 {
     staysail_tack(cfg) + Vec3::new(angle.sin() * length, 0.22, angle.cos() * length)
 }
 
@@ -1839,8 +1830,14 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
             // The normal is not known until the chord is, so a provisional one from the
             // straight chord serves to push the edges — one iteration of a shape that
             // would otherwise need solving.
-            let across = Vec3::Y.cross((leech - luff).normalize()).normalize_or_zero();
-            let side = if across.x * lee < 0.0 { -across } else { across };
+            let across = Vec3::Y
+                .cross((leech - luff).normalize())
+                .normalize_or_zero();
+            let side = if across.x * lee < 0.0 {
+                -across
+            } else {
+                across
+            };
             luff += side * (bow * 0.085) - Vec3::Z * 0.0;
             leech += side * (bow * 0.055);
         }
@@ -2366,11 +2363,7 @@ mod cloth_stays_cloth {
         // So the measure is the worst turn against the typical one. Returned as a ratio,
         // and the absolute worst alongside it for the message.
         turns.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let typical = turns
-            .get(turns.len() / 2)
-            .copied()
-            .unwrap_or(0.0)
-            .max(1.0);
+        let typical = turns.get(turns.len() / 2).copied().unwrap_or(0.0).max(1.0);
         (worst, worst / typical)
     }
 
