@@ -1,0 +1,16 @@
+[package]
+name = "sail-net"
+version = "0.1.6"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "What two boats say to each other: the wire format and nothing else."
+
+# Engine-free, like `sail-core`, and for a stronger reason: the server has to build and
+# run on a four-euro virtual machine with no graphics stack at all. Bevy must never
+# appear anywhere in this dependency tree.
+[dependencies]
+sail-core = { path = "../sail-core" }
+glam.workspace = true
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["alloc"] }

@@ -114,7 +114,7 @@ pub fn car_position(car: f32) -> f32 {
 
 /// Where the mast is stepped, metres aft of the centre of gravity. One definition, in
 /// the core, shared by the physics and the drawing.
-const MAST_FOOT_Z: f32 = sail_core::boat::packet::MAST_FOOT_Z as f32;
+pub const MAST_FOOT_Z: f32 = sail_core::boat::packet::MAST_FOOT_Z as f32;
 /// Height of the boom above the waterline — the mainsail's tack. Defined in `rig`, so
 /// the spar and the sail cannot disagree about it.
 use crate::rig::BOOM_HEIGHT;
@@ -146,7 +146,7 @@ pub struct Telltale {
 ///
 /// Measured off the file rather than taken from the museum's "eighteen feet", because
 /// what matters is what the vertices say: 5.396 m stem to stern, 1.573 m across.
-const SCAN_LOA: f32 = 5.396;
+pub const SCAN_LOA: f32 = 5.396;
 /// How far down the scaled scan is dropped so that y = 0 is her waterline.
 ///
 /// The scan is of a boat out of the water, so the file knows nothing about where she
@@ -154,7 +154,7 @@ const SCAN_LOA: f32 = 5.396;
 /// below a trial waterline, and the plane solved for where that volume equals the
 /// displacement. She floats 1.294 m above the bottom of the scaled hull, which also
 /// gave the waterline length and beam the physics config now uses.
-const HULL_SINKAGE: f32 = -1.294;
+pub const HULL_SINKAGE: f32 = -1.294;
 
 /// Height of the gunwale above the waterline, metres.
 ///
@@ -206,9 +206,9 @@ pub fn setup(
         ..default()
     });
 
-    let main_mesh = meshes.add(empty_sail_mesh());
-    let genoa_mesh = meshes.add(empty_sail_mesh());
-    let staysail_mesh = meshes.add(empty_sail_mesh());
+    let main_mesh = meshes.add(empty_sail());
+    let genoa_mesh = meshes.add(empty_sail());
+    let staysail_mesh = meshes.add(empty_sail());
 
     commands
         .spawn((
@@ -1712,7 +1712,7 @@ pub struct SailGeometry {
 const SAIL_U: usize = 17;
 const SAIL_V: usize = 9;
 
-fn empty_sail_mesh() -> Mesh {
+pub fn empty_sail() -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
@@ -1766,6 +1766,38 @@ struct SailTrim<'a> {
     chord: f32,
     /// A spar along the foot, which therefore has no belly in it at all.
     footed: bool,
+}
+
+/// Build a sail for a boat that is not yours.
+///
+/// The same builder, given the trim a ghost can actually know about. Everything left out
+/// here is something that cannot be seen at the distance another boat is at: the shrouds
+/// the cloth bears on, the twist the vang is holding, where the draft sits, how far the
+/// foot sags. Those are all worth having on the sail four feet from your face and none of
+/// them survives a hundred metres of air.
+///
+/// Kept beside `build_sail` rather than in `fleet.rs` so that the two callers of the sail
+/// builder are in one place and cannot drift apart.
+pub fn dress_sail(mesh: &mut Mesh, g: &SailGeometry, lee: f32, luffing: f32, shake: f32, now: f32) {
+    build_sail(
+        mesh,
+        g,
+        &SailTrim {
+            lee,
+            twist: 0.18,
+            luffing,
+            draft: 0.14,
+            now,
+            foot_sag: 0.12,
+            draft_at: 0.42,
+            shrouds: &[],
+            clear_mast: false,
+            shake,
+            flying: false,
+            chord: 0.0,
+            footed: true,
+        },
+    );
 }
 
 fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {

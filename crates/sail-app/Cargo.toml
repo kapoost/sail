@@ -8,6 +8,7 @@ description = "Presentation layer: window, rendering, input, HUD. The only crate
 
 [dependencies]
 sail-core = { path = "../sail-core" }
+sail-net = { path = "../sail-net" }
 # Pinned on purpose. Bevy ships breaking changes roughly every quarter; an engine
 # upgrade is scheduled work with its own budget, not a side effect of `cargo update`.
 bevy = "=0.20.0"

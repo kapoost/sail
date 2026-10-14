@@ -16,6 +16,7 @@ mod curve;
 mod deck;
 mod deck_texture;
 mod fittings;
+mod fleet;
 mod frame;
 mod help;
 mod horizon;
@@ -211,6 +212,7 @@ fn main() {
         .insert_resource(world::Ink::from_env())
         .init_resource::<world::SeaFilm>()
         .init_resource::<music::Music>()
+        .init_resource::<fleet::Fleet>()
         .init_resource::<chart::Chart>()
         .init_resource::<chart::Track>()
         .init_resource::<world::SurfaceDrift>()
@@ -255,6 +257,11 @@ fn main() {
                 world::report_frame_times,
                 chart::record,
                 islands::follow_origin,
+                // Everybody else's boats: told where they are, given their hulls, then
+                // placed and dressed like any other thing in the scene. One group of its
+                // own because the four have to happen in that order and because a tuple
+                // of systems is twenty long at the most.
+                (fleet::rehearsal, fleet::sync, fleet::place, fleet::dress).chain(),
                 (
                     boat::update_hull,
                     boat::update_rudder,

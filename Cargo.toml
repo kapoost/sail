@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/sail-core", "crates/sail-app"]
+members = ["crates/sail-core", "crates/sail-net", "crates/sail-app"]
 
 [workspace.package]
 edition = "2021"
