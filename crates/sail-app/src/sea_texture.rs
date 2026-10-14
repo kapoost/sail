@@ -438,6 +438,89 @@ fn claw_mark(u: f32, v: f32) -> f32 {
     1.0 - smoothstep(rim * 0.35, rim, r)
 }
 
+/// Rafts of foam, for the wake: four of them, so a bandful is not one mark repeated.
+///
+/// A wake close astern is not a white stripe, which is what it was drawn as and what was
+/// reported from the deck. It is *rafts*: patches of bubbles with holes in them, lying
+/// flat on the water, drifting apart and dissolving over half a minute. The holes are the
+/// whole point — a patch of foam is mostly air and water with gaps all through it, and a
+/// mark with no gaps reads as paint however well its rim is drawn.
+///
+/// So each of the four is a soft disc with a lacy bubble pattern eaten out of it, lacier
+/// towards the rim than in the middle, because that is where a raft comes apart first.
+/// Four variants and a random turn on each patch is enough that a hundred of them in one
+/// band never show their repeat.
+pub fn wake_rafts() -> Image {
+    const CELL: u32 = 128;
+    const GRID: u32 = 2;
+    const W: u32 = CELL * GRID;
+    let mut data = vec![0u8; (W * W * 4) as usize];
+    for y in 0..W {
+        for x in 0..W {
+            let which = (y / CELL) * GRID + (x / CELL);
+            let u = ((x % CELL) as f32 + 0.5) / CELL as f32 * 2.0 - 1.0;
+            let v = ((y % CELL) as f32 + 0.5) / CELL as f32 * 2.0 - 1.0;
+            let value = raft_mark(u, v, which as f32);
+            let i = ((y * W + x) * 4) as usize;
+            let byte = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+            data[i] = byte;
+            data[i + 1] = byte;
+            data[i + 2] = byte;
+            data[i + 3] = 255;
+        }
+    }
+    let mut image = Image::new(
+        Extent3d {
+            width: W,
+            height: W,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    build_mipmaps(&mut image, false);
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        mipmap_filter: ImageFilterMode::Linear,
+        ..ImageSamplerDescriptor::linear()
+    });
+    image
+}
+
+/// One raft: a soft, slightly irregular disc with bubbles eaten out of it.
+pub fn raft_mark(u: f32, v: f32, seed: f32) -> f32 {
+    let r = (u * u + v * v).sqrt().max(1e-4);
+    let angle = v.atan2(u);
+    // Not round. Three slow lobes and five quick ones, offset per variant, which is a
+    // patch of foam rather than a disc stamped out with a punch.
+    let rim = 0.84 + 0.07 * (angle * 3.0 + seed).sin() + 0.04 * (angle * 5.0 - seed * 2.3).sin();
+    let body = 1.0 - smoothstep(rim * 0.30, rim, r);
+    // The bubbles. Value noise at two scales: the big one makes the holes a raft breaks
+    // into, the small one is the texture of the foam itself.
+    let n = |scale: f32, offset: f32| -> f32 {
+        let (px, py) = (u * scale + offset, v * scale + offset * 1.7);
+        let (ix, iy) = (px.floor(), py.floor());
+        let (fx, fy) = (px - ix, py - iy);
+        let hash = |a: f32, b: f32| {
+            let h = (a * 127.1 + b * 311.7 + seed * 41.3).sin() * 43758.547;
+            h - h.floor()
+        };
+        let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+        let a = hash(ix, iy);
+        let b = hash(ix + 1.0, iy);
+        let c = hash(ix, iy + 1.0);
+        let d = hash(ix + 1.0, iy + 1.0);
+        (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sy
+    };
+    let lace = (0.62 * n(5.0, 0.0) + 0.38 * n(13.0, 3.1)).clamp(0.0, 1.0);
+    // Open towards the rim, solid in the middle: a raft comes apart from the outside.
+    let open = smoothstep(0.10, 0.95, r / rim) * 0.85;
+    body * (1.0 - open * smoothstep(0.30, 0.78, 1.0 - lace))
+}
+
 /// The tile has to repeat, and the mesh's UVs run to hundreds of tiles across.
 fn repeating() -> ImageSampler {
     ImageSampler::Descriptor(ImageSamplerDescriptor {
