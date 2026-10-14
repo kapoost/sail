@@ -312,7 +312,7 @@ pub fn run(
                 sound.0.ring(3);
                 step(&mut lesson, Stage::Alarm, now);
                 lesson.shout(
-                    "MAN OVERBOARD",
+                    "OSCAR OVERBOARD",
                     "throw him something — now",
                     Tone::Alarm,
                     now,
@@ -335,12 +335,17 @@ pub fn run(
         Stage::Search(leg) => match over.drill {
             Drill::Recovered { .. } => {
                 step(&mut lesson, Stage::Done, now);
-                lesson.shout("ABOARD", "and that is the one that counts", Tone::Good, now);
+                lesson.shout(
+                    "OSCAR ABOARD",
+                    "and that is the one that counts",
+                    Tone::Good,
+                    now,
+                );
             }
             Drill::Lost { .. } => {
                 step(&mut lesson, Stage::Lost, now);
                 sound.0.ring(1);
-                lesson.shout("HE IS GONE", "", Tone::Dead, now);
+                lesson.shout("OSCAR IS GONE", "", Tone::Dead, now);
             }
             Drill::Overboard { mark, oscar, .. } => {
                 // Can the last leg be sailed from where she has got to? Asked before the
@@ -639,10 +644,12 @@ fn instruction(stage: Stage, sim: &Sim, over: &Overboard, held: f64) -> (String,
             // it left the boat now. It grows while you read this sentence.
             let gap = over.off_the_rail(sim).unwrap_or(0.0);
             (
-                format!("THROW IT — IT WOULD LAND {gap:.0} M FROM HIM"),
+                format!("THROW IT — IT WOULD LAND {gap:.0} M FROM OSCAR"),
                 format!(
-                    "{} puts the lifebuoy over the stern. It lands where *you* are, and \
-                     you are leaving him behind at {knots:.1} knots.",
+                    "Oscar is what every crew calls the man in the water, after flag O, \
+                     and in a drill he is the dummy you practise on. {} throws the \
+                     lifebuoy from behind the helm. It lands where *you* are, and you are \
+                     leaving him at {knots:.1} knots.",
                     key_name(THROW)
                 ),
             )
@@ -665,9 +672,9 @@ fn instruction(stage: Stage, sim: &Sim, over: &Overboard, held: f64) -> (String,
                               with a man in the water puts the boom across the cockpit and \
                               takes your eyes off him."
                     .into(),
-                Leg::Downwind => "Work down to leeward of him — below him, downwind — so \
-                                  that the last of it can be sailed slowly uphill. Steer \
-                                  for the light."
+                Leg::Downwind => "Work down to leeward of Oscar — below him, downwind — \
+                                  so that the last of it can be sailed slowly uphill. \
+                                  Steer for the light."
                     .into(),
                 Leg::Approach => format!(
                     "Up at him on a close reach, sheets eased, as slowly as she will \
@@ -687,10 +694,10 @@ fn instruction(stage: Stage, sim: &Sim, over: &Overboard, held: f64) -> (String,
         }
         Stage::Lost => {
             let Drill::Lost { range, ring_gap } = over.drill else {
-                return ("HE IS GONE".into(), String::new());
+                return ("OSCAR IS GONE".into(), String::new());
             };
             (
-                format!("LOST OVERBOARD — {range:.0} M AWAY"),
+                format!("OSCAR LOST — {range:.0} M AWAY"),
                 match ring_gap {
                     Some(gap) => format!(
                         "Ten minutes in the water is as long as a person's hands keep \
@@ -712,7 +719,7 @@ fn instruction(stage: Stage, sim: &Sim, over: &Overboard, held: f64) -> (String,
                 run_downs,
             } = over.drill
             else {
-                return ("ABOARD".into(), String::new());
+                return ("OSCAR ABOARD".into(), String::new());
             };
             (
                 crate::mob::verdict(took, ring_gap, thrown_after, run_downs),

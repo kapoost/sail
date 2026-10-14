@@ -6,18 +6,25 @@
 //! cost of being bad at it is somebody's life, and it is practised with a dan buoy and a
 //! fender precisely because you cannot practise it with a person.
 //!
-//! **Oscar is the dan buoy.** In a real drill the pole goes over the side and the crew
-//! recovers *it*, calling it Oscar after the flag — flag O, red over yellow on the
-//! diagonal, which is the signal for a man overboard and is what is sewn to the top of
-//! every dan buoy ever made. So the pole here is both the casualty and the thing that
-//! makes him findable: a head in the water disappears in the first wave trough, and two
-//! metres of pole with a flag on it does not.
+//! **Oscar is the man**, called that after flag O — red over yellow on the diagonal,
+//! which is the signal for a man overboard. He is what is in the water and what has to
+//! come back out of it, and he is drawn as what he is: a head, a pair of shoulders and
+//! an orange lifejacket, about a third of a metre of which is above the surface. That is
+//! deliberately hard to see, because it is deliberately hard to see. Losing sight of
+//! somebody between two waves at fifty metres is the thing that kills them and no amount
+//! of drawing a convenient flag over his head would teach it.
 //!
-//! **The lifebuoy is the thing you throw**, and when you throw it is the whole lesson.
-//! A horseshoe thrown in the first two seconds lands within a boat's length of him; one
-//! thrown after a quarter of a minute of getting organised lands wherever the boat had
-//! got to by then, which at six knots is forty metres away and downwind of him. That
-//! distance is reported at the end of the drill, because it is the number that teaches.
+//! **The lifebuoy is the thing you throw**, and when you throw it is the whole lesson. It
+//! lives on edge against the after end of the companionway, which is where a hand falls
+//! on it coming up out of the cabin — the one place on a flush-decked boat you can reach
+//! without going forward. Thrown in the first two seconds it lands within a boat's length
+//! of him; thrown after a quarter of a minute of getting organised it lands wherever the
+//! boat had got to by then, which at six knots is forty metres away and downwind of him.
+//! Both numbers are reported at the end of the drill, because that pair is what teaches.
+//!
+//! It is also the only thing out there that can be seen. An orange ring on the water is
+//! visible when a head is not, which is the second reason to throw it early and close:
+//! it marks him.
 //!
 //! **And the drift is why the whole thing is urgent.** A person in the water, and a dan
 //! buoy with a drogue under it, go with the water and about three per cent of the wind —
@@ -33,12 +40,11 @@ use crate::course::Floating;
 use crate::frame;
 use crate::sim::Sim;
 
-/// The dan buoy in its tube on the quarter, which is where one lives.
+/// The lifebuoy in its lashings at the companionway, where a hand falls on it.
 #[derive(Component)]
 pub struct Stowed;
 
-/// And the same pole in the water, which is a different object because it is no longer
-/// attached to the boat.
+/// The man in the water.
 #[derive(Component)]
 pub struct Oscar;
 
@@ -78,8 +84,22 @@ const RUN_DOWN_SPEED: f64 = 3.0;
 /// difficulty setting, which is why it is a constant with a reason rather than a knob.
 pub const ENDURANCE: f64 = 600.0;
 
-/// Where the tube is, along the boat. Abaft the cockpit, which ends at four metres.
-const TUBE_Z: f32 = 4.35;
+/// Where the lifebuoy is stowed, along the boat.
+///
+/// Right aft, behind the helmsman, which is where it has to be — and the arithmetic says
+/// so rather than taste. A tiller sweeps forty degrees each way about a stock a little
+/// forward of the transom and reaches a metre and a quarter ahead of it, which is the
+/// whole cockpit: there is no station between the companionway and the stock where
+/// three quarters of a metre of ring clears both the tiller and the sheer. Abaft the
+/// stock there is nothing in the way, and that is a step behind the helmsman's shoulder.
+///
+/// It overhangs the quarters by a hand's breadth each side, because the counter there is
+/// only half a metre across. That is not a mistake: a lifebuoy lashed across a transom
+/// overhangs on every boat this size, and the alternative is a ring small enough to be
+/// no use to anybody.
+const RACK_Z: f32 = 4.72;
+/// How big a lifebuoy is: a ring three quarters of a metre across.
+const RING: (f32, f32) = (0.24, 0.37);
 
 /// What fraction of the wind a thing in the water goes downwind at.
 ///
@@ -235,16 +255,9 @@ pub fn off_the_rail(sim: &Sim, him: DVec2) -> f64 {
     ((him - nearest).length() - cfg.beam * 0.5).max(0.0)
 }
 
-/// The pole: two and a bit metres of it, ballasted at the bottom, with flag O at the top.
-///
-/// Built about its own waterline rather than about its foot, so the same mesh is right
-/// in the tube and right in the sea: the ballast hangs below zero and the flag is up at
-/// the top, and a dan buoy floating properly shows about a metre and a half.
-fn dan_buoy(w: &mut Workshop) -> (Handle<Mesh>, Handle<Mesh>, Handle<Mesh>) {
-    let pole = w.meshes.add(Cylinder::new(0.022, 2.3));
-    let collar = w.meshes.add(Cylinder::new(0.17, 0.22));
-    let flag = w.meshes.add(Rectangle::new(0.42, 0.30));
-    (pole, collar, flag)
+/// The ring itself, which is the same object on deck and in the water.
+fn lifering(w: &mut Workshop) -> Handle<Mesh> {
+    w.meshes.add(Torus::new(RING.0, RING.1))
 }
 
 /// The bits a spawn needs, so the two call sites below do not each take six arguments.
@@ -265,68 +278,61 @@ pub fn setup(
         meshes: &mut meshes,
         materials: &mut materials,
     };
-    let (pole, collar, flag) = dan_buoy(&mut w);
-    let white = w.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.88, 0.88, 0.86),
-        perceptual_roughness: 0.7,
-        ..default()
-    });
+    let ring = lifering(&mut w);
     let orange = w.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.93, 0.42, 0.10),
+        base_color: Color::srgb(0.95, 0.41, 0.08),
         perceptual_roughness: 0.75,
         ..default()
     });
-    // Flag O: divided on the diagonal, red above and yellow below. Two halves of one
-    // rectangle, drawn as two rectangles because a diagonal split needs a texture or a
-    // second quad and a second quad is cheaper to read.
-    let red = w.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.78, 0.12, 0.10),
-        perceptual_roughness: 0.9,
-        unlit: false,
-        double_sided: true,
-        cull_mode: None,
-        ..default()
-    });
-    let yellow = w.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.95, 0.80, 0.12),
-        perceptual_roughness: 0.9,
-        double_sided: true,
-        cull_mode: None,
+    let tape = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.90, 0.90, 0.88),
+        perceptual_roughness: 0.5,
         ..default()
     });
 
-    // The pole in its tube, lashed to the quarter: a child of the boat, so it rides with
-    // her. On the port quarter — clear of the wind vane, which is on the centreline right
-    // aft, and outboard of the tiller, which sweeps forty degrees each way about a stock
-    // a quarter of a metre abaft this. Both of those clearances are arithmetic and both
-    // are in the test at the bottom of this file, because a dan buoy the tiller knocks
-    // over every time the helm goes down is the kind of thing that is obvious on the
-    // water and invisible here.
-    let z = TUBE_Z;
-    let x = -(crate::deck::deck_half_beam(z) - 0.16);
-    let deck = crate::deck::deck_height(z);
     let Ok(root) = boat.single() else {
-        warn!("no boat to lash a dan buoy to");
+        warn!("no boat to lash a lifebuoy to");
         return;
     };
+
+    // On edge across the counter, facing aft so it is a ring from the cockpit and a turn
+    // of the head from the helm. A torus lies in its own XZ plane, so it is stood up.
+    let deck = crate::deck::deck_height(RACK_Z);
     commands.entity(root).with_children(|b| {
         b.spawn((
             Stowed,
-            Transform::from_xyz(x, deck + 0.70, z),
+            Transform::from_xyz(0.0, deck + RING.1 + 0.02, RACK_Z)
+                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
             Visibility::default(),
         ))
         .with_children(|p| {
-            dress_buoy(p, &pole, &collar, &flag, &white, &orange, &red, &yellow);
-            // And the tube it stands in, which is what holds it upright on the rail.
+            p.spawn((Mesh3d(ring.clone()), MeshMaterial3d(orange.clone())));
+            // The lashing that holds it there, which is the difference between a
+            // lifebuoy stowed and a lifebuoy left lying on the deck.
             p.spawn((
-                Mesh3d(collar.clone()),
-                MeshMaterial3d(white.clone()),
-                Transform::from_xyz(0.0, -0.62, 0.0).with_scale(Vec3::new(0.52, 1.8, 0.52)),
+                Mesh3d(w.meshes.add(Cylinder::new(0.012, 0.42))),
+                MeshMaterial3d(tape.clone()),
+                Transform::from_xyz(0.0, -0.1, -RING.1 + 0.02),
             ));
         });
     });
 
-    // The same pole in the water, hidden until it is needed.
+    // The man in the water, hidden until there is one. A head, a pair of shoulders, an
+    // orange lifejacket and one arm up: a third of a metre of him above the surface, and
+    // that is the whole of what anybody on deck has to find.
+    let skin = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.72, 0.56, 0.46),
+        perceptual_roughness: 0.85,
+        ..default()
+    });
+    let jacket = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.98, 0.46, 0.06),
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+    let head = w.meshes.add(Sphere::new(0.115));
+    let shoulders = w.meshes.add(Sphere::new(0.26));
+    let arm = w.meshes.add(Capsule3d::new(0.055, 0.42));
     commands
         .spawn((
             Oscar,
@@ -338,66 +344,42 @@ pub fn setup(
             Visibility::Hidden,
         ))
         .with_children(|p| {
-            dress_buoy(p, &pole, &collar, &flag, &white, &orange, &red, &yellow);
+            // The jacket sits in the water with most of itself under it, which is why a
+            // lifejacket keeps a face clear and why it is nearly all you can see.
+            p.spawn((
+                Mesh3d(shoulders.clone()),
+                MeshMaterial3d(jacket.clone()),
+                Transform::from_xyz(0.0, 0.02, 0.0).with_scale(Vec3::new(1.0, 0.62, 0.8)),
+            ));
+            p.spawn((
+                Mesh3d(head.clone()),
+                MeshMaterial3d(skin.clone()),
+                Transform::from_xyz(0.0, 0.17, 0.04),
+            ));
+            // An arm up. It is the only thing about him that moves, and a drill where the
+            // casualty is a floating object teaches you to look for a floating object.
+            p.spawn((
+                Mesh3d(arm.clone()),
+                MeshMaterial3d(skin.clone()),
+                Transform::from_xyz(0.17, 0.26, -0.02).with_rotation(Quat::from_rotation_z(-0.38)),
+            ));
         });
 
-    // And the lifebuoy, likewise.
-    let ring = w.meshes.add(Torus::new(0.26, 0.38));
+    // And the lifebuoy once it is in the water, which is a different object from the one
+    // in the lashings because it is no longer attached to the boat.
     commands.spawn((
         Horseshoe,
         Floating {
             at: sim.sim.state.pos,
-            lift: 0.04,
+            lift: 0.03,
         },
         Mesh3d(ring),
-        MeshMaterial3d(orange.clone()),
+        MeshMaterial3d(orange),
         Transform::from_translation(origin.to_bevy(sim.sim.state.pos, 0.0)),
         Visibility::Hidden,
     ));
 
     commands.init_resource::<Overboard>();
-}
-
-/// The pole itself, which is the same object in the tube and in the sea.
-#[allow(clippy::too_many_arguments)]
-fn dress_buoy(
-    p: &mut ChildSpawnerCommands,
-    pole: &Handle<Mesh>,
-    collar: &Handle<Mesh>,
-    flag: &Handle<Mesh>,
-    white: &Handle<StandardMaterial>,
-    orange: &Handle<StandardMaterial>,
-    red: &Handle<StandardMaterial>,
-    yellow: &Handle<StandardMaterial>,
-) {
-    // Built about its own waterline: the ballast below, the float at it, the flag above.
-    p.spawn((
-        Mesh3d(pole.clone()),
-        MeshMaterial3d(white.clone()),
-        Transform::from_xyz(0.0, 0.45, 0.0),
-    ));
-    p.spawn((
-        Mesh3d(collar.clone()),
-        MeshMaterial3d(orange.clone()),
-        Transform::from_xyz(0.0, 0.02, 0.0),
-    ));
-    // Flag O at the head of it, two triangles' worth, hung in the fore-and-aft plane
-    // and again across it so there is something to see from any angle — which is what a
-    // real one does by flapping.
-    for turn in [0.0_f32, std::f32::consts::FRAC_PI_2] {
-        p.spawn((
-            Mesh3d(flag.clone()),
-            MeshMaterial3d(red.clone()),
-            Transform::from_xyz(0.21 * turn.cos(), 1.42, 0.21 * turn.sin())
-                .with_rotation(Quat::from_rotation_y(turn)),
-        ));
-        p.spawn((
-            Mesh3d(flag.clone()),
-            MeshMaterial3d(yellow.clone()),
-            Transform::from_xyz(0.21 * turn.cos(), 1.10, 0.21 * turn.sin())
-                .with_rotation(Quat::from_rotation_y(turn)),
-        ));
-    }
 }
 
 /// Throw the lifebuoy: the key, and the whole of what the crew can do in the first two
@@ -413,7 +395,9 @@ pub fn throw(
     }
     let now = sim.sim.state.time;
     let st = &sim.render_state();
-    // Over the stern, which is where it is racked and where it would go in.
+    // Over the stern. It is racked at the companionway, but what the throw models is the
+    // ring hitting the water, and a ring thrown by somebody standing in the cockpit goes
+    // in astern of her.
     let at = st.pos - st.forward() * (sim.config().loa * 0.5);
     if let Drill::Overboard {
         ring: ref mut where_it_is,
@@ -472,8 +456,11 @@ pub fn update(
     let dt = time.delta_secs_f64();
     let live = over.live();
 
+    // The lashings are empty once the ring has gone over the side, and not before: it is
+    // the gear leaving the boat that takes it out of them, not the man leaving the boat.
+    let thrown = matches!(over.drill, Drill::Overboard { ring: Some(_), .. });
     if let Ok(mut vis) = stowed.single_mut() {
-        *vis = if live {
+        *vis = if thrown {
             Visibility::Hidden
         } else {
             Visibility::Inherited
@@ -574,7 +561,7 @@ pub fn verdict(
     run_downs: u32,
 ) -> String {
     let mut said = format!(
-        "ABOARD IN {}:{:02}",
+        "OSCAR ABOARD IN {}:{:02}",
         (took / 60.0).floor() as u32,
         (took % 60.0).floor() as u32
     );
@@ -596,38 +583,40 @@ mod tests {
     use super::*;
     use sail_core::units::kn_to_ms;
 
-    /// The dan buoy is where one goes, and nothing on the boat can knock it over.
+    /// The lifebuoy is where one goes, and nothing on the boat sweeps through it.
     ///
-    /// Two clearances, both arithmetic: the tiller sweeps forty degrees each way about
-    /// its stock and reaches a metre and a quarter forward of it, so at the tube's
-    /// station it has a known lateral reach; and the wind vane stands on the centreline
-    /// right aft. A pole that fouls either is obvious the first time the helm goes hard
-    /// over on the water and invisible in the code.
+    /// The tiller is the whole constraint and it is the reason this is right aft: it
+    /// pivots at the stock, reaches a metre and a quarter forward and swings forty
+    /// degrees each way, so it sweeps the entire cockpit and every station between the
+    /// companionway and the transom. Three quarters of a metre of ring does not fit
+    /// beside it anywhere — tried, and the arithmetic refused every position before
+    /// anything was drawn.
     #[test]
-    // Constant assertions on purpose: these are the numbers somebody tuning the drill
-    // will reach for, and what they must not do is drift out of the band the comment
-    // above them claims. A test that can only fail when an edit happens is the test for
-    // that.
-    #[allow(clippy::assertions_on_constants)]
-    fn nothing_aboard_knocks_the_dan_buoy_over() {
-        let x = (crate::deck::deck_half_beam(TUBE_Z) - 0.16) as f64;
-        assert!(
-            x > 0.25,
-            "the tube is {x:.2} m off the centreline, which is on top of the vane"
-        );
-        // The tiller, at this station: it pivots abaft the tube and reaches forward, so
-        // the arm crosses this station a short way from its pivot.
+    fn nothing_aboard_sweeps_through_the_lifebuoy() {
         let stock = 4.60_f32;
-        let arm = (stock - TUBE_Z).max(0.0);
-        let sweep = arm * (40.0_f32).to_radians().tan();
+        // Abaft the stock, so the tiller cannot reach it at all.
         assert!(
-            x as f32 > sweep + 0.10,
-            "the tiller reaches {sweep:.2} m out at this station and the tube is {x:.2}"
+            RACK_Z > stock,
+            "the ring at z {RACK_Z:.2} is inside the tiller's sweep"
         );
-        // And abaft the cockpit, not in it.
+        // Forward of the wind vane, which stands on the centreline right aft.
+        let vane_z = stock + 0.34;
         assert!(
-            TUBE_Z > 4.0,
-            "the tube is in the cockpit well at z {TUBE_Z:.2}"
+            RACK_Z + RING.1 * 0.2 < vane_z,
+            "the ring at z {RACK_Z:.2} is standing in the wind vane at {vane_z:.2}"
+        );
+        // Still on the boat: the counter is narrow there and it overhangs, but only by a
+        // hand's breadth, which is what a lifebuoy on a transom does.
+        let overhang = RING.1 - crate::deck::deck_half_beam(RACK_Z);
+        assert!(
+            overhang < 0.20,
+            "it hangs {overhang:.2} m over the water each side, which is a ring on a pole"
+        );
+        // And it is a lifebuoy rather than a bracelet: three quarters of a metre across.
+        assert!(
+            (0.60..0.85).contains(&(RING.1 * 2.0)),
+            "a ring {:.2} m across is not a lifebuoy",
+            RING.1 * 2.0
         );
     }
 
@@ -671,6 +660,7 @@ mod tests {
     #[test]
     fn the_verdict_reads_like_a_debrief() {
         let said = verdict(108.0, Some(14.0), Some(3.0), 0);
+        assert!(said.contains("OSCAR"), "{said}");
         assert!(said.contains("1:48"), "{said}");
         assert!(said.contains("14 m"), "{said}");
         assert!(said.contains("after 3 s"), "{said}");
