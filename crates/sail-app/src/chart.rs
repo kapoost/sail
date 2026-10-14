@@ -37,6 +37,65 @@ pub struct Chart {
     /// The dividers: where they were set down, and where they are now. In simulation
     /// coordinates, so they stay on the chart rather than on the screen when she moves.
     pub dividers: Option<(glam::DVec2, glam::DVec2)>,
+    /// Which instrument is in hand.
+    pub tool: Tool,
+    /// What has been drawn on the chart with it.
+    pub plot: Vec<Plotted>,
+}
+
+/// The instruments on the chart table.
+///
+/// A real set, and a small one, because the real set *is* small: four things have been
+/// doing this job since the eighteenth century and nobody has needed a fifth.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Tool {
+    /// Dividers. They measure distance, and they do nothing else at all — you walk them
+    /// along the latitude scale and that is a mile a step.
+    #[default]
+    Dividers,
+    /// The parallel rule: a straight edge that walks across the chart without changing
+    /// its angle, which is how a bearing gets from the compass rose onto the water you
+    /// are looking at. Here it plots a position line through a mark.
+    ParallelRule,
+    /// The pencil. A cross for an estimated position, and a soft one, because a chart is
+    /// corrected in ink and worked in pencil so that the working can be rubbed out.
+    Pencil,
+    /// And the rubber that rubs it out.
+    Rubber,
+}
+
+impl Tool {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Tool::Dividers => "DIVIDERS",
+            Tool::ParallelRule => "PARALLEL RULE",
+            Tool::Pencil => "PENCIL",
+            Tool::Rubber => "RUBBER",
+        }
+    }
+
+    /// What it does, in the words of somebody showing you.
+    pub fn hint(&self) -> &'static str {
+        match self {
+            Tool::Dividers => "drag across the chart: miles, and the bearing both ways",
+            Tool::ParallelRule => {
+                "drag from a mark: a position line through it, at the bearing you drag"
+            }
+            Tool::Pencil => "click: a cross where you think you are",
+            Tool::Rubber => "click a line or a cross to take it off the chart",
+        }
+    }
+}
+
+/// Something drawn on the chart in pencil.
+#[derive(Clone, Copy, Debug)]
+pub enum Plotted {
+    /// A position line: through this point, at this bearing. Drawn both ways from the
+    /// mark, because a position line is a line and not an arrow — you are somewhere on
+    /// it and the mark does not say which side.
+    Line { through: glam::DVec2, bearing: f64 },
+    /// A cross: an estimated position, a danger, a place to come back to.
+    Cross { at: glam::DVec2 },
 }
 
 impl Default for Chart {
@@ -45,6 +104,8 @@ impl Default for Chart {
             open: true,
             spread: false,
             dividers: None,
+            tool: Tool::Dividers,
+            plot: Vec::new(),
             // Two and a half miles each way: far enough to see the next island and the
             // one after it, close enough that a shoal is a shape rather than a dot.
             range: 4_600.0,
@@ -75,6 +136,9 @@ mod ink {
     /// put there by people rather than by geology is printed in magenta, so that it can
     /// be picked out under a red torch at night without reading a word.
     pub const LIGHT: Color32 = Color32::from_rgb(168, 42, 128);
+    /// What the working is done in. A chart is corrected in ink and worked in pencil, so
+    /// that the working can be rubbed out and the coastline cannot.
+    pub const PENCIL: Color32 = Color32::from_rgb(64, 64, 70);
 }
 
 pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut chart: ResMut<Chart>) {
@@ -143,6 +207,7 @@ pub fn draw(
     sim: Res<Sim>,
     course: Res<Course>,
     track: Res<Track>,
+    nav: Res<crate::navigation::Navigation>,
 ) -> Result {
     if !chart.open {
         return Ok(());
@@ -155,9 +220,20 @@ pub fn draw(
 
     let screen = ctx.viewport_rect();
     let spread = chart.spread;
+    // Whether the chart may say where she is.
+    //
+    // This is the whole of the navigation exercise and it is one boolean: a chart that
+    // always knows is a plotter, and the question "which bay is that" cannot be asked of
+    // one. Everything else is still drawn — the coast does not stop being there because
+    // you are lost — and what goes is the boat, her track, and the line to the place she
+    // is bound, which between them give the position away three times over.
+    let knows = nav.shows_position(sim.sim.state.time);
     // Set inside the closure and applied after it: the painter borrows the chart.
     let mut set_dividers: Option<(glam::DVec2, glam::DVec2)> = None;
     let mut clear_dividers = false;
+    let mut draw_on: Option<Plotted> = None;
+    let mut rub_out: Option<glam::DVec2> = None;
+    let mut pick: Option<Tool> = None;
     let area = if spread {
         egui::Area::new("chart".into()).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
     } else {
@@ -361,23 +437,45 @@ pub fn draw(
             }
         }
 
-        // The boat: a wedge pointing where she is pointing.
-        let heading = st.heading as f32;
-        let nose = egui::vec2(heading.sin(), -heading.cos());
-        let beam = egui::vec2(-nose.y, nose.x);
-        p.add(egui::Shape::convex_polygon(
-            vec![
-                centre + nose * 9.0,
-                centre - nose * 5.0 + beam * 4.0,
-                centre - nose * 5.0 - beam * 4.0,
-            ],
-            ink::BOAT,
-            egui::Stroke::NONE,
-        ));
-        // And the bearing to the consignment, which is the line you are trying to
-        // make good rather than the one you are sailing.
-        let target = to_screen(course.target());
-        p.line_segment([centre, target], egui::Stroke::new(1.0, ink::MARK));
+        // What a chart with no fix on it says, which is nothing — and it says it where
+        // the boat would have been, because that is where the eye goes first.
+        if !knows {
+            p.text(
+                centre,
+                egui::Align2::CENTER_CENTER,
+                "POSITION UNKNOWN",
+                egui::FontId::monospace(if spread { 16.0 } else { 11.0 }),
+                ink::BOAT,
+            );
+            if spread {
+                p.text(
+                    centre + egui::vec2(0.0, 20.0),
+                    egui::Align2::CENTER_CENTER,
+                    "take bearings on two marks and cross them",
+                    egui::FontId::monospace(11.0),
+                    ink::COAST,
+                );
+            }
+        }
+        if knows {
+            // The boat: a wedge pointing where she is pointing.
+            let heading = st.heading as f32;
+            let nose = egui::vec2(heading.sin(), -heading.cos());
+            let beam = egui::vec2(-nose.y, nose.x);
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    centre + nose * 9.0,
+                    centre - nose * 5.0 + beam * 4.0,
+                    centre - nose * 5.0 - beam * 4.0,
+                ],
+                ink::BOAT,
+                egui::Stroke::NONE,
+            ));
+            // And the bearing to the consignment, which is the line you are trying to
+            // make good rather than the one you are sailing.
+            let target = to_screen(course.target());
+            p.line_segment([centre, target], egui::Stroke::new(1.0, ink::MARK));
+        }
 
         // --- Dividers and a straight edge --------------------------------
         //
@@ -390,18 +488,89 @@ pub fn draw(
         // Only on the table. On the folded chart there is no room to put a hand down,
         // and a measurement you cannot read is worse than none.
         if spread {
-            if response.drag_started() {
-                if let Some(at) = response.interact_pointer_pos() {
-                    set_dividers = Some((to_water(at), to_water(at)));
+            // What a drag means depends on what is in your hand, which is how a chart
+            // table works: the dividers measure, the rule plots, the pencil marks and
+            // the rubber takes it off again.
+            match chart.tool {
+                Tool::Dividers | Tool::ParallelRule => {
+                    if response.drag_started() {
+                        if let Some(at) = response.interact_pointer_pos() {
+                            set_dividers = Some((to_water(at), to_water(at)));
+                        }
+                    } else if response.dragged() {
+                        if let (Some(at), Some((from, _))) =
+                            (response.interact_pointer_pos(), chart.dividers)
+                        {
+                            set_dividers = Some((from, to_water(at)));
+                        }
+                    } else if response.drag_stopped() {
+                        // The rule leaves its line on the chart; the dividers leave
+                        // nothing, because dividers are for reading and not for drawing.
+                        if chart.tool == Tool::ParallelRule {
+                            if let Some((from, to)) = chart.dividers {
+                                let off = to - from;
+                                if off.length() > 1.0 {
+                                    draw_on = Some(Plotted::Line {
+                                        through: from,
+                                        bearing: off
+                                            .x
+                                            .atan2(off.y)
+                                            .rem_euclid(std::f64::consts::TAU),
+                                    });
+                                }
+                            }
+                        }
+                        clear_dividers = true;
+                    } else if response.clicked() {
+                        clear_dividers = true;
+                    }
                 }
-            } else if response.dragged() {
-                if let (Some(at), Some((from, _))) =
-                    (response.interact_pointer_pos(), chart.dividers)
-                {
-                    set_dividers = Some((from, to_water(at)));
+                Tool::Pencil => {
+                    if response.clicked() {
+                        if let Some(at) = response.interact_pointer_pos() {
+                            draw_on = Some(Plotted::Cross { at: to_water(at) });
+                        }
+                    }
                 }
-            } else if response.clicked() {
-                clear_dividers = true;
+                Tool::Rubber => {
+                    if response.clicked() {
+                        if let Some(at) = response.interact_pointer_pos() {
+                            rub_out = Some(to_water(at));
+                        }
+                    }
+                }
+            }
+
+            // --- What is already on the chart --------------------------------
+            for item in &chart.plot {
+                match *item {
+                    Plotted::Line { through, bearing } => {
+                        // Both ways from the mark and a long way: a position line runs
+                        // off the edge of the chart, because all it says is *somewhere
+                        // on here*.
+                        let along = glam::DVec2::new(bearing.sin(), bearing.cos());
+                        let reach = chart.range as f64 * 2.4;
+                        let a = to_screen(through - along * reach);
+                        let b = to_screen(through + along * reach);
+                        p.line_segment([a, b], egui::Stroke::new(1.1, ink::PENCIL));
+                        p.text(
+                            to_screen(through) + egui::vec2(6.0, 10.0),
+                            egui::Align2::LEFT_TOP,
+                            format!("{:03.0}", bearing.to_degrees()),
+                            egui::FontId::monospace(10.0),
+                            ink::PENCIL,
+                        );
+                    }
+                    Plotted::Cross { at } => {
+                        let c = to_screen(at);
+                        for (dx, dy) in [(-5.0, -5.0), (-5.0, 5.0)] {
+                            p.line_segment(
+                                [c + egui::vec2(dx, dy), c - egui::vec2(dx, dy)],
+                                egui::Stroke::new(1.3, ink::PENCIL),
+                            );
+                        }
+                    }
+                }
             }
             if let Some((from, to)) = chart.dividers {
                 let (a, b) = (to_screen(from), to_screen(to));
@@ -447,12 +616,100 @@ pub fn draw(
                 ink::COAST,
             );
             p.text(
-                egui::pos2(rect.left() + 24.0, rect.top() + 20.0),
+                egui::pos2(rect.left() + 24.0, rect.top() + 46.0),
                 egui::Align2::LEFT_CENTER,
-                "drag to measure — click to lift the dividers",
+                chart.tool.hint(),
                 egui::FontId::monospace(11.0),
                 ink::COAST,
             );
+            // The instruments, along the top of the table where a hand reaches for them.
+            let mut x = rect.left() + 24.0;
+            for tool in [
+                Tool::Dividers,
+                Tool::ParallelRule,
+                Tool::Pencil,
+                Tool::Rubber,
+            ] {
+                let text = tool.name();
+                let wide = 11.0 + text.len() as f32 * 7.4;
+                let slot = egui::Rect::from_min_size(
+                    egui::pos2(x, rect.top() + 14.0),
+                    egui::vec2(wide, 20.0),
+                );
+                let on = chart.tool == tool;
+                p.rect_filled(slot, 2.0, if on { ink::MARK } else { ink::PAPER });
+                p.rect_stroke(
+                    slot,
+                    2.0,
+                    egui::Stroke::new(1.0, ink::COAST),
+                    egui::StrokeKind::Inside,
+                );
+                p.text(
+                    slot.center(),
+                    egui::Align2::CENTER_CENTER,
+                    text,
+                    egui::FontId::monospace(10.0),
+                    ink::COAST,
+                );
+                if response.clicked()
+                    && response
+                        .interact_pointer_pos()
+                        .is_some_and(|at| slot.contains(at))
+                {
+                    pick = Some(tool);
+                }
+                x += wide + 8.0;
+            }
+
+            // --- The compass rose --------------------------------------------
+            //
+            // Printed on every chart ever made, and not as decoration: it is what a
+            // parallel rule is laid against to read a bearing off, and it is how you can
+            // tell at a glance which way is north on a chart somebody has turned round on
+            // the table. Graduated every ten degrees and numbered every thirty.
+            let rose = egui::pos2(rect.right() - 86.0, rect.bottom() - 86.0);
+            p.circle(
+                rose,
+                56.0,
+                egui::Color32::TRANSPARENT,
+                egui::Stroke::new(1.0, ink::COAST),
+            );
+            p.circle(
+                rose,
+                44.0,
+                egui::Color32::TRANSPARENT,
+                egui::Stroke::new(0.7, ink::COAST),
+            );
+            for tick in 0..36 {
+                let a = (tick as f32 * 10.0).to_radians();
+                let dir = egui::vec2(a.sin(), -a.cos());
+                let long = tick % 3 == 0;
+                p.line_segment(
+                    [
+                        rose + dir * if long { 44.0 } else { 50.0 },
+                        rose + dir * 56.0,
+                    ],
+                    egui::Stroke::new(if long { 1.1 } else { 0.6 }, ink::COAST),
+                );
+                if long {
+                    p.text(
+                        rose + dir * 34.0,
+                        egui::Align2::CENTER_CENTER,
+                        format!("{:03}", tick * 10),
+                        egui::FontId::monospace(8.0),
+                        ink::COAST,
+                    );
+                }
+            }
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    rose + egui::vec2(0.0, -56.0),
+                    rose + egui::vec2(-4.5, -40.0),
+                    rose + egui::vec2(4.5, -40.0),
+                ],
+                ink::BOAT,
+                egui::Stroke::NONE,
+            ));
         }
 
         p.rect_stroke(
@@ -555,6 +812,41 @@ pub fn draw(
         chart.dividers = Some(set);
     }
     if clear_dividers {
+        chart.dividers = None;
+    }
+    if let Some(item) = draw_on {
+        chart.plot.push(item);
+        // What a navigator would have on the chart and not a day's worth of pencil: past
+        // a dozen lines the plot is a scribble, and the oldest of them is about water she
+        // left an hour ago.
+        if chart.plot.len() > 12 {
+            chart.plot.remove(0);
+        }
+    }
+    if let Some(at) = rub_out {
+        // Whatever is nearest, within a reasonable reach — which is what a rubber does:
+        // you put it on the thing you meant.
+        let reach = chart.range as f64 * 0.04;
+        let mut nearest: Option<(usize, f64)> = None;
+        for (i, item) in chart.plot.iter().enumerate() {
+            let d = match *item {
+                Plotted::Cross { at: c } => (c - at).length(),
+                Plotted::Line { through, bearing } => {
+                    let along = glam::DVec2::new(bearing.sin(), bearing.cos());
+                    let off = at - through;
+                    (off - along * off.dot(along)).length()
+                }
+            };
+            if d < reach && nearest.is_none_or(|(_, best)| d < best) {
+                nearest = Some((i, d));
+            }
+        }
+        if let Some((i, _)) = nearest {
+            chart.plot.remove(i);
+        }
+    }
+    if let Some(tool) = pick {
+        chart.tool = tool;
         chart.dividers = None;
     }
     Ok(())

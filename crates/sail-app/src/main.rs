@@ -30,6 +30,7 @@ mod islands;
 mod marks;
 mod mob;
 mod music;
+mod navigation;
 mod net;
 mod panel;
 mod rain;
@@ -232,6 +233,7 @@ fn main() {
         // same places, and a passage can be repeated rather than merely re-rolled.
         .insert_resource(fishing::Fishing::new(weather.seed))
         .init_resource::<camera::ViewAim>()
+        .init_resource::<navigation::Navigation>()
         // `SAIL_TUTORIAL=1` starts the drill on the first frame, which is how it gets
         // looked at twenty times in an afternoon without clicking through a panel.
         .insert_resource(tutorial::Tutorial::asked_for(
@@ -343,7 +345,7 @@ fn main() {
                     (camera::toggle, camera::dress, glance::posts),
                     camera::aim,
                     hud::toggle,
-                    course::restart,
+                    (course::restart, navigation::lost_at_sea),
                     chart::toggle,
                     retro::toggle,
                     retro::stress.run_if(|| std::env::var("SAIL_RETRO_STRESS").is_ok()),

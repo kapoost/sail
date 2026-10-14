@@ -382,7 +382,10 @@ pub fn restart(
 ) {
     // Either the key or the button on the console. This was `L` and nothing else, which
     // made it one of the three things on the boat a mouse could not reach at all.
-    let asked = keys.just_pressed(KeyCode::KeyL) || course.wants_new;
+    // Shift and L is a different thing entirely — it puts her somewhere at sea with no
+    // idea where — so a consignment is only asked for by the bare key.
+    let shifted = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    let asked = (keys.just_pressed(KeyCode::KeyL) && !shifted) || course.wants_new;
     course.wants_new = false;
     if !asked {
         return;
