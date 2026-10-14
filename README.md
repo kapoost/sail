@@ -300,6 +300,33 @@ fish with infinite patience and lets go only when the way is off her.
 A mackerel does not, a pollack does not, and a cod has never left the water under its own
 power in its life.
 
+### What is not in the water, and what would have to change first
+
+No mahi, no marlin, no swordfish, and that is a fact about the place rather than a gap in
+the work. The sun in `sky.rs` is worked out for 57 degrees north at a declination of five,
+which is an Irish spring: eight degrees of water. Mahi want twenty-one. Marlin have never
+been here at all, and a swordfish off Scotland is a stray that makes the papers.
+
+**Bluefin tuna are the interesting case, because they genuinely came back.** They have
+been taken off the Hebrides and Donegal since about 2018 and Ireland has run a tag-and-
+release fishery for them since 2019. Two things stand in the way and neither is modelling
+effort. They arrive in August and run to October, chasing the mackerel — so putting one in
+means moving the season, which moves the sun, the sea temperature and the whole look of
+the light. And a hundred and fifty kilogrammes of it against twenty pound braid is not a
+fish you land; it is the spool going empty and the arbor knot letting go in half a minute.
+Which is an honest thing for a game to contain, and it is a different feature from the one
+this is — that is a fish you lose on purpose, and it wants the season first.
+
+What would come before any of that, because it is here now and in this season:
+
+* **Tope.** The real big run in these waters — fifteen to twenty-five kilogrammes of
+  shark that will take a trolled bait and make the ling look patient. It drops into the
+  table beside the others without changing anything.
+* **Garfish.** The one fish on this coast that *does* leap and tail-walk, which would
+  overturn the paragraph above — honestly, and that is the only way a rule like that
+  should ever be overturned. A beak full of bone and a hook hold to match.
+* **Sea trout and bass**, which are ordinary here and are simply missing.
+
 **Every take rips line off the spool**, including the smallest fish in the table. That
 took two goes. The first put a shock *load* on the line and was wrong by measurement —
 thirty newtons of drag against half a kilogramme of mackerel hauls the fish bodily in, so
