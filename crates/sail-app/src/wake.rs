@@ -520,6 +520,10 @@ mod tests {
     /// no slick at all; if it began at nought the ribbon would be painting white over the
     /// foam again, which is the whole thing that was reported.
     #[test]
+    // Constant assertions on purpose: these three numbers are the ones somebody tuning
+    // the look of the foam will reach for, and what they must not do is drift past each
+    // other. A test that can only fail when an edit happens is exactly the test for that.
+    #[allow(clippy::assertions_on_constants)]
     fn the_foam_and_the_slick_meet() {
         assert!(
             RAFT_MEAN * 0.45 > 4.0,
