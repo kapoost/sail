@@ -70,6 +70,97 @@ pub fn light_character(name: &str) -> String {
     }
 }
 
+/// A village: the houses that go with a spire.
+///
+/// Not scenery. A cluster of buildings on a shore is a navigation mark in its own right
+/// and the pilot book says so — *conspic* is the word, and a white gable catches the sun
+/// at ten miles when the hill behind it is a grey smudge. It is also the thing that makes
+/// an island read as a place somebody lives rather than as an obstacle, which is most of
+/// what the archipelago is for.
+///
+/// Laid along the shore rather than scattered: a village on an island of this size is one
+/// row of houses facing the water, because everybody there has a boat and nobody wants to
+/// carry fish uphill.
+#[allow(clippy::too_many_arguments)]
+fn village(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    centre: glam::DVec2,
+    towards: glam::DVec2,
+    island: &sail_core::land::Island,
+    origin: &frame::RenderOrigin,
+    seed: u64,
+) {
+    let mut rng = sail_core::rng::Pcg32::new(seed);
+    // Along the shore: across the line that runs from the island's middle to the bay.
+    let out = (towards - centre).normalize_or_zero();
+    let along = glam::DVec2::new(-out.y, out.x);
+    let count = 5 + (rng.next_u32() % 6) as usize;
+    for i in 0..count {
+        // Spread along the shore with a little depth behind, which is a street.
+        let spread = (i as f64 - count as f64 * 0.5) * (26.0 + rng.next_f64() * 14.0);
+        let back = rng.next_f64() * 34.0;
+        let at = centre + along * spread - out * back;
+        let ground = island.elevation(at) as f32;
+        // Nothing in the water and nothing up the hill behind the village.
+        if ground < 0.5 || ground > island.height as f32 * 0.5 {
+            continue;
+        }
+        let wide = 4.6 + rng.next_f64() as f32 * 2.4;
+        let deep = 5.4 + rng.next_f64() as f32 * 2.6;
+        let tall = 3.1 + rng.next_f64() as f32 * 1.4;
+        // Nordic paint: red lead, ochre, and whitewash. Three colours because three is
+        // what a village has — they bought the same paint from the same boat.
+        let paint = match rng.next_u32() % 3 {
+            0 => Color::srgb(0.58, 0.16, 0.13),
+            1 => Color::srgb(0.78, 0.63, 0.30),
+            _ => Color::srgb(0.88, 0.87, 0.83),
+        };
+        let walls = materials.add(StandardMaterial {
+            base_color: paint,
+            perceptual_roughness: 0.9,
+            ..default()
+        });
+        let roof = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.22, 0.23, 0.25),
+            perceptual_roughness: 0.85,
+            ..default()
+        });
+        // Turned to face the water, give or take: a row of houses on a shore is roughly
+        // aligned and not exactly, because the ground decided and not a planner.
+        let facing = out.x.atan2(out.y) as f32 + (rng.next_f64() as f32 - 0.5) * 0.5;
+        commands
+            .spawn((
+                Standing { at, top: ground },
+                Transform::from_translation(origin.to_bevy(at, ground))
+                    .with_rotation(Quat::from_rotation_y(facing)),
+                Visibility::default(),
+            ))
+            .with_children(|h| {
+                h.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(wide, tall, deep))),
+                    MeshMaterial3d(walls),
+                    Transform::from_xyz(0.0, tall * 0.5, 0.0),
+                ));
+                // A gable, which is the shape that says house at any distance: two sloping
+                // faces, drawn as a prism lying along the ridge.
+                h.spawn((
+                    Mesh3d(meshes.add(Cone {
+                        radius: wide * 0.78,
+                        height: tall * 0.75,
+                    })),
+                    MeshMaterial3d(roof),
+                    Transform::from_xyz(0.0, tall + tall * 0.36, 0.0).with_scale(Vec3::new(
+                        1.0,
+                        1.0,
+                        deep / wide * 0.92,
+                    )),
+                ));
+            });
+    }
+}
+
 pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -101,6 +192,9 @@ pub fn setup(
         ..default()
     });
 
+    // Villages are built after the marks, because a house needs its island and the
+    // spawner is borrowed while a mark is being dressed.
+    let mut spires: Vec<(glam::DVec2, String)> = Vec::new();
     for mark in land.landmarks() {
         let ground = mark.ground as f32;
         let base = origin.to_bevy(mark.at, ground);
@@ -161,6 +255,7 @@ pub fn setup(
             // world leads with one of these.
             Mark::Spire => {
                 let tall = (mark.height as f32 - ground).max(10.0);
+                spires.push((mark.at, mark.name.clone()));
                 here.with_children(|m| {
                     m.spawn((
                         Mesh3d(meshes.add(Cuboid::new(5.0, tall * 0.62, 5.0))),
@@ -218,6 +313,33 @@ pub fn setup(
                 });
             }
         }
+    }
+
+    // --- The villages --------------------------------------------------------
+    //
+    // One to a spire, because the spire is in the village: a church is built where the
+    // people are and the people are where the boats can land.
+    for (at, name) in spires {
+        let Some(island) = land.islands().iter().min_by(|a, b| {
+            (a.centre - at)
+                .length()
+                .total_cmp(&(b.centre - at).length())
+        }) else {
+            continue;
+        };
+        let seed = name.bytes().fold(0x2545_F491_4F6C_DD1Du64, |a, b| {
+            a.wrapping_mul(0x100_0000_01B3) ^ b as u64
+        });
+        village(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            at,
+            island.anchorage(),
+            island,
+            &origin,
+            seed,
+        );
     }
 }
 

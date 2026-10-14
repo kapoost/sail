@@ -119,6 +119,14 @@ const KEYS: [(&str, &[(&str, &str)]); 5] = [
             ("V", "picture: sharp, 960, 720, 480 pixels"),
             ("B", "the ink drawing"),
             ("M", "the chart, and [ ] to zoom it"),
+            (
+                "Shift M",
+                "spread it on the table: marks, their names, and a mile scale",
+            ),
+            (
+                " ",
+                "drag across it to measure — miles, and the bearing both ways",
+            ),
             ("Tab", "the diagnostic panel"),
             ("H", "hide the console"),
             ("K", "mute"),

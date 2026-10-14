@@ -50,6 +50,11 @@ const SHELF: f64 = 400.0;
 #[derive(Clone, Copy, Debug)]
 pub struct Island {
     pub centre: DVec2,
+    /// Which way the sheltered side faces: the shoalest bearing, which is where the bay
+    /// is, where the anchorage is, and — because the weather is on the other side —
+    /// where the cliffs are not. Worked out once at construction, because `elevation`
+    /// asks for it at every vertex of every island.
+    pub bay: f64,
     /// Mean radius, metres.
     pub radius: f64,
     /// How high it stands, metres. Sets the length of its wind shadow.
@@ -118,13 +123,34 @@ impl Island {
             return 0.0;
         }
         let inland = (-d / self.radius.max(1.0)).clamp(0.0, 1.0);
+        // **How steep the climb is depends which side you are on**, and that is the one
+        // thing that makes an island read as a place rather than as a hill.
+        //
+        // An island in a swell is not the same shape all the way round. The side the
+        // weather comes from is a cliff, because ten thousand years of Atlantic have been
+        // taking it away; the lee side is where the beach is, where the bay is, and
+        // therefore where the village is. The bay is already chosen — it is the shoalest
+        // bearing, which is the same thing — so the cliff is simply the other side of
+        // that, and the whole island hangs together: you come round a wall of rock and
+        // find a harbour in the lee of it.
+        let bearing = {
+            let off = pos - self.centre;
+            off.x.atan2(off.y)
+        };
+        // Nought in the bay, one directly opposite it.
+        let exposure = (1.0 - (crate::units::wrap_pi(bearing - self.bay).cos())) * 0.5;
+        // On the weather side the climb happens in the first twelfth of the way inland
+        // and takes it four fifths of the way up — which is a cliff. In the bay it is
+        // spread over a third of the island and gets a third of the way up, which is a
+        // beach and a field behind it.
+        let share = CLIFF_SHARE * (1.70 - 1.30 * exposure);
+        let rise = CLIFF_RISE * (0.55 + 0.72 * exposure);
         // The climb. Steep at the shore, easing off inland.
-        let profile = if inland < CLIFF_SHARE {
-            let e = inland / CLIFF_SHARE;
-            CLIFF_RISE * e * e * (3.0 - 2.0 * e)
+        let profile = if inland < share {
+            let e = inland / share;
+            rise * e * e * (3.0 - 2.0 * e)
         } else {
-            CLIFF_RISE
-                + (1.0 - CLIFF_RISE) * ((inland - CLIFF_SHARE) / (1.0 - CLIFF_SHARE)).powf(0.75)
+            rise + (1.0 - rise) * ((inland - share) / (1.0 - share)).powf(0.75)
         };
         // The relief, in world metres so it does not stretch with the island's size: a
         // ridge is a few hundred metres across whether it is on a skerry or on a
@@ -191,8 +217,11 @@ impl Archipelago {
             // A spread of sizes: mostly skerries, a few proper islands to hide behind.
             let t = rng.next_f64();
             let radius = 90.0 + t * t * t * 1500.0;
-            let candidate = Island {
+            let mut candidate = Island {
                 centre,
+                // Filled in below: it is a property of the shape and the shape is not
+                // finished until the lobes are in.
+                bay: 0.0,
                 radius,
                 // Low islands shelter badly, which is true and is why a fifty-metre
                 // hill matters more to a sailor than a mile of sand.
@@ -209,6 +238,7 @@ impl Archipelago {
                 ],
                 relief_seed: rng.next_u32() as u64 | ((rng.next_u32() as u64) << 32),
             };
+            candidate.bay = candidate.best_bay();
             if candidate.centre.length() < clear_radius + radius {
                 continue;
             }
@@ -468,7 +498,7 @@ impl Island {
 
     /// Where a boat would lie off this island.
     pub fn anchorage(&self) -> DVec2 {
-        let bearing = self.best_bay();
+        let bearing = self.bay;
         let out = self.shore_radius(bearing) + ANCHORAGE_OFF;
         self.centre + DVec2::new(bearing.sin(), bearing.cos()) * out
     }
