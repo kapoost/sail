@@ -707,6 +707,27 @@ pub fn update(
                 // The guy's rope starts at the tack rather than the clew — the corner
                 // the pole is holding.
                 let clew = if guy { shape.tack } else { clew };
+                // And a lead that barely moves the rope is not a lead.
+                //
+                // A sheet is drawn in two parts when something bends it, and each part
+                // sags about its own chord — so when the bend is slight the two curves
+                // meet at the join with different slopes and there is a visible crease in
+                // mid-air. Reported from the deck as kinks on the sheets, and seen before
+                // on the other sails for the same reason. Two catenaries of different
+                // lengths cannot be made to meet smoothly; the answer is not to cut the
+                // rope in two unless something is really bending it.
+                //
+                // A quarter of a metre, which is about the radius of the fitting a rope
+                // would be led round. Less than that and the lead is inside the rope's own
+                // sag anyway.
+                if led {
+                    let run = car_at - clew;
+                    let f =
+                        ((join - clew).dot(run) / run.length_squared().max(1e-6)).clamp(0.0, 1.0);
+                    if (join - (clew + run * f)).length() < 0.25 {
+                        led = false;
+                    }
+                }
                 let (a, b) = match (part, led) {
                     // Led round something: two ropes, two sags, a real bend at the block.
                     (0, true) => (clew, join),

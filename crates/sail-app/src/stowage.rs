@@ -46,10 +46,12 @@ fn berth(which: Headsail) -> (f32, f32) {
 /// light sails get the loud bags because they are the ones wanted in a hurry.
 fn cloth(which: Headsail) -> Color {
     match which {
-        Headsail::Genoa => Color::srgb(0.33, 0.35, 0.38),
-        Headsail::Code0 => Color::srgb(0.28, 0.40, 0.52),
-        Headsail::Gennaker => Color::srgb(0.55, 0.33, 0.22),
-        Headsail::Spinnaker => Color::srgb(0.62, 0.48, 0.16),
+        // Loud, because the deck is varnished wood and a bag the colour of the deck is a
+        // bag nobody finds — which is also why sailmakers do not make them that colour.
+        Headsail::Genoa => Color::srgb(0.16, 0.20, 0.30),
+        Headsail::Code0 => Color::srgb(0.10, 0.45, 0.62),
+        Headsail::Gennaker => Color::srgb(0.78, 0.33, 0.12),
+        Headsail::Spinnaker => Color::srgb(0.88, 0.70, 0.10),
     }
 }
 
@@ -174,7 +176,9 @@ pub fn setup(
         return;
     };
     let stencil = images.add(markings());
-    let bag = meshes.add(bag_mesh(1.55, 0.26));
+    // Fatter than it is long by the standards of a kitbag: a sail in a bag is a bag of
+    // cloth, and half a metre across is what a genoa looks like on a side deck.
+    let bag = meshes.add(bag_mesh(1.45, 0.34));
     for which in [
         Headsail::Genoa,
         Headsail::Code0,
@@ -183,7 +187,7 @@ pub fn setup(
     ] {
         let (z, side) = berth(which);
         // Sitting on the deck against the toe rail, not floating over the middle of it.
-        let y = crate::deck::deck_height(z) + 0.17;
+        let y = crate::deck::deck_height(z) + 0.26;
         let x = side * (crate::deck::deck_half_beam(z) - 0.36);
         commands.entity(root).with_children(|b| {
             b.spawn((
@@ -203,6 +207,13 @@ pub fn setup(
         });
     }
 
+    info!(
+        "stowed: bags at z {:.1} and {:.1}, x +/-{:.2}, y {:.2}",
+        berth(Headsail::Genoa).0,
+        berth(Headsail::Code0).0,
+        crate::deck::deck_half_beam(berth(Headsail::Genoa).0) - 0.36,
+        crate::deck::deck_height(berth(Headsail::Genoa).0) + 0.26
+    );
     // And the pole in its chocks along the port side deck.
     //
     // Laid *along the sheer* rather than parallel to the centreline, because the side

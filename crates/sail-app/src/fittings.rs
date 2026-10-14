@@ -55,8 +55,21 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     // A spar out over the stem, for a gennaker to be tacked to later. Stayed by a
     // bobstay down to the waterline and a pair of shrouds to the rail — see `rig.rs` —
     // because an unstayed sprit is not a spar, it is a lever against the stem.
+    // Its heel is at the mast, which is where a bowsprit's heel goes.
+    //
+    // It was stepped at the stem — a spar a metre and a half long sitting in a fitting on
+    // the stemhead, which is not a bowsprit, it is a bumkin bolted to the one part of the
+    // boat least able to take it. A real sprit runs *inboard*: it lies along the foredeck
+    // and fetches up against the mast or a samson post stepped beside it, so the whole
+    // length of the deck takes the load and the stemhead fitting is only a fairlead. That
+    // is why the spar is as long as it is and why nobody worries about the pull of a kite
+    // on its end.
     let tip = crate::boat::sprit_end(loa);
-    let heel_at = Vec3::new(0.0, deck::deck_height(-loa * 0.46) + 0.18, -loa * 0.46);
+    let heel_at = Vec3::new(
+        0.0,
+        deck::deck_height(crate::boat::MAST_FOOT_Z) + 0.16,
+        crate::boat::MAST_FOOT_Z,
+    );
     let run = tip - heel_at;
     b.spawn((
         Mesh3d(w.meshes.add(Cylinder::new(0.072, run.length()))),
