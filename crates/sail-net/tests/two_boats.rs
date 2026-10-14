@@ -115,3 +115,43 @@ fn two_boats_can_see_each_other() {
     );
     drop(server);
 }
+
+/// A server answers "is there a game here?" — the half of discovery that is protocol.
+///
+/// Asked directly rather than broadcast, on purpose: whether a broadcast gets off the
+/// machine depends on the network the test happens to be run on, and a test that fails in
+/// a sandbox teaches nobody anything. The broadcast half is one line in `discovery.rs`
+/// and is verified by running the game on a real network, which is the only place it can
+/// honestly be verified anyway.
+#[test]
+fn a_server_says_it_is_there() {
+    let port = 7792;
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_sail-server"))
+            .args(["--port", &port.to_string(), "--seed", "99"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("the server binary"),
+    );
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").expect("a socket");
+    socket
+        .set_read_timeout(Some(Duration::from_millis(400)))
+        .unwrap();
+    let ask = sail_net::encode(&sail_net::ToServer::WhoIsThere);
+    let mut buf = [0u8; 2048];
+    let until = Instant::now() + Duration::from_secs(5);
+    let mut found = None;
+    while Instant::now() < until && found.is_none() {
+        let _ = socket.send_to(&ask, ("127.0.0.1", port));
+        if let Ok((n, _)) = socket.recv_from(&mut buf) {
+            if let Some(sail_net::ToClient::Beacon { game, seed, .. }) =
+                sail_net::decode::<sail_net::ToClient>(&buf[..n])
+            {
+                found = Some((game, seed));
+            }
+        }
+    }
+    let (game, seed) = found.expect("a server that will not say it exists cannot be found");
+    assert_eq!(seed, 99, "the beacon carries the sea it is offering");
+    assert!(!game.is_empty(), "and something a person can recognise");
+}

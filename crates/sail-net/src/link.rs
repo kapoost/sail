@@ -224,6 +224,9 @@ fn run(
                 ToClient::Weather { sky, squalls } => {
                     let _ = incoming.send(Event::Weather { sky, squalls });
                 }
+                // A beacon on this socket is somebody else's scan being answered while
+                // we happened to be listening; it is not for us.
+                ToClient::Beacon { .. } => {}
                 ToClient::No { because } => {
                     let _ = incoming.send(Event::Lost(because));
                     return;

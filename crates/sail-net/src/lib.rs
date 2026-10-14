@@ -22,6 +22,7 @@
 //! game does not have. A newer snapshot replaces an older one, a lost one is replaced
 //! sixty-six milliseconds later, and the receiver dead-reckons across the gap.
 
+pub mod discovery;
 pub mod link;
 
 use serde::{Deserialize, Serialize};
@@ -245,6 +246,15 @@ pub enum ToServer {
         protocol: u16,
         name: String,
     },
+    /// Shouted at the whole network rather than sent to anybody: is there a game here?
+    ///
+    /// The clients ask and the servers answer, rather than the servers announcing
+    /// themselves to a fixed port and the clients listening on it. Which way round this
+    /// goes is not a detail — a listening client has to bind a known port, two copies of
+    /// the game on one machine then cannot both have it, and the first thing anybody does
+    /// when testing this is run two copies on one machine. Asking from an ephemeral port
+    /// and being answered unicast has neither problem and needs no second port.
+    WhoIsThere,
     /// Fifteen times a second, and nothing else from here on.
     Here {
         id: BoatId,
@@ -278,6 +288,14 @@ pub enum ToClient {
     Weather {
         sky: Sky,
         squalls: Vec<Squall>,
+    },
+    /// Yes, here. Sent straight back to whoever asked.
+    Beacon {
+        protocol: u16,
+        /// Something a person can recognise in a list: whose machine this is.
+        game: String,
+        players: u8,
+        seed: u64,
     },
     /// The handshake failed, and why — so the person sees "different version" rather
     /// than a game that does not start.

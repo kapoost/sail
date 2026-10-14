@@ -144,6 +144,18 @@ fn main() -> std::io::Result<()> {
                     });
                     let _ = socket.send_to(&welcome, from);
                 }
+                ToServer::WhoIsThere => {
+                    // Answered unicast, straight back to whoever shouted. The name is
+                    // the machine's, because in a list of games on a home network that is
+                    // the only thing anybody will recognise.
+                    let beacon = encode(&ToClient::Beacon {
+                        protocol: PROTOCOL,
+                        game: host_name(),
+                        players: fleet.len().min(255) as u8,
+                        seed,
+                    });
+                    let _ = socket.send_to(&beacon, from);
+                }
                 ToServer::Here { id, drawn } => {
                     let Some(boat) = fleet.get_mut(&from) else {
                         continue;
@@ -203,6 +215,16 @@ fn main() -> std::io::Result<()> {
             broadcast(&socket, &fleet, &weather);
         }
     }
+}
+
+/// Whose machine this is, for the list. Taken from whatever the host already knows
+/// rather than asked for: a game that will not start until somebody has named it is a
+/// game nobody starts.
+fn host_name() -> String {
+    std::env::var("SAIL_GAME")
+        .or_else(|_| std::env::var("USER"))
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "a game".into())
 }
 
 fn sky_now(wind: &SyntheticWind, t: f32) -> Sky {

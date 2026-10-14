@@ -31,12 +31,22 @@ pub struct Net {
     /// What went wrong, for the panel. Empty while things are well.
     pub trouble: String,
     pub joined: bool,
+    /// Where the panel will knock, and what to call yourself when it does.
+    pub address: String,
+    pub name: String,
+    /// Looking for games on this network, while the panel's page is open. Dropping it
+    /// stops the thread.
+    pub scan: Option<sail_net::discovery::Scan>,
 }
 
 pub fn setup(mut commands: Commands) {
-    let mut net = Net::default();
+    let mut net = Net {
+        name: std::env::var("SAIL_NAME").unwrap_or_else(|_| whoami()),
+        ..Default::default()
+    };
     if let Ok(server) = std::env::var("SAIL_JOIN") {
-        let name = std::env::var("SAIL_NAME").unwrap_or_else(|_| whoami());
+        let name = net.name.clone();
+        net.address = server.clone();
         match Link::join(&server, &name) {
             Ok(link) => {
                 info!("knocking on {server} as {name}");
