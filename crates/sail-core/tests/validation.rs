@@ -948,12 +948,15 @@ fn pilot_run(
     }
     pilot.mode = match mode {
         PilotMode::Heading(_) => PilotMode::Heading(sim.state.heading),
-        PilotMode::ApparentWind(_) => PilotMode::ApparentWind(sim.telemetry.awa),
+        PilotMode::ApparentWind { .. } => PilotMode::ApparentWind {
+            awa: sim.telemetry.awa,
+            twa: sim.telemetry.twa,
+        },
         PilotMode::Standby => PilotMode::Standby,
     };
     let reference = match pilot.mode {
         PilotMode::Heading(h) => h,
-        PilotMode::ApparentWind(a) => a,
+        PilotMode::ApparentWind { awa, .. } => awa,
         PilotMode::Standby => 0.0,
     };
 
@@ -968,7 +971,7 @@ fn pilot_run(
         sim.run(SUBSTEP, &controls);
         let drift = match pilot.mode {
             PilotMode::Heading(_) => wrap_pi(sim.state.heading - reference).abs(),
-            PilotMode::ApparentWind(_) => (sim.telemetry.awa - reference).abs(),
+            PilotMode::ApparentWind { .. } => (sim.telemetry.awa - reference).abs(),
             PilotMode::Standby => 0.0,
         };
         worst = worst.max(drift);
@@ -995,7 +998,13 @@ fn the_pilot_holds_a_compass_course() {
 fn the_vane_holds_a_wind_angle_through_the_shifts() {
     let cfg = BoatConfig::charter_sloop_34();
     // Gusty, shifting wind — the case a compass pilot cannot handle and a vane can.
-    let (sim, worst) = pilot_run(cfg, PilotMode::ApparentWind(0.0), 420.0, 12.0, Some(11));
+    let (sim, worst) = pilot_run(
+        cfg,
+        PilotMode::ApparentWind { awa: 0.0, twa: 0.0 },
+        420.0,
+        12.0,
+        Some(11),
+    );
     assert!(
         deg(worst) < 5.0,
         "wind vane let the apparent wind angle move {:.1} deg",
@@ -1015,7 +1024,7 @@ fn a_vane_follows_a_shift_where_a_compass_pilot_would_not() {
     // therefore lets the wind angle wander; the vane keeps the angle and lets the
     // course wander. That difference is the whole reason both pieces of gear exist.
     let compass = wind_angle_spread(cfg, PilotMode::Heading(0.0));
-    let vane = wind_angle_spread(cfg, PilotMode::ApparentWind(0.0));
+    let vane = wind_angle_spread(cfg, PilotMode::ApparentWind { awa: 0.0, twa: 0.0 });
     assert!(
         vane < compass,
         "the vane should hold the wind angle tighter than the compass pilot: \
@@ -1051,7 +1060,10 @@ fn wind_angle_spread(cfg: BoatConfig, mode: PilotMode) -> f64 {
     }
     pilot.mode = match mode {
         PilotMode::Heading(_) => PilotMode::Heading(sim.state.heading),
-        PilotMode::ApparentWind(_) => PilotMode::ApparentWind(sim.telemetry.awa),
+        PilotMode::ApparentWind { .. } => PilotMode::ApparentWind {
+            awa: sim.telemetry.awa,
+            twa: sim.telemetry.twa,
+        },
         PilotMode::Standby => PilotMode::Standby,
     };
     let reference = sim.telemetry.awa;
@@ -1093,7 +1105,7 @@ fn a_vane_knocked_onto_the_wrong_tack_tacks_back_instead_of_gybing() {
     let mut pilot = Autopilot::new();
     pilot.hold_wind(&sim.telemetry);
     let target = match pilot.mode {
-        PilotMode::ApparentWind(a) => a,
+        PilotMode::ApparentWind { awa, .. } => awa,
         _ => unreachable!(),
     };
     assert!(target > 0.0, "armed on starboard tack");
@@ -2561,7 +2573,10 @@ fn the_vane_does_not_gybe_itself_across_the_stern() {
     let cfg = BoatConfig::archipelago_packet();
     let helm = |target_deg: f64, awa_deg: f64| {
         let mut pilot = Autopilot::new();
-        pilot.mode = PilotMode::ApparentWind(rad(target_deg));
+        pilot.mode = PilotMode::ApparentWind {
+            awa: rad(target_deg),
+            twa: rad(target_deg),
+        };
         let mut state = BoatState::at_rest(0.0);
         state.surge = kn_to_ms(8.0);
         let tm = Telemetry {
@@ -3575,7 +3590,10 @@ fn a_vane_has_nothing_to_let_go_with() {
     let mut pilot = Autopilot::new();
     pilot.mode = PilotMode::Heading(rad(40.0));
     assert!(pilot.can_let_go(), "an electric pilot can drop out");
-    pilot.mode = PilotMode::ApparentWind(rad(40.0));
+    pilot.mode = PilotMode::ApparentWind {
+        awa: rad(40.0),
+        twa: rad(40.0),
+    };
     assert!(!pilot.can_let_go(), "a vane gear cannot");
     pilot.mode = PilotMode::Standby;
     assert!(pilot.can_let_go());

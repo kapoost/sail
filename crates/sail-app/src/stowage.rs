@@ -40,68 +40,68 @@ fn berth(which: Headsail) -> (f32, f32) {
     }
 }
 
-/// The colour of the bag, which is how anybody tells them apart on a foredeck.
+/// The band on the bag, which is how anybody tells them apart on a foredeck.
 ///
-/// Sailmakers do this for the same reason, and the convention is loose but real: the
-/// light sails get the loud bags because they are the ones wanted in a hurry.
-fn cloth(which: Headsail) -> Color {
+/// The bag itself is the same for all four and it is not a colour anybody chose: a sail
+/// bag is made out of a sail. When a working jib is finally past repair it goes to the
+/// loft and comes back as bags, which is why every bag on every cruising boat is the
+/// same tired cream as every other, and why the only thing that distinguishes them is a
+/// band of tape and a stencil. That is what is drawn.
+fn band(which: Headsail) -> [u8; 3] {
     match which {
-        // Loud, because the deck is varnished wood and a bag the colour of the deck is a
-        // bag nobody finds — which is also why sailmakers do not make them that colour.
-        Headsail::Genoa => Color::srgb(0.16, 0.20, 0.30),
-        Headsail::Code0 => Color::srgb(0.10, 0.45, 0.62),
-        Headsail::Gennaker => Color::srgb(0.78, 0.33, 0.12),
-        Headsail::Spinnaker => Color::srgb(0.88, 0.70, 0.10),
+        Headsail::Genoa => [38, 44, 62],
+        Headsail::Code0 => [26, 96, 128],
+        Headsail::Gennaker => [168, 72, 28],
+        Headsail::Spinnaker => [190, 150, 24],
     }
 }
 
-/// A sausage of a sail bag: round in the middle, drawn in at both ends by its own
-/// drawstring, with a seam along the top and a band round one end where the label is.
-///
-/// Built rather than modelled because it has to sit on a deck whose height is a function
-/// and not a drawing, and because a bag is three numbers: how long, how fat, and how hard
-/// it is pulled in at the ends.
-fn bag_mesh(length: f32, girth: f32) -> Mesh {
-    use bevy::asset::RenderAssetUsages;
-    use bevy::render::mesh::{Indices, PrimitiveTopology};
+/// Worn canvas: cream gone grey, which is what a bag made out of a dead sail looks like
+/// after a few seasons in a cockpit locker.
+const CANVAS: Color = Color::srgb(0.72, 0.69, 0.60);
 
-    const RINGS: usize = 14;
-    const AROUND: usize = 12;
-    let mut positions = Vec::new();
-    let mut normals = Vec::new();
-    let mut uvs = Vec::new();
-    for ring in 0..=RINGS {
-        let t = ring as f32 / RINGS as f32;
-        let z = (t - 0.5) * length;
-        // Drawn in at the ends: a cosine shoulder rather than a cone, because a bag with
-        // rope through its mouth gathers rather than tapers.
-        let pinch = (std::f32::consts::PI * t).sin().powf(0.45);
-        let r = girth * (0.18 + 0.82 * pinch);
-        for a in 0..=AROUND {
-            let ang = a as f32 / AROUND as f32 * std::f32::consts::TAU;
-            let (s, c) = (ang.sin(), ang.cos());
-            positions.push([r * s, r * c, z]);
-            normals.push([s, c, 0.0]);
-            uvs.push([a as f32 / AROUND as f32, t]);
-        }
+/// A duffle with a sail in it, which is not a cylinder.
+///
+/// Reported from the deck: too regular, should be flattened, crumpled, not that stiff,
+/// and lying slightly bent. All of which is one observation — canvas has no opinions.
+/// A bag with thirty kilos of wet sailcloth in it spreads under its own weight, takes
+/// the camber of the deck it is lying on, and is covered in the creases of however it
+/// was stuffed; the only straight thing about it is the tape round its mouth.
+///
+/// Built by taking the engine's capsule and ruining it: squashed to two thirds, bent
+/// along its length to lie into the deck, and every vertex pushed about by a cheap hash
+/// of its own position so the surface is lumpy in a way that does not repeat. The hash is
+/// deterministic, so the four bags on this deck are the same shape — which is right,
+/// because they came out of the same loft.
+fn duffle() -> Mesh {
+    let mut mesh = Mesh::from(Capsule3d::new(0.30, 1.05));
+    let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
+    else {
+        return mesh;
+    };
+    for p in positions.iter_mut() {
+        let (x, y, z) = (p[0], p[1], p[2]);
+        // Squashed: a bag of cloth is wider than it is tall.
+        let mut nx = x * 1.18;
+        let mut nz = z * 0.66;
+        // And bent, so it lies along a deck rather than across it.
+        let along = (y / 0.82).clamp(-1.0, 1.0);
+        nx += along * along * 0.07;
+        // Creases. A hash of the position, which gives the same lumps every time without
+        // anything to store and without a pattern the eye can pick up.
+        let hash = |a: f32, b: f32, c: f32| {
+            let v = (a * 12.9898 + b * 78.233 + c * 37.719).sin() * 43758.547;
+            v - v.floor() - 0.5
+        };
+        let r = (nx * nx + nz * nz).sqrt().max(1e-4);
+        let crease =
+            hash(x * 9.0, y * 11.0, z * 7.0) * 0.055 + hash(x * 23.0, y * 19.0, z * 29.0) * 0.022;
+        nx += nx / r * crease;
+        nz += nz / r * crease;
+        let ny = y + hash(x * 5.0, y * 13.0, z * 3.0) * 0.02;
+        *p = [nx, ny, nz];
     }
-    let mut indices = Vec::new();
-    let stride = AROUND + 1;
-    for ring in 0..RINGS {
-        for a in 0..AROUND {
-            let i = (ring * stride + a) as u32;
-            let j = i + stride as u32;
-            indices.extend_from_slice(&[i, j, i + 1, i + 1, j, j + 1]);
-        }
-    }
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(Indices::U32(indices));
     mesh.compute_normals();
     mesh
 }
@@ -112,7 +112,7 @@ fn bag_mesh(length: f32, girth: f32) -> Mesh {
 /// Drawn into a small texture rather than modelled, because that is what they are — sewn
 /// tape and a stencil — and because a boat carries four of these and nobody is going to
 /// look at them closely enough to want geometry.
-fn markings() -> Image {
+fn markings(band_colour: [u8; 3]) -> Image {
     use bevy::asset::RenderAssetUsages;
     use bevy::image::Image;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -126,25 +126,34 @@ fn markings() -> Image {
         data[i + 1] = v[1];
         data[i + 2] = v[2];
     };
+    // A capsule's texture runs `u` round the girth and `v` along the length, so a stripe
+    // at constant `u` is a tape down the length of the bag and one at constant `v` is a
+    // binding round it. Which is exactly how a sail bag is made: webbing up each side for
+    // the handles, a band round each end where the cloth is turned and sewn, and a strip
+    // of tape at the mouth with the sail's name written on it in marker.
+    //
+    // Reported as missing, and they were: the first stencil had a hairline seam and a
+    // block of colour, which at the size a bag is drawn reads as a dirty patch.
+    let tape = [96, 92, 84];
+    let stitch = [64, 61, 56];
     for y in 0..H {
         for x in 0..W {
-            // The seam: two stitched lines up the length of the bag.
-            let seam = x == 3 || x == 5;
-            // The label band, round the end where the drawstring is.
-            let band = (6..11).contains(&y);
-            // And the chevrons, pointing at that end.
-            let into = |y: usize, x: usize| {
-                let dx = (x as i32 - 32).abs();
-                let on = (y as i32 - (20 + dx / 2)).abs() <= 1;
-                on && dx < 22
-            };
-            let arrow = into(y, x) || into(y.wrapping_sub(14).min(H - 1), x);
-            if seam {
-                put(x, y, [120, 118, 112]);
-            } else if band {
-                put(x, y, [40, 42, 46]);
-            } else if arrow {
-                put(x, y, [90, 92, 96]);
+            // Two handle tapes, a quarter of the way round each side, each with its
+            // stitching either side of it.
+            let on_tape = |at: usize| x.abs_diff(at) <= 2;
+            let stitched = |at: usize| x.abs_diff(at) == 3;
+            let handle = on_tape(16) || on_tape(48);
+            let handle_stitch = stitched(16) || stitched(48);
+            // Bindings round both ends, and the label band inboard of the one at the
+            // mouth.
+            let binding = (2..5).contains(&y) || (H - 5..H - 2).contains(&y);
+            let label = (8..15).contains(&y);
+            if handle {
+                put(x, y, tape);
+            } else if handle_stitch || binding {
+                put(x, y, stitch);
+            } else if label {
+                put(x, y, band_colour);
             }
         }
     }
@@ -175,10 +184,7 @@ pub fn setup(
         warn!("no boat to stow anything on");
         return;
     };
-    let stencil = images.add(markings());
-    // Fatter than it is long by the standards of a kitbag: a sail in a bag is a bag of
-    // cloth, and half a metre across is what a genoa looks like on a side deck.
-    let bag = meshes.add(bag_mesh(1.45, 0.34));
+    let bag = meshes.add(duffle());
     for which in [
         Headsail::Genoa,
         Headsail::Code0,
@@ -187,21 +193,27 @@ pub fn setup(
     ] {
         let (z, side) = berth(which);
         // Sitting on the deck against the toe rail, not floating over the middle of it.
-        let y = crate::deck::deck_height(z) + 0.26;
+        let y = crate::deck::deck_height(z) + 0.24;
         let x = side * (crate::deck::deck_half_beam(z) - 0.36);
         commands.entity(root).with_children(|b| {
             b.spawn((
                 SailBag(which),
                 Mesh3d(bag.clone()),
                 MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: cloth(which),
-                    base_color_texture: Some(stencil.clone()),
-                    perceptual_roughness: 0.92,
+                    base_color: CANVAS,
+                    base_color_texture: Some(images.add(markings(band(which)))),
+                    perceptual_roughness: 0.95,
                     ..default()
                 })),
                 // Lying fore and aft along the side deck, which is where a bag goes: it
-                // is the only orientation that leaves the side deck walkable.
-                Transform::from_xyz(x, y, z),
+                // is the only orientation that leaves the side deck walkable. A capsule
+                // stands up the Y axis, so it is laid down.
+                // Lying fore and aft, and turned a little off the centreline because
+                // nobody puts a bag down square.
+                Transform::from_xyz(x, y, z).with_rotation(
+                    Quat::from_rotation_y(side * 0.12)
+                        * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                ),
                 Visibility::default(),
             ));
         });

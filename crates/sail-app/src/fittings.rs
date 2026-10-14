@@ -537,7 +537,7 @@ pub fn update_vane(
     const FULL_ERROR: f32 = 25.0;
 
     let (set, error) = match pilot.mode {
-        PilotMode::ApparentWind(target) => (
+        PilotMode::ApparentWind { awa: target, .. } => (
             target as f32,
             sail_core::units::wrap_pi(sim.sim.telemetry.awa - target) as f32,
         ),

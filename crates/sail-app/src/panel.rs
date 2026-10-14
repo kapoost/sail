@@ -505,7 +505,7 @@ pub fn draw(
                                 pilot.hold_heading(&state);
                             }
                         }
-                        let wind_mode = matches!(pilot.mode, PilotMode::ApparentWind(_));
+                        let wind_mode = matches!(pilot.mode, PilotMode::ApparentWind { .. });
                         if lamp_button(
                             ui,
                             if wind_mode { "WIND VANE" } else { "COMPASS" },
@@ -533,7 +533,7 @@ pub fn draw(
                             egui::RichText::new(match pilot.mode {
                                 PilotMode::Standby => "   —".to_string(),
                                 PilotMode::Heading(h) => format!("{:03.0}", deg(h)),
-                                PilotMode::ApparentWind(a) => {
+                                PilotMode::ApparentWind { awa: a, .. } => {
                                     format!("{:+.0} awa", deg(a))
                                 }
                             })

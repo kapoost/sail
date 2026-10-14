@@ -657,7 +657,14 @@ pub fn update_pole(
         tr.translation = root;
         let along = (end - root).normalize_or_zero();
         tr.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, along);
-        *vis = Visibility::Inherited;
+        // On the mast only when the kite is the sail of the day. The rest of the time
+        // the spar is the one lying in its chocks on the side deck, and two poles on one
+        // boat is one pole too many — reported from the deck, looking at both of them.
+        *vis = if kite {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 

@@ -302,7 +302,7 @@ pub fn draw(
                         }
                     }
                 }
-                PilotMode::ApparentWind(target) => {
+                PilotMode::ApparentWind { awa: target, .. } => {
                     ui.label(
                         egui::RichText::new(format!(
                             "vane   holding {:.0} apparent   (now {:.0})",

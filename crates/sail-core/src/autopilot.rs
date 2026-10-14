@@ -505,9 +505,21 @@ pub enum PilotMode {
     Standby,
     /// Hold a compass heading, radians from north.
     Heading(f64),
-    /// Hold a signed apparent wind angle, radians, positive with the wind to
-    /// starboard. The sign carries the tack.
-    ApparentWind(f64),
+    /// Hold a wind angle, radians, positive with the wind to starboard. The sign
+    /// carries the tack.
+    ///
+    /// Two of them, and both are the same instruction said in the two languages a boat
+    /// has for wind. Close-hauled and reaching the pilot steers the *apparent*, because
+    /// that is what the sails feel and a lift or a header is an apparent shift. Deep it
+    /// steers the *true*, because apparent wind angle downwind is made mostly of the
+    /// boat's own speed: she surfs and it goes aft, she drops off a wave and it comes
+    /// forward, fifteen degrees of swing with every sea and not a breath of it a change
+    /// in the wind. A pilot chasing that yaws the boat with the waves instead of across
+    /// them, and on a run that is how the wind gets behind the mainsail.
+    ///
+    /// Both are set when the vane is engaged and both move together when the target is
+    /// nudged, so there is one instruction and no mode to be in the wrong one of.
+    ApparentWind { awa: f64, twa: f64 },
 }
 
 /// A tiller pilot with a wind vane in the same box.
@@ -560,7 +572,7 @@ impl Autopilot {
     /// or gybes herself and the gear goes on patiently steering the new course. That is
     /// the failure mode, and it is a different one to be caught out by.
     pub fn can_let_go(&self) -> bool {
-        !matches!(self.mode, PilotMode::ApparentWind(_))
+        !matches!(self.mode, PilotMode::ApparentWind { .. })
     }
 
     /// How long the rudder has been hard over, for diagnostics.
@@ -583,7 +595,12 @@ impl Autopilot {
     pub fn hold_wind(&mut self, tm: &Telemetry) {
         let sign = if tm.awa >= 0.0 { 1.0 } else { -1.0 };
         let magnitude = tm.awa.abs().clamp(VANE_MIN_ANGLE, VANE_MAX_ANGLE);
-        self.mode = PilotMode::ApparentWind(sign * magnitude);
+        self.mode = PilotMode::ApparentWind {
+            awa: sign * magnitude,
+            // The same instruction in the other language, read off the instruments at the
+            // moment it is given.
+            twa: tm.twa,
+        };
         self.loop_.reset();
     }
 
@@ -598,11 +615,12 @@ impl Autopilot {
         match &mut self.mode {
             PilotMode::Standby => {}
             PilotMode::Heading(h) => *h = wrap_tau(*h + delta),
-            PilotMode::ApparentWind(a) => {
-                // Luffing means a smaller angle, on either tack.
-                let sign = if *a >= 0.0 { 1.0 } else { -1.0 };
-                let magnitude = (a.abs() - delta).clamp(VANE_MIN_ANGLE, VANE_MAX_ANGLE);
-                *a = sign * magnitude;
+            PilotMode::ApparentWind { awa, twa } => {
+                // Luffing means a smaller angle, on either tack, and it means it in both
+                // languages at once.
+                let sign = if *awa >= 0.0 { 1.0 } else { -1.0 };
+                *awa = sign * (awa.abs() - delta).clamp(VANE_MIN_ANGLE, VANE_MAX_ANGLE);
+                *twa = sign * (twa.abs() - delta).clamp(VANE_MIN_ANGLE, VANE_MAX_ANGLE);
             }
         }
     }
@@ -618,7 +636,10 @@ impl Autopilot {
         let error = match self.mode {
             PilotMode::Standby => return None,
             PilotMode::Heading(target) => wrap_pi(target - st.heading),
-            PilotMode::ApparentWind(target) => {
+            PilotMode::ApparentWind {
+                awa: target,
+                twa: deep_target,
+            } => {
                 // The apparent wind angle is a *circular* quantity, and this used to
                 // subtract it like a straight line. Which is a tree of special cases
                 // waiting to happen, and one of them was a trap: dead downwind the wind
@@ -647,7 +668,38 @@ impl Autopilot {
                 //
                 // One subtraction and a wrap, and it is right everywhere the tree was
                 // right and right where the tree was dangerous.
-                wrap_pi(tm.awa - target)
+                //
+                // And deep, it is the *true* wind angle that is steered to, which is what
+                // every pilot worth having does and what was asked for from the deck in
+                // one line: apparent on the close angles, true between the broad reaches.
+                //
+                // The reason is that apparent wind angle is a bad thing to steer by
+                // downwind. It is made of the true wind and the boat's own speed, and
+                // running in a seaway the boat's speed is what changes: she surfs, the
+                // apparent goes aft; she drops off the back, the apparent comes forward —
+                // ten or fifteen degrees of swing with every wave, none of it a change in
+                // the wind and all of it a change the pilot chases. The boat then yaws
+                // with the waves instead of across them, and on a dead run that is how
+                // the wind gets behind the main. Under a kite with no mainsail up it is
+                // worse, because there is nothing damping the yaw at all.
+                //
+                // Upwind the opposite holds and is why nobody steers a true angle there:
+                // apparent is what the sails feel, a lift or a header *is* an apparent
+                // shift, and a vane that ignored it would sail her into a luff.
+                //
+                // So the two are blended by how deep she is, over the thirty degrees
+                // between a beam reach and a broad one. The target is kept in apparent
+                // terms either way — it is what the console shows and what the arrows
+                // move — and converted at the moment it is used, which keeps one number
+                // in one place.
+                let deep = crate::units::smoothstep(
+                    crate::units::rad(100.0),
+                    crate::units::rad(130.0),
+                    tm.twa.abs(),
+                );
+                let by_apparent = wrap_pi(tm.awa - target);
+                let by_true = wrap_pi(tm.twa - deep_target);
+                by_apparent + (by_true - by_apparent) * deep
             }
         };
         // The load the ram is working against, which is everything the rig and the
