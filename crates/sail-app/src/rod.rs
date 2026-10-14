@@ -986,10 +986,32 @@ pub fn gauge(ui: &mut bevy_egui::egui::Ui, fishing: &mut Fishing, sim: &Sim) {
         egui::Stroke::new(1.0, paint::FACE),
         egui::StrokeKind::Inside,
     );
-    if response.dragged() {
+    // The **left** button only, and that is a bug fix rather than a nicety.
+    //
+    // `dragged()` answers for any button, and the right button is how you look around —
+    // so holding it to swing the view while the pointer happened to be over this track
+    // set the drag star to wherever the pointer was. Reported from the deck three times
+    // as the drag "being at sixty-four newtons on its own", which it was: the hand that
+    // moved it was the hand turning the camera, and the two had no idea they were on the
+    // same control.
+    if response.dragged_by(egui::PointerButton::Primary) {
         if let Some(pos) = response.interact_pointer_pos() {
             fishing.drag = ((pos.x - track.left()) / track.width()).clamp(0.0, 1.0) as f64;
         }
+    }
+    // And a word when the handle has stopped, because a key that does nothing reads as
+    // broken and this one is telling the truth: past about forty newtons you cannot turn
+    // a multiplier, and the answer is the rod or the other gear rather than the arrow.
+    if fishing.fish().is_some() && tension > crate::fishing::stall(false) {
+        small(
+            ui,
+            if tension > crate::fishing::stall(true) {
+                "HANDLE STOPPED — U TO PUMP".into()
+            } else {
+                "HANDLE STOPPED — Shift FOR LOW GEAR".into()
+            },
+            paint::LIVE,
+        );
     }
 
     // --- What is on --------------------------------------------------------------

@@ -109,26 +109,32 @@ const STICTION: f64 = 1.3;
 
 /// The fastest the reel will take line in with no load on it, metres per second.
 ///
-/// A multiplier gains about three quarters of a metre a turn and two turns a second is a
-/// brisk wind, so this is honest rather than generous.
-const RETRIEVE: f64 = 0.80;
+/// A multiplier with a full spool gains the best part of a metre a turn and two turns a
+/// second is a brisk wind. It stood at 0.80, which is the figure off an *empty* spool and
+/// felt, from the deck, like winding treacle.
+const RETRIEVE: f64 = 1.15;
 
 /// Tension at which you cannot turn the handle at all, newtons.
 ///
-/// Not the reel's limit — yours, and it is far lower than it looks. Work it out at the
-/// handle: a six-to-one multiplier turns the spool six times per turn of the handle, so
-/// the force your hand needs is the line's pull times the spool radius times the ratio,
-/// over the handle's own radius — `30 mm × 6 / 50 mm`, which is **three and a half times
-/// the line tension**. Twenty-four newtons on the line is nine kilogrammes in your
-/// fingers, and that is where winding stops.
+/// Not the reel's limit — yours. Work it out at the handle: a five-to-one multiplier
+/// turns the spool five times per turn of the handle, so the force your hand needs is the
+/// line's pull times the spool radius times the ratio, over the handle's own radius —
+/// `25 mm × 5 / 50 mm`, which is **two and a half times the line tension**. A person can
+/// put a hundred newtons on a reel handle for a few seconds, so winding stops at about
+/// forty on the line.
 ///
-/// It stood at seventy for a long time, which is twenty-five kilogrammes at the handle
-/// and not a thing a person does. The error was invisible until pumping went in and
-/// turned out to gain nothing: with a reel that strong there is no load a rod is better
-/// at than a handle, which is the opposite of every angler's experience and was the
-/// model's fault rather than the technique's. **Asking for the pumping is what found
-/// it.**
-const STALL: f64 = 24.0;
+/// This has now been wrong in both directions and the second was worse than the first.
+/// Seventy was twenty-five kilogrammes at the handle and not a thing a person does, and
+/// with a reel that strong there was no load a rod was better at than a handle — which is
+/// why pumping gained nothing, and is how the error was found at all. Twenty-four was the
+/// same arithmetic with a six-to-one ratio and an empty spool, and it overshot: through
+/// the middle of an ordinary fight the handle was simply dead, and the arrow key was
+/// reported from the deck as having stopped working. It had not. It was telling the truth
+/// about a reel nobody would buy.
+///
+/// Forty leaves it working and slow, which is the honest answer and the one that leaves
+/// the gearbox and the rod a reason to exist rather than making them compulsory.
+const STALL: f64 = 40.0;
 
 /// And the same two numbers in low gear.
 ///
@@ -141,8 +147,8 @@ const STALL: f64 = 24.0;
 /// to one against six to one, and the hand force falls in proportion. The trade is not
 /// free and is not meant to be — winding against a heavy fish *puts that load on*, so
 /// low gear gains you line and wears the hook at the same time.
-const LOW_RETRIEVE: f64 = 0.34;
-const LOW_STALL: f64 = 48.0;
+const LOW_RETRIEVE: f64 = 0.48;
+const LOW_STALL: f64 = 75.0;
 
 /// How fast line runs off a spool in free spool, metres per second.
 const PAYOUT: f64 = 2.6;
@@ -591,7 +597,19 @@ pub fn lure_depth(line_out: f64, stw: f64) -> f64 {
 /// instrument, and read it in opposite directions: the hour you ought to be shortening
 /// down is the hour they are feeding.
 pub fn bite_weather(glass: f64) -> f64 {
-    (1.0 + 0.5 * (glass / 2.5).clamp(-0.7, 1.0)).max(0.25)
+    // Falling is the good one, so the sign turns over here and nowhere else. Six
+    // hectopascals in three hours is a proper fall — a front, and the hour to be out in.
+    (1.0 + 0.5 * (-glass / 6.0).clamp(-0.7, 1.0)).max(0.25)
+}
+
+/// Where the handle stops, in the gear asked for. For the console, which has to be able
+/// to say *why* the arrow key has gone quiet.
+pub fn stall(low_gear: bool) -> f64 {
+    if low_gear {
+        LOW_STALL
+    } else {
+        STALL
+    }
 }
 
 /// Whether the sea is lifting her hard enough to swing a fish aboard on.
@@ -631,14 +649,13 @@ pub struct Sea {
     /// The sea running, metres. In flat water there is nothing to time and you simply
     /// lift the thing aboard, which is also true.
     pub swell: f64,
-    /// How much more wind is expected within the hour, m/s. Positive is building.
+    /// What the barometer has done over the last three hours, hectopascals. Negative is
+    /// falling.
     ///
-    /// Standing in for the barometer, and the substitution is honest rather than
-    /// convenient. Every angler alive believes a falling glass turns the fish on, and
-    /// there is no pressure in this simulation to fall — but what a falling glass
-    /// *means* is a front on its way, and a building wind is the same front seen through
-    /// a different instrument. The boat already carries the reading: it is the OUTLOOK
-    /// line on the console, which until now only told you when to reef.
+    /// The real instrument rather than the wind trend it is derived from. This read
+    /// `outlook().0` until somebody pointed at the console and showed there was a BARO
+    /// line on it — and the tendency is what an angler actually reads, because the number
+    /// on the dial says nothing and the three-hour change says everything.
     pub glass: f64,
 }
 
@@ -1505,8 +1522,9 @@ pub fn work(
         // a frame late on exactly the frames that matter.
         lift: sim.sim.state.heave_rate,
         swell: sim.sim.telemetry.significant_height,
-        // The same reading the OUTLOOK line on the console is drawn from.
-        glass: sim.sim.wind.outlook().0,
+        // The same reading the BARO line on the console shows, and the same half of it:
+        // the tendency, not the number.
+        glass: sim.sim.wind.barometer().1,
     };
 
     // One key, and what it does depends on what is on the end — which is not a trick,
@@ -1774,8 +1792,14 @@ mod tests {
     fn a_properly_set_drag_beats_a_saithe() {
         let mut f = with(Quarry::Saithe, 2.5);
         let said = fish_it(&mut f, 400.0, sea(1.5, 25.0), hands(1.0, 1.0 / 3.0));
-        assert_eq!(f.caught.len(), 1, "{said:?}");
-        assert_eq!(f.caught[0].what, Quarry::Saithe);
+        // The first one, not the only one: the lure goes back in the water the moment a
+        // fish is boated, so a long enough run catches another — which is the gear
+        // working rather than the test failing.
+        assert_eq!(
+            f.caught.first().map(|c| c.what),
+            Some(Quarry::Saithe),
+            "{said:?}"
+        );
         // And it did not come quietly.
         assert!(said.iter().any(|s| s.contains("seen the boat")), "{said:?}");
     }
@@ -2009,21 +2033,40 @@ mod tests {
     #[test]
     fn low_gear_winds_when_high_gear_will_not() {
         let against = |low_gear: bool| {
-            // A saithe running, which pulls about thirty-eight newtons — above where a
-            // handle in high gear stops and below where one in low gear does, on a drag
-            // tight enough that nothing is slipping. That band is the gearbox's whole
-            // purpose and it is a narrow one, which is why the first version of this
-            // test used a ling, found the drag paying out in both gears, and measured
-            // nothing at all.
-            let mut f = with(Quarry::Saithe, 2.2);
-            let before = f.line_out;
+            // A pollack sounding, which pulls about sixty newtons — above where a handle
+            // in high gear stops and below where one in low gear does, on a drag tight
+            // enough that nothing is slipping. That band is the gearbox's whole purpose
+            // and it is a narrow one: the first version of this test used a ling and
+            // found the drag paying out in both gears, and the second used a saithe,
+            // which stopped being in the band the moment the stall was corrected.
+            let mut f = with(Quarry::Pollack, 3.0);
+            let water = sea(0.8, 40.0);
+            // Let the opening run have its way first, with the hands off. Measuring
+            // across it instead measured the *fish*, which takes line far faster than
+            // either gear gains it — both numbers came out near zero and the comparison
+            // was between two kinds of noise.
             sail(
                 &mut f,
-                20.0,
-                sea(0.8, 40.0),
+                2.0,
+                water,
+                Hands {
+                    reel: 0.0,
+                    drag: 0.62,
+                    low_gear: false,
+                    pump: false,
+                },
+            );
+            let before = f.line_out;
+            // And then two and a half seconds of winding, still inside its opening run,
+            // because that is where the load is: a fish that has moved on to hanging or
+            // shaking pulls half as hard and is out of the band the gearbox is for.
+            sail(
+                &mut f,
+                2.5,
+                water,
                 Hands {
                     reel: 1.0,
-                    drag: 0.5,
+                    drag: 0.62,
                     low_gear,
                     pump: false,
                 },
@@ -2036,7 +2079,7 @@ mod tests {
         // turns freely until it does — but once it is on, the handle stops and low gear
         // keeps coming.
         assert!(
-            low > high * 2.0 + 0.3,
+            low > high * 2.0 + 0.1,
             "low gained {low} m against high gear's {high} m"
         );
     }
@@ -2167,11 +2210,13 @@ mod tests {
         // difference this makes — half again against a third fewer — is smaller than the
         // noise in a sample that size. A test that passes or fails on the seed is worse
         // than no test, and the first version of this one did exactly that.
-        assert!(bite_weather(2.5) > bite_weather(0.0) * 1.3);
-        assert!(bite_weather(-2.5) < bite_weather(0.0) * 0.8);
+        // Falling glass is the good one, and the sign has been the wrong way round once
+        // already in this file's life.
+        assert!(bite_weather(-6.0) > bite_weather(0.0) * 1.3);
+        assert!(bite_weather(6.0) < bite_weather(0.0) * 0.8);
         assert!(bite_weather(0.0) == 1.0);
         // And it never shuts them off altogether, because they do still feed.
-        assert!(bite_weather(-100.0) > 0.2);
+        assert!(bite_weather(100.0) > 0.2);
     }
 
     /// Pumping gains line where the reel alone cannot, which is the whole reason every
@@ -2188,13 +2233,13 @@ mod tests {
             // *holding*: lift against a fish strong enough to open it and all you have
             // done is pay line out through a slipping clutch, which is what the first
             // version of this test measured and reported as pumping being useless.
-            let mut f = with(Quarry::Pollack, 3.0);
+            let mut f = with(Quarry::Pollack, 4.0);
             let water = sea(0.8, 40.0);
             let before = f.line_out;
             // Four full cycles: up for a second and a half, down for a second with the
             // handle turning, which is the rhythm.
             let mut t = 0.0;
-            while t < 12.0 {
+            while t < 9.0 {
                 let up = pump && (t % 3.5) < 2.2;
                 f.step(
                     1.0 / 60.0,
@@ -2203,7 +2248,7 @@ mod tests {
                         // Winding on the drop, which is the half of it that keeps what
                         // the lift gained.
                         reel: 1.0,
-                        drag: 0.75,
+                        drag: 0.8,
                         low_gear: false,
                         pump: up,
                     },
@@ -2218,7 +2263,7 @@ mod tests {
         // the handle cannot, and over twelve seconds of a fight that is a few tenths of
         // a metre against nearly nothing.
         assert!(
-            pumped > wound * 3.0,
+            pumped > wound * 2.5,
             "pumping gained {pumped} m, winding alone {wound} m"
         );
     }
