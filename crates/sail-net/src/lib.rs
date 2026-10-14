@@ -86,7 +86,7 @@ pub struct Drawn {
     pub staysail: f32,
     pub staysail_sheet: f32,
     pub genoa_car: f32,
-    /// Which headsail is up: 0 genoa, 1 code zero, 2 gennaker.
+    /// Which headsail is up: 0 genoa, 1 code zero, 2 gennaker, 3 spinnaker.
     pub headsail: u8,
     /// Backed, which is visible from a long way off and means something has gone wrong
     /// or she is heaving to.
@@ -121,6 +121,7 @@ impl Drawn {
                 sail_core::state::Headsail::Genoa => 0,
                 sail_core::state::Headsail::Code0 => 1,
                 sail_core::state::Headsail::Gennaker => 2,
+                sail_core::state::Headsail::Spinnaker => 3,
             },
             aback: c.headsail_aback,
         }
@@ -155,6 +156,7 @@ impl Drawn {
             headsail: match self.headsail {
                 1 => sail_core::state::Headsail::Code0,
                 2 => sail_core::state::Headsail::Gennaker,
+                3 => sail_core::state::Headsail::Spinnaker,
                 _ => sail_core::state::Headsail::Genoa,
             },
             headsail_aback: self.aback,

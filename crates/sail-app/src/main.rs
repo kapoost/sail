@@ -278,7 +278,7 @@ fn main() {
                     fittings::update_tiller,
                     fittings::update_compass,
                     boat::update_boom,
-                    boat::update_staysail_boom,
+                    (boat::update_staysail_boom, boat::update_pole),
                     boat::update_windex,
                     boat::update_genoa_cars,
                     boat::update_telltales,

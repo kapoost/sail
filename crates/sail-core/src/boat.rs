@@ -44,6 +44,9 @@ pub struct RiggedSail {
 mod cloth {
     use crate::units::kn_to_ms;
     pub const GENNAKER: f64 = kn_to_ms(22.0);
+    /// The most fragile thing on the boat: half-ounce cloth, no luff tension, and the
+    /// loads go up with the square of the wind like everything else.
+    pub const SPINNAKER: f64 = kn_to_ms(20.0);
     pub const CODE_ZERO: f64 = kn_to_ms(27.0);
     pub const GENOA: f64 = kn_to_ms(42.0);
     pub const MAIN: f64 = kn_to_ms(45.0);
@@ -218,6 +221,8 @@ pub struct BoatConfig {
     pub code_zero: RiggedSail,
     /// The running sail.
     pub gennaker: RiggedSail,
+    /// The symmetric kite, flown from a pole.
+    pub spinnaker: RiggedSail,
     /// The inner headsail of a double head rig.
     pub staysail: RiggedSail,
     /// Mass of the boom and the cloth that hangs on it, kg.
@@ -286,7 +291,10 @@ pub mod packet {
 /// ratios, and that cannot happen again.
 ///
 /// The ratios are to the genoa, because the genoa is the sail a rig is measured by.
-fn wardrobe(genoa: &RiggedSail, genoa_luff: f64) -> (RiggedSail, RiggedSail, RiggedSail) {
+fn wardrobe(
+    genoa: &RiggedSail,
+    genoa_luff: f64,
+) -> (RiggedSail, RiggedSail, RiggedSail, RiggedSail) {
     let area = genoa.area;
     let code_zero = RiggedSail {
         // Sixty square metres against the genoa's twenty-six, which is not a typo: a
@@ -308,6 +316,19 @@ fn wardrobe(genoa: &RiggedSail, genoa_luff: f64) -> (RiggedSail, RiggedSail, Rig
         x_ce: genoa.x_ce * 1.47,
         limit_aws: cloth::GENNAKER,
     };
+    let spinnaker = RiggedSail {
+        // Bigger again than the gennaker, because a symmetric is measured round a pole
+        // that holds its foot out across the boat rather than along it: four times the
+        // genoa, which on this rig is a hundred and four square metres and about what a
+        // thirty-six footer's running kite actually is.
+        profile: SailProfile::spinnaker(area * 4.0, genoa_luff * 1.02),
+        area: area * 4.0,
+        z_ce: genoa.z_ce * 1.34,
+        // Further forward than anything else: the pole carries the tack out ahead of the
+        // stem and the sail flies in front of the boat rather than beside her.
+        x_ce: genoa.x_ce * 1.55,
+        limit_aws: cloth::SPINNAKER,
+    };
     let staysail = RiggedSail {
         // Thirty per cent of the genoa, not fifty-four, and the number is forced by the
         // boat rather than chosen for her.
@@ -328,7 +349,7 @@ fn wardrobe(genoa: &RiggedSail, genoa_luff: f64) -> (RiggedSail, RiggedSail, Rig
         x_ce: genoa.x_ce * 0.55,
         limit_aws: cloth::STAYSAIL,
     };
-    (code_zero, gennaker, staysail)
+    (code_zero, gennaker, spinnaker, staysail)
 }
 
 /// Where on the reef control the mainsail stops being set at all.
@@ -358,7 +379,7 @@ impl BoatConfig {
             x_ce: 1.90,
             limit_aws: cloth::GENOA,
         };
-        let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
+        let (code_zero, gennaker, spinnaker, staysail) = wardrobe(&genoa, genoa_luff);
 
         Self {
             name: "charter sloop 34",
@@ -428,6 +449,7 @@ impl BoatConfig {
             genoa,
             code_zero,
             gennaker,
+            spinnaker,
             staysail,
             boom_mass: 58.0,
             boom_cg: 2.4,
@@ -535,7 +557,7 @@ impl BoatConfig {
             x_ce: 1.95,
             limit_aws: cloth::GENOA,
         };
-        let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
+        let (code_zero, gennaker, spinnaker, staysail) = wardrobe(&genoa, genoa_luff);
 
         Self {
             name: "archipelago packet 36",
@@ -632,6 +654,7 @@ impl BoatConfig {
             genoa,
             code_zero,
             gennaker,
+            spinnaker,
             staysail,
             boom_mass: 58.0,
             boom_cg: 2.4,
@@ -676,6 +699,7 @@ impl BoatConfig {
             crate::state::Headsail::Genoa => &self.genoa,
             crate::state::Headsail::Code0 => &self.code_zero,
             crate::state::Headsail::Gennaker => &self.gennaker,
+            crate::state::Headsail::Spinnaker => &self.spinnaker,
         }
     }
 
@@ -793,7 +817,7 @@ impl BoatConfig {
             x_ce: 2.90,
             limit_aws: cloth::GENOA,
         };
-        let (code_zero, gennaker, staysail) = wardrobe(&genoa, genoa_luff);
+        let (code_zero, gennaker, spinnaker, staysail) = wardrobe(&genoa, genoa_luff);
 
         Self {
             name: "performance cruiser 53",
@@ -866,6 +890,7 @@ impl BoatConfig {
             genoa,
             code_zero,
             gennaker,
+            spinnaker,
             staysail,
             boom_mass: 58.0,
             boom_cg: 2.4,

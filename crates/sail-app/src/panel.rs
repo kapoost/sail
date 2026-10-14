@@ -134,6 +134,20 @@ pub fn draw(
                 ui.add_space(2.0);
                 readout(ui, "HDG", &format!("{:03.0}", deg(heading)));
                 readout(ui, "TWA", &format!("{:+.0}", deg(telemetry.twa)));
+                // The apparent, which is the wind the sails are actually in and the one
+                // a trimmer reads. It was in the diagnostic panel and on the windex and
+                // nowhere a person glances at — so the one number you set a sheet by was
+                // the one number the instruments did not have, and the true wind beside
+                // it was quietly doing duty for it.
+                readout(
+                    ui,
+                    "AWA",
+                    &format!(
+                        "{:+.0}  {:.1} kn",
+                        deg(telemetry.awa),
+                        ms_to_kn(telemetry.aws)
+                    ),
+                );
                 readout(ui, "VMG", &format!("{:.2} kn", ms_to_kn(telemetry.vmg)));
                 // The barometer. A skipper does not sail the wind that is blowing, he
                 // sails the one he thinks will be blowing in an hour: whether to reef
@@ -370,7 +384,12 @@ pub fn draw(
                         );
                         ui.add_space(4.0);
                         let rolled = sim.controls.furl > 0.9;
-                        for sail in [Headsail::Genoa, Headsail::Code0, Headsail::Gennaker] {
+                        for sail in [
+                            Headsail::Genoa,
+                            Headsail::Code0,
+                            Headsail::Gennaker,
+                            Headsail::Spinnaker,
+                        ] {
                             let up = sim.controls.headsail == sail;
                             let label = egui::RichText::new(sail.name().to_uppercase())
                                 .monospace()

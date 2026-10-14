@@ -310,7 +310,12 @@ pub fn gather(
     }
     if step != 0 {
         if sim.controls.furl > 0.9 {
-            let order = [Headsail::Genoa, Headsail::Code0, Headsail::Gennaker];
+            let order = [
+                Headsail::Genoa,
+                Headsail::Code0,
+                Headsail::Gennaker,
+                Headsail::Spinnaker,
+            ];
             let at = order
                 .iter()
                 .position(|h| *h == sim.controls.headsail)

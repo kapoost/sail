@@ -544,6 +544,7 @@ impl Simulation {
             }
             crate::state::Headsail::Code0 => crate::sail::CAMBER_CODE_ZERO,
             crate::state::Headsail::Gennaker => crate::sail::CAMBER_GENNAKER,
+            crate::state::Headsail::Spinnaker => crate::sail::CAMBER_SPINNAKER,
         };
         // Twist, and the same question again: a genoa's leech is opened and closed by
         // its lead car, and a sail set flying has no car to lead to. Its sheet goes to a

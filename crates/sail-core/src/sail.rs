@@ -34,6 +34,14 @@ pub const CAMBER_CODE_ZERO: f64 = 0.10;
 /// identify as wrong from a photograph.
 pub const CAMBER_GENNAKER: f64 = 0.22;
 
+/// And the symmetric kite, which is deeper still.
+///
+/// A spinnaker is cut as two halves of a sphere and flown with nothing holding its
+/// shape but the wind in it and a pole at one corner. Thirty per cent is a sail that is
+/// nearly as deep as it is wide, which is what the thing looks like from the foredeck
+/// and is why it makes the force it does at angles where every other sail is a flag.
+pub const CAMBER_SPINNAKER: f64 = 0.30;
+
 /// How far the best angle of attack moves per unit of relative camber. A deeper sail
 /// peaks earlier because the camber is already doing part of the work.
 pub const ALPHA_SHIFT_PER_DEPTH: f64 = 3.0 * std::f64::consts::PI / 180.0;
@@ -682,6 +690,51 @@ impl SailProfile {
     /// squared right out beyond anything a genoa could reach, which is how it gets clear
     /// of the mainsail's wind shadow deep downwind — and why, unlike a genoa, it does
     /// not die behind the main.
+    /// A symmetric spinnaker, flown from a pole.
+    ///
+    /// The sail the gennaker's own notes point at: *what does go forward of abeam is a
+    /// symmetric spinnaker on a pole, which is a different sail*. This is that sail, and
+    /// the pole is the whole of the difference. An asymmetric is tacked on the centreline
+    /// and sheeted to the quarter, so its clew cannot get forward of abeam however far it
+    /// is eased, and dead downwind it sits in the mainsail's shadow doing very little.
+    /// A symmetric has its tack carried out to *windward* on a spar, which squares the
+    /// whole sail across the boat and out of the main's lee — which is why a boat with
+    /// one runs deeper and faster than a boat without, and why it is worth the trouble it
+    /// is.
+    ///
+    /// Everything here is more than the gennaker's. More camber, because it is cut as two
+    /// halves of a sphere. A bigger best angle and a far later stall, because what the
+    /// sail is doing at a hundred and fifty degrees of true wind is mostly *drag*, and
+    /// drag does not stall. A higher separated normal coefficient for the same reason: a
+    /// parachute is an efficient parachute.
+    pub fn spinnaker(area: f64, luff_height: f64) -> Self {
+        Self {
+            cl_max: 1.92,
+            alpha_opt: rad(40.0),
+            alpha_stall: rad(75.0),
+            cd0: 0.090,
+            aspect_ratio: luff_height * luff_height / area,
+            luff_margin: rad(6.0),
+            entry_angle: rad(0.0),
+            cn_separated: 1.78,
+            // Past abeam, which no other sail on this boat can do: the pole holds the
+            // tack out to windward and the sail is squared until it is across the hull.
+            // A hundred and fifteen degrees is the pole on the forestay with the sheet
+            // eased right out, which is a boat running dead before it.
+            max_chord_angle: rad(115.0),
+            min_chord_angle: rad(22.0),
+        }
+    }
+
+    /// Lift and drag coefficients, plus how luffing and how stalled the sail is.
+    ///
+    /// `alpha` may be negative (sheet eased past the apparent wind, sail flogging) or
+    /// well past 90 degrees (boom squared off on a run). `camber` is the maximum draft
+    /// as a fraction of chord — see [`camber_for_outhaul`].
+    ///
+    /// Camber moves three things, all in the directions thin-aerofoil theory predicts:
+    /// a deeper sail reaches a higher peak lift, reaches it at a *lower* angle of
+    /// attack (the camber is already doing part of the work), and drags more.
     pub fn gennaker(area: f64, luff_height: f64) -> Self {
         Self {
             cl_max: 1.78,

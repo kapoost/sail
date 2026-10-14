@@ -90,6 +90,37 @@ fn lead_height(z: f32) -> f32 {
 /// Where a gennaker will be tacked. It is there now because the spar has to be drawn,
 /// stayed and lived with before anything is set from it — and because a sprit is the
 /// single most characteristic thing about the bow of a boat of this kind.
+/// How long the spinnaker pole is, metres.
+///
+/// Not a choice: a symmetric pole is cut to the fore-triangle base — the distance from
+/// the mast to the stemhead — because that is what squares the sail without the pole
+/// going outside the forestay. Every rule that has ever measured a spinnaker says the
+/// same thing, and the sail is cut to the pole rather than the other way round.
+pub fn pole_length(loa: f32) -> f32 {
+    (MAST_FOOT_Z - genoa_tack(loa).z).abs()
+}
+
+/// Where the outboard end of the pole is: out to windward, swung aft with the trim.
+///
+/// `windward` is +1 when the wind is on the starboard side. The pole goes out on the
+/// side the wind is on and the sail flies to leeward of it, which is the whole point of
+/// the thing: it holds the tack out of the mainsail's shadow so that a boat running dead
+/// before the wind has both sails in clear air.
+///
+/// Squared with the sheet rather than on a control of its own. A real foredeck squares
+/// the pole to the wind with a guy, and modelling that as a second line the player has
+/// to work would be a knob for a job the trim already describes: the sheet angle *is*
+/// how square the sail is set.
+pub fn pole_end(loa: f32, windward: f32, angle: f32) -> Vec3 {
+    let out = angle.clamp(
+        sail_core::units::rad(25.0) as f32,
+        std::f32::consts::FRAC_PI_2,
+    );
+    let length = pole_length(loa);
+    Vec3::new(0.0, BOOM_HEIGHT + 0.35, MAST_FOOT_Z)
+        + Vec3::new(windward * out.sin() * length, 0.0, -out.cos() * length)
+}
+
 pub fn sprit_end(loa: f32) -> Vec3 {
     let stem = -loa * 0.49;
     Vec3::new(
@@ -435,6 +466,21 @@ pub fn setup(
                         .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                 ));
             });
+            // The spinnaker pole. Hung on the mast and swung out to windward, and the
+            // only spar on the boat that is only there some of the time — which is also
+            // true of the real one, since it lives on the foredeck until it is needed.
+            let pole = pole_length(cfg.loa as f32);
+            b.spawn((
+                SpinnakerPole,
+                Transform::default(),
+                Visibility::Hidden,
+                children![(
+                    Mesh3d(meshes.add(Cylinder::new(0.05, pole))),
+                    MeshMaterial3d(spar_mat.clone()),
+                    Transform::from_xyz(0.0, 0.0, -pole * 0.5)
+                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                )],
+            ));
             // Sails. Their meshes are rebuilt every frame from the trim.
             b.spawn((
                 SailSurface {
@@ -553,6 +599,33 @@ pub fn update_rudder(sim: Res<Sim>, mut q: Query<&mut Transform, With<RudderBlad
 /// The club boom swings to whatever angle the staysail has found, and goes away with
 /// the sail — a boom lying on the foredeck with no sail on it is not a thing a boat has
 /// in the middle of a passage.
+/// The pole follows the sail it is holding out.
+pub fn update_pole(
+    sim: Res<Sim>,
+    mut q: Query<(&mut Transform, &mut Visibility), With<SpinnakerPole>>,
+) {
+    let t_ = &sim.sim.telemetry;
+    let cfg = sim.config();
+    let up =
+        sim.controls.headsail == sail_core::state::Headsail::Spinnaker && sim.controls.furl < 0.9;
+    // To windward, swung aft with the trim — the same two numbers the sail's tack is
+    // computed from, through the same function, so the spar and the corner of the cloth
+    // cannot end up in different places.
+    let windward = t_.awa.signum() as f32;
+    let end = pole_end(cfg.loa as f32, windward, t_.jib.chord_angle.abs() as f32);
+    let root = Vec3::new(0.0, crate::rig::BOOM_HEIGHT + 0.35, MAST_FOOT_Z);
+    for (mut tr, mut vis) in &mut q {
+        tr.translation = root;
+        let along = (end - root).normalize_or_zero();
+        tr.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, along);
+        *vis = if up {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
 pub fn update_staysail_boom(
     sim: Res<Sim>,
     mut q: Query<(&mut Transform, &mut Visibility), With<StaysailBoom>>,
@@ -1143,10 +1216,18 @@ pub fn headsail_shape(
     // A sail set flying: tacked out on the sprit end, hoisted to the masthead, clew
     // sheeted away aft. Nothing holds its luff but its own tension.
     let gennaker = kind == sail_core::state::Headsail::Gennaker;
+    let spinnaker = kind == sail_core::state::Headsail::Spinnaker;
     // The same hoist curve the force model uses: up, or away, and the sliver between is
     // the sail folding rather than a size to sail in.
     let out = 1.0 - sail_core::units::smoothstep(0.10, 0.45, controls.furl) as f32;
-    let tack = sprit_end(cfg.loa as f32);
+    // A symmetric is tacked to the pole end, out to windward; everything else to the
+    // sprit, on the centreline. That one difference is what takes the sail out of the
+    // main's lee and lets her run deep.
+    let tack = if spinnaker {
+        pole_end(cfg.loa as f32, -side, angle.abs())
+    } else {
+        sprit_end(cfg.loa as f32)
+    };
     // Both go to the masthead. A sail set flying is hoisted on its own halyard to the
     // very top of the spar — above the forestay, which is where its extra hoist comes
     // from and half the reason it is worth setting.
@@ -1165,7 +1246,14 @@ pub fn headsail_shape(
     //     cloth/triangle   1.25 -> foot 5.66 m, LP 116% of J
     //                      1.15 ->      6.15     126%
     //                      1.08 ->      6.55     136%
-    let fullness = if gennaker { 1.45 } else { 1.08 };
+    let fullness = if spinnaker {
+        // Two halves of a sphere: more cloth again than the gennaker's half as much.
+        1.65
+    } else if gennaker {
+        1.45
+    } else {
+        1.08
+    };
     let foot = foot_for_area(
         cfg.headsail(kind).area as f32,
         head - tack,
@@ -1173,10 +1261,21 @@ pub fn headsail_shape(
         fullness,
     ) * out;
     let hoisted = tack.lerp(head, 0.3 + 0.7 * out);
-    let cloth = Cloth::flying(tack, hoisted, foot, if gennaker { 0.90 } else { 0.93 });
+    let cloth = Cloth::flying(
+        tack,
+        hoisted,
+        foot,
+        if gennaker || spinnaker { 0.90 } else { 0.93 },
+    );
     // A gennaker is cut deep and a Code 0 nearly flat, and neither has a car to change
     // it: the depth is the sailmaker's, not the trimmer's.
-    let belly = if gennaker { 1.0 } else { 0.25 };
+    let belly = if spinnaker {
+        1.3
+    } else if gennaker {
+        1.0
+    } else {
+        0.25
+    };
     // A sail set flying sheets to a block on the quarter, right aft — the same point the
     // sheet is drawn to, so the cloth and the rope agree about where they meet.
     let block = Vec3::new(side * 1.15, crate::deck::deck_height(3.9) + 0.07, 3.9);
@@ -1185,7 +1284,7 @@ pub fn headsail_shape(
         tack,
         hoisted,
         fitted_foot(tack, hoisted, &cloth, belly, angle, block, want),
-        if gennaker { 0.90 } else { 0.93 },
+        if gennaker || spinnaker { 0.90 } else { 0.93 },
     );
     SailGeometry {
         tack,
@@ -1221,6 +1320,10 @@ pub fn main_head(reef_scale: f32) -> Vec3 {
 /// Marks the staysail's club boom, which swings on its own.
 #[derive(Component)]
 pub struct StaysailBoom;
+
+/// Marks the spinnaker pole, which is up only when the kite is.
+#[derive(Component)]
+pub struct SpinnakerPole;
 
 /// Where the staysail is tacked down: at the foot of its own stay, which lands where
 /// the sail's own luff reaches from the tang.
@@ -1386,7 +1489,11 @@ pub fn feels_the_shrouds(
         sail_core::state::Headsail::Genoa => {
             sail_core::sail::rig_contact(chord_angle, bears_at) > 0.0
         }
-        sail_core::state::Headsail::Code0 | sail_core::state::Headsail::Gennaker => false,
+        // And a spinnaker is further outside still: its tack is out on a pole to
+        // windward and its cloth flies in front of the boat.
+        sail_core::state::Headsail::Code0
+        | sail_core::state::Headsail::Gennaker
+        | sail_core::state::Headsail::Spinnaker => false,
     }
 }
 

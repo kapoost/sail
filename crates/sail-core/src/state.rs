@@ -256,6 +256,10 @@ pub enum Headsail {
     Genoa,
     Code0,
     Gennaker,
+    /// The symmetric kite, on a pole. Deeper, bigger and squarer than the gennaker, and
+    /// the only sail aboard whose tack goes out to *windward* — which is what takes it
+    /// out of the mainsail's shadow and lets her run deep.
+    Spinnaker,
 }
 
 impl Headsail {
@@ -287,6 +291,11 @@ impl Headsail {
             Headsail::Genoa => 0.0,
             Headsail::Code0 => crate::units::rad(32.0),
             Headsail::Gennaker => crate::units::rad(52.0),
+            // Higher than the gennaker's, because a symmetric cannot be carried as close
+            // as an asymmetric: it has no luff tension to hold a leading edge with and
+            // the pole will not let it sheet in. Reaching with a spinnaker up is how
+            // people end up swimming.
+            Headsail::Spinnaker => crate::units::rad(70.0),
         }
     }
 
@@ -296,6 +305,7 @@ impl Headsail {
             Headsail::Genoa => "genoa",
             Headsail::Code0 => "code 0",
             Headsail::Gennaker => "gennaker",
+            Headsail::Spinnaker => "spinnaker",
         }
     }
 }
@@ -337,6 +347,7 @@ impl Mishap {
             Mishap::BlownOut(Blown::Headsail(Headsail::Genoa)) => "the genoa blew out",
             Mishap::BlownOut(Blown::Headsail(Headsail::Code0)) => "the Code 0 blew out",
             Mishap::BlownOut(Blown::Headsail(Headsail::Gennaker)) => "the gennaker blew out",
+            Mishap::BlownOut(Blown::Headsail(Headsail::Spinnaker)) => "the spinnaker blew out",
             Mishap::BlownOut(Blown::Staysail) => "the staysail blew out",
             Mishap::Capsized => "capsized",
         }

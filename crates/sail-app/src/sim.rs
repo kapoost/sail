@@ -77,6 +77,7 @@ impl Sim {
         let headsail = match std::env::var("SAIL_HEADSAIL").as_deref() {
             Ok("code0") => Headsail::Code0,
             Ok("gennaker") => Headsail::Gennaker,
+            Ok("spinnaker") => Headsail::Spinnaker,
             _ => Headsail::Genoa,
         };
         let outhaul = 0.0;

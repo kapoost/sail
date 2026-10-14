@@ -55,7 +55,10 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
             ("Q E", "genoa winch: ease, grind in"),
             ("1 2", "pick a line out of the clutch bank"),
             ("A D", "and work the one you picked"),
-            ("X Z", "change headsail — she furls what is up first"),
+            (
+                "X Z",
+                "headsail: genoa, code 0, gennaker, spinnaker — roll the old one away first",
+            ),
             ("T", "a hand on the sheet: once for the sail that leads"),
             (
                 " ",
