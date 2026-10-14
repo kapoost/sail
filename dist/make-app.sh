@@ -23,6 +23,12 @@ APP="$OUT/$NAME.app"
 ARM="target/aarch64-apple-darwin/dist/sail-app"
 INTEL="target/x86_64-apple-darwin/dist/sail-app"
 PLAIN="target/dist/sail-app"
+# And the relay, which travels beside the bundle rather than inside it: it is a terminal
+# program, it is only wanted by whoever is hosting, and burying it in Contents/MacOS
+# would mean telling people a path into a bundle rather than a filename.
+SRV_ARM="target/aarch64-apple-darwin/dist/sail-server"
+SRV_INTEL="target/x86_64-apple-darwin/dist/sail-server"
+SRV_PLAIN="target/dist/sail-server"
 
 # Scoped to this build's own output directory and nothing above it.
 rm -rf "$OUT"
@@ -93,11 +99,29 @@ PLIST
 codesign --force --deep --sign - "$APP"
 codesign --verify --strict "$APP" && echo "signed: ad-hoc"
 
+if [ -f "$SRV_ARM" ] && [ -f "$SRV_INTEL" ]; then
+  lipo -create -output "$OUT/sail-server" "$SRV_ARM" "$SRV_INTEL"
+elif [ -f "$SRV_ARM" ]; then
+  cp "$SRV_ARM" "$OUT/sail-server"
+elif [ -f "$SRV_INTEL" ]; then
+  cp "$SRV_INTEL" "$OUT/sail-server"
+elif [ -f "$SRV_PLAIN" ]; then
+  cp "$SRV_PLAIN" "$OUT/sail-server"
+fi
+if [ -f "$OUT/sail-server" ]; then
+  chmod +x "$OUT/sail-server"
+  # Signed for the same reason the bundle is: an unsigned arm64 binary is refused
+  # outright rather than warned about.
+  codesign --force --sign - "$OUT/sail-server"
+  echo "bundled: the relay as well"
+fi
+
 # The licences travel with the bundle as well as inside the binary. `--licences` prints
 # them from the executable, which is what satisfies the font's terms for a single file;
 # these are here so nobody has to run a command to read them.
 cp assets/ATTRIBUTION.md assets/VT323-OFL.txt "$OUT/"
 
-( cd "$OUT" && zip -qry "$NAME-macos.zip" "$NAME.app" ATTRIBUTION.md VT323-OFL.txt )
+( cd "$OUT" && zip -qry "$NAME-macos.zip" "$NAME.app" ATTRIBUTION.md VT323-OFL.txt \
+    $( [ -f sail-server ] && echo sail-server ) )
 echo "wrote $OUT/$NAME-macos.zip"
 ls -lh "$OUT/$NAME-macos.zip" | awk '{print $5}'

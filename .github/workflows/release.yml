@@ -26,6 +26,10 @@ jobs:
       # Both architectures, joined with lipo: an Intel Mac is still a Mac somebody has.
       - run: cargo build --profile dist -p sail-app --target aarch64-apple-darwin
       - run: cargo build --profile dist -p sail-app --target x86_64-apple-darwin
+      # The relay, for whoever is hosting a game. Tiny — no engine in its tree — so
+      # building it for both architectures costs seconds.
+      - run: cargo build --profile dist -p sail-net --bin sail-server --target aarch64-apple-darwin
+      - run: cargo build --profile dist -p sail-net --bin sail-server --target x86_64-apple-darwin
       - run: bash dist/make-app.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -39,15 +43,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --profile dist -p sail-app
+      - run: cargo build --profile dist -p sail-net --bin sail-server
       # One file, genuinely: the hull is inside it and so are the licences, which
       # `Sail.exe --licences` prints.
       - run: mkdir out
       - run: copy target\dist\sail-app.exe out\Sail.exe
         shell: cmd
+      - run: copy target\dist\sail-server.exe out\sail-server.exe
+        shell: cmd
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: out/Sail.exe
+          path: |
+            out/Sail.exe
+            out/sail-server.exe
 
   publish:
     needs: [macos, windows]
@@ -63,6 +72,7 @@ jobs:
           files: |
             artifacts/macos/Sail-macos.zip
             artifacts/windows/Sail.exe
+            artifacts/windows/sail-server.exe
             assets/ATTRIBUTION.md
             assets/VT323-OFL.txt
           body: |
@@ -85,6 +95,19 @@ jobs:
             ```
             xattr -dr com.apple.quarantine /path/to/Sail.app
             ```
+
+            **Sailing together.** One of you runs `sail-server` (it is in the macOS
+            zip and beside `Sail.exe` on Windows) and everybody starts the game
+            pointed at that machine:
+
+            ```
+            sail-server --seed 42
+            SAIL_SEED=42 SAIL_JOIN=192.168.1.20:7714 Sail
+            ```
+
+            Over the internet the same thing works if everybody is on one Tailscale
+            or ZeroTier network — use the address from there. The server needs no
+            graphics and runs on anything.
 
             The hull model and the font are inside the executable; `Sail.exe --licences`
             or `Sail.app/Contents/MacOS/sail --licences` prints their terms.
