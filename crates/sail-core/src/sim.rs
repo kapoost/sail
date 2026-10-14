@@ -33,6 +33,58 @@ const SHEET_DAMPING: f64 = 5_000.0;
 /// And while it is slack, when only the air and the gooseneck are resisting.
 const BOOM_DAMPING: f64 = 190.0;
 
+/// How much the sheet gives before it is holding anything, radians.
+///
+/// A mainsheet is not a bar. There is stretch in the rope, slop in four sheaves and a
+/// traveller car that moves, and the sum of it is a couple of degrees the boom can wander
+/// through before the tackle is taking load at all. In steady air nobody would notice.
+/// In a seaway it is most of what the boom *does*: she rolls, the boom swings into the
+/// slack, the rope comes up and stops it, and the sail snatches — which is the noise a
+/// boat makes rolling downwind in light air and a thing the model had no room for while
+/// the sheet was infinitely tight at exactly its set angle.
+///
+/// Measured rather than chosen, and then taken at the low end of what the measurement
+/// allows: a 6:1 tackle with twenty metres of line in it stretching the one per cent
+/// polyester stretches under load, worked back through a 2.4 m lever, is between one and
+/// four centimetres at the boom — one to two degrees. Two and a half degrees was tried
+/// first and cost the beam-sea roll test a tenth of a degree it did not have to spare:
+/// slack lets the boom lag instead of transmitting the sail's force rigidly, so the rig
+/// damps the roll it is supposed to be driving. That is a real effect and the test is
+/// measuring a real thing; the honest response was to take the bottom of the physical
+/// range rather than to widen the test.
+const SHEET_SLACK: f64 = 1.8 * std::f64::consts::PI / 180.0;
+
+/// The slowest a boom crossing the boat is ever seen to move, radians a second.
+///
+/// Not a fudge, and worth saying why. The aerodynamic model gives a sail on the wrong
+/// side a force that falls almost to nothing as the chord lines up with the wind near the
+/// centreline, so a boom in light air would start its crossing at a couple of degrees a
+/// second and spend three seconds getting going. Real booms do not do that. What is
+/// missing from the force model is everything that is not steady aerodynamics — the
+/// leech snapping through, the roll of the boat throwing it, the vang and the topping
+/// lift, the man ducking — and the sum of it is that a boom which has decided to come
+/// across comes across. It is thrown, not eased.
+///
+/// Forty-five degrees a second is the floor. Measured against the whole manoeuvre: it
+/// puts an unassisted gybe in ten knots at 2.8 seconds and one in twenty-two at 1.2, and
+/// the second number is almost untouched by it because there the air is doing the work.
+/// So the floor is only ever felt where it was wanted — in light air, where the model
+/// would otherwise have the boom creeping — and above it the physics is in charge and the
+/// manoeuvre is quicker in more wind, which is the whole character of a gybe.
+const BOOM_CROSSING: f64 = 45.0 * std::f64::consts::PI / 180.0;
+
+/// What is left of the boom's speed after it fetches up against the cap shroud.
+///
+/// Not nothing, which is what it used to be. A spar coming across in a breeze arrives at
+/// the wire with real energy and the wire is a spring with a mast at the end of it: the
+/// boom rebounds, the sheet snatches it back, and it settles in a swing or two. That
+/// bounce is how a gybe *ends*, and it is the difference between a manoeuvre that
+/// finishes with a bang and one that finishes by arriving.
+///
+/// Only on a real impact. Below ten degrees a second the boom is leaning on the wire
+/// rather than hitting it, and bouncing there would chatter.
+const SHROUD_BOUNCE: f64 = 0.35;
+
 pub struct Simulation {
     pub config: BoatConfig,
     pub state: BoatState,
@@ -1086,7 +1138,7 @@ impl Simulation {
             // it across, it fetches up against the sheet on the far side, and the sail
             // slams and flogs. Which is the most recognisable thing a boat does in a
             // calm, and the model could not do it while the boom was pinned to one side.
-            let stretch = st.boom_angle.abs() - boom_set;
+            let stretch = st.boom_angle.abs() - (boom_set + SHEET_SLACK);
             let (sheet, damping) = if stretch > 0.0 {
                 (
                     -SHEET_STIFFNESS * stretch * st.boom_angle.signum(),
@@ -1097,13 +1149,23 @@ impl Simulation {
             };
             let accel = (push + gravity + sheet - damping * st.boom_rate) / inertia;
             s.boom_rate += accel * dt;
+            // Coming across, it comes across. Only while it is on the windward side and
+            // already heading the right way: a boom wandering about in the slack of its
+            // sheet in a calm is doing the opposite thing and must be left alone to do it.
+            if s.boom_angle < 0.0 && s.boom_rate > 0.0 {
+                s.boom_rate = s.boom_rate.max(BOOM_CROSSING);
+            }
             s.boom_angle += s.boom_rate * dt;
             // The cap shroud stops it on either side — the same limit the force model
             // uses for the sheet, and the thing a boom actually hits.
             let hard_over = cfg.main.profile.max_chord_angle;
             if s.boom_angle.abs() > hard_over {
                 s.boom_angle = hard_over * s.boom_angle.signum();
-                s.boom_rate = 0.0;
+                s.boom_rate = if s.boom_rate.abs() > crate::units::rad(10.0) {
+                    -s.boom_rate * SHROUD_BOUNCE
+                } else {
+                    0.0
+                };
             }
         }
         s.heading = wrap_tau(s.heading + s.yaw_rate * dt);
@@ -1202,6 +1264,10 @@ impl Simulation {
 
         self.telemetry = Telemetry {
             mishap: self.mishap,
+            // Leeward is the side the wind is not on, so this is the boom's own place
+            // over the deck — continuous through a gybe, because when the wind changes
+            // sides the stored angle changes sign at the same moment.
+            boom: -lower_awa.signum() * self.state.boom_angle,
             strain: self.strain_main.max(self.strain_head).max(self.strain_stay),
             bend_main,
             bend_jib,

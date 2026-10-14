@@ -2659,6 +2659,7 @@ fn a_gybe_takes_the_boom_across_and_costs_her() {
 
     let (light, light_driving, light_least, light_shade) = gybe(10.0);
     let (blow, _, _, _) = gybe(22.0);
+    println!("boom across: {light:.2} s in ten knots, {blow:.2} s in twenty-two");
 
     // It takes time, and a bounded amount of it. Below half a second nobody could react;
     // above six the boom is drifting rather than gybing.

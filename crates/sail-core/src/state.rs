@@ -415,6 +415,18 @@ pub struct Telemetry {
     /// The worst of the three sails, because the first one to go is the one that matters.
     pub strain: f64,
 
+    /// Where the boom actually is, radians, **positive to starboard**.
+    ///
+    /// The one place the boom's position is stated in the boat's own frame rather than
+    /// relative to leeward, and it exists because every consumer outside the force model
+    /// wants that: the thing drawn over the deck, the thing sent to another player, the
+    /// thing a sailor ducks under. `BoatState::boom_angle` is signed towards leeward
+    /// because that is the frame the sail's angle of attack lives in, and a renderer that
+    /// re-derives the side from the wind gets a spar that jumps across the boat the
+    /// instant the wind does — which is exactly what it did, after the simulation had
+    /// already been taught not to.
+    pub boom: f64,
+
     /// Net driving force and side force from the rig, N.
     pub drive: f64,
     pub side: f64,

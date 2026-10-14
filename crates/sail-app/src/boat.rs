@@ -591,7 +591,12 @@ const BOOM_LIFT_PER_TWIST: f32 = 0.34;
 
 /// Where the boom is: swung out on its sheet, and lifted by its leech.
 pub fn boom_attitude(t: &sail_core::state::Telemetry) -> (f32, f32) {
-    let swing = -t.awa.signum() as f32 * t.main.chord_angle as f32;
+    // Where the spar *is*, not where the sheet would put it. Those are the same number
+    // in steady air and they are not the same number for the second or two of a gybe —
+    // and this used to take the second one, so the boom jumped across the boat the
+    // instant the wind did, in a game whose simulation had already been taught that it
+    // takes time. Reported from the deck twice, which it deserved.
+    let swing = t.boom as f32;
     (swing, t.twist as f32 * BOOM_LIFT_PER_TWIST)
 }
 
@@ -654,7 +659,7 @@ pub fn update_telltales(sim: Res<Sim>, time: Res<Time>, mut q: Query<(&Telltale,
 
     let reef = sim.controls.reef as f32;
     let foot = crate::rig::BOOM_LENGTH * (1.0 - 0.35 * reef);
-    let boom = side * t_.main.chord_angle as f32;
+    let boom = t_.boom as f32;
     let tack = Vec3::new(0.0, BOOM_HEIGHT, MAST_FOOT_Z);
     // The same three corners the sail is built from, from the same functions, which is
     // the only way a telltale stays sewn to the cloth it is reporting on.
@@ -744,7 +749,7 @@ pub fn update_sails(
                 // And the hoist comes down by the same scale, because the reef band is
                 // cut parallel to the foot and takes the sail in both ways at once.
                 let shrink = main_reef_scale(&cfg, &sim.controls);
-                let boom = side * t_.main.chord_angle as f32;
+                let boom = t_.boom as f32;
                 let tack = Vec3::new(0.0, BOOM_HEIGHT, MAST_FOOT_Z);
                 (
                     t_.main,
