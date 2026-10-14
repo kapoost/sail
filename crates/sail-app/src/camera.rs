@@ -38,6 +38,20 @@ pub enum View {
     /// It is on board, so it heels. The wake tilting as she lies over is most of what
     /// tells you how hard she is pressed when you cannot see the sails.
     Astern,
+    /// Under the surface, beside the lure.
+    ///
+    /// This file argued against it on the grounds that the sea is opaque and there would
+    /// be nothing to see — which was an argument about the *surface*. Below it there is
+    /// the one thing the whole activity is about and that no other view can show: the
+    /// lure working, and the fish on it.
+    ///
+    /// What makes it read as water rather than as a camera that has fallen in is the
+    /// visibility. Ten metres, green, and the sky taken away altogether — you cannot fog
+    /// a skybox, it is drawn at infinity and no distance falloff reaches it, so the
+    /// honest fix is to take it off the camera while the camera is under. Everything
+    /// beyond the fog is then the clear colour, which is the colour of water, which is
+    /// what is actually out there.
+    Under,
 }
 
 /// A head and neck, in effect.
@@ -385,8 +399,80 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>, mut view: 
         *view = match *view {
             View::Chase => View::Cockpit,
             View::Cockpit => View::Astern,
-            View::Astern => View::Chase,
+            View::Astern => View::Under,
+            View::Under => View::Chase,
         };
+    }
+}
+
+/// How far you can see under water, metres, and what colour it is.
+///
+/// Ten metres is a good day in these waters and a flattering one. The colour is green
+/// rather than blue because this is a shelf sea with a plankton bloom in it in spring —
+/// blue water is deep ocean water, and the archipelago is neither.
+const UNDER_VISIBILITY: f32 = 10.0;
+const UNDER_WATER: Color = Color::srgb(0.045, 0.145, 0.135);
+
+/// Dress the camera for where it is: under the water, or above it.
+///
+/// Three things change together and they have to, because any one of them alone looks
+/// worse than none: the fog, the sky, and what is left where nothing is drawn.
+///
+/// The skybox comes **off** rather than being dimmed. A skybox is drawn at infinity and
+/// no distance falloff reaches it, so a fogged scene under a bright sky is a green room
+/// with a hole in the ceiling. With it gone, everything past the fog is the clear colour,
+/// and the clear colour is the water.
+///
+/// Runs on a change of view rather than every frame, because adding and removing a
+/// component is a structural change to the entity and doing it sixty times a second to
+/// say the same thing would be sixty archetype moves a second.
+pub fn dress(
+    mut commands: Commands,
+    view: Res<View>,
+    sky: Res<crate::sky::Sky>,
+    image: Query<(Entity, &crate::sky::SkyImage), With<MainCamera>>,
+    mut fog: Query<&mut DistanceFog, With<MainCamera>>,
+    mut camera: Query<&mut Camera, With<MainCamera>>,
+    mut was: Local<Option<View>>,
+) {
+    if *was == Some(*view) {
+        return;
+    }
+    *was = Some(*view);
+    let under = *view == View::Under;
+    for mut fog in &mut fog {
+        fog.color = if under {
+            UNDER_WATER
+        } else {
+            crate::sky::haze_colour(&sky)
+        };
+        fog.falloff = if under {
+            FogFalloff::from_visibility_colors(UNDER_VISIBILITY, UNDER_WATER, UNDER_WATER)
+        } else {
+            FogFalloff::from_visibility_colors(
+                2600.0,
+                crate::sky::haze_near(&sky),
+                crate::sky::haze_colour(&sky),
+            )
+        };
+    }
+    for mut camera in &mut camera {
+        camera.clear_color = if under {
+            bevy::camera::ClearColorConfig::Custom(UNDER_WATER)
+        } else {
+            bevy::camera::ClearColorConfig::Default
+        };
+    }
+    for (entity, image) in &image {
+        if under {
+            commands.entity(entity).remove::<Skybox>();
+        } else {
+            commands.entity(entity).insert(Skybox {
+                image: Some(image.0.clone()),
+                brightness: 8000.0,
+                ..default()
+            });
+        }
     }
 }
 
@@ -399,12 +485,23 @@ pub struct Eye<'w> {
     time: Res<'w, Time>,
 }
 
+/// How far the underwater camera stands off the lure, metres, and how far below it.
+///
+/// Beyond it rather than inside the boat's side of it, so the composition is lure first
+/// and the hull behind it going away — which is the picture, and is also the only
+/// arrangement in which the line has anywhere to go in the frame.
+const UNDER_STANDOFF: f32 = 3.2;
+const UNDER_BELOW: f32 = 0.45;
+
+#[allow(clippy::too_many_arguments)]
 pub fn follow(
     eye: Eye,
     mut aim: ResMut<ViewAim>,
     mut attention: ResMut<Attention>,
     mut chase: ResMut<ChaseState>,
     mut head: ResMut<HeadMotion>,
+    gear: Option<Res<crate::rod::Ratchet>>,
+    fishing: Res<crate::fishing::Fishing>,
     mut q: Query<&mut Transform, With<MainCamera>>,
 ) {
     let Eye {
@@ -480,6 +577,35 @@ pub fn follow(
                 // set, coming back to the chase view after a few minutes aboard aims it
                 // at where the fish was a mile astern, and it lerps home over a second
                 // while you wonder what you are looking at.
+                chase.looking_set = false;
+            }
+            View::Under => {
+                // Beside the lure if there is one in the water, and under her counter if
+                // there is not — which is worth having anyway, since it is the only way
+                // to see the keel and the rudder doing what the physics says they do.
+                let surface = head.heave;
+                let (stand, at) = match gear.as_deref().filter(|_| fishing.out()) {
+                    Some(gear) => {
+                        let out = (gear.far - Vec3::new(hull.x, surface, hull.z))
+                            .with_y(0.0)
+                            .normalize_or(Vec3::Z);
+                        (
+                            gear.far + out * UNDER_STANDOFF - Vec3::Y * UNDER_BELOW,
+                            gear.far,
+                        )
+                    }
+                    None => {
+                        let astern = frame::heading_only(st) * Vec3::Z;
+                        let keel = Vec3::new(hull.x, surface - 2.2, hull.z);
+                        (keel + astern * 7.0 - Vec3::Y * 0.6, keel)
+                    }
+                };
+                // Kept under the surface whatever the lure is doing. A camera that
+                // breaks out of the water for a moment reads as a bug, not as a wave.
+                let ceiling = surface - 0.55;
+                cam.translation = Vec3::new(stand.x, stand.y.min(ceiling), stand.z);
+                cam.look_at(at, Vec3::Y);
+                chase.initialised = false;
                 chase.looking_set = false;
             }
             View::Chase => {

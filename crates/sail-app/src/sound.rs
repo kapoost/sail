@@ -1676,3 +1676,95 @@ mod tests {
         assert!(cut < 0.12, "a cut is a flick: {cut:.3} s");
     }
 }
+
+#[cfg(test)]
+mod balance_probe {
+    use super::*;
+    use std::sync::Arc;
+
+    fn group_rms(seconds: f32, set: impl Fn(&Arc<SeaParams>), music: bool) -> f32 {
+        let rate = SAMPLE_RATE as f32;
+        let p = Arc::new(SeaParams::default());
+        p.set_master(crate::settings::Settings::default().volume);
+        p.set_sea(crate::settings::Settings::default().sea);
+        p.set_boat(crate::settings::Settings::default().boat);
+        p.set_music(crate::settings::Settings::default().music);
+        set(&p);
+        let mut s = SeaStream::new(p.clone());
+        let mut sum = 0.0f64;
+        let mut n = 0usize;
+        let every = (rate * 0.35) as usize;
+        for i in 0..(rate * seconds) as usize {
+            if music && i > (rate as usize * 4) && i % every == 0 {
+                p.strike(147.0, 0.5);
+                p.strike(220.0, 0.45);
+                p.strike(262.0, 0.4);
+                p.strike_damped(330.0, 0.55 * 0.85, 0.76);
+            }
+            let out = s.next().unwrap_or(0.0);
+            if i > (rate as usize * 4) {
+                sum += (out * out) as f64;
+                n += 1;
+            }
+        }
+        (sum / n as f64).sqrt() as f32
+    }
+
+    fn db(x: f32) -> f32 {
+        20.0 * x.max(1e-9).log10()
+    }
+
+    #[test]
+    fn what_is_actually_loud() {
+        for (what, aws, stw, luff) in [
+            ("drill, sheets eased", 7.8f32, 0.7f32, 1.0f32),
+            ("sailing, 8 kn breeze", 8.0, 3.5, 0.0),
+            ("sailing, fresh", 18.0, 5.5, 0.0),
+            ("fresh, genoa flogging", 18.0, 5.5, 1.0),
+        ] {
+            let elements = move |p: &Arc<SeaParams>| {
+                store(
+                    &p.wind_level,
+                    (aws / 20.0).clamp(0.0, 1.6).powf(1.5).min(1.15),
+                );
+                store(&p.wind_cutoff, 320.0 + 95.0 * aws.min(30.0));
+                store(&p.water_level, (stw / 7.0).clamp(0.0, 1.3).powf(1.4));
+                store(&p.water_cutoff, 260.0 + 150.0 * stw.min(9.0));
+            };
+            let gear = move |p: &Arc<SeaParams>| {
+                store(
+                    &p.rig_level,
+                    ((aws - 11.0) / 16.0).clamp(0.0, 1.0).powf(1.6),
+                );
+                store(&p.rig_hz, 300.0);
+                store(&p.flog_level, luff);
+                store(&p.flog_hz, 2.6 + 0.22 * aws.min(28.0));
+            };
+            let sea = group_rms(9.0, elements, false);
+            let boat = group_rms(9.0, gear, false);
+            let all_quiet = group_rms(
+                9.0,
+                move |p| {
+                    elements(p);
+                    gear(p);
+                },
+                false,
+            );
+            let with_music = group_rms(
+                9.0,
+                move |p| {
+                    elements(p);
+                    gear(p);
+                },
+                true,
+            );
+            let music = (with_music * with_music - all_quiet * all_quiet)
+                .max(0.0)
+                .sqrt();
+            println!(
+                "{what:<24} sea {:>6.1}  boat {:>6.1}  music {:>6.1} dBFS   music over sea {:>+5.1} dB, over boat {:>+5.1} dB",
+                db(sea), db(boat), db(music), db(music) - db(sea), db(music) - db(boat)
+            );
+        }
+    }
+}

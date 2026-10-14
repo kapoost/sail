@@ -101,6 +101,7 @@ const KEYS: [(&str, &[(&str, &str)]); 5] = [
                 "Shift",
                 "low gear: slower, and it winds when high gear will not",
             ),
+            ("U", "pump: lift the rod, and wind as you let it down"),
             (
                 " ",
                 "a fish on and the way still on her is a fish you will lose",
@@ -114,7 +115,7 @@ const KEYS: [(&str, &[(&str, &str)]); 5] = [
     (
         "LOOKING AT IT",
         &[
-            ("C", "view: from the helm, from behind her, down the wake"),
+            ("C", "view: behind her, ahead, down the wake, under it"),
             ("V", "picture: sharp, 960, 720, 480 pixels"),
             ("B", "the ink drawing"),
             ("M", "the chart, and [ ] to zoom it"),
@@ -135,7 +136,7 @@ const KEYS: [(&str, &[(&str, &str)]); 5] = [
 /// help does not mention is a feature nobody will find; a key the help promises and
 /// nothing reads is a lie, and both have happened here.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const DOCUMENTED: [KeyCode; 42] = [
+pub const DOCUMENTED: [KeyCode; 43] = [
     // At the helm.
     KeyCode::ArrowLeft,
     KeyCode::ArrowRight,
@@ -167,6 +168,7 @@ pub const DOCUMENTED: [KeyCode; 42] = [
     KeyCode::ArrowDown,
     KeyCode::Minus,
     KeyCode::Equal,
+    KeyCode::KeyU,
     // Looking at it.
     KeyCode::KeyC,
     KeyCode::KeyV,

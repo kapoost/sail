@@ -144,6 +144,13 @@ pub struct Ratchet {
     running: bool,
     /// Where the spool stood, radians, so the drum can be drawn turning.
     turn: f32,
+    /// Where the two ends of the line were, in rendered space.
+    ///
+    /// Published because the camera wants them and working them out twice is how the
+    /// readout came to disagree with the drawing about how deep the lure was. A frame
+    /// stale, which for a camera is nothing.
+    pub far: Vec3,
+    pub tip: Vec3,
     /// What was on the line, so a take can be told from a fish that is merely still on.
     playing: bool,
     /// Where the drag star was, and how much line was out.
@@ -196,7 +203,7 @@ pub fn setup(
     };
 
     // The blank: a tube that is rebuilt every frame because its shape is the readout.
-    let blank = meshes.add(blank_mesh(0.0, Vec3::new(0.0, -0.6, 0.8)));
+    let blank = meshes.add(blank_mesh(0.0, Vec3::new(0.0, -0.6, 0.8), 0.0));
     let carbon = materials.add(StandardMaterial {
         base_color: Color::srgb(0.10, 0.10, 0.12),
         perceptual_roughness: 0.35,
@@ -382,9 +389,23 @@ fn butt() -> Vec3 {
     )
 }
 
-/// Which way the blank points with nothing on it.
+/// Which way the blank points, `lift` of the way through a pump.
+///
+/// The whole rod swings up about its butt, which is what a pump *is* — the bend is what
+/// the fish is doing and the angle is what you are doing, and a drawing that showed only
+/// the first would be a drawing of a key having no effect.
+fn unloaded_direction_at(lift: f32) -> Vec3 {
+    let low = Vec3::new(-HOLDER_OUT, HOLDER_UP, 0.49).normalize();
+    // Up and inboard through the sweep, the way an arm lifts: a rod pumped straight up
+    // the way it was pointing would have the line sawing across the quarter.
+    let high = Vec3::new(-HOLDER_OUT * 0.55, HOLDER_UP * 1.9, 0.30).normalize();
+    low.lerp(high, lift.clamp(0.0, 1.0)).normalize()
+}
+
+/// Which way it points with nothing on it and the rod down, for the holder and the reel,
+/// neither of which move.
 fn unloaded_direction() -> Vec3 {
-    Vec3::new(-HOLDER_OUT, HOLDER_UP, 0.49).normalize()
+    unloaded_direction_at(0.0)
 }
 
 /// A point a short way down the line from the rod tip, for the camera to look at.
@@ -421,8 +442,8 @@ fn reel_seat() -> (Vec3, Quat) {
 /// towards the tip, because that is what a progressive-action rod does: the butt stays
 /// nearly straight and takes the load, and the top third does the curving. A rod drawn
 /// as a circular arc looks like a bow, which is a different piece of equipment.
-fn blank_mesh(deflection: f32, pull: Vec3) -> Mesh {
-    let start = unloaded_direction();
+fn blank_mesh(deflection: f32, pull: Vec3, lift: f32) -> Mesh {
+    let start = unloaded_direction_at(lift);
     // Total turn through the blank. For a gently curved beam the tip's offset from the
     // straight line is about half the length times the total angle, which inverts to
     // this and is accurate enough to a third of a radian — further than the rod goes.
@@ -634,17 +655,19 @@ pub fn update(
         let pull = (far - butt_world).normalize_or(Vec3::NEG_Z);
         let local_pull = attitude.inverse() * pull;
         let deflection = (fishing.tension as f32 / ROD_SPRING).min(MAX_DEFLECTION);
+        let lift = fishing.lift as f32;
+
         if showing {
             for mesh in &blanks {
                 if let Some(mut slot) = meshes.get_mut(&mesh.0) {
-                    *slot = blank_mesh(deflection, local_pull);
+                    *slot = blank_mesh(deflection, local_pull, lift);
                 }
             }
         }
         // The tip, worked out the same way the mesh was so the line starts exactly where
         // the rod ends. Recomputing it is cheaper than reading it back out of the mesh
         // and cannot drift from it.
-        butt_world + attitude * tip_offset(deflection, local_pull)
+        butt_world + attitude * tip_offset(deflection, local_pull, lift)
     };
 
     // --- The line -------------------------------------------------------------
@@ -793,6 +816,8 @@ pub fn update(
         ratchet.drag = fishing.drag;
     }
     ratchet.line_out = fishing.line_out;
+    ratchet.far = far;
+    ratchet.tip = tip_world;
 
     // --- The drag breaking away -------------------------------------------------
     //
@@ -817,8 +842,8 @@ pub fn update(
 
 /// Where the tip ends up, for a given bend: the same walk as `blank_mesh` without the
 /// tube round it, so the line can start exactly where the rod ends.
-fn tip_offset(deflection: f32, pull: Vec3) -> Vec3 {
-    let start = unloaded_direction();
+fn tip_offset(deflection: f32, pull: Vec3, lift: f32) -> Vec3 {
+    let start = unloaded_direction_at(lift);
     let turn = (2.0 * deflection / BLANK).clamp(0.0, 1.6);
     let across = (pull - start * pull.dot(start)).normalize_or_zero();
     let mut at = Vec3::ZERO;
@@ -1058,7 +1083,7 @@ mod tests {
     /// line starts somewhere the rod does not end.
     #[test]
     fn an_unloaded_rod_is_its_own_length() {
-        let tip = tip_offset(0.0, Vec3::new(0.0, -0.6, 0.8));
+        let tip = tip_offset(0.0, Vec3::new(0.0, -0.6, 0.8), 0.0);
         assert!((tip.length() - BLANK).abs() < 1e-4, "{}", tip.length());
         assert!(tip.angle_between(unloaded_direction()) < 1e-4);
     }
@@ -1069,13 +1094,13 @@ mod tests {
     #[test]
     fn a_loaded_rod_bends_towards_the_pull_without_growing() {
         let pull = Vec3::new(0.0, -0.8, 0.6).normalize();
-        let slack = tip_offset(0.0, pull);
-        let bent = tip_offset(0.6, pull);
+        let slack = tip_offset(0.0, pull, 0.0);
+        let bent = tip_offset(0.6, pull, 0.0);
         assert!(bent.length() < slack.length(), "the blank grew");
         assert!(bent.y < slack.y, "it bent the wrong way");
         // And it is still a rod rather than a hoop: the tip has not come round past the
         // butt however hard it is pulled.
-        assert!(tip_offset(MAX_DEFLECTION, pull).length() > BLANK * 0.6);
+        assert!(tip_offset(MAX_DEFLECTION, pull, 0.0).length() > BLANK * 0.6);
     }
 
     /// The bend is drawn from the tension by the spring rate the fight uses, so a third
@@ -1098,7 +1123,7 @@ mod tests {
             Vec3::new(0.0, -1.0, 0.0),
             Vec3::ZERO,
         ] {
-            let mesh = blank_mesh(0.4, pull);
+            let mesh = blank_mesh(0.4, pull, 0.0);
             let positions = mesh
                 .attribute(Mesh::ATTRIBUTE_POSITION)
                 .expect("the blank has positions");

@@ -328,6 +328,23 @@ pressure; it runs. That is the one place the fight answers the *player* rather t
 table, and it is why a heavy hand is not simply a faster way to win — pull harder and you
 get a longer fight, which is the first thing anybody is told on a boat.
 
+**Pumping, and the error it found.** Lifting the rod moves the tip away from the fish,
+which is arithmetically the same thing as the fish swimming away: the spring takes it up,
+the tension rises and the fish comes. Dropping the rod gives that distance back — and if
+you are not winding as it drops, what you have made is *slack*, which on a head-shake
+throws the hook. None of that had to be written; it was already in one line of the model,
+and `U` is the only thing that was added.
+
+What it exposed is worth more than the mechanic. Pumping gained nothing at first, which
+is the opposite of every angler's experience — because the reel was modelled far too
+strong. Work it out at the handle: a six-to-one multiplier needs the line's pull times the
+spool radius times the ratio over the handle radius, about **three and a half times the
+line tension**, so twenty-four newtons on the line is nine kilogrammes in your fingers and
+that is where winding stops. It had stood at seventy, which is twenty-five kilogrammes and
+not a thing a person does. With a reel that strong there is no load a rod is better at
+than a handle, and *that* is why pumping looked useless. The parameter was wrong and
+asking for the technique is what found it.
+
 **Nothing comes quietly, and the last move is timed.** Every fish, however beaten, finds
 one more run at the sight of the hull — that is where most fish are actually lost, and a
 model in which a tired one simply arrived was missing the most famous ten seconds in
@@ -343,7 +360,18 @@ roll, because what hanging gear mostly does is swing *against* the boat, and a f
 cannot do that. A score is not a thing; three fish in a basket off the quarter is an
 afternoon, and you can see it from the helm without asking.
 
-`C` now gives a third view, facing aft from the cockpit down the wake — which is worth
+`C` gives a fourth view, under the surface beside the lure — which this project argued
+against on the grounds that the sea is opaque and there would be nothing to see. That was
+an argument about the *surface*. Below it is the one thing the whole activity is about and
+that no other view can show. What makes it read as water rather than as a camera that has
+fallen in is the visibility: ten metres, green rather than blue because this is a shelf
+sea with a spring bloom in it, and the sky taken off the camera altogether — you cannot
+fog a skybox, it is drawn at infinity and no falloff reaches it, so a fogged scene under a
+bright sky is a green room with a hole in the ceiling. With no rod out it sits under her
+counter instead, which is the only way to watch the keel and the rudder do what the
+physics says they do.
+
+The third view faces aft from the cockpit down the wake — which is worth
 having without a rod in your hand, because ahead is where you are going and astern is
 where your wake, your gear and anything overtaking you are. `SAIL_ROD=30` streams thirty
 metres before the first frame and `SAIL_FISH=20` makes them take twenty times as often,

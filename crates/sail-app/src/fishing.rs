@@ -115,10 +115,20 @@ const RETRIEVE: f64 = 0.80;
 
 /// Tension at which you cannot turn the handle at all, newtons.
 ///
-/// Not the reel's limit — yours. The gearing is what decides this, and the point of
-/// having it is that winding is not the answer to everything: past about half the line's
-/// strength the handle simply stops, and the way to gain line is to let the fish tire.
-const STALL: f64 = 70.0;
+/// Not the reel's limit — yours, and it is far lower than it looks. Work it out at the
+/// handle: a six-to-one multiplier turns the spool six times per turn of the handle, so
+/// the force your hand needs is the line's pull times the spool radius times the ratio,
+/// over the handle's own radius — `30 mm × 6 / 50 mm`, which is **three and a half times
+/// the line tension**. Twenty-four newtons on the line is nine kilogrammes in your
+/// fingers, and that is where winding stops.
+///
+/// It stood at seventy for a long time, which is twenty-five kilogrammes at the handle
+/// and not a thing a person does. The error was invisible until pumping went in and
+/// turned out to gain nothing: with a reel that strong there is no load a rod is better
+/// at than a handle, which is the opposite of every angler's experience and was the
+/// model's fault rather than the technique's. **Asking for the pumping is what found
+/// it.**
+const STALL: f64 = 24.0;
 
 /// And the same two numbers in low gear.
 ///
@@ -127,12 +137,12 @@ const STALL: f64 = 70.0;
 /// trades the line you gain per turn for the force you can turn against, which is the
 /// whole of what a gearbox is for and is why every serious boat reel has two of them.
 ///
-/// Roughly half the speed for not quite twice the pull, which is about what the real
-/// ratios come out at — six to one against three to one. The trade is not free and is
-/// not meant to be: winding against a heavy fish *puts that load on*, so low gear gains
-/// you line and wears the hook at the same time.
+/// Half the speed for twice the pull, which is exactly what the real ratios give: three
+/// to one against six to one, and the hand force falls in proportion. The trade is not
+/// free and is not meant to be — winding against a heavy fish *puts that load on*, so
+/// low gear gains you line and wears the hook at the same time.
 const LOW_RETRIEVE: f64 = 0.34;
-const LOW_STALL: f64 = 110.0;
+const LOW_STALL: f64 = 48.0;
 
 /// How fast line runs off a spool in free spool, metres per second.
 const PAYOUT: f64 = 2.6;
@@ -231,6 +241,29 @@ const TAKE_SURGE_DIES: f64 = 0.35;
 /// setting where nothing is ripped off at all is a drag screwed down past what the fish
 /// can pull — which is correct, and is the same lesson the dial teaches everywhere else.
 const TAKE_SHOCK: f64 = 7.0;
+
+/// How far the rod tip travels through one pump, metres, and how fast it goes each way.
+///
+/// **Pumping is the genre's signature mechanic and this file argued against having it**,
+/// on the grounds that the gearbox already answers the question it answers. That was
+/// wrong in an interesting way: the gearbox answers *how do I gain line against a load*
+/// and pumping answers *how do I gain line without the reel at all*, which is a different
+/// question with a different failure mode, and it is the one every angler is taught
+/// first.
+///
+/// What it costs to add is one term, because the model was already a spring. Lifting the
+/// rod moves the tip away from the fish, which is exactly the same thing as the fish
+/// swimming away: the spring takes it up, the tension rises, and the fish comes. Dropping
+/// the rod gives that distance back — and if you are not winding as it drops, what you
+/// have made is **slack**, which on a head-shake throws the hook. That is the whole of
+/// why "wind down" is the second half of the instruction, and none of it had to be
+/// written: it was already in `d(stretch)/dt`.
+///
+/// Down slower than up, and slower than a reel in high gear can take line, so a pump
+/// wound down properly loses nothing and a pump dropped on a slack reel loses the lot.
+const SWEEP: f64 = 1.1;
+const LIFT_UP: f64 = 0.42;
+const LIFT_DOWN: f64 = 0.60;
 
 /// Line left when the fish is at the rod tip and the fight is over, metres.
 const LEADER: f64 = 1.6;
@@ -611,6 +644,8 @@ pub struct Hands {
     pub drag: f64,
     /// Whether the reel is in low gear.
     pub low_gear: bool,
+    /// Whether the rod is being lifted.
+    pub pump: bool,
 }
 
 /// A fish on the line.
@@ -728,6 +763,9 @@ pub struct Fishing {
     pub depth: f64,
     /// Extension of the rod-and-line spring, metres. Negative is slack.
     stretch: f64,
+    /// How far through a pump the rod is, nought low and one high. Public because the
+    /// drawing has to show it: a pump you cannot see is a key with a number behind it.
+    pub lift: f64,
     /// How fast line is leaving the spool against the drag, m/s. Drives the ratchet.
     pub paying: f64,
     /// What is in the box.
@@ -781,6 +819,7 @@ impl Fishing {
             line_out: streamed.unwrap_or(0.0),
             drag: 1.0 / 3.0,
             tension: 0.0,
+            lift: 0.0,
             depth: 0.0,
             stretch: 0.0,
             paying: 0.0,
@@ -912,6 +951,17 @@ impl Fishing {
 
     fn substep(&mut self, dt: f64, sea: Sea, hands: Hands) -> Option<String> {
         let cap = self.drag * BREAKING;
+        // The rod goes up while the key is held and comes down when it is let go. What
+        // the fight sees is not the angle but the *distance the tip moved*, which is the
+        // same quantity the fish's own swimming contributes and goes into the same
+        // spring.
+        let was = self.lift;
+        self.lift = if hands.pump {
+            (self.lift + LIFT_UP * dt).min(1.0)
+        } else {
+            (self.lift - LIFT_DOWN * dt).max(0.0)
+        };
+        let swept = (self.lift - was) * SWEEP;
         // What the hand is asking of the reel. Winding in is limited by the tension —
         // past the stall you cannot turn the handle at all — and giving line is not,
         // because a free spool does not care.
@@ -989,7 +1039,7 @@ impl Fishing {
             }
             return self.take(dt, sea, depth);
         }
-        self.fight(dt, sea, cap, reel)
+        self.fight(dt, sea, cap, reel, swept)
     }
 
     /// Roll for something taking the lure.
@@ -1130,7 +1180,7 @@ impl Fishing {
     /// from its force-velocity relation, the spring between the fish and the spool, the
     /// drag letting line go once the spring passes its setting, and fatigue charged for
     /// the work the line does on the fish.
-    fn fight(&mut self, dt: f64, sea: Sea, cap: f64, reel: f64) -> Option<String> {
+    fn fight(&mut self, dt: f64, sea: Sea, cap: f64, reel: f64, swept: f64) -> Option<String> {
         let Rod::Playing(fish) = &mut self.rod else {
             return None;
         };
@@ -1226,9 +1276,10 @@ impl Fishing {
         fish.surge *= (-dt / TAKE_SURGE_DIES).exp();
         let supplied = self.paying - reel;
         self.line_out = (self.line_out + supplied * dt).max(0.0);
-        // The spring takes up whatever the fish's movement and the line supply disagree
-        // about, which is the one equation the whole fight runs on.
-        self.stretch = (self.stretch + (away - supplied) * dt).clamp(-2.0, 4.0);
+        // The spring takes up whatever the fish's movement, the line supply and the rod
+        // tip's own travel disagree about, which is the one equation the whole fight runs
+        // on. `swept` is a distance and not a rate, so it goes in as it is.
+        self.stretch = (self.stretch + (away - supplied) * dt + swept).clamp(-2.0, 4.0);
 
         // --- Where it is, for the drawing ----------------------------------------
         let (down, across) = fish.doing.heading();
@@ -1466,6 +1517,9 @@ pub fn work(
             // one meaning rather than two: slower and more deliberate, whichever of them
             // your hand is on.
             low_gear: fine,
+            // Held, because a rod held up is a position your arms are holding. Let go
+            // and it comes down, which is the half of a pump that loses fish.
+            pump: keys.pressed(KeyCode::KeyU),
         },
     ) {
         info!("{said}");
@@ -1604,6 +1658,7 @@ mod tests {
             reel,
             drag,
             low_gear: false,
+            pump: false,
         }
     }
 
@@ -1908,22 +1963,23 @@ mod tests {
     #[test]
     fn low_gear_winds_when_high_gear_will_not() {
         let against = |low_gear: bool| {
-            let mut f = with(Quarry::Pollack, 4.0);
-            // A pollack sounding, on a drag tight enough that nothing is slipping: the
-            // line is simply loaded to what the fish can pull, which is eighty-odd
-            // newtons — past where a handle in high gear stops turning and short of
-            // where the drag breaks away. That window is the gearbox's whole purpose and
-            // it is a narrow one, which is why the first version of this test used a
-            // ling, found the drag paying out in both gears, and measured nothing at all.
+            // A saithe running, which pulls about thirty-eight newtons — above where a
+            // handle in high gear stops and below where one in low gear does, on a drag
+            // tight enough that nothing is slipping. That band is the gearbox's whole
+            // purpose and it is a narrow one, which is why the first version of this
+            // test used a ling, found the drag paying out in both gears, and measured
+            // nothing at all.
+            let mut f = with(Quarry::Saithe, 2.2);
             let before = f.line_out;
             sail(
                 &mut f,
-                4.5,
+                20.0,
                 sea(0.8, 40.0),
                 Hands {
                     reel: 1.0,
-                    drag: 0.75,
+                    drag: 0.5,
                     low_gear,
+                    pump: false,
                 },
             );
             before - f.line_out
@@ -1934,7 +1990,7 @@ mod tests {
         // turns freely until it does — but once it is on, the handle stops and low gear
         // keeps coming.
         assert!(
-            low > high * 2.0,
+            low > high * 2.0 + 0.3,
             "low gained {low} m against high gear's {high} m"
         );
     }
@@ -1955,6 +2011,7 @@ mod tests {
                     reel: 1.0,
                     drag: 1.0 / 3.0,
                     low_gear,
+                    pump: false,
                 },
             );
             60.0 - f.line_out
@@ -2069,6 +2126,103 @@ mod tests {
         assert!(bite_weather(0.0) == 1.0);
         // And it never shuts them off altogether, because they do still feed.
         assert!(bite_weather(-100.0) > 0.2);
+    }
+
+    /// Pumping gains line where the reel alone cannot, which is the whole reason every
+    /// angler is taught it before they are taught anything else.
+    ///
+    /// Measured against a hand that only winds, on the same fish, at a load that has the
+    /// handle stopped. The rod is doing the lifting and your back is doing the work, and
+    /// neither of them cares what the gearing is.
+    #[test]
+    fn pumping_gains_line_the_reel_cannot() {
+        let worked = |pump: bool| {
+            // Three kilogrammes rather than four, and the difference is the whole
+            // condition the technique has. A pump only gains line while the drag is
+            // *holding*: lift against a fish strong enough to open it and all you have
+            // done is pay line out through a slipping clutch, which is what the first
+            // version of this test measured and reported as pumping being useless.
+            let mut f = with(Quarry::Pollack, 3.0);
+            let water = sea(0.8, 40.0);
+            let before = f.line_out;
+            // Four full cycles: up for a second and a half, down for a second with the
+            // handle turning, which is the rhythm.
+            let mut t = 0.0;
+            while t < 12.0 {
+                let up = pump && (t % 3.5) < 2.2;
+                f.step(
+                    1.0 / 60.0,
+                    water,
+                    Hands {
+                        // Winding on the drop, which is the half of it that keeps what
+                        // the lift gained.
+                        reel: 1.0,
+                        drag: 0.75,
+                        low_gear: false,
+                        pump: up,
+                    },
+                );
+                t += 1.0 / 60.0;
+            }
+            before - f.line_out
+        };
+        let pumped = worked(true);
+        let wound = worked(false);
+        // A ratio rather than a margin: what matters is that the rod is doing the work
+        // the handle cannot, and over twelve seconds of a fight that is a few tenths of
+        // a metre against nearly nothing.
+        assert!(
+            pumped > wound * 3.0,
+            "pumping gained {pumped} m, winding alone {wound} m"
+        );
+    }
+
+    /// And dropping the rod without winding makes slack, which is what loses fish — the
+    /// second half of "lift and wind down" is not advice, it is the whole technique.
+    #[test]
+    fn dropping_the_rod_on_a_slack_reel_makes_slack() {
+        let slack_after = |reel: f64| {
+            let mut f = with(Quarry::Cod, 4.0);
+            let water = sea(0.5, 40.0);
+            // Lift it right up, then let it fall.
+            let mut t = 0.0;
+            while t < 2.0 {
+                f.step(
+                    1.0 / 60.0,
+                    water,
+                    Hands {
+                        reel: 0.0,
+                        drag: 0.5,
+                        low_gear: false,
+                        pump: true,
+                    },
+                );
+                t += 1.0 / 60.0;
+            }
+            let mut least = f.tension;
+            t = 0.0;
+            while t < 1.5 {
+                f.step(
+                    1.0 / 60.0,
+                    water,
+                    Hands {
+                        reel,
+                        drag: 0.5,
+                        low_gear: false,
+                        pump: false,
+                    },
+                );
+                least = least.min(f.tension);
+                t += 1.0 / 60.0;
+            }
+            least
+        };
+        let wound_down = slack_after(1.0);
+        let let_go = slack_after(0.0);
+        assert!(
+            let_go < wound_down,
+            "dropping on a slack reel left {let_go} N, winding down left {wound_down} N"
+        );
     }
 
     /// The gear cannot be stowed with a fish on it, and saying so is better than doing

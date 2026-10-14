@@ -333,7 +333,7 @@ fn main() {
                     rain::shroud,
                     (settings::toggle, settings::apply),
                     (help::toggle, mob::throw, tutorial::run),
-                    camera::toggle,
+                    (camera::toggle, camera::dress),
                     camera::aim,
                     hud::toggle,
                     course::restart,
