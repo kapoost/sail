@@ -455,212 +455,193 @@ fn tip_offset(deflection: f32, pull: Vec3) -> Vec3 {
     at
 }
 
-/// The gear's own corner of the console.
+/// The gear, as part of the instrument column.
 ///
-/// Only there when the rod is, because a panel for equipment you have not got out is
-/// clutter — and the console's own rule applies: everything the keyboard can do, the
-/// mouse can do, so the drag is a lever you can drag as well as a pair of keys.
+/// Drawn *inside* `panel.rs`'s block of readouts rather than in an area of its own, and
+/// that is a correction. It had a corner to itself at the top right — which is the
+/// corner the chart opens into, and more to the point is not where anybody looks for a
+/// number. The complaint from the deck was that you could not see how much line was out,
+/// and the line out was on the screen the whole time, in the one place on it nobody had
+/// any reason to read. A reading you have to be told the position of is a reading that
+/// is not there.
 ///
-/// Four things, and the order is the order you look at them in:
+/// So it joins the log, the wind, the sea and the sounder, and it appears and disappears
+/// with the gear the way the squall warning appears and disappears with the squall.
 ///
+/// Four things, in the order you look at them:
+///
+/// * **Line out**, first and on its own, because it is the control as well as the
+///   reading: it is what sets the depth, and the depth is what decides whether anything
+///   can see the lure.
+/// * **The lure's depth**, the water under her, and what is between them. Red when the
+///   lure is in the last two metres, which is where tackle is lost.
 /// * **Load**, against the line's breaking strain, with the drag marked on the same
-///   scale. Two numbers on one bar, because the whole question is which of them is
-///   bigger and a pair of separate readouts would make you do that in your head.
-/// * **Line out**, which is the depth control, with the depth it is producing and the
-///   depth of water under her — the three numbers that decide whether anything can see
-///   the lure and whether it is about to be in the kelp.
-/// * **The drag**, with the quarter-to-a-third band painted on it. The band is the only
-///   piece of instruction in the whole interface and it is painted rather than written.
-/// * **What is on**, once something is, and how beaten it is. Not what it *is*: you do
-///   not know that until you see it, and the console is not going to tell you.
-pub fn draw(
-    mut contexts: bevy_egui::EguiContexts,
-    mut fishing: ResMut<Fishing>,
-    sim: Res<Sim>,
-    console: Res<crate::panel::Console>,
-) -> Result {
+///   scale. Two numbers on one bar, because the whole question is which is bigger.
+/// * **The drag**, with the quarter-to-a-third band painted on. The band is the only
+///   instruction in the interface and it is painted rather than written. Draggable,
+///   because the console's rule is that everything the keyboard can do the mouse can do.
+///
+/// What is on the end, once something is — and *not* what it is. You do not know that
+/// until you see it, and the console is not going to spoil it.
+pub fn gauge(ui: &mut bevy_egui::egui::Ui, fishing: &mut Fishing, sim: &Sim) {
     use crate::panel::paint;
     use bevy_egui::egui;
 
-    if !fishing.out() || console.hidden {
-        return Ok(());
+    if !fishing.out() {
+        return;
     }
-    let ctx = contexts.ctx_mut()?;
-    let frame = egui::Frame::new()
-        .fill(paint::CASE)
-        .stroke(egui::Stroke::new(1.0, paint::BEZEL))
-        .inner_margin(egui::Margin::symmetric(9, 7));
-
     let tension = fishing.tension;
     let drag = fishing.drag;
     let drag_force = fishing.drag_force();
     let line_out = fishing.line_out;
     let depth = crate::fishing::lure_depth(line_out, sim.sim.telemetry.stw);
     let sounding = sim.sim.telemetry.depth;
-    let mut set_drag: Option<f64> = None;
+    let clear = sounding - depth;
 
-    egui::Area::new("rod".into())
-        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 8.0))
-        .show(ctx, |ui| {
-            frame.show(ui, |ui| {
-                ui.set_width(164.0);
-                let small = |ui: &mut egui::Ui, text: String, colour| {
-                    ui.label(
-                        egui::RichText::new(text)
-                            .color(colour)
-                            .monospace()
-                            .size(9.0),
-                    );
-                };
+    let small = |ui: &mut egui::Ui, text: String, colour| {
+        ui.label(
+            egui::RichText::new(text)
+                .color(colour)
+                .monospace()
+                .size(10.0),
+        );
+    };
 
-                small(ui, "ROD".into(), paint::LABEL);
+    ui.add_space(4.0);
+    ui.separator();
+    // The one number the hand on the reel is changing, given a line of its own and the
+    // size the headline readouts have.
+    ui.label(
+        egui::RichText::new(format!("LINE OUT   {line_out:>5.1} m"))
+            .color(if fishing.paying > 0.05 {
+                paint::LIVE
+            } else {
+                paint::FACE
+            })
+            .monospace()
+            .size(13.0),
+    );
+    small(
+        ui,
+        format!("LURE {depth:>5.1} m   SEABED {sounding:>4.0} m"),
+        if clear < 2.0 {
+            paint::BAD
+        } else {
+            paint::LABEL
+        },
+    );
 
-                // --- Load, with the drag marked on the same scale -------------------
-                let (rect, _) =
-                    ui.allocate_exact_size(egui::vec2(146.0, 11.0), egui::Sense::hover());
-                let p = ui.painter();
-                p.rect_filled(rect, 2.0, paint::TRACK);
-                let at = |v: f64| {
-                    rect.left()
-                        + (v / crate::fishing::BREAKING).clamp(0.0, 1.0) as f32 * rect.width()
-                };
-                let loaded = egui::Rect::from_min_max(
-                    rect.left_top(),
-                    egui::pos2(at(tension), rect.bottom()),
-                );
-                // Amber up to the drag setting and red past it, because past the drag
-                // the line is going out and that is a different situation rather than
-                // more of the same one.
-                p.rect_filled(
-                    loaded,
-                    2.0,
-                    if tension > drag_force {
-                        paint::NEEDLE
-                    } else {
-                        paint::LIVE
-                    },
-                );
-                let star = at(drag_force);
-                p.line_segment(
-                    [
-                        egui::pos2(star, rect.top() - 1.0),
-                        egui::pos2(star, rect.bottom() + 1.0),
-                    ],
-                    egui::Stroke::new(1.5, paint::FACE),
-                );
-                small(
-                    ui,
-                    format!("LOAD {tension:>5.0} N   DRAG {drag_force:>3.0} N"),
-                    paint::FACE,
-                );
+    // --- Load, with the drag marked on the same scale ---------------------------
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(160.0, 10.0), egui::Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, 2.0, paint::TRACK);
+    let at =
+        |v: f64| rect.left() + (v / crate::fishing::BREAKING).clamp(0.0, 1.0) as f32 * rect.width();
+    p.rect_filled(
+        egui::Rect::from_min_max(rect.left_top(), egui::pos2(at(tension), rect.bottom())),
+        2.0,
+        // Amber up to the drag setting and red past it, because past the drag the line
+        // is going out, and that is a different situation rather than more of the same.
+        if tension > drag_force {
+            paint::NEEDLE
+        } else {
+            paint::LIVE
+        },
+    );
+    let star = at(drag_force);
+    p.line_segment(
+        [
+            egui::pos2(star, rect.top() - 1.0),
+            egui::pos2(star, rect.bottom() + 1.0),
+        ],
+        egui::Stroke::new(1.5, paint::FACE),
+    );
+    small(
+        ui,
+        format!("LOAD {tension:>5.0} N   DRAG {drag_force:>4.0} N"),
+        paint::FACE,
+    );
 
-                // --- Line, depth, and what is under her -----------------------------
-                ui.add_space(2.0);
-                small(
-                    ui,
-                    format!("LINE {line_out:>5.0} m   LURE {depth:>4.0} m"),
-                    paint::FACE,
-                );
-                // Red when the lure is in the last two metres of water, which is where
-                // it gets lost.
-                let clear = sounding - depth;
-                small(
-                    ui,
-                    format!("UNDER{sounding:>5.0} m   CLEAR{clear:>4.0} m"),
-                    if clear < 2.0 {
-                        paint::BAD
-                    } else {
-                        paint::LABEL
-                    },
-                );
-
-                // --- The drag, as a thing you can put a mouse on --------------------
-                ui.add_space(3.0);
-                let (track, response) =
-                    ui.allocate_exact_size(egui::vec2(146.0, 13.0), egui::Sense::click_and_drag());
-                let p = ui.painter();
-                p.rect_filled(track, 2.0, paint::TRACK);
-                // The rule, painted: a quarter to a third of the line's strength.
-                let band = egui::Rect::from_min_max(
-                    egui::pos2(track.left() + 0.25 * track.width(), track.top()),
-                    egui::pos2(track.left() + 0.3333 * track.width(), track.bottom()),
-                );
-                p.rect_filled(band, 0.0, paint::GOOD.gamma_multiply(0.45));
-                let knob = egui::Rect::from_center_size(
-                    egui::pos2(track.left() + drag as f32 * track.width(), track.center().y),
-                    egui::vec2(7.0, track.height() - 2.0),
-                );
-                p.rect_filled(knob, 1.0, paint::BEZEL);
-                p.rect_stroke(
-                    knob,
-                    1.0,
-                    egui::Stroke::new(1.0, paint::FACE),
-                    egui::StrokeKind::Inside,
-                );
-                if response.dragged() {
-                    if let Some(pos) = response.interact_pointer_pos() {
-                        set_drag =
-                            Some(((pos.x - track.left()) / track.width()).clamp(0.0, 1.0) as f64);
-                    }
-                }
-
-                // --- What is on -----------------------------------------------------
-                ui.add_space(3.0);
-                match fishing.fish() {
-                    Some(fish) => {
-                        small(ui, format!("ON  {:<16}", fish.doing.name()), paint::NEEDLE);
-                        let (bar, _) =
-                            ui.allocate_exact_size(egui::vec2(146.0, 7.0), egui::Sense::hover());
-                        let p = ui.painter();
-                        p.rect_filled(bar, 1.0, paint::TRACK);
-                        p.rect_filled(
-                            egui::Rect::from_min_max(
-                                bar.left_top(),
-                                egui::pos2(
-                                    bar.left() + fish.beaten() as f32 * bar.width(),
-                                    bar.bottom(),
-                                ),
-                            ),
-                            1.0,
-                            paint::GOOD,
-                        );
-                    }
-                    None => small(ui, "trolling".into(), paint::LABEL),
-                }
-
-                // --- The box --------------------------------------------------------
-                if !fishing.caught.is_empty() || fishing.lost > 0 {
-                    let weight: f64 = fishing.caught.iter().map(|c| c.mass).sum();
-                    small(
-                        ui,
-                        format!(
-                            "BOX  {} fish, {weight:.1} kg   lost {}",
-                            fishing.caught.len(),
-                            fishing.lost
-                        ),
-                        paint::LABEL,
-                    );
-                    // The best one, because that is the fish anybody talks about
-                    // afterwards and a total weight is not.
-                    if let Some(best) = fishing
-                        .caught
-                        .iter()
-                        .max_by(|a, b| a.mass.total_cmp(&b.mass))
-                    {
-                        small(
-                            ui,
-                            format!("BEST {:<10}{:>5.1} kg", best.what.name(), best.mass),
-                            paint::GOOD,
-                        );
-                    }
-                }
-            });
-        });
-
-    if let Some(v) = set_drag {
-        fishing.drag = v;
+    // --- The drag, as a thing you can put a mouse on ----------------------------
+    let (track, response) =
+        ui.allocate_exact_size(egui::vec2(160.0, 12.0), egui::Sense::click_and_drag());
+    let p = ui.painter();
+    p.rect_filled(track, 2.0, paint::TRACK);
+    let band = egui::Rect::from_min_max(
+        egui::pos2(track.left() + 0.25 * track.width(), track.top()),
+        egui::pos2(track.left() + 0.3333 * track.width(), track.bottom()),
+    );
+    p.rect_filled(band, 0.0, paint::GOOD.gamma_multiply(0.45));
+    let knob = egui::Rect::from_center_size(
+        egui::pos2(track.left() + drag as f32 * track.width(), track.center().y),
+        egui::vec2(7.0, track.height() - 2.0),
+    );
+    p.rect_filled(knob, 1.0, paint::BEZEL);
+    p.rect_stroke(
+        knob,
+        1.0,
+        egui::Stroke::new(1.0, paint::FACE),
+        egui::StrokeKind::Inside,
+    );
+    if response.dragged() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            fishing.drag = ((pos.x - track.left()) / track.width()).clamp(0.0, 1.0) as f64;
+        }
     }
-    Ok(())
+
+    // --- What is on --------------------------------------------------------------
+    match fishing.fish() {
+        Some(fish) => {
+            small(ui, format!("ON  {}", fish.doing.name()), paint::NEEDLE);
+            let (bar, _) = ui.allocate_exact_size(egui::vec2(160.0, 6.0), egui::Sense::hover());
+            let p = ui.painter();
+            p.rect_filled(bar, 1.0, paint::TRACK);
+            p.rect_filled(
+                egui::Rect::from_min_max(
+                    bar.left_top(),
+                    egui::pos2(
+                        bar.left() + fish.beaten() as f32 * bar.width(),
+                        bar.bottom(),
+                    ),
+                ),
+                1.0,
+                paint::GOOD,
+            );
+        }
+        None => small(
+            ui,
+            if fishing.paying > 0.05 {
+                "streaming".into()
+            } else {
+                "trolling".into()
+            },
+            paint::LABEL,
+        ),
+    }
+
+    if !fishing.caught.is_empty() || fishing.lost > 0 {
+        let weight: f64 = fishing.caught.iter().map(|c| c.mass).sum();
+        small(
+            ui,
+            format!(
+                "BOX {} fish {weight:.1} kg  lost {}",
+                fishing.caught.len(),
+                fishing.lost
+            ),
+            paint::LABEL,
+        );
+        if let Some(best) = fishing
+            .caught
+            .iter()
+            .max_by(|a, b| a.mass.total_cmp(&b.mass))
+        {
+            small(
+                ui,
+                format!("BEST {:<9}{:>5.1} kg", best.what.name(), best.mass),
+                paint::GOOD,
+            );
+        }
+    }
 }
 
 #[cfg(test)]

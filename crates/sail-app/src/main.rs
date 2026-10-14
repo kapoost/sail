@@ -350,7 +350,6 @@ fn main() {
                 settings::draw,
                 help::draw,
                 chart::draw,
-                rod::draw,
                 hud::draw,
             )
                 .chain(),

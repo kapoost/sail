@@ -1058,6 +1058,7 @@ pub fn work(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
     time: Res<Time>,
+    mut since_report: Local<f32>,
 ) {
     let dt = time.delta_secs_f64();
     let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
@@ -1104,6 +1105,29 @@ pub fn work(
     };
     if let Some(said) = gear.step(dt, sea, Hands { reel, drag }) {
         info!("{said}");
+    }
+
+    // A line on the terminal every second while the dev switch is set, so the gear can
+    // be told apart from the drawing of it. `world::report_vitals` does the same thing
+    // for the boat and for the same reason: when something looks wrong, the first
+    // question is always whether it *is* wrong or merely invisible, and that question
+    // should cost nothing to answer.
+    *since_report += time.delta_secs();
+    if gear.out() && *since_report >= 1.0 && std::env::var("SAIL_ROD").is_ok() {
+        *since_report = 0.0;
+        info!(
+            "rod: line {:.1} m, lure {:.1} m down over {:.0} m, load {:.0} N, \
+             drag {:.0} N, reel {reel:+.1}, {}",
+            gear.line_out,
+            lure_depth(gear.line_out, sea.stw),
+            sea.sounding,
+            gear.tension,
+            gear.drag_force(),
+            match gear.fish() {
+                Some(fish) => fish.doing.name(),
+                None => "nothing on",
+            }
+        );
     }
 }
 
@@ -1172,6 +1196,23 @@ mod tests {
     /// this function saturated at fifteen metres and no amount of line got past it,
     /// which is the failure this test exists to catch — so it asks for the depth to keep
     /// climbing a long way out, not merely to climb at all.
+    /// The down arrow lets line off the spool and the up arrow gets it back. The
+    /// plainest thing the gear does, and therefore the one nothing was watching.
+    #[test]
+    fn the_reel_gives_line_and_takes_it_back() {
+        let mut f = rig(5);
+        f.stow_or_set();
+        let streamed = f.line_out;
+        sail(&mut f, 4.0, sea(3.0, 40.0), hands(-1.0, 1.0 / 3.0));
+        let given = f.line_out;
+        assert!(
+            given > streamed + 5.0,
+            "four seconds of free spool gave {given} from {streamed}"
+        );
+        sail(&mut f, 4.0, sea(3.0, 40.0), hands(1.0, 1.0 / 3.0));
+        assert!(f.line_out < given - 1.0, "wound back to {}", f.line_out);
+    }
+
     #[test]
     fn the_lure_goes_deeper_the_more_line_is_out() {
         let shallow = lure_depth(20.0, 2.0);

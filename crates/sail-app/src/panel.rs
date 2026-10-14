@@ -65,6 +65,7 @@ pub fn draw(
     mut console: ResMut<Console>,
     mut settings: ResMut<crate::settings::Settings>,
     mut course: ResMut<Course>,
+    mut fishing: ResMut<crate::fishing::Fishing>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     // How long the screen has been up, so it can surface rather than appear.
@@ -169,6 +170,11 @@ pub fn draw(
                             .size(11.0),
                     );
                 }
+
+                // And the gear over the stern, when there is any. Here rather than in a
+                // corner of its own: line out is a reading you glance at continuously
+                // while you are fishing, which makes it an instrument and not a window.
+                crate::rod::gauge(ui, &mut fishing, &sim);
 
                 ui.add_space(4.0);
                 ui.separator();
