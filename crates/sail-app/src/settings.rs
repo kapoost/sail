@@ -583,9 +583,20 @@ fn together(
                 );
             }
             for game in games {
-                let label = format!("{}  —  {} aboard", game.game, game.players);
+                // Marked as a thing to press. A row of text that happens to be clickable
+                // is a row of text as far as anybody is concerned, and this one was read
+                // as a label with the join button living underneath it — which is how
+                // somebody ends up pressing JOIN with nothing typed in the box.
+                let label = format!("  ▸  {}   {} aboard", game.game, game.players);
                 if ui
-                    .selectable_label(false, egui::RichText::new(label).monospace().size(11.0))
+                    .selectable_label(
+                        false,
+                        egui::RichText::new(label)
+                            .monospace()
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(230, 198, 120)),
+                    )
+                    .on_hover_text("join this game")
                     .clicked()
                 {
                     net.address = game.at.clone();
@@ -606,7 +617,17 @@ fn together(
                         .hint_text("address:7714")
                         .font(egui::TextStyle::Monospace),
                 );
-                if ui.button("JOIN").clicked() {
+                // Nothing to join when the box is empty, so the button says so by being
+                // grey rather than by failing. Pressed empty it used to build ":7714",
+                // hand that to the resolver and put "nodename nor servname provided" on
+                // the screen — an operating system's words for "you typed nothing",
+                // which is a poor way for a game to say it.
+                let typed = !net.address.trim().is_empty();
+                if ui
+                    .add_enabled(typed, egui::Button::new("JOIN"))
+                    .on_disabled_hover_text("type an address, or pick a game above")
+                    .clicked()
+                {
                     join(net);
                 }
             });
@@ -625,11 +646,15 @@ fn together(
 }
 
 fn join(net: &mut crate::net::Net) {
+    if net.address.trim().is_empty() {
+        net.trouble = "nothing to join: pick a game above, or type an address".into();
+        return;
+    }
     let address = if net.address.contains(':') {
-        net.address.clone()
+        net.address.trim().to_string()
     } else {
         // A bare address is the commonest thing to type and the port is fixed anyway.
-        format!("{}:{}", net.address, sail_net::PORT)
+        format!("{}:{}", net.address.trim(), sail_net::PORT)
     };
     net.trouble.clear();
     match sail_net::link::Link::join(&address, &net.name) {
@@ -740,6 +765,39 @@ mod tests {
         assert!(
             said.contains("no route to that address"),
             "the reason it failed has to be visible: {said:?}"
+        );
+    }
+
+    /// Pressing JOIN with an empty box.
+    ///
+    /// Reported from the deck as a screenful of ":7714: failed to lookup address
+    /// information: nodename nor servname provided, or not known" — which is an
+    /// operating system's way of saying "you typed nothing", and a poor way for a game
+    /// to say it. The button is grey now, and the function refuses before it resolves
+    /// anything, because a disabled button can still be reached by other paths.
+    #[test]
+    fn joining_nothing_says_so_in_words_a_person_uses() {
+        let mut net = Net::default();
+        assert!(net.address.is_empty());
+        join(&mut net);
+        assert!(net.link.is_none(), "it should not have opened a socket");
+        assert!(
+            net.trouble.contains("pick a game above"),
+            "it should say what to do instead: {:?}",
+            net.trouble
+        );
+        assert!(
+            !net.trouble.contains("servname"),
+            "and not hand the resolver's words to a sailor: {:?}",
+            net.trouble
+        );
+
+        // And the button is not offered while there is nothing in the box.
+        let fleet = Fleet::default();
+        let said = words(|ui| together(ui, &mut net, &fleet, glam::DVec2::ZERO));
+        assert!(
+            said.contains("JOIN"),
+            "the button is still there, just grey"
         );
     }
 
