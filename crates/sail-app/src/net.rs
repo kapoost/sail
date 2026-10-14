@@ -37,6 +37,8 @@ pub struct Net {
     /// Looking for games on this network, while the panel's page is open. Dropping it
     /// stops the thread.
     pub scan: Option<sail_net::discovery::Scan>,
+    /// A world to go to, set by the handshake and taken by `rebuild`.
+    pub rebuild: Option<sail_net::World>,
 }
 
 pub fn setup(mut commands: Commands) {
@@ -61,6 +63,64 @@ pub fn setup(mut commands: Commands) {
     commands.insert_resource(net);
 }
 
+/// Everything in the scene that came off the old seed and therefore has to go.
+type OfTheOldWorld = Or<(
+    With<crate::islands::Landmass>,
+    With<crate::course::Floating>,
+)>;
+
+/// Move to the world the game is being played in.
+///
+/// Everything that comes off the seed goes: the archipelago, the harbours, the
+/// consignment, the track she has drawn so far. What stays is the boat herself — her
+/// class, her rig, where her sheets are — because that is the player's and not the
+/// world's.
+///
+/// Done in one frame and visibly: she is somewhere else afterwards, in weather that is
+/// not the weather she cast off in. That is the honest presentation of what joining a
+/// game actually is, and the alternative — quietly sailing on in a different sea from
+/// everybody else — was what this replaced.
+pub fn rebuild(
+    mut commands: Commands,
+    mut net: ResMut<Net>,
+    mut sim: ResMut<Sim>,
+    mut sky: ResMut<crate::sky::Sky>,
+    mut track: ResMut<crate::chart::Track>,
+    old: Query<Entity, OfTheOldWorld>,
+) {
+    let Some(world) = net.rebuild.take() else {
+        return;
+    };
+    // The day as that machine drew it, over the day this one drew. The parts that are a
+    // property of the *world* come across; the parts that are a property of this boat's
+    // first minute — which tack she starts on, how much she starts reefed — stay, because
+    // nobody else has an opinion about those.
+    let mut weather = crate::weather::Weather::draw(world.seed);
+    weather.tws = world.tws as f64;
+    weather.wind_from = world.wind_from as f64;
+    weather.fetch = world.fetch as f64;
+    weather.start_hour = world.start_hour as f64;
+    weather.cover = world.cover as f64;
+    let (hs, tp) = sail_core::water::fetch_limited_sea(weather.tws, weather.fetch);
+    weather.hs = hs;
+    weather.tp = tp;
+
+    *sim = Sim::new(weather);
+    sky.hour = weather.start_hour as f32;
+    track.clear();
+    // Out with the old archipelago. The marks go with it: a consignment to a harbour that
+    // is no longer there is a buoy floating in open water.
+    for entity in &old {
+        commands.entity(entity).despawn();
+    }
+    // And in with the new, through the same two systems that built the first one. Running
+    // them again rather than writing a second version is the only way the joined world
+    // and the solo one cannot drift apart.
+    commands.run_system_cached(crate::islands::setup);
+    commands.run_system_cached(crate::course::setup);
+    info!("sailing in seed {} now", world.seed);
+}
+
 /// A name over the boat, taken from whatever the machine already knows about its owner
 /// rather than asked for in a dialogue nobody wants to fill in.
 fn whoami() -> String {
@@ -69,7 +129,12 @@ fn whoami() -> String {
         .unwrap_or_else(|_| "somebody".into())
 }
 
-pub fn exchange(mut net: ResMut<Net>, mut fleet: ResMut<Fleet>, mut sim: ResMut<Sim>) {
+pub fn exchange(
+    mut net: ResMut<Net>,
+    mut fleet: ResMut<Fleet>,
+    mut sim: ResMut<Sim>,
+    sound: Res<crate::sound::SoundHandle>,
+) {
     let Some(link) = net.link.as_mut() else {
         return;
     };
@@ -109,21 +174,30 @@ pub fn exchange(mut net: ResMut<Net>, mut fleet: ResMut<Fleet>, mut sim: ResMut<
                 // and the time of day has its own hour.
                 sim.sim.state.time = sky.t as f64;
                 if world.seed != sim.weather.seed {
-                    // Not fixed here on purpose. Rebuilding the archipelago under a boat
-                    // that is sailing in it is a different piece of work — the islands,
-                    // the sea texture and the consignment all come off the seed — and
-                    // doing it badly would be worse than saying so. Start both with
-                    // `SAIL_SEED` matching the server's and this line never appears.
-                    warn!(
-                        "this game is seed {} and that one is seed {} — different \
-                         archipelagos. Start with SAIL_SEED={}",
-                        sim.weather.seed, world.seed, world.seed
-                    );
-                    net.trouble = "different archipelago — see the console".into();
+                    // Sail where they are sailing. Handled by its own system rather than
+                    // here, because moving to another archipelago means replacing the
+                    // simulation, taking the islands and the marks out of the scene and
+                    // building the new ones — which is five resources and two queries,
+                    // and threading all of that through the packet reader would make the
+                    // packet reader about something else.
+                    info!("their sea is seed {} — going there", world.seed);
+                    net.rebuild = Some(world);
                 }
             }
-            Event::Boat { id, name, drawn } => fleet.heard(id, &name, drawn),
-            Event::Gone(id) => fleet.gone(id),
+            Event::Boat { id, name, drawn } => {
+                // Two strokes for a boat arriving: it is the one thing that happens out
+                // here which nobody on deck can see coming, and a bell is what a boat
+                // already has for telling somebody something.
+                if fleet.heard(id, &name, drawn) {
+                    info!("{name} is on the water");
+                    sound.0.ring(2);
+                }
+            }
+            Event::Gone(id) => {
+                if fleet.gone(id) {
+                    sound.0.ring(1);
+                }
+            }
             Event::Weather { sky, squalls } => {
                 if sky.t <= 0.0 {
                     continue;

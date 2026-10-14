@@ -62,18 +62,24 @@ impl Fleet {
     /// A snapshot has come in. Newest wins and nothing is queued: a late packet is worth
     /// less than the one already here, and a lost one is replaced in sixty-six
     /// milliseconds.
-    pub fn heard(&mut self, id: BoatId, name: &str, drawn: Drawn) {
+    /// Returns whether this is somebody who was not here a moment ago, which is what
+    /// the bell is rung for.
+    pub fn heard(&mut self, id: BoatId, name: &str, drawn: Drawn) -> bool {
         match self.boats.iter_mut().find(|b| b.id == id) {
             Some(boat) => {
                 boat.drawn = drawn;
                 boat.age = 0.0;
+                false
             }
-            None => self.boats.push(Ghost {
-                id,
-                name: name.to_string(),
-                drawn,
-                age: 0.0,
-            }),
+            None => {
+                self.boats.push(Ghost {
+                    id,
+                    name: name.to_string(),
+                    drawn,
+                    age: 0.0,
+                });
+                true
+            }
         }
     }
 
@@ -81,8 +87,10 @@ impl Fleet {
     /// nothing had been heard from her — but a boat that vanishes the moment somebody
     /// closes the window is worth the four lines.
     #[allow(dead_code)]
-    pub fn gone(&mut self, id: BoatId) {
+    pub fn gone(&mut self, id: BoatId) -> bool {
+        let before = self.boats.len();
         self.boats.retain(|b| b.id != id);
+        before != self.boats.len()
     }
 }
 
@@ -109,6 +117,7 @@ pub fn sync(
     mut fleet: ResMut<Fleet>,
     time: Res<Time>,
     sim: Res<Sim>,
+    sound: Res<crate::sound::SoundHandle>,
     assets: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -119,7 +128,14 @@ pub fn sync(
     for boat in &mut fleet.boats {
         boat.age += dt;
     }
+    // Gone quiet rather than said goodbye — a closed laptop, a wifi that dropped. It
+    // gets the same single stroke as leaving properly, because from the deck those are
+    // the same event: there was a boat there and now there is not.
+    let before = fleet.boats.len();
     fleet.boats.retain(|b| b.age < FORGOTTEN);
+    if fleet.boats.len() != before {
+        sound.0.ring(1);
+    }
 
     for (entity, root) in &existing {
         if !fleet.boats.iter().any(|b| b.id == root.0) {
@@ -367,6 +383,6 @@ pub fn rehearsal(time: Res<Time>, sim: Res<Sim>, mut fleet: ResMut<Fleet>) {
             genoa_car: 0.5,
             ..Default::default()
         };
-        fleet.heard(id, "rehearsal", drawn);
+        let _ = fleet.heard(id, "rehearsal", drawn);
     }
 }

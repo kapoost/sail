@@ -69,6 +69,7 @@ impl Default for SeaParams {
             rig_hz: AtomicU32::default(),
             notes_played: AtomicU32::default(),
             notes_lost: AtomicU32::default(),
+            bell: AtomicU32::default(),
             water_level: AtomicU32::default(),
             water_cutoff: AtomicU32::default(),
             flog_level: AtomicU32::default(),
@@ -107,6 +108,8 @@ pub struct SeaParams {
     /// apart without anybody having to guess.
     notes_played: AtomicU32,
     notes_lost: AtomicU32,
+    /// Strikes of the ship's bell waiting to be rung.
+    bell: AtomicU32,
     water_level: AtomicU32,
     water_cutoff: AtomicU32,
     flog_level: AtomicU32,
@@ -262,6 +265,18 @@ impl SeaParams {
         }
         self.notes_lost.fetch_add(1, Ordering::Relaxed);
         false
+    }
+
+    /// Strike the bell.
+    ///
+    /// Two for somebody arriving and one for somebody leaving, which is not a convention
+    /// borrowed from anywhere — a ship's bell is struck in pairs for the watch — but it
+    /// is the right shape: two is an event and one is a note being made. What matters is
+    /// that it is a *bell* and not a notification sound. A boat has one, it is the thing
+    /// aboard that is for telling other people something, and it carries across water
+    /// without being loud.
+    pub fn ring(&self, strikes: u8) {
+        self.bell.store(strikes.min(3) as u32, Ordering::Relaxed);
     }
 
     /// How many notes have been asked for and how many were dropped, since the
@@ -639,6 +654,12 @@ pub struct SeaStream {
     tick_env: f32,
     tick_phase: f32,
     flog_env: f32,
+    /// Strikes still to come, the wait until the next one, and the five partials of the
+    /// one that is ringing.
+    bell_left: u8,
+    bell_wait: f32,
+    bell_amp: [f32; 5],
+    bell_phase: [f32; 5],
 }
 
 /// Per-sample slew on every parameter.
@@ -674,6 +695,10 @@ impl SeaStream {
             poll: 0,
             tick_env: 0.0,
             tick_phase: 0.0,
+            bell_left: 0,
+            bell_wait: 0.0,
+            bell_amp: [0.0; 5],
+            bell_phase: [0.0; 5],
             params,
             rng: 0x2545_F491,
             wind_a: OnePole::default(),
@@ -997,6 +1022,48 @@ impl Iterator for SeaStream {
         // the wind alone is doing.
         song *= MASTER * 0.85;
 
+        // --- The ship's bell ------------------------------------------------------
+        //
+        // Five partials, and the ratios are what make it a bell rather than a chime: a
+        // hum an octave below the note you think you are hearing, the prime, a *minor
+        // third* above it, a fifth, and the nominal an octave up. The minor third is the
+        // whole character — it is why a bell sounds solemn where a tubular chime sounds
+        // cheerful, and it is the one interval nobody expects to find in something struck
+        // with a hammer.
+        //
+        // They die at different rates, slowest at the bottom, which is why a bell turns
+        // from a clang into a hum as it rings rather than just getting quieter.
+        let struck = self.params.bell.swap(0, Ordering::Relaxed);
+        if struck > 0 {
+            self.bell_left = struck as u8;
+            self.bell_wait = 0.0;
+        }
+        if self.bell_left > 0 {
+            self.bell_wait -= dt;
+            if self.bell_wait <= 0.0 {
+                self.bell_left -= 1;
+                // Not quite half a second between strikes: a bell struck faster than this
+                // reads as an alarm, and slower than it as two bells.
+                self.bell_wait = 0.42;
+                self.bell_amp = [0.55, 1.0, 0.8, 0.45, 0.65];
+                // Phases left where they were, so a second strike on a still-ringing bell
+                // beats against the first the way it does on the boat.
+            }
+        }
+        let mut bell = 0.0;
+        if self.bell_amp.iter().any(|a| *a > 1e-4) {
+            const RATIO: [f32; 5] = [0.5, 1.0, 1.2, 1.5, 2.0];
+            const FADE: [f32; 5] = [0.45, 0.9, 1.6, 2.2, 3.4];
+            // A small bell on a thirty-six foot boat, not a cathedral.
+            const NOTE: f32 = 740.0;
+            for n in 0..5 {
+                self.bell_phase[n] = (self.bell_phase[n] + NOTE * RATIO[n] * dt).fract();
+                bell += fast_sin(self.bell_phase[n]) * self.bell_amp[n];
+                self.bell_amp[n] *= (-FADE[n] * dt).exp();
+            }
+            bell *= 0.16;
+        }
+
         // The beat, which exists so the music has a floor to stand on when the voices
         // thin out — and which is a woodblock rather than a drum, because this is a
         // small boat and not a procession.
@@ -1027,10 +1094,11 @@ impl Iterator for SeaStream {
 
         // Grouped as somebody would actually want them: the elements, the ship, and the
         // music over both.
-        let mix =
-            ((wind + water + rain) * t_sea + (rig + flog + gear) * t_boat) * MASTER * t_master
-                + song * t_music * t_master
-                + beep * MASTER * 2.0;
+        let mix = ((wind + water + rain) * t_sea + (rig + flog + gear + bell) * t_boat)
+            * MASTER
+            * t_master
+            + song * t_music * t_master
+            + beep * MASTER * 2.0;
         let mix = mix * self.smooth.mute;
         // Soft clip. A gust plus a flogging genoa can stack up, and a hard clip is a
         // much worse sound than a little compression.
@@ -1352,6 +1420,73 @@ mod tests {
         assert!(
             peak < 0.8,
             "the loudest chord should leave the soft clip alone: peak {peak:.2}"
+        );
+    }
+
+    /// Two strokes, and the thing that makes it a bell rather than a chime.
+    #[test]
+    fn the_bell_is_struck_twice_and_rings_like_a_bell() {
+        let rate = SAMPLE_RATE as f32;
+        let p = Arc::new(SeaParams::default());
+        p.set_master(1.0);
+        p.set_boat(1.0);
+        p.set_sea(0.0);
+        let mut s = SeaStream::new(p.clone());
+        // Past the mute ramp first, or the first stroke is measured through a fade.
+        for _ in 0..(rate as usize * 4) {
+            let _ = s.next();
+        }
+        let window = (rate * 0.01) as usize;
+        let mut env = Vec::new();
+        let mut here = 0.0f32;
+        // Rung a fifth of a second *into* the measurement rather than before it: with the
+        // bell struck at sample zero there is nothing in front of the first stroke to
+        // compare it with, and a detector looking for a step up finds one stroke in two.
+        // Which it did, and the sound was right all along.
+        for i in 0..(rate as usize * 6) {
+            if i == (rate * 0.2) as usize {
+                p.ring(2);
+            }
+            let out = s.next().unwrap_or(0.0).abs();
+            here = here.max(out);
+            if i % window == window - 1 {
+                env.push(here);
+                here = 0.0;
+            }
+        }
+        let step = window as f32 / rate;
+        let loudest = env.iter().copied().fold(0.0f32, f32::max);
+        assert!(loudest > 0.02, "a bell has to be audible: {loudest:.4}");
+        // Two attacks. A second stroke on a still-ringing bell does not double the
+        // level — the first one has decayed to about two thirds by then and the partials
+        // are at random phase against each other — so what it looks like in an envelope
+        // is a clear step up rather than a spike, and a quarter again is what that is.
+        let attacks: Vec<f32> = env
+            .windows(2)
+            .enumerate()
+            // Measured against the quiet rather than against the peak: the second
+            // stroke lands on a bell that has already decayed, so it is a step up from a
+            // quarter of the peak to four tenths of it — 0.250 to 0.401 in the envelope —
+            // and a threshold set against the loudest moment of the first stroke misses
+            // it entirely. Which it did.
+            .filter(|(_, w)| w[1] > w[0] * 1.25 && w[1] > loudest * 0.1)
+            .map(|(i, _)| i as f32 * step)
+            .collect();
+        assert!(
+            attacks.len() >= 2,
+            "two strokes for somebody arriving, got {}",
+            attacks.len()
+        );
+        let apart = attacks[attacks.len() - 1] - attacks[0];
+        assert!(
+            (0.3..0.6).contains(&apart),
+            "struck faster than this it is an alarm and slower it is two bells: {apart:.2} s"
+        );
+        // And it rings on. A notification sound stops; a bell hums.
+        let late = env[(4.2 / step) as usize];
+        assert!(
+            late > loudest / 100.0,
+            "four seconds on there should still be a hum: {late:.5} against {loudest:.4}"
         );
     }
 

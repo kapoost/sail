@@ -86,6 +86,16 @@ pub struct Track {
     since: f64,
 }
 
+impl Track {
+    /// Forget where she has been. For when the water under her is not the same water —
+    /// joining somebody else's game puts her in a different archipelago, and a track
+    /// drawn across it is a line through islands she was never near.
+    pub fn clear(&mut self) {
+        self.points.clear();
+        self.since = 0.0;
+    }
+}
+
 /// One fix every few seconds, which is what a log book gets anyway.
 pub fn record(sim: Res<Sim>, time: Res<Time>, mut track: ResMut<Track>) {
     track.since += time.delta_secs_f64();

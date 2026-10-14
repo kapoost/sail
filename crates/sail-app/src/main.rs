@@ -265,6 +265,7 @@ fn main() {
                 // of systems is twenty long at the most.
                 (
                     net::exchange,
+                    net::rebuild,
                     fleet::rehearsal,
                     fleet::sync,
                     fleet::place,
