@@ -22,6 +22,8 @@
 //! game does not have. A newer snapshot replaces an older one, a lost one is replaced
 //! sixty-six milliseconds later, and the receiver dead-reckons across the gap.
 
+pub mod link;
+
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a message changes shape. Two versions that disagree refuse each other

@@ -25,6 +25,7 @@ mod ink;
 mod input;
 mod islands;
 mod music;
+mod net;
 mod panel;
 mod rain;
 mod retro;
@@ -237,6 +238,7 @@ fn main() {
                 rain::setup,
                 rig::setup,
                 panel::setup,
+                net::setup,
                 windstreaks::setup,
             )
                 // Chained because several of these depend on each other's entities,
@@ -261,7 +263,14 @@ fn main() {
                 // placed and dressed like any other thing in the scene. One group of its
                 // own because the four have to happen in that order and because a tuple
                 // of systems is twenty long at the most.
-                (fleet::rehearsal, fleet::sync, fleet::place, fleet::dress).chain(),
+                (
+                    net::exchange,
+                    fleet::rehearsal,
+                    fleet::sync,
+                    fleet::place,
+                    fleet::dress,
+                )
+                    .chain(),
                 (
                     boat::update_hull,
                     boat::update_rudder,
