@@ -274,6 +274,32 @@ const LIFT_DOWN: f64 = 0.60;
 /// Line left when the fish is at the rod tip and the fight is over, metres.
 const LEADER: f64 = 1.6;
 
+/// What the rod holder will take before it lets go, and for how long.
+///
+/// **The one loss in this file you do not get back**, and the only one that is a mistake
+/// rather than a misfortune.
+///
+/// A rod in a holder is held by a tube and its own weight, and what fails is not a force
+/// but a *moment*: two metres of lever with the load at the far end of it, which a tube
+/// and a bolt will take for a while and not for ever.
+///
+/// So it happens in exactly one situation, and it is the situation the drag dial exists
+/// to teach: **a screwed-down drag, a fish big enough to use it, and nobody holding the
+/// rod.** A drag set anywhere near right never gets there, because a slipping drag is a
+/// load that cannot build. And holding the rod — `U`, which is a pair of hands on it and
+/// not merely a lift — stops it outright.
+/// Measured against the only window it can happen in, which is narrower than it looks
+/// and is set by the stiction rather than by the holder. A drag only slips once the load
+/// passes it by a third, so a setting above about three quarters of the breaking strain
+/// never gives line at all — it holds until the *line* goes. The band where a drag is
+/// both slipping and loading the rod hard is therefore everything between the rule of
+/// thumb and there, and the holder has to give somewhere inside it or it never gives at
+/// all. Sixty-two hundredths puts it comfortably above a drag set to the rule — which
+/// settles around fifty newtons on the worst fish here — and comfortably below the
+/// setting that parts the line instead.
+const HOLDER: f64 = 0.62 * BREAKING;
+const HOLDER_HOLDS: f64 = 1.6;
+
 /// How long a beaten fish will lie alongside before it finds one more run, seconds.
 ///
 /// Twelve, which is two or three waves — long enough to pick a good one and far too
@@ -840,6 +866,12 @@ pub enum Rod {
     Trolling,
     /// Something is on.
     Playing(Hooked),
+    /// Over the side. See [`HOLDER`].
+    ///
+    /// A boat carries one rod. There is another in the chandlery at the next harbour and
+    /// nowhere nearer, which is the whole weight of this state: everything else in this
+    /// file costs you a fish, and this costs you the afternoon.
+    Gone,
 }
 
 /// A fish in the box, which is the only score this game keeps.
@@ -909,6 +941,10 @@ pub struct Fishing {
     /// Same family as `SAIL_SQUALL` and `SAIL_FISH`, and the same reasoning: you cannot
     /// get a thing right by looking at it once every few minutes.
     forced: Option<Quarry>,
+    /// Seconds the holder has been taking more than it can take.
+    straining: f64,
+    /// Seconds since the rod went over the side, for the screen that says so.
+    pub gone_for: f64,
     /// A knock on the rod that has not died away yet, newtons.
     ///
     /// Something hit the lure and did not stay on. It is a real force for a real reason —
@@ -961,6 +997,8 @@ impl Fishing {
             lost: 0,
             rng: Pcg32::new(seed ^ 0xF15E),
             quiet: 0.0,
+            straining: 0.0,
+            gone_for: 0.0,
             forced: std::env::var("SAIL_HOOK").ok().and_then(|name| {
                 let found = Quarry::named(name.trim());
                 if found.is_none() {
@@ -983,7 +1021,22 @@ impl Fishing {
     }
 
     pub fn out(&self) -> bool {
-        !matches!(self.rod, Rod::Stowed)
+        matches!(self.rod, Rod::Trolling | Rod::Playing(_))
+    }
+
+    /// Whether there is a rod aboard at all.
+    pub fn have_a_rod(&self) -> bool {
+        !matches!(self.rod, Rod::Gone)
+    }
+
+    /// A new one out of the chandlery, which is a thing that happens in a harbour and
+    /// nowhere else. Called when a consignment is delivered — see `main.rs`.
+    pub fn ashore(&mut self) {
+        if matches!(self.rod, Rod::Gone) {
+            self.rod = Rod::Stowed;
+            self.gone_for = 0.0;
+            self.straining = 0.0;
+        }
     }
 
     pub fn fish(&self) -> Option<&Hooked> {
@@ -1025,6 +1078,7 @@ impl Fishing {
                 "rod stowed"
             }
             Rod::Playing(_) => "not with a fish on",
+            Rod::Gone => "there is no rod — there will be one at the next harbour",
         }
     }
 
@@ -1106,6 +1160,12 @@ impl Fishing {
     /// Advance the gear. Returns anything worth saying out loud.
     pub fn step(&mut self, dt: f64, sea: Sea, hands: Hands) -> Option<String> {
         self.drag = hands.drag.clamp(0.0, 1.0);
+        if matches!(self.rod, Rod::Gone) {
+            self.gone_for += dt;
+            self.tension = 0.0;
+            self.paying = 0.0;
+            return None;
+        }
         if matches!(self.rod, Rod::Stowed) {
             self.tension = 0.0;
             self.paying = 0.0;
@@ -1215,7 +1275,7 @@ impl Fishing {
             }
             return self.take(dt, sea, depth);
         }
-        self.fight(dt, sea, cap, reel, swept)
+        self.fight(dt, sea, cap, reel, swept, hands.pump)
     }
 
     /// Roll for something taking the lure.
@@ -1361,7 +1421,16 @@ impl Fishing {
     /// from its force-velocity relation, the spring between the fish and the spool, the
     /// drag letting line go once the spring passes its setting, and fatigue charged for
     /// the work the line does on the fish.
-    fn fight(&mut self, dt: f64, sea: Sea, cap: f64, reel: f64, swept: f64) -> Option<String> {
+    #[allow(clippy::too_many_arguments)]
+    fn fight(
+        &mut self,
+        dt: f64,
+        sea: Sea,
+        cap: f64,
+        reel: f64,
+        swept: f64,
+        hands_on: bool,
+    ) -> Option<String> {
         let Rod::Playing(fish) = &mut self.rod else {
             return None;
         };
@@ -1518,6 +1587,34 @@ impl Fishing {
         let beaten = fish.beaten();
         let hold = fish.hold;
 
+        // The holder, before anything else, because if it goes nothing after it matters.
+        // Only while nobody has hold of the rod: a hand on it is the whole difference,
+        // and it is the difference in life too.
+        // And only while it is *running*. A rod is worked out of a tube by a fish that
+        // is still taking line, not by a dead weight: the load has to be high, sustained
+        // and moving. That is also what keeps the two punishments apart, which they have
+        // to be — a drag locked outright does not slip, so a pollack hangs there at
+        // eighty newtons and the *hook* comes out, while a drag wound to nine tenths
+        // still gives and a tope goes on taking line at that load until the holder
+        // tires. Both are the same mistake and they fail differently, and it was worth
+        // an afternoon to keep both.
+        self.straining = if self.tension > HOLDER && self.paying > 0.2 && !hands_on {
+            self.straining + dt
+        } else {
+            0.0
+        };
+        if self.straining > HOLDER_HOLDS {
+            self.rod = Rod::Gone;
+            self.line_out = 0.0;
+            self.tension = 0.0;
+            self.paying = 0.0;
+            self.depth = 0.0;
+            self.stretch = 0.0;
+            self.straining = 0.0;
+            self.gone_for = 0.0;
+            self.lost += 1;
+            return Some("the rod has gone over the side".into());
+        }
         if self.tension > BREAKING {
             self.lost_the_lot();
             return Some(format!(
@@ -1636,17 +1733,29 @@ const DRAG_FINE: f64 = 0.06;
 /// Reads the keyboard directly, like the other eleven modules that do. The key list in
 /// `help.rs` is checked against this file by a test, so a key added here and not
 /// documented there fails the build rather than going unfound.
+#[allow(clippy::too_many_arguments)]
 pub fn work(
     mut gear: ResMut<Fishing>,
     sim: Res<Sim>,
+    course: Res<crate::course::Course>,
     sky: Res<crate::sky::Sky>,
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
     time: Res<Time>,
     mut since_report: Local<f32>,
+    mut landfalls: Local<u32>,
 ) {
     let dt = time.delta_secs_f64();
     let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+
+    // A new rod comes out of the chandlery, and a chandlery is in a harbour. Hung on the
+    // delivery count rather than on a timer or a key, because that is what it costs: not
+    // a wait, but *getting there* — which is the game this is attached to, and it means
+    // losing the rod is paid for in the thing the rest of the boat is already doing.
+    if *landfalls != course.delivered {
+        *landfalls = course.delivered;
+        gear.ashore();
+    }
 
     let sea = Sea {
         stw: sim.sim.telemetry.stw,
@@ -2484,6 +2593,73 @@ mod tests {
         for what in SPECIES {
             assert_eq!(Quarry::named(what.name()), Some(what));
         }
+    }
+
+    /// **The one loss you do not get back**, and it happens for exactly one reason: a
+    /// drag wound up near the top, a fish big enough to use it, and nobody holding the
+    /// rod.
+    ///
+    /// Seven tenths and not the whole way, and the difference between those is the whole
+    /// shape of it. A drag only slips once the load passes it by a third, so wound right
+    /// to the top it never gives at all: the load runs straight past the line's breaking
+    /// strain and the *line* goes, leaving a parted line and a rod still in its holder.
+    /// It is the drag that still gives — but gives at seventy newtons — that holds the
+    /// load up there second after second while the fish goes on taking line, and that is
+    /// what works a rod out of a tube.
+    ///
+    /// So everything above the rule of thumb is a mistake and there are two different
+    /// punishments for it, which is worth the arithmetic it took to keep both.
+    #[test]
+    fn a_tight_drag_on_a_big_fish_takes_the_rod_over_the_side() {
+        let mut f = with(Quarry::Tope, 11.0);
+        let said = sail(&mut f, 20.0, sea(1.5, 40.0), hands(0.0, 0.7));
+        assert!(said.iter().any(|s| s.contains("over the side")), "{said:?}");
+        assert!(!f.have_a_rod());
+        // And it does not come back by waiting.
+        sail(&mut f, 600.0, sea(1.5, 40.0), hands(0.0, 1.0 / 3.0));
+        assert!(!f.have_a_rod(), "a rod does not swim back");
+    }
+
+    /// A hand on it is the whole difference, and it is the difference in life too.
+    #[test]
+    fn a_hand_on_the_rod_keeps_it_aboard() {
+        let mut f = with(Quarry::Tope, 11.0);
+        let mut t = 0.0;
+        while t < 20.0 {
+            f.step(
+                1.0 / 60.0,
+                sea(1.5, 40.0),
+                Hands {
+                    reel: 0.0,
+                    drag: 0.7,
+                    low_gear: false,
+                    pump: true,
+                },
+            );
+            t += 1.0 / 60.0;
+        }
+        assert!(f.have_a_rod(), "it should not have gone with hands on it");
+    }
+
+    /// And a drag set anywhere near the rule never gets near it, because a slipping drag
+    /// is a load that cannot build. The holder is not a hazard, it is a consequence.
+    #[test]
+    fn a_proper_drag_never_threatens_the_holder() {
+        let mut f = with(Quarry::Tope, 11.0);
+        sail(&mut f, 60.0, sea(1.5, 40.0), hands(0.0, 1.0 / 3.0));
+        assert!(f.have_a_rod());
+    }
+
+    /// A harbour is where a new one comes from, and nowhere else.
+    #[test]
+    fn a_new_rod_comes_from_the_chandlery() {
+        let mut f = with(Quarry::Tope, 11.0);
+        sail(&mut f, 20.0, sea(1.5, 40.0), hands(0.0, 0.7));
+        assert!(!f.have_a_rod());
+        f.ashore();
+        assert!(f.have_a_rod());
+        // And it arrives stowed, not streamed: you have to put it out again.
+        assert!(!f.out());
     }
 
     /// The gear cannot be stowed with a fish on it, and saying so is better than doing

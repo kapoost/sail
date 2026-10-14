@@ -379,6 +379,7 @@ fn main() {
                 help::draw,
                 chart::draw,
                 logbook::draw,
+                logbook::lost,
                 hud::draw,
                 tutorial::draw,
                 sight::draw,

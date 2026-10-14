@@ -60,6 +60,88 @@ fn advice(what: Quarry, stw: f64) -> (String, String) {
     )
 }
 
+/// How long the screen stands there before it gets out of the way, seconds.
+///
+/// Eight. Long enough to read twice and not long enough to be in the way of a boat that
+/// is still sailing — which she is, and that is the point: nothing has stopped, the rod
+/// is simply not there any more. A modal box with a button on it would be a *game* saying
+/// you failed. This is a boat telling you what just happened over your shoulder.
+const SHOWN_FOR: f64 = 8.0;
+
+/// The one that is not a fish getting away.
+///
+/// Everything else in the fishing costs you a fish and leaves you fishing. This costs you
+/// the rod, and there is another one at the next harbour and nowhere nearer, so it is the
+/// only thing here that ends the afternoon.
+///
+/// It says what happened, why, and what would have prevented it — in that order, because
+/// that is the order somebody wants it in and because the *why* is the whole lesson: the
+/// holder gives when the drag does not, so a rod goes over the side for exactly one
+/// reason, and it is a reason you chose a minute earlier.
+pub fn lost(mut contexts: bevy_egui::EguiContexts, fishing: Res<Fishing>) -> Result {
+    if fishing.have_a_rod() || fishing.gone_for > SHOWN_FOR {
+        return Ok(());
+    }
+    use crate::panel::paint;
+    let ctx = contexts.ctx_mut()?;
+    // Fading out at the end rather than vanishing, so it reads as the moment passing
+    // instead of a dialog being dismissed by something you did not do.
+    let fade = ((SHOWN_FOR - fishing.gone_for) / 1.5).clamp(0.0, 1.0) as f32;
+
+    egui::Area::new("rod gone".into())
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -40.0))
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgb(22, 12, 12).gamma_multiply(fade))
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    paint::BAD.gamma_multiply(fade * 0.8),
+                ))
+                .inner_margin(egui::Margin::symmetric(22, 16))
+                .show(ui, |ui| {
+                    ui.set_width(392.0);
+                    let say = |ui: &mut egui::Ui, text: &str, colour: egui::Color32, size| {
+                        ui.label(
+                            egui::RichText::new(text)
+                                .color(colour.gamma_multiply(fade))
+                                .monospace()
+                                .size(size),
+                        );
+                    };
+                    say(ui, "THE ROD HAS GONE OVER THE SIDE", paint::BAD, 16.0);
+                    ui.add_space(6.0);
+                    say(
+                        ui,
+                        "The holder gives before the line does. It takes the bending",
+                        paint::FACE,
+                        11.0,
+                    );
+                    say(
+                        ui,
+                        "moment of two metres of lever, and a drag that will not slip",
+                        paint::FACE,
+                        11.0,
+                    );
+                    say(ui, "puts it there and holds it there.", paint::FACE, 11.0);
+                    ui.add_space(6.0);
+                    say(
+                        ui,
+                        "Back the drag off, or keep a hand on it — U is a hand on it.",
+                        paint::LIVE,
+                        11.0,
+                    );
+                    ui.add_space(6.0);
+                    say(
+                        ui,
+                        "There is another in the chandlery at the next harbour.",
+                        paint::LABEL,
+                        11.0,
+                    );
+                });
+        });
+    Ok(())
+}
+
 pub fn draw(
     mut contexts: bevy_egui::EguiContexts,
     book: Res<Logbook>,
@@ -92,6 +174,14 @@ pub fn draw(
                     );
                 };
                 line(ui, "WHAT SWIMS HERE".into(), paint::LABEL, 12.0);
+                if !fishing.have_a_rod() {
+                    line(
+                        ui,
+                        "— and nothing to catch it with until the next harbour".into(),
+                        paint::BAD,
+                        11.0,
+                    );
+                }
                 ui.add_space(4.0);
 
                 for what in SPECIES {
