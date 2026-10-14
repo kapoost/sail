@@ -19,6 +19,13 @@ use crate::sim::Sim;
 #[derive(Component)]
 pub struct Tiller;
 
+/// The winch the clutch bank runs to. Marked so the camera can be pointed at it: it is
+/// the one control on this boat that is behind your shoulder from the helm, and showing
+/// it to somebody the first time they press `1` is most of what they need. See
+/// `glance.rs`.
+#[derive(Component)]
+pub struct ClutchWinch;
+
 /// The compass card, which stays still while the boat turns under it.
 #[derive(Component)]
 pub struct CompassCard;
@@ -295,6 +302,7 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     // The clutch-bank winch, on the deck just forward of the coaming where the slow
     // lines come aft to. It used to live on the coachroof; there is no coachroof.
     b.spawn((
+        ClutchWinch,
         Mesh3d(drum.clone()),
         MeshMaterial3d(metal.clone()),
         Transform::from_xyz(0.52, deck::deck_height(0.55), 0.55),

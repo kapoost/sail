@@ -20,12 +20,14 @@ mod fishing;
 mod fittings;
 mod fleet;
 mod frame;
+mod glance;
 mod help;
 mod horizon;
 mod hud;
 mod ink;
 mod input;
 mod islands;
+mod marks;
 mod mob;
 mod music;
 mod net;
@@ -258,7 +260,7 @@ fn main() {
                 // on the boat once she exists. Grouped because a startup tuple is
                 // twenty long at the most and this one is full.
                 (stowage::setup, rod::setup, creel::setup),
-                (mob::setup, tutorial::setup, net::setup),
+                (mob::setup, tutorial::setup, marks::setup, net::setup),
                 windstreaks::setup,
             )
                 // Chained because several of these depend on each other's entities,
@@ -283,7 +285,7 @@ fn main() {
                 world::report_vitals,
                 world::report_frame_times,
                 chart::record,
-                islands::follow_origin,
+                (islands::follow_origin, marks::follow_origin),
                 // Everybody else's boats: told where they are, given their hulls, then
                 // placed and dressed like any other thing in the scene. One group of its
                 // own because the four have to happen in that order and because a tuple
@@ -326,7 +328,11 @@ fn main() {
                 ),
                 (
                     // The weather you can see, after everything that places it.
-                    (fittings::update_vane, fittings::light_the_lamps),
+                    (
+                        fittings::update_vane,
+                        fittings::light_the_lamps,
+                        marks::flash,
+                    ),
                     horizon::follow,
                     sky::drift,
                     sky::light,
@@ -334,7 +340,7 @@ fn main() {
                     rain::shroud,
                     (settings::toggle, settings::apply),
                     (help::toggle, mob::throw, tutorial::run),
-                    (camera::toggle, camera::dress),
+                    (camera::toggle, camera::dress, glance::posts),
                     camera::aim,
                     hud::toggle,
                     course::restart,
