@@ -435,8 +435,17 @@ impl Simulation {
             } else {
                 lower_awa.signum()
             };
-        } else if lower_awa.signum() != self.wind_side && lower_awa.abs() < crate::units::rad(170.0)
+        } else if lower_awa.signum() != self.wind_side && lower_awa.abs() < crate::units::rad(160.0)
         {
+            // Twenty degrees past dead astern, not ten.
+            //
+            // At ten the band was narrower than a boat squared away actually wanders: on
+            // a dead run she rolls, the apparent swings five or six degrees either side
+            // of the stern with every wave, and anything inside the band was being
+            // treated as a gybe. Reported from the deck as not settling at a hundred and
+            // eighty — and it was not, because every swing through the stern threw the
+            // boom and sent the headsail across the foretriangle again, so the sail spent
+            // its whole time crossing and never drawing.
             self.wind_side = lower_awa.signum();
             self.state.boom_angle = -self.state.boom_angle;
             self.state.boom_rate = -self.state.boom_rate;
@@ -444,7 +453,14 @@ impl Simulation {
             // what has just become the windward side. For a tack that is the backed jib
             // that pushes her bow round; for a gybe it is the sail having to come round
             // the forestay. Both are the same event to this number.
-            self.state.jib_across = 0.0;
+            // Except for a symmetric kite, which does not cross anything. It is the
+            // same shape on both gybes: what changes sides is the *pole*, taken off one
+            // corner and clipped on to the other, and the sail goes on drawing
+            // throughout. A spinnaker that collapsed and thrashed across the foredeck at
+            // every gybe would be a sail nobody would ever set.
+            if controls.headsail != crate::state::Headsail::Spinnaker {
+                self.state.jib_across = 0.0;
+            }
         }
         let boom_angle = if st.boom_angle == 0.0 && st.boom_rate == 0.0 {
             boom_set

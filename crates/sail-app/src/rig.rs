@@ -501,7 +501,16 @@ pub fn update(
                 // what was reported from the deck. A sheet with no sail on the end of it
                 // is coiled on the winch, and the honest way to draw a coil is not to
                 // draw a rope.
-                let working = side * lee > 0.0 && sim.controls.furl < 0.9;
+                let set = sim.controls.furl < 0.9;
+                let kite = sim.controls.headsail == sail_core::state::Headsail::Spinnaker;
+                // A symmetric kite has *two* lines on the deck and both of them are
+                // doing something, which is the one place the "draw only the working
+                // sheet" rule is wrong. The leeward one is the sheet, on the clew. The
+                // windward one is the guy: it goes to the tack, through the end of the
+                // pole, and it is what holds the pole aft against the whole pull of the
+                // sail. A kite drawn with one rope is a pole held up by nothing.
+                let guy = kite && set && side * lee < 0.0;
+                let working = (side * lee > 0.0 && set) || guy;
                 // Only the working sheet is drawn taut from the clew; a furled genoa
                 // has no clew to pull on at all.
                 // The same solve the sail uses, so the rope ends where the sail's
@@ -630,6 +639,9 @@ pub fn update(
                         clew.lerp(car_at, 0.5)
                     }
                 };
+                // The guy's rope starts at the tack rather than the clew — the corner
+                // the pole is holding.
+                let clew = if guy { shape.tack } else { clew };
                 let (a, b) = match (part, led) {
                     // Led round something: two ropes, two sags, a real bend at the block.
                     (0, true) => (clew, join),
@@ -651,7 +663,14 @@ pub fn update(
                     // disagree about where the sheet is being turned.
                     to: if working { b } else { car_at },
                     tension: if working {
-                        jib_load * (1.0 - t.jib.coeffs.luffing as f32) * (1.0 - furled)
+                        // The guy carries the same load as the sheet and then some: it is
+                        // holding a spar as well as a corner of the sail.
+                        let share = if guy {
+                            1.0
+                        } else {
+                            1.0 - t.jib.coeffs.luffing as f32
+                        };
+                        jib_load * share * (1.0 - furled)
                     } else {
                         0.0
                     },

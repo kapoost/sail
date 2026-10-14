@@ -2087,7 +2087,22 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         // tacks and would have been undefined anyway with the boom amidships: the
         // chord lies along the centreline there and has no side to read.
         let mut normal = Vec3::Y.cross(span.normalize()).normalize_or_zero();
-        if normal.x.abs() < 1e-4 {
+        if fullness > 1.2 {
+            // A symmetric kite bellies *forward*, not to leeward of its own chord, and
+            // that is not the same question. Its foot runs athwartships from the pole to
+            // the clew, so the horizontal perpendicular to it is fore-and-aft and which
+            // way round it comes out is decided by the sign of a number that is nearly
+            // zero — noise. The sail then inflated aft, into the mast, which is what was
+            // reported as the thing being inverted and is also most of why it looked like
+            // it was wrapping round the spar.
+            //
+            // Downwind of a sail flying in front of the boat is forward. There is no
+            // ambiguity to resolve and no side to read: the wind is behind her and the
+            // cloth is pushed the way the wind is going.
+            if normal.z > 0.0 {
+                normal = -normal;
+            }
+        } else if normal.x.abs() < 1e-4 {
             // Boom squared off dead across the boat: the chord has no athwartships
             // component left to read a side from, and the sail's surface is lying
             // across the hull. Its leeward is then forward — which is exactly right
