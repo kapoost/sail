@@ -2209,7 +2209,24 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
             //
             // The generic "an eased sail gets fuller" term does not apply here: this
             // *is* that term, written properly for a sail that has no edges held.
-            let depth = (0.12 + 0.30 * chord.sin()) * fullness;
+            // A kite's depth is cut into it, not trimmed into it.
+            //
+            // For a gennaker the term below is right: the sail is flatter sheeted in and
+            // rounder eased, because its luff is a straight line under tension and the
+            // trim is what puts shape in it. A symmetric has no such edge — it is two
+            // halves of a sphere hanging from three ropes — so it is a balloon whenever
+            // there is air in it, at any sheet setting, and it is a flat sheet when there
+            // is not. Reported from the deck as sometimes having the balloon and
+            // sometimes flattening out, which was the sine of the chord angle wandering
+            // with the trim and taking the shape with it.
+            //
+            // So: round while it is full, flat when it collapses, and nothing in between
+            // that depends on where the sheet happens to be.
+            let depth = if fullness > 1.2 {
+                0.42 * fullness * (1.0 - luffing).powf(0.6)
+            } else {
+                (0.12 + 0.30 * chord.sin()) * fullness
+            };
             // And the shoulders, which say where down the hoist that depth sits — high,
             // at two thirds, because the tack is pinned on the sprit and the head is
             // free. Normalised so the deepest point of the sail *is* the depth and the
@@ -2307,7 +2324,20 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
             // up the luff and to the boom along the foot, and the clew is pinned by
             // the outhaul, so the shaking vanishes at v = 0, at u = 0, and therefore
             // at the corner where the two meet.
-            let free_edge = v * u.powf(0.65);
+            // Which edges are held decides where the shaking is. A mainsail is bolted to
+            // the mast up its luff and to the boom along its foot, so it can only shake
+            // along the free edge and the corner between the two held ones is still.
+            //
+            // A spinnaker has no held edge at all. It is a bag on three ropes, and when
+            // it goes it goes everywhere at once — the whole sail cracking across its
+            // width, which is the loudest thing that ever happens on a boat and the
+            // reason a kite collapsing wakes the off watch. Reported from the deck in one
+            // line: it flattens and does not flog, and it is really very light canvas.
+            let free_edge = if fullness > 1.2 {
+                0.45 + 0.55 * (v * u.powf(0.35))
+            } else {
+                v * u.powf(0.65)
+            };
             // Flogging, and it has to *look* like flogging.
             //
             // One sine at nine radians a second and four tenths of a chord of amplitude
@@ -2335,7 +2365,11 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
                 // than one apart, which is not a sail flogging, it is a sail tearing —
                 // caught by the fold sweep the moment that sweep learnt to tell a crease
                 // from a curve.
-                * 0.38
+                // Half-ounce cloth on a sail the size of a tennis court moves further
+                // and faster than a dacron main does, so the kite gets nearly twice the
+                // amplitude. It is also the one sail where the amplitude is safe to spend:
+                // there is no spar beside it for the cloth to be driven through.
+                * if fullness > 1.2 { 0.68 } else { 0.38 }
                 * free_edge
                 * chord_length.max(0.4);
             let point = luff.lerp(leech, v) + normal * (belly + flap + crease) - Vec3::Y * droop;
