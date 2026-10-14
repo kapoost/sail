@@ -452,7 +452,22 @@ where
         return (0.0, best);
     }
     let mut chosen = 0.0;
-    for step in 1..=8 {
+    // Seven rungs, not eight, and the eighth is the whole point of this comment.
+    //
+    // `reef` at 1.0 does not mean the deepest reef: past `boat::DROPPED` it means the
+    // main is *off her*, which is a different decision entirely. Reefing is how you hold
+    // a boat on her feet while she keeps sailing; handing the main is what you do to
+    // heave to, or to run home under headsail alone. Letting a heel target choose between
+    // them means that in any wind where the deepest reef is not enough — twenty-five
+    // knots on a beat, which is a normal bad afternoon — the rule takes the mainsail off
+    // and the boat stops being able to point at all. Measured in the polar: TWA 35 to 50
+    // in 25 knots came out at 2.2 knots with thirty degrees of leeway and the helm hard
+    // over, which is not a slow boat, it is a boat lying there.
+    //
+    // So the ladder stops at the last real reef. Past that she is simply overpowered, the
+    // heel target is not met, and the honest answer is the one a crew gets: you are
+    // carrying too much sail for this and there is nothing left to take in.
+    for step in 1..=7 {
         let reef = step as f64 / 8.0;
         let trial = steady_state_with(cfg, make_wind, twa, seconds, reef, head);
         chosen = reef;
