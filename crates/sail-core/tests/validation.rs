@@ -778,8 +778,14 @@ fn depth_is_fastest_until_the_boat_runs_out_of_righting_moment() {
         }
         let cost = best - best_course(settled.controls.outhaul);
         let relative = cost / best;
+        // Two per cent rather than one and eight, and the difference is windage: part of
+        // the heel the rule is reading is now the rig and the topsides being pushed on,
+        // and no amount of flattening the main takes that part off her. The rule is
+        // unchanged and still within two per cent of a sweep that tries every outhaul at
+        // every angle, which is the claim worth defending — a trimmer reading a heel
+        // gauge cannot do better than that either.
         assert!(
-            relative < 0.018,
+            relative < 0.021,
             "at {tws} kn the rule settles on outhaul {:.2} and gives away {:.3} kn VMG \
              ({:.1} percent) against a best of {:.3}",
             settled.controls.outhaul,
@@ -2593,6 +2599,57 @@ fn the_vane_does_not_gybe_itself_across_the_stern() {
 }
 
 #[test]
+fn in_a_seaway_with_nothing_set_she_still_goes_somewhere() {
+    // The flat-water test above is the clean statement of the claim; this is the one
+    // that caught it being false where it mattered.
+    //
+    // Reported from the deck as a boat sitting still in twenty-two knots of wind with
+    // everything handed: nought point one knots on the log, two degrees of heel, and the
+    // only thing moving was the sea. In flat water the same boat drifted a knot and a
+    // half, so the test passed and the game did not.
+    //
+    // What makes the difference is that a real sea is *moving*. The orbital flow at the
+    // keel runs back and forth at half a metre a second, and the hull is dragged along
+    // with it hard — far harder than a hundred and thirty newtons of windage could push
+    // her through it. So she rode the waves and made no way of her own, which is
+    // precisely what the picture showed. Six times the windage, which is what the pieces
+    // actually add up to, and she goes.
+    let cfg = BoatConfig::archipelago_packet();
+    let tws = kn_to_ms(22.5);
+    let heading = wrap_tau(0.0 - rad(25.0));
+    let sea = sail_core::water::WindSea::new(tws, 8000.0, 0.0, 0xC0FFEE);
+    let mut sim = Simulation::new(
+        cfg,
+        BoatState::at_rest(heading),
+        Box::new(SteadyWind::new(0.0, tws)) as Box<dyn WindField>,
+    )
+    .with_water(Box::new(sea));
+    let controls = Controls {
+        reef: 1.0,
+        furl: 1.0,
+        staysail: 0.0,
+        rudder: 0.0,
+        ..Default::default()
+    };
+    for _ in 0..(120.0 / SUBSTEP) as u64 {
+        sim.run(SUBSTEP, &controls);
+    }
+    let speed = ms_to_kn(sim.telemetry.stw);
+    assert!(
+        speed > 1.5,
+        "with nothing set in twenty-two knots and a sea running she made {speed:.2} kn \
+         through the water, which is a boat being carried by the waves rather than \
+         driven by the wind"
+    );
+    // And she lies the way a sloop lies: wind aft, not pinned where she was pointed.
+    let twa = deg(sim.telemetry.twa).abs();
+    assert!(
+        twa > 120.0,
+        "she should bear away and run off rather than sit at TWA {twa:.0}"
+    );
+}
+
+#[test]
 fn under_bare_poles_she_bears_away_and_lies_stern_to() {
     // With the main handed and the headsail rolled away there is no sail on her, and
     // what is left is windage: the spar, the rigging, the rolled sail on the stay and
@@ -2638,8 +2695,17 @@ fn under_bare_poles_she_bears_away_and_lies_stern_to() {
     for start in [20.0, 45.0, 90.0, 135.0, 170.0] {
         let (twa, speed, vmg) = lying(start);
         // She moves, which she did not before the windage existed.
+        // A knot or two sideways while she is still across the wind, and three or so
+        // once she has borne away and is running off in front of it, which is what a
+        // boat with nothing set actually does in twenty knots and is why lying a-hull
+        // in a gale covers ground.
+        //
+        // The band used to stop at three, and that was a number measured off a windage
+        // six times too small: the beam-on figure in the config said 1.6 m² while the
+        // table of pieces in the doc beside it added the same pieces up to eighteen.
+        // With the arithmetic the doc had already done, she makes 3.2 here.
         assert!(
-            (0.8..=3.0).contains(&speed),
+            (0.8..=4.0).contains(&speed),
             "bare poles in twenty knots should drift a knot or two, got {speed:.2} from \
              a start at TWA {start:.0}"
         );
@@ -2728,9 +2794,15 @@ fn she_will_not_point_under_headsail_alone() {
     );
 
     let (alone, alone_vmg, by_angle) = best(1.0, 0.0);
+    // Up to sixty-eight, because with the main handed the mast, the boom and the sail
+    // flaked on it stop being the leading edge of anything and become naked windage —
+    // five or six square metres of it, pushing her sideways and aft at the one time she
+    // has least drive. The upper end of this band moved when that was counted honestly,
+    // and it moved the way every sailor says it does: a boat under headsail alone is a
+    // boat that will not point.
     assert!(
-        (48.0..=62.0).contains(&alone),
-        "under headsail alone the best she should do is 48-62 deg true, got {alone}"
+        (48.0..=68.0).contains(&alone),
+        "under headsail alone the best she should do is 48-68 deg true, got {alone}"
     );
 
     // And a wall rather than a weight, which is the second half of it and took a second
@@ -3096,7 +3168,11 @@ fn with_no_wind_she_only_ever_slows_down() {
             }
             windows.push(ms_to_kn(total / n));
         }
-        let where_ = if sea.is_some() { "in a seaway" } else { "on flat water" };
+        let where_ = if sea.is_some() {
+            "in a seaway"
+        } else {
+            "on flat water"
+        };
         for pair in windows.windows(2) {
             assert!(
                 pair[1] <= pair[0] + 0.05,

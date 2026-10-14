@@ -624,9 +624,28 @@ impl Simulation {
         // backwards when she is head to wind. More of it beam-on than head-on, because
         // beam-on presents the whole side of the hull and a rolled headsail as well as
         // the spar.
+        //
+        // Beam-on it is four times what it is head-on, and the difference is not a
+        // detail: eighteen square metres against five is the difference between a boat
+        // that lies there and a boat that is being carried to leeward at two knots.
+        //
+        // And it is counted only for what is actually bare. A mast with a mainsail set
+        // on it is the leading edge of that sail — the flow stays attached round it and
+        // its drag is already in the sail's own profile drag — and a genoa that is
+        // unrolled is a sail rather than a sausage on the stay. Counting both twice would
+        // put a few hundred newtons of drag on a boat going to windward that nothing is
+        // actually doing to her. The topsides are there whatever is set, so slightly
+        // under half of it never goes away.
+        let dressed = {
+            let main_up = cfg.reefed_main(controls.reef).0 / cfg.main.area.max(1e-6);
+            0.5 * main_up.clamp(0.0, 1.0) + 0.5 * (1.0 - controls.furl.clamp(0.0, 1.0))
+        };
+        const TOPSIDES: f64 = 0.45;
+        let bare = TOPSIDES + (1.0 - TOPSIDES) * (1.0 - dressed);
+        let sideways = lower_awa.sin() * lower_awa.sin();
         let windage = crate::wind::q_air(lower_aws)
-            * cfg.windage_area
-            * (0.55 + 0.45 * lower_awa.sin() * lower_awa.sin());
+            * (cfg.windage_area + (cfg.windage_beam - cfg.windage_area) * sideways)
+            * bare;
         let windage_drive = -windage * lower_awa.cos();
         let windage_side = -windage * lower_awa.sin();
 
@@ -1123,6 +1142,7 @@ impl Simulation {
 
         self.telemetry = Telemetry {
             mishap: self.mishap,
+            strain: self.strain_main.max(self.strain_head).max(self.strain_stay),
             bend_main,
             bend_jib,
             depth,

@@ -404,6 +404,17 @@ pub struct Telemetry {
     /// what makes a short steep sea so much worse than a long one of the same height.
     pub heave_accel: f64,
 
+    /// How near the rig is to breaking something, nought to one.
+    ///
+    /// Not a force but a *countdown*: a sail carried over the wind its cloth is cut for
+    /// accumulates this at the rate it is overloaded by, and at one it goes. So the
+    /// number answers a question no instantaneous reading can — whether she is merely
+    /// pressed or has already run out of time — and it is the one thing on this boat
+    /// that is genuinely past what she can do rather than near it.
+    ///
+    /// The worst of the three sails, because the first one to go is the one that matters.
+    pub strain: f64,
+
     /// Net driving force and side force from the rig, N.
     pub drive: f64,
     pub side: f64,

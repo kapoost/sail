@@ -109,13 +109,34 @@ pub struct BoatConfig {
     /// sails has ever done.
     ///
     /// A drag coefficient times an area, lumped: mast and boom, the standing and running
-    /// rigging, a rolled headsail on the stay, and the topsides. On a boat this size the
-    /// usual figure is one to two square metres head-on and nearer three beam-on, where
-    /// the whole side of the hull and the furled sail are presented. That is a hundred
-    /// and fifty newtons in twenty-five knots, which is what drives her off to leeward at
-    /// a knot or two with everything handed — and what lays her over when she is lying
-    /// a-hull in a gale, since it acts at the height of the rig.
+    /// rigging, a rolled headsail on the stay, and the topsides. **Head-on**, which is
+    /// the small one — see [`BoatConfig::windage_beam`] for the other, which is four
+    /// times larger and is the one that decides what a boat does with nothing set.
+    ///
+    /// Head-on a yacht is mostly spar: the mast and the furled genoa are cylinders and a
+    /// cylinder presents the same width from every direction, so they do not shrink the
+    /// way the topsides do. About four square metres of them, plus a metre of bow and
+    /// pulpit.
+    ///
+    /// The first version of this said "one to two square metres head-on and nearer three
+    /// beam-on" and used 1.6 — while the table under `windage_x` directly below it added
+    /// the same pieces up to eighteen. Two descriptions of one thing, disagreeing by a
+    /// factor of six, and the one that was wrong was the one doing the work: a boat that
+    /// barely drifted. The table was right.
     pub windage_area: f64,
+    /// And beam-on, which is the figure that matters.
+    ///
+    /// Side-on a boat is enormous: eleven metres of topsides, the mast, the boom with
+    /// the main flaked on it and a genoa rolled on the stay. The pieces are added up in
+    /// the table under [`BoatConfig::windage_x`] and they come to about eighteen square
+    /// metres of drag area on a boat this size — roughly one and a half times her length
+    /// in metres, which is the rule of thumb that falls out of it.
+    ///
+    /// Eighteen square metres is fourteen hundred newtons in twenty-two knots of wind.
+    /// That is the number behind every unpleasant thing that happens in a marina, it is
+    /// why a boat with nothing set still fore-reaches to leeward at a knot or two, and it
+    /// is most of why she lies over when there is not a sail on her.
+    pub windage_beam: f64,
     /// And where it acts, fore and aft, metres — bow positive.
     ///
     /// A force with no moment is a force applied at the origin, which is an accident
@@ -376,7 +397,8 @@ impl BoatConfig {
             gm: 1.15,
             gz_peak_angle: rad(60.0),
             z_clr: 0.85,
-            windage_area: 1.6,
+            windage_area: 4.6,
+            windage_beam: 16.0,
             windage_x: 0.85,
 
             surge_added_mass: 0.05 * displacement,
@@ -576,7 +598,8 @@ impl BoatConfig {
             gm: 1.42,
             gz_peak_angle: rad(65.0),
             z_clr: 0.90,
-            windage_area: 1.6,
+            windage_area: 5.0,
+            windage_beam: 18.0,
             windage_x: 0.85,
 
             surge_added_mass: 0.05 * displacement,
@@ -812,7 +835,8 @@ impl BoatConfig {
             gm: 1.60,
             gz_peak_angle: rad(60.0),
             z_clr: 1.05,
-            windage_area: 1.6,
+            windage_area: 7.0,
+            windage_beam: 26.0,
             windage_x: 0.85,
 
             surge_added_mass: 0.05 * displacement,
