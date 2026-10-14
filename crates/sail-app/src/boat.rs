@@ -112,13 +112,40 @@ pub fn pole_length(loa: f32) -> f32 {
 /// to work would be a knob for a job the trim already describes: the sheet angle *is*
 /// how square the sail is set.
 pub fn pole_end(loa: f32, windward: f32, angle: f32) -> Vec3 {
+    pole_end_stowed(loa, windward, angle, 0.0)
+}
+
+/// How far through being stowed the pole is, taken from the furling line.
+///
+/// Nothing for the first half of rolling the sail away, because the pole comes down
+/// last: you get the kite off her first and then deal with the spar, and a pole taken off
+/// a sail that is still pulling is how people lose fingers.
+pub fn pole_stow(furl: f32) -> f32 {
+    sail_core::units::smoothstep(0.55, 1.0, furl as f64) as f32
+}
+
+/// Where the outboard end is, with the last part of the furl swinging it up the mast.
+///
+/// A spinnaker pole is stowed vertically on a track up the front of the mast: the inboard
+/// end stays on its car and the outboard end is lifted on the topping lift until the spar
+/// is standing against the one it hangs on. From the cockpit that is the nok going up on
+/// an *arc* — it does not fold, it swings, because the inboard end is a hinge and the
+/// pole is rigid. So the direction is turned from where it was out to straight up, rather
+/// than the end being slid along a line, which is the only way of writing it that cannot
+/// shorten the spar halfway through.
+pub fn pole_end_stowed(loa: f32, windward: f32, angle: f32, stow: f32) -> Vec3 {
     let out = angle.clamp(
         sail_core::units::rad(25.0) as f32,
         std::f32::consts::FRAC_PI_2,
     );
     let length = pole_length(loa);
-    Vec3::new(0.0, BOOM_HEIGHT + 0.35, MAST_FOOT_Z)
-        + Vec3::new(windward * out.sin() * length, 0.0, -out.cos() * length)
+    let heel = Vec3::new(0.0, BOOM_HEIGHT + 0.35, MAST_FOOT_Z);
+    let set = Vec3::new(windward * out.sin(), 0.0, -out.cos());
+    // Standing up the front of the mast, leaning a hand's breadth forward of it so the
+    // spar is on the track and not through the sail track.
+    let stowed = Vec3::new(0.0, 1.0, -0.12).normalize();
+    let along = set.lerp(stowed, stow.clamp(0.0, 1.0)).normalize_or_zero();
+    heel + along * length
 }
 
 pub fn sprit_end(loa: f32) -> Vec3 {
@@ -606,29 +633,31 @@ pub fn update_pole(
 ) {
     let t_ = &sim.sim.telemetry;
     let cfg = sim.config();
-    let up =
-        sim.controls.headsail == sail_core::state::Headsail::Spinnaker && sim.controls.furl < 0.9;
-    // To windward, swung aft with the trim — the same two numbers the sail's tack is
-    // computed from, through the same function, so the spar and the corner of the cloth
-    // cannot end up in different places.
-    // From the one place that knows where the pole is. Re-deriving it from the sheet
-    // meant the spar and the sail's tack could disagree — and that the preventer, which
-    // stops the pole dead, had nothing to stop.
-    let end = pole_end(
+    // The pole is a fitting rather than a sail: it lives on the mast whether or not
+    // anything is set from it, standing up its own track when it is not wanted and coming
+    // down on to its car when it is. Which is also what makes the last part of rolling
+    // the kite away worth watching — the nok swings up the mast on an arc.
+    let kite = sim.controls.headsail == sail_core::state::Headsail::Spinnaker;
+    let stow = if kite {
+        pole_stow(sim.controls.furl as f32)
+    } else {
+        1.0
+    };
+    // Its angle comes from the one place that knows where the pole is. Re-deriving it
+    // from the sheet meant the spar and the sail's tack could disagree — and that the
+    // preventer, which stops the pole dead, had nothing to stop.
+    let end = pole_end_stowed(
         cfg.loa as f32,
         t_.pole.signum() as f32,
         t_.pole.abs() as f32,
+        stow,
     );
     let root = Vec3::new(0.0, crate::rig::BOOM_HEIGHT + 0.35, MAST_FOOT_Z);
     for (mut tr, mut vis) in &mut q {
         tr.translation = root;
         let along = (end - root).normalize_or_zero();
         tr.rotation = Quat::from_rotation_arc(Vec3::NEG_Z, along);
-        *vis = if up {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
+        *vis = Visibility::Inherited;
     }
 }
 
