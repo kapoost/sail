@@ -374,7 +374,9 @@ physics says they do.
 The third view faces aft from the cockpit down the wake — which is worth
 having without a rod in your hand, because ahead is where you are going and astern is
 where your wake, your gear and anything overtaking you are. `SAIL_ROD=30` streams thirty
-metres before the first frame and `SAIL_FISH=20` makes them take twenty times as often,
+metres before the first frame, `SAIL_HOOK=ling` puts one of that species on as soon as the
+lure is fishing and another whenever the line comes free, and `SAIL_FISH=20` makes them
+take twenty times as often,
 for the same reason `SAIL_SQUALL` exists: the fight is the interesting part, and testing
 it by waiting for takes is an afternoon per change.
 

@@ -503,6 +503,13 @@ const GROUND: Nature = Nature {
 };
 
 impl Quarry {
+    /// By name, for the dev switch. Anything unrecognised is nothing rather than a
+    /// default fish, because silently hooking a mackerel when you asked for a ling is
+    /// a worse afternoon than being told you spelled it wrong.
+    pub fn named(name: &str) -> Option<Self> {
+        SPECIES.iter().copied().find(|q| q.name() == name)
+    }
+
     fn nature(self) -> &'static Nature {
         match self {
             Quarry::Mackerel => &MACKEREL,
@@ -775,6 +782,18 @@ pub struct Fishing {
     rng: Pcg32,
     /// Seconds since the last take, so one fish does not arrive on top of another.
     quiet: f64,
+    /// A fish to hook on demand, from `SAIL_HOOK`.
+    ///
+    /// Waiting for a take is the right way to test the *trolling* and a useless way to
+    /// test the *fight*: the interesting fish are the rare ones, and the interesting
+    /// moments — a drag that will not hold a ling, low gear against a load that stops the
+    /// handle, a lift mistimed on the drop of a wave — all need one on the line now and
+    /// another one after it. So `SAIL_HOOK=ling` puts one on as soon as the lure is
+    /// fishing and another whenever the line comes free.
+    ///
+    /// Same family as `SAIL_SQUALL` and `SAIL_FISH`, and the same reasoning: you cannot
+    /// get a thing right by looking at it once every few minutes.
+    forced: Option<Quarry>,
     /// A knock on the rod that has not died away yet, newtons.
     ///
     /// Something hit the lure and did not stay on. It is a real force for a real reason —
@@ -827,6 +846,20 @@ impl Fishing {
             lost: 0,
             rng: Pcg32::new(seed ^ 0xF15E),
             quiet: 0.0,
+            forced: std::env::var("SAIL_HOOK").ok().and_then(|name| {
+                let found = Quarry::named(name.trim());
+                if found.is_none() {
+                    println!(
+                        "sail: SAIL_HOOK={name} is not a fish — try {}",
+                        SPECIES
+                            .iter()
+                            .map(|q| q.name())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                }
+                found
+            }),
             knock: 0.0,
             shoal: 0.0,
             plenty,
@@ -1054,6 +1087,11 @@ impl Fishing {
         self.shoal = (self.shoal - dt).max(0.0);
         if self.quiet < 6.0 / self.plenty.max(1.0) {
             return None;
+        }
+        // The dev switch, before anything that could stop it: asked for a ling, you get
+        // a ling, over any ground and at any speed.
+        if let Some(what) = self.forced {
+            return Some(self.hook(what, sea));
         }
         let knots = sail_core::units::ms_to_kn(sea.stw);
 
@@ -1535,12 +1573,20 @@ pub fn work(
         *since_report = 0.0;
         info!(
             "rod: line {:.1} m, lure {:.1} m down over {:.0} m, load {:.0} N, \
-             drag {:.0} N, reel {reel:+.1}, {}",
+             drag {:.0} N, reel {reel:+.1}{}, rod {:.0}%, sea {:.1} m {}, {}",
             gear.line_out,
-            lure_depth(gear.line_out, sea.stw),
+            gear.depth,
             sea.sounding,
             gear.tension,
             gear.drag_force(),
+            if fine { " low" } else { "" },
+            gear.lift * 100.0,
+            sea.swell,
+            if on_the_rise(sea.lift, sea.swell) {
+                "rising"
+            } else {
+                "dropping"
+            },
             match gear.fish() {
                 Some(fish) => fish.doing.name(),
                 None => "nothing on",
@@ -2223,6 +2269,23 @@ mod tests {
             let_go < wound_down,
             "dropping on a slack reel left {let_go} N, winding down left {wound_down} N"
         );
+    }
+
+    /// The dev switch takes a fish by name and refuses anything else, because silently
+    /// hooking a mackerel when you asked for a ling is a worse afternoon than being told
+    /// you spelled it wrong.
+    #[test]
+    fn a_fish_can_be_asked_for_by_name() {
+        assert_eq!(Quarry::named("ling"), Some(Quarry::Ling));
+        assert_eq!(Quarry::named("saithe"), Some(Quarry::Saithe));
+        assert_eq!(Quarry::named("trout"), None);
+        // The ground is not in the list, because it is not caught.
+        assert_eq!(Quarry::named("the bottom"), None);
+        // And every name in the table round-trips, so adding a species cannot leave it
+        // unreachable from the switch.
+        for what in SPECIES {
+            assert_eq!(Quarry::named(what.name()), Some(what));
+        }
     }
 
     /// The gear cannot be stowed with a fish on it, and saying so is better than doing
