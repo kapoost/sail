@@ -26,12 +26,17 @@ pub struct StowedPole;
 /// Where each bag lies: along the side deck, forward of the mast, in the order a crew
 /// would strike them — the one you are most likely to want next is nearest the hatch.
 fn berth(which: Headsail) -> (f32, f32) {
+    // Where the deck is wide enough to put a bag down and still walk past it, which on
+    // this hull is between the mast and the forward end of the coachroof: half a metre
+    // further forward the half-beam is down to a quarter of a metre and a bag put there
+    // is inside the stem. Measured rather than guessed — the sheer is a function in
+    // `deck.rs` and it can simply be asked.
     match which {
         // (z along the boat, which side)
-        Headsail::Genoa => (MAST_FOOT_Z - 1.1, 1.0),
-        Headsail::Code0 => (MAST_FOOT_Z - 2.2, -1.0),
-        Headsail::Gennaker => (MAST_FOOT_Z - 1.1, -1.0),
-        Headsail::Spinnaker => (MAST_FOOT_Z - 2.2, 1.0),
+        Headsail::Genoa => (MAST_FOOT_Z + 0.5, 1.0),
+        Headsail::Code0 => (MAST_FOOT_Z - 0.6, -1.0),
+        Headsail::Gennaker => (MAST_FOOT_Z + 0.5, -1.0),
+        Headsail::Spinnaker => (MAST_FOOT_Z - 0.6, 1.0),
     }
 }
 
@@ -165,10 +170,11 @@ pub fn setup(
     boat: Query<Entity, With<crate::boat::BoatRoot>>,
 ) {
     let Ok(root) = boat.single() else {
+        warn!("no boat to stow anything on");
         return;
     };
     let stencil = images.add(markings());
-    let bag = meshes.add(bag_mesh(1.75, 0.27));
+    let bag = meshes.add(bag_mesh(1.55, 0.26));
     for which in [
         Headsail::Genoa,
         Headsail::Code0,
@@ -176,8 +182,9 @@ pub fn setup(
         Headsail::Spinnaker,
     ] {
         let (z, side) = berth(which);
-        let y = crate::deck::deck_height(z) + 0.22;
-        let x = side * (crate::deck::deck_half_beam(z) - 0.42);
+        // Sitting on the deck against the toe rail, not floating over the middle of it.
+        let y = crate::deck::deck_height(z) + 0.17;
+        let x = side * (crate::deck::deck_half_beam(z) - 0.36);
         commands.entity(root).with_children(|b| {
             b.spawn((
                 SailBag(which),
@@ -196,10 +203,26 @@ pub fn setup(
         });
     }
 
-    // And the pole in its chocks on the opposite side deck from the bags that matter,
-    // lying fore and aft for the same reason.
-    let z = MAST_FOOT_Z - 0.4;
+    // And the pole in its chocks along the port side deck.
+    //
+    // Laid *along the sheer* rather than parallel to the centreline, because the side
+    // deck narrows towards the bow: a spar put down at a constant offset from the middle
+    // is inboard at its after end and hanging over the water at its forward one, which is
+    // what was reported. Both ends are set in from the gunwale by the same hand's breadth
+    // and the spar takes the angle between them, which is what a pair of chocks does.
     let length = crate::boat::pole_length(sim.config().loa as f32);
+    let aft = MAST_FOOT_Z - 0.3;
+    let forward = aft - length;
+    const INSET: f32 = 0.34;
+    let end = |z: f32| {
+        Vec3::new(
+            -(crate::deck::deck_half_beam(z) - INSET),
+            crate::deck::deck_height(z) + 0.10,
+            z,
+        )
+    };
+    let (chock_aft, chock_fwd) = (end(aft), end(forward));
+    let along = (chock_fwd - chock_aft).normalize_or_zero();
     commands.entity(root).with_children(|b| {
         b.spawn((
             StowedPole,
@@ -209,12 +232,8 @@ pub fn setup(
                 perceptual_roughness: 0.22,
                 ..default()
             })),
-            Transform::from_xyz(
-                -(crate::deck::deck_half_beam(z) - 0.30),
-                crate::deck::deck_height(z) + 0.10,
-                z - length * 0.1,
-            )
-            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            Transform::from_translation((chock_aft + chock_fwd) * 0.5)
+                .with_rotation(Quat::from_rotation_arc(Vec3::Y, along)),
             Visibility::default(),
         ));
     });
