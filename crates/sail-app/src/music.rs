@@ -43,6 +43,7 @@
 
 use bevy::prelude::*;
 
+use crate::course::Leg;
 use crate::sim::Sim;
 use crate::sound::SoundHandle;
 
@@ -106,18 +107,18 @@ impl Motif {
     /// four notes, not a motif.
     fn invent(rng: &mut impl FnMut() -> f32) -> Self {
         let openings: [[i32; 4]; 12] = [
-            [0, 2, 1, 0],   // a turn round the tonic: the commonest opening there is
-            [0, 1, 2, 4],   // a climb
-            [4, 2, 1, 0],   // and the fall that answers it
-            [0, 4, 2, 1],   // a leap, then filling in behind it
-            [0, 2, 4, 2],   // an arch
-            [2, 1, 0, -3],  // dropping to the seventh below, which is very Nordic
-            [0, 0, 2, 4],   // a repeated note that then goes: a shanty's shape
-            [4, 4, 2, 0],   // the same thing falling, which is how a chorus answers
-            [0, -1, 0, 2],  // dipping under the tonic first — a lift that works by delay
-            [2, 4, 3, 2],   // a turn higher up, round the third
-            [0, 3, 2, 1],   // a fourth, the interval every hymn and half the sea songs
-            [1, 0, 2, 0],   // leaning on the second and resolving down, twice
+            [0, 2, 1, 0],  // a turn round the tonic: the commonest opening there is
+            [0, 1, 2, 4],  // a climb
+            [4, 2, 1, 0],  // and the fall that answers it
+            [0, 4, 2, 1],  // a leap, then filling in behind it
+            [0, 2, 4, 2],  // an arch
+            [2, 1, 0, -3], // dropping to the seventh below, which is very Nordic
+            [0, 0, 2, 4],  // a repeated note that then goes: a shanty's shape
+            [4, 4, 2, 0],  // the same thing falling, which is how a chorus answers
+            [0, -1, 0, 2], // dipping under the tonic first — a lift that works by delay
+            [2, 4, 3, 2],  // a turn higher up, round the third
+            [0, 3, 2, 1],  // a fourth, the interval every hymn and half the sea songs
+            [1, 0, 2, 0],  // leaning on the second and resolving down, twice
         ];
         let shape = openings[(rng() * openings.len() as f32) as usize % openings.len()];
         // Rhythms that leave the right silences. A cell that speaks on every quaver has
@@ -160,14 +161,14 @@ impl Motif {
 /// bar is a cadence — the bar that has to land rather than carry on.
 fn how_to_say_it(bar: u32) -> (usize, i32, bool, bool) {
     match bar % PHRASE {
-        0 => (0, 0, false, false),  // the A part
-        1 => (0, 2, false, false),  // said a third higher
-        2 => (0, 0, true, false),   // turned over
-        3 => (0, 0, false, true),   // and landed: the half cadence
-        4 => (1, 4, false, false),  // the B part, up where a B part lives
-        5 => (1, 4, false, false),  // said again
-        6 => (1, 2, true, false),   // turned over and coming down
-        _ => (0, 0, false, true),   // home, with the A's own shape, and landed
+        0 => (0, 0, false, false), // the A part
+        1 => (0, 2, false, false), // said a third higher
+        2 => (0, 0, true, false),  // turned over
+        3 => (0, 0, false, true),  // and landed: the half cadence
+        4 => (1, 4, false, false), // the B part, up where a B part lives
+        5 => (1, 4, false, false), // said again
+        6 => (1, 2, true, false),  // turned over and coming down
+        _ => (0, 0, false, true),  // home, with the A's own shape, and landed
     }
 }
 
@@ -230,6 +231,37 @@ impl Music {
         self.rng ^= self.rng >> 17;
         self.rng ^= self.rng << 5;
         self.rng as f32 / u32::MAX as f32
+    }
+}
+
+/// What a point of sail *is*, musically.
+///
+/// The three are not three settings of one thing. They are three different kinds of
+/// sailing and everybody who has done any of it knows which one they are in without
+/// looking at an instrument, so the music should know too.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Going {
+    /// Close-hauled: a fight. She is being made to do something she does not want to,
+    /// everything is loaded, and it goes on for hours.
+    Beating,
+    /// Reaching: the one that is worth all the rest. Fastest, most alive, and the only
+    /// point of sail that feels like it is *driving* rather than coping or coasting.
+    Reaching,
+    /// Running: chill. The apparent wind falls away, the boat goes quiet, and there is
+    /// nothing to do but keep her there.
+    Running,
+}
+
+impl Going {
+    fn of(twa: f32) -> Self {
+        let t = twa.abs();
+        if t < 62.0 {
+            Going::Beating
+        } else if t < 132.0 {
+            Going::Reaching
+        } else {
+            Going::Running
+        }
     }
 }
 
@@ -390,13 +422,21 @@ fn asking(sim: &Sim, hour: f32, tonic: f32) -> Asking {
         // when nothing is being hauled at all and the boat is only drifting.
         beats: if wind < 6.0 {
             3
-        } else if twa < 70.0 {
-            4
         } else {
-            6
+            match Going::of(twa) {
+                // Four to haul to: a halyard shanty is in four because it is sung to a
+                // pull, and beating is nothing but pulling.
+                Going::Beating => 4,
+                // Four again, but it will be filled quite differently — a reach wants a
+                // motor and six-eight lilts where this needs to drive.
+                Going::Reaching => 4,
+                // Six-eight rolls the way she rolls off the wind.
+                Going::Running => 6,
+            }
         },
         // Upwind is work and Aeolian; off the wind the sixth lifts and it is a reel.
-        dorian: twa >= 70.0,
+        // Upwind is work and Aeolian. Off the wind the sixth lifts and it is a reel.
+        dorian: Going::of(twa) != Going::Beating,
         // The band thins as it blows. One voice in a gale is not a limitation, it is
         // what the sea leaves room for.
         fullness: (1.0 - (force - 4.0).max(0.0) / 4.0).clamp(0.25, 1.0),
@@ -415,12 +455,14 @@ fn asking(sim: &Sim, hour: f32, tonic: f32) -> Asking {
 }
 
 /// Place the notes.
+#[allow(clippy::too_many_arguments)]
 pub fn compose(
     time: Res<Time>,
     sim: Res<Sim>,
     sky: Res<crate::sky::Sky>,
     ink: Res<crate::world::Ink>,
     pilot: Res<crate::input::Pilot>,
+    course: Res<crate::course::Course>,
     sound: Res<SoundHandle>,
     mut music: ResMut<Music>,
 ) {
@@ -662,6 +704,24 @@ pub fn compose(
         tonic * 2.0_f32.powf(scale[d] as f32 / 12.0 + oct + octave + want.register)
     };
 
+    // How soon each note is let go of — and why a sung idiom needs to be told.
+    //
+    // A shanty is *sung*. It is a line of separate words with breath between them, and
+    // the crew hauling to it stops the note on the pull; an air played on a whistle is
+    // tongued the same way. A piano does the opposite: every note rings for two or three
+    // seconds, so at this tempo eight or nine of them are sounding at once and the tune
+    // dissolves into its own harmony. Which is pleasant, and is not a song — reported
+    // from the deck as wanting a little silence between the sounds, which is exactly what
+    // a singer leaves without being asked for it.
+    //
+    // Stopped harder the faster the tune runs, because the thing that has to stay the
+    // same is the *gap*, not the note: hold about a quarter of a second of ring whatever
+    // the tempo, and a quaver always has air after it.
+    //
+    // The cinematic treatment below gets none of this. There the long ring is the sound.
+    let quaver = 30.0 / want.tempo.max(30.0);
+    let detach = (0.25 / quaver).clamp(0.45, 0.85);
+
     // The tune. The motif, said the way this bar says it, on the chord this bar sits on.
     let spoken = motif.at(in_bar).map(|d| {
         let turned = if upside_down { -d } else { d };
@@ -697,14 +757,15 @@ pub fn compose(
         // tune, and it carries it only while there is a headsail doing something.
         // The tune thins out as a squall comes on and is gone before it arrives.
         let left = (1.0 - approach * 1.3).clamp(0.0, 1.0);
-        p.strike(
+        p.strike_damped(
             hz(degree, 1.0),
             want.level * weight * hush * head_work * left,
+            detach,
         );
         // Going well, the melody is doubled an octave up — the oldest way there is of
         // saying the same thing brighter, and it arrives exactly when she does.
         if flying && strong {
-            p.strike(hz(degree, 2.0), want.level * 0.4 * hush * head_work);
+            p.strike_damped(hz(degree, 2.0), want.level * 0.4 * hush * head_work, detach);
         }
     } else if going > 0.35 {
         // The quaver the motif does not speak on, and what a player puts there.
@@ -724,12 +785,13 @@ pub fn compose(
         });
         if let Some(next) = coming {
             // A step above whatever is about to be played, which is what a cut is.
-            p.strike(hz(next + 1, 1.0), want.level * 0.22 * going * hush);
+            // Stopped almost at once: a cut is a flick of a note, not a note.
+            p.strike_damped(hz(next + 1, 1.0), want.level * 0.22 * going * hush, 0.95);
         } else if going > 0.55 && !ink.0 {
             // And in the gaps with nothing coming, a passing note towards where the tune
             // was — only in the vanilla picture, because a chip has no voice to spare.
             let step_to = music.degree + if music.next() < 0.5 { 1 } else { -1 };
-            p.strike(hz(step_to, 1.0), want.level * 0.3 * going * hush);
+            p.strike_damped(hz(step_to, 1.0), want.level * 0.3 * going * hush, detach);
         }
     }
 
@@ -755,7 +817,10 @@ pub fn compose(
         if near > 0.45 && strong {
             // The semitone. Not in the scale at all, which is the point — it is not part
             // of the music, it is the thing arriving.
-            p.strike(music.tonic * 2.0_f32.powf(1.0 / 12.0) * 0.25, 0.3 * near * hush);
+            p.strike(
+                music.tonic * 2.0_f32.powf(1.0 / 12.0) * 0.25,
+                0.3 * near * hush,
+            );
         }
         // The pulse quickens by *thinning the gaps* rather than by playing faster than
         // the composer can place: every fourth quaver while it is still a dark patch on
@@ -777,6 +842,90 @@ pub fn compose(
         }
     }
 
+    // --- The passage: where she is going, and whether she will get there ------------
+    //
+    // The music knew everything about the weather and nothing about the *voyage*, which
+    // is the whole arc of this game — you set out, you are given a hard time, and you
+    // arrive. There was not a note for arriving, which is the one moment in a passage
+    // when anything resolves.
+    let (range, _) = course.to_target(sim.sim.state.pos);
+    let miles = range / 1852.0;
+    let overdue = course.remaining() < 0.0;
+
+    // Coming in. A mile out the harbour is a thing you can see, and from there the music
+    // starts going home: the major third over the tonic, which is the one bright interval
+    // this minor world has and is therefore worth saving for exactly this.
+    if miles < 1.2 && !matches!(course.leg, Leg::Idle) {
+        let home = ((1.2 - miles) / 1.2).clamp(0.0, 1.0) as f32;
+        if strong && bar.is_multiple_of(2) {
+            p.strike_damped(hz(0, 0.0), want.level * 0.5 * home * hush, detach * 0.3);
+            // The third. In a passage that has been in a minor mode for half an hour,
+            // one major third is an enormous event, and it costs nothing because it has
+            // been withheld all along.
+            if home > 0.45 {
+                p.strike_damped(
+                    music.tonic * 2.0_f32.powf(4.0 / 12.0),
+                    want.level * 0.45 * home * hush,
+                    detach * 0.3,
+                );
+            }
+        }
+    }
+
+    // And overdue, which is the other end of the same feeling: the harmony stops landing.
+    // The seventh under the tonic rather than the tonic itself, so every phrase ends
+    // somewhere that is nearly home and is not.
+    if overdue && strong && bar == PHRASE - 1 {
+        p.strike_damped(hz(-1, -1.0), want.level * 0.5 * hush, detach * 0.5);
+    }
+
+    // --- Water under the keel -------------------------------------------------------
+    //
+    // The thing that actually ends passages had an alarm on the panel and not one note in
+    // the score. It gets the same device as a squall for the same reason — a pulse whose
+    // rate says how near it is — but two octaves down and on the pedal rather than the
+    // block, so the two can happen at once and still be told apart. A squall is something
+    // arriving; the ground is something you are going *towards*, and the lower register
+    // is the difference.
+    let under = t.under_keel as f32;
+    if under < 6.0 && under > -1.0 {
+        let shoal = ((6.0 - under) / 6.0).clamp(0.0, 1.0);
+        let every = if shoal > 0.75 {
+            1
+        } else if shoal > 0.45 {
+            2
+        } else {
+            4
+        };
+        if in_bar.is_multiple_of(every) {
+            // A semitone *below* the tonic, which is the note that does not belong to
+            // anything above it. Rising harmony is hope; this is the floor coming up.
+            p.strike(
+                music.tonic * 0.25 * 2.0_f32.powf(-1.0 / 12.0),
+                (0.2 + 0.6 * shoal) * hush,
+            );
+        }
+    }
+
+    // --- The motion -----------------------------------------------------------------
+    //
+    // A boat punching into a head sea and a boat surfing down a swell at the same wind
+    // speed feel nothing alike and used to sound identical. Both are in the telemetry
+    // and neither was being read.
+    //
+    // Surfing is the one everybody remembers: she picks up, the apparent goes aft, and
+    // for ten seconds she is doing something she cannot normally do. It gets the octave
+    // above, struck on the beat — the oldest way of saying *brighter*, and it arrives
+    // when she does.
+    if t.surf_force > 400.0 && strong {
+        p.strike_damped(hz(music.degree, 2.0), want.level * 0.35 * hush, detach);
+    }
+    // And the slam: when she is pitching hard the block follows the *hull* rather than
+    // the bar line, which is the rhythm section going back to what it was taken from.
+    if sim.sim.state.pitch_rate.abs() > 0.22 && in_bar.is_multiple_of(2) {
+        p.tick(0.3 * hush);
+    }
+
     // The cinematic treatment of the same tune: wide, slow and open.
     //
     // Three things do nearly all of it, and none is a new melody. The register opens
@@ -793,13 +942,65 @@ pub fn compose(
             // is doing. It is what a film score puts under a scene that has not resolved.
             p.strike(hz(0, -2.0), want.level * 0.85 * hush);
             // And the chord as an open fifth, wide apart.
-            p.strike(hz(chord, -1.0), want.level * 0.6 * hush * main_work.max(0.35));
-            p.strike(hz(chord + 4, 0.0), want.level * 0.5 * hush * main_work.max(0.35));
+            p.strike(
+                hz(chord, -1.0),
+                want.level * 0.6 * hush * main_work.max(0.35),
+            );
+            p.strike(
+                hz(chord + 4, 0.0),
+                want.level * 0.5 * hush * main_work.max(0.35),
+            );
         }
         // Three and three and two, which is a bar of eight read the way a heartbeat
         // reads it rather than the way a dance does.
         if matches!(in_bar % 8, 0 | 3 | 6) {
             p.tick(0.3 + 0.45 * urgency);
+        }
+    }
+
+    // --- What kind of sailing this is, played rather than described -----------------
+    let going_kind = Going::of(sail_core::units::deg(t.twa) as f32);
+    match going_kind {
+        // **The fight.** Everything lands where it is not expected. Syncopation is
+        // effort — a beat pushed off its place is the sound of something resisting — and
+        // close-hauled is the only point of sail where the boat is being made to do
+        // something she would rather not. The bass goes to one and three and leaves the
+        // middle of the bar empty, so each note is a heave rather than a walk.
+        Going::Beating => {
+            if in_bar % 4 == 3 && drama < 0.45 {
+                // The off-beat push, under the melody: a second voice leaning where the
+                // beat is not.
+                p.strike(
+                    hz(chord + 4, -1.0),
+                    want.level * 0.4 * hush * main_work * going.max(0.3),
+                );
+            }
+        }
+        // **The drive.** This is the Bach and the rock, which are the same animal: a
+        // motor in the quavers and a bass that *walks* — moving by step from one chord to
+        // the next instead of jumping to the root and sitting there. That walking is what
+        // makes a reach feel like it is going somewhere rather than merely going fast,
+        // and it is why a toccata and a riff do the same thing to a listener.
+        Going::Reaching => {
+            if !ink.0 && main_work > 0.05 {
+                // Every quaver, stepping towards the next chord's root. The step is
+                // chosen by where the harmony is heading, which is the whole trick.
+                let next = progression[((bar + 1) % 4) as usize] as i32;
+                let along = (in_bar as i32).min(per_bar as i32 - 1);
+                let reach_to = chord + (next - chord) * along / per_bar.max(1) as i32;
+                p.strike(
+                    hz(reach_to, -1.0),
+                    want.level * 0.3 * hush * main_work * (0.5 + 0.5 * going),
+                );
+            }
+        }
+        // **Chill.** Long notes and a great deal of air. Off the wind the apparent falls
+        // away, the boat goes quiet, and the music should do the same — the mistake would
+        // be to fill it, when what a run actually sounds like is space with a boat in it.
+        Going::Running => {
+            if strong && bar.is_multiple_of(2) {
+                p.strike(hz(chord, -1.0), want.level * 0.45 * hush * main_work);
+            }
         }
     }
 
@@ -817,7 +1018,11 @@ pub fn compose(
         // degrees further up, and that note belongs to the tune rather than to this
         // chord.
         for (i, tone) in [0, 2, 4].iter().enumerate() {
-            let fatten = if want.fullness > 0.6 || i < 2 { 1.0 } else { 0.0 };
+            let fatten = if want.fullness > 0.6 || i < 2 {
+                1.0
+            } else {
+                0.0
+            };
             p.strike(
                 hz(chord + tone, -1.0),
                 want.level * 0.5 * fatten * hush * main_work * (1.0 - 0.1 * i as f32),
@@ -827,9 +1032,7 @@ pub fn compose(
 
     // And the bass, which holds under a long sea and walks under a short one.
     let swell = sim.sim.water.significant_height() > 1.2;
-    if (strong || (!swell && in_bar == (per_bar / 2) as usize && going > 0.5))
-        && main_work > 0.05
-    {
+    if (strong || (!swell && in_bar == (per_bar / 2) as usize && going > 0.5)) && main_work > 0.05 {
         p.strike(hz(chord, -2.0), want.level * 0.7 * hush * main_work);
     }
 

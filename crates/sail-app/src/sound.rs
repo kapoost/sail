@@ -198,14 +198,34 @@ impl SeaParams {
     /// dropped, which is the right failure — a dropped note is a thinner chord and a
     /// blocked audio thread is a click.
     pub fn strike(&self, hz: f32, velocity: f32) -> bool {
+        self.strike_damped(hz, velocity, 0.0)
+    }
+
+    /// The same, told how soon to let go of it.
+    ///
+    /// Nought is a note left to ring, which is what a piano does and what a long line
+    /// wants. One is a note stopped almost as soon as it is made — and that is not a
+    /// lesser version of the first, it is a different way of singing.
+    ///
+    /// Which this music needs, because the idiom it is in is *sung*. A shanty is a line
+    /// of separate words with air between them; the notes do not run into each other,
+    /// and a crew of twenty breathing together is as much of the sound as the pitches
+    /// are. Played with a piano's sustain the same notes blur into a wash and the thing
+    /// stops being a song and becomes a texture. Reported from the deck as wanting a
+    /// little silence between the sounds, which is exactly what a singer does without
+    /// being asked.
+    pub fn strike_damped(&self, hz: f32, velocity: f32, damp: f32) -> bool {
         if hz < 20.0 || hz > 8000.0 || velocity <= 0.0 {
             return false;
         }
         // Packed into one atomic so a note is never half-written: twelve bits of
         // frequency in tenths of a hertz is a tenth of a cent at the top of the
         // keyboard, and eight of velocity is finer than a hand.
-        let packed = ((hz.round() as u32).min(0xFFFF) << 8)
-            | ((velocity.clamp(0.0, 1.0) * 255.0) as u32).min(255);
+        // Frequency, velocity, and how soon to let go — three fields in one word so a
+        // note is never half-written.
+        let packed = ((hz.round() as u32).min(0x7FFF) << 17)
+            | (((velocity.clamp(0.0, 1.0) * 255.0) as u32).min(255) << 9)
+            | ((damp.clamp(0.0, 1.0) * 255.0) as u32).min(255);
         for slot in &self.notes {
             if slot
                 .compare_exchange(0, packed, Ordering::Relaxed, Ordering::Relaxed)
@@ -238,7 +258,6 @@ impl SeaParams {
     pub fn set_boat(&self, level: f32) {
         store(&self.boat_level, level.clamp(0.0, 1.0));
     }
-
 
     pub fn set_muted(&self, muted: bool) {
         self.muted
@@ -363,13 +382,28 @@ struct Plucked {
 }
 
 impl Plucked {
-    fn strike(&mut self, hz: f32, velocity: f32, shape: f32, sample_rate: f32) {
+    fn strike(&mut self, hz: f32, velocity: f32, shape: f32, sample_rate: f32, damp: f32) {
         self.hz = hz;
         self.shape = shape;
         self.knock = velocity * 0.5;
         // How quickly this note dies: about eight seconds at the bottom of the keyboard
         // and one at the top, which is roughly what a real one does.
-        let base = 0.55 + 6.0 * (1.0 - (hz / 900.0).clamp(0.0, 1.0)).powi(2);
+        let natural = 0.55 + 6.0 * (1.0 - (hz / 900.0).clamp(0.0, 1.0)).powi(2);
+        // Damped, the note is stopped rather than left to die.
+        //
+        // Geometrically rather than by subtracting a fraction, because the range is
+        // enormous: a note in the middle of the melody's register rings for seven seconds
+        // and the gap it has to fit inside is a third of one. The first version of this
+        // took a sixth off the natural decay and I called it a damped note in the
+        // comment; measured, it still masked the following note for two and a quarter
+        // seconds, which is seven quavers. Proportional thinking was the whole mistake —
+        // what matters is the absolute length of the tail against the absolute length of
+        // a quaver, and only a measurement says whether that is met.
+        //
+        // So full damping is forty-three milliseconds of ring whatever the pitch, and
+        // everything between is the geometric mean of that and the string's own.
+        const STOPPED: f32 = 0.043;
+        let base = natural * (STOPPED / natural).powf(damp.clamp(0.0, 1.0));
         // Stiffness. More at the bottom, where the strings are short for their pitch.
         let b = 0.0004 + 0.0022 * (1.0 - (hz / 500.0).clamp(0.0, 1.0));
         for n in 0..6 {
@@ -470,6 +504,9 @@ pub struct SeaStream {
     smooth: Smoothed,
     rig_phase: f32,
     rig_phase2: f32,
+    /// The whine's pitch half a second ago, and whether the wire is holding its note.
+    rig_steady: f32,
+    rig_gate: f32,
     surge_phase: f32,
     flog_phase: f32,
     /// Twelve voices, each one a note that has been struck and is dying.
@@ -541,6 +578,8 @@ impl SeaStream {
             },
             rig_phase: 0.0,
             rig_phase2: 0.0,
+            rig_steady: 200.0,
+            rig_gate: 1.0,
             surge_phase: 0.0,
             flog_phase: 0.0,
             flog_env: 0.0,
@@ -635,10 +674,38 @@ impl Iterator for SeaStream {
         let wind = self.wind_b.run(w, self.smooth.wind_cutoff) * self.smooth.wind * 2.2;
 
         // --- Rigging whine: a detuned pair, so it reads as wire and not a tone -----
+        //
+        // And it only sings while the wind is holding still, which is the difference
+        // between wire and a theremin.
+        //
+        // The pitch comes from vortex shedding, and shedding has to *lock on*: the
+        // eddies have to fall off the wire in step with each other, and they cannot do
+        // that in a flow that is changing underneath them. So a shroud in a rising gust
+        // does not slide up the scale — it lets go, goes quiet, and finds a new note
+        // when the gust steadies. Anybody who has sat in a cockpit in twenty-five knots
+        // has heard the rig pick up and drop out, over and over, and never once heard it
+        // glissando.
+        //
+        // Measuring that costs almost nothing: a second follower of the same pitch, slow
+        // enough to be half a second behind, and the gap between the two *is* how much
+        // the note has moved lately. No differentiating, so no amplified jitter.
+        Smoothed::towards(&mut self.rig_steady, self.smooth.rig_hz, 0.00004);
+        let moved = (self.smooth.rig_hz - self.rig_steady).abs() / self.rig_steady.max(60.0);
+        let holding = 1.0 / (1.0 + (moved / 0.04).powi(2));
+        // Asymmetric, because the two halves are not the same event: the note breaks the
+        // moment the flow does, and then the wire has to find it again, which takes a
+        // moment and is most of what makes this sound alive.
+        let rate = if holding < self.rig_gate {
+            0.0015
+        } else {
+            0.00018
+        };
+        Smoothed::towards(&mut self.rig_gate, holding, rate);
         self.rig_phase = (self.rig_phase + self.smooth.rig_hz * dt).fract();
         self.rig_phase2 = (self.rig_phase2 + self.smooth.rig_hz * 1.013 * dt).fract();
         let rig = (fast_sin(self.rig_phase) * 0.6 + fast_sin(self.rig_phase2) * 0.4)
             * self.smooth.rig
+            * self.rig_gate
             * 0.14;
 
         // --- Water at the hull: bandpassed noise with a bow-wave surge -------------
@@ -676,9 +743,8 @@ impl Iterator for SeaStream {
         }
         self.pawl_env *= 0.9972;
         self.pawl_ring = (self.pawl_ring + self.pawl_hz * dt).fract();
-        let tooth = (fast_sin(self.pawl_ring) * 0.55 + self.noise() * 0.45)
-            * self.pawl_env
-            * self.pawl_env;
+        let tooth =
+            (fast_sin(self.pawl_ring) * 0.55 + self.noise() * 0.45) * self.pawl_env * self.pawl_env;
 
         // Rope through a block and a jammer: a rasp, and it is noise with the top taken
         // off rather than a tone — polyester over anodised aluminium has no pitch.
@@ -693,8 +759,7 @@ impl Iterator for SeaStream {
         }
         self.clack_env *= 0.9988;
         self.clack_phase = (self.clack_phase + 95.0 * dt).fract();
-        let clack_out = (fast_sin(self.clack_phase) * 0.7
-            + self.noise() * 0.3)
+        let clack_out = (fast_sin(self.clack_phase) * 0.7 + self.noise() * 0.3)
             * self.clack_env
             * self.clack_env
             * 1.45;
@@ -766,14 +831,15 @@ impl Iterator for SeaStream {
                 if packed == 0 {
                     continue;
                 }
-                let hz = (packed >> 8) as f32;
-                let velocity = (packed & 0xFF) as f32 / 255.0;
+                let hz = (packed >> 17) as f32;
+                let velocity = ((packed >> 9) & 0xFF) as f32 / 255.0;
+                let damp = (packed & 0xFF) as f32 / 255.0;
                 // Round robin, so a long bass note is not stolen by the next chord. With
                 // twelve voices and notes that die in a few seconds, stealing is rare
                 // enough that the simplest rule is the right one.
                 let v = self.next_voice;
                 self.next_voice = (self.next_voice + 1) % self.voices.len();
-                self.voices[v].strike(hz, velocity, t_shape, 1.0 / dt);
+                self.voices[v].strike(hz, velocity, t_shape, 1.0 / dt, damp);
             }
         }
         for v in 0..self.voices.len() {
@@ -817,11 +883,10 @@ impl Iterator for SeaStream {
 
         // Grouped as somebody would actually want them: the elements, the ship, and the
         // music over both.
-        let mix = ((wind + water + rain) * t_sea + (rig + flog + gear) * t_boat)
-            * MASTER
-            * t_master
-            + song * t_music * t_master
-            + beep * MASTER * 2.0;
+        let mix =
+            ((wind + water + rain) * t_sea + (rig + flog + gear) * t_boat) * MASTER * t_master
+                + song * t_music * t_master
+                + beep * MASTER * 2.0;
         let mix = mix * self.smooth.mute;
         // Soft clip. A gust plus a flogging genoa can stack up, and a hard clip is a
         // much worse sound than a little compression.
@@ -1014,4 +1079,109 @@ pub fn update(
     }
     was.boom = boom;
     was.started = true;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// How long a note takes to get out of the way of the next one.
+    ///
+    /// The number that matters is not how long the note is audible — a piano note is
+    /// faintly audible for seconds — but how long it is loud enough to blur the note
+    /// after it, which is around twenty decibels down for notes of the same loudness.
+    /// Measured against the quaver at this music's own tempi (0.25–0.40 s), because a
+    /// note still masking when the next one arrives cannot help blurring into it.
+    fn masks_for(hz: f32, damp: f32) -> f32 {
+        let rate = 48_000.0;
+        let mut v = Plucked::default();
+        v.strike(hz, 1.0, 0.0, rate, damp);
+        let mut peak = 0.0f32;
+        let mut last_loud = 0.0f32;
+        for i in 0..(rate as usize * 10) {
+            let out = v.next(1.0 / rate, 0.0).abs();
+            peak = peak.max(out);
+            if out > peak / 10.0 {
+                last_loud = i as f32 / rate;
+            }
+        }
+        last_loud
+    }
+
+    /// Only the wire singing: everything else in the mix turned off, so the measurement
+    /// is of one voice.
+    fn rig_only() -> (Arc<SeaParams>, SeaStream) {
+        let p = Arc::new(SeaParams::default());
+        store(&p.rig_level, 1.0);
+        store(&p.rig_hz, 300.0);
+        (p.clone(), SeaStream::new(p))
+    }
+
+    fn rms(stream: &mut SeaStream, seconds: f32) -> f32 {
+        let n = (SAMPLE_RATE as f32 * seconds) as usize;
+        let mut sum = 0.0f64;
+        for _ in 0..n {
+            let out = stream.next().unwrap_or(0.0);
+            sum += (out * out) as f64;
+        }
+        (sum / n as f64).sqrt() as f32
+    }
+
+    /// The rig lets go of its note when the wind changes, and finds it again when the
+    /// wind settles.
+    #[test]
+    fn the_wire_only_sings_while_the_flow_holds_still() {
+        let (p, mut s) = rig_only();
+        // Settle: the mute ramp alone is a couple of seconds.
+        rms(&mut s, 4.0);
+        let holding = rms(&mut s, 1.0);
+        assert!(holding > 0.01, "a steady rig should sing: {holding:.4}");
+
+        // A gust: the apparent goes from fifteen to nineteen knots over two seconds,
+        // which is an ordinary puff and a quarter on the shedding frequency.
+        let steps = 120;
+        let mut during = 0.0f32;
+        for i in 0..steps {
+            store(&p.rig_hz, 300.0 + 75.0 * (i as f32 / steps as f32));
+            during = during.max(rms(&mut s, 2.0 / steps as f32));
+        }
+        let gusting = rms(&mut s, 0.2);
+        assert!(
+            gusting < holding * 0.5,
+            "the note should break while the flow moves: {gusting:.4} against {holding:.4}"
+        );
+        let _ = during;
+
+        // And back, once it is steady at the new speed. Not instantly — the wire has to
+        // find the note — but inside a second and a half.
+        rms(&mut s, 1.5);
+        // Measured: a two-second puff of four knots drops the whine to 0.35 of its
+        // steady level — nine decibels, which is audibly letting go and not a dip — and
+        // it is back at full inside a second and a half.
+        let again = rms(&mut s, 1.0);
+        assert!(
+            again > holding * 0.8,
+            "and come back when it steadies: {again:.4} against {holding:.4}"
+        );
+    }
+
+    #[test]
+    fn a_damped_note_leaves_room_for_the_next_one() {
+        // Middle of the melody's range. Undamped it rings straight through two or three
+        // quavers, which is the wash that was reported; damped it is clear of the next
+        // note.
+        let rung = masks_for(440.0, 0.0);
+        let sung = masks_for(440.0, 0.76);
+        // Measured: 3.93 s left to ring, 0.229 s sung, 0.106 s for a cut — and the
+        // bottom of the melody's register, where the strings ring longest, is 0.265 s.
+        assert!(rung > 0.8, "a piano note should ring: {rung:.2} s");
+        assert!(
+            sung < 0.30,
+            "a sung note has to be clear of the next quaver: {sung:.2} s"
+        );
+        // And the cut, which is an ornament rather than a note and has to be gone before
+        // the note it decorates.
+        let cut = masks_for(660.0, 0.95);
+        assert!(cut < 0.12, "a cut is a flick: {cut:.3} s");
+    }
 }
