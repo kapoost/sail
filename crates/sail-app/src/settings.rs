@@ -35,7 +35,7 @@ use crate::sound::SoundHandle;
 /// that do something irreversible-ish. Underneath three sections of preferences it would
 /// be both hard to find and easy to hit by accident. Four short pages also means the
 /// panel stops growing downwards every time the game learns something new.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
     Sound,
     Picture,
@@ -159,32 +159,7 @@ pub fn draw(
         .show(ctx, |ui| {
             frame.show(ui, |ui| {
                 ui.set_width(300.0);
-                ui.horizontal(|ui| {
-                    for (tab, name) in [
-                        (Tab::Sound, "SOUND"),
-                        (Tab::Picture, "PICTURE"),
-                        (Tab::Weather, "WEATHER"),
-                        (Tab::Network, "TOGETHER"),
-                    ] {
-                        let on = settings.tab == tab;
-                        if ui
-                            .selectable_label(
-                                on,
-                                egui::RichText::new(name)
-                                    .monospace()
-                                    .size(11.0)
-                                    .color(if on {
-                                        egui::Color32::from_rgb(230, 198, 120)
-                                    } else {
-                                        egui::Color32::from_rgb(150, 150, 130)
-                                    }),
-                            )
-                            .clicked()
-                        {
-                            settings.tab = tab;
-                        }
-                    }
-                });
+                tabs(ui, &mut settings.tab);
                 ui.add_space(8.0);
                 ui.separator();
                 ui.add_space(8.0);
@@ -460,6 +435,45 @@ pub fn draw(
     Ok(())
 }
 
+/// The four pages, as a row of labels.
+///
+/// Its own function so that it can be looked at without a window. Everything else in
+/// this panel is a slider over a resource and would need half the game to test; this is
+/// the one piece whose correctness is "the page is there and you can get to it", which is
+/// exactly the thing that was reported missing and exactly the thing a test can hold.
+pub fn tabs(ui: &mut egui::Ui, current: &mut Tab) {
+    ui.horizontal(|ui| {
+        for (tab, name) in PAGES {
+            let on = *current == tab;
+            if ui
+                .selectable_label(
+                    on,
+                    egui::RichText::new(name)
+                        .monospace()
+                        .size(11.0)
+                        .color(if on {
+                            egui::Color32::from_rgb(230, 198, 120)
+                        } else {
+                            egui::Color32::from_rgb(150, 150, 130)
+                        }),
+                )
+                .clicked()
+            {
+                *current = tab;
+            }
+        }
+    });
+}
+
+/// In the order they are read, which is the order they were added in and also the order
+/// of how often anybody touches them.
+pub const PAGES: [(Tab, &str); 4] = [
+    (Tab::Sound, "SOUND"),
+    (Tab::Picture, "PICTURE"),
+    (Tab::Weather, "WEATHER"),
+    (Tab::Network, "TOGETHER"),
+];
+
 fn heading(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
@@ -625,5 +639,145 @@ fn join(net: &mut crate::net::Net) {
             net.scan = None;
         }
         Err(e) => net.trouble = format!("{address}: {e}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fleet::{Fleet, Ghost};
+    use crate::net::Net;
+
+    /// Every word the panel actually draws, in one string.
+    ///
+    /// egui needs no window: it lays out into shapes and hands them back, and the text
+    /// shapes carry the text. So a test can ask the question a person asks — *what does
+    /// it say* — instead of the question a test usually settles for, which is whether the
+    /// function ran without panicking.
+    fn words(add: impl FnOnce(&mut egui::Ui)) -> String {
+        let ctx = egui::Context::default();
+        // `run_ui` rather than `run`: this egui gives a bare `Ui` straight out, which is
+        // what these functions take.
+        let mut add = Some(add);
+        let output = ctx.run_ui(egui::RawInput::default(), move |ui| {
+            if let Some(add) = add.take() {
+                add(ui);
+            }
+        });
+        let mut said = String::new();
+        fn walk(shape: &egui::epaint::Shape, into: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    into.push_str(text.galley.text());
+                    into.push('\n');
+                }
+                egui::epaint::Shape::Vec(many) => {
+                    for shape in many {
+                        walk(shape, into);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut said);
+        }
+        said
+    }
+
+    /// Reported from the deck as "I cannot see the network menu", and the answer that
+    /// time was that the game being looked at was a release older than the menu. Which is
+    /// the right answer and a poor one to have to give: nothing in this repository could
+    /// have told anybody whether the page was there, in any version, without opening a
+    /// window and pressing Escape.
+    #[test]
+    fn there_is_a_page_for_sailing_together_and_you_can_get_to_it() {
+        assert!(
+            PAGES.iter().any(|(tab, _)| *tab == Tab::Network),
+            "the panel has no network page at all"
+        );
+        let mut current = Tab::Sound;
+        let said = words(|ui| tabs(ui, &mut current));
+        for (_, name) in PAGES {
+            assert!(
+                said.contains(name),
+                "the tab bar does not show {name}: {said:?}"
+            );
+        }
+        assert!(
+            said.contains("TOGETHER"),
+            "the page is found by its name, by a person: {said:?}"
+        );
+        assert_eq!(
+            current,
+            Tab::Sound,
+            "drawing a tab bar must not switch pages"
+        );
+    }
+
+    /// The three states the page can be in, in the words it uses for them.
+    #[test]
+    fn the_page_says_which_of_the_three_things_is_happening() {
+        let fleet = Fleet::default();
+        let here = glam::DVec2::ZERO;
+
+        // Not in a game: it looks for one, and says so when there is nothing to find.
+        let mut net = Net::default();
+        let said = words(|ui| together(ui, &mut net, &fleet, here));
+        assert!(
+            said.contains("no games on this network"),
+            "an empty list has to say it is empty: {said:?}"
+        );
+        assert!(
+            net.scan.is_some(),
+            "opening the page should start looking for games"
+        );
+
+        // Trouble, which the panel must not swallow: a person who cannot join needs the
+        // reason on the screen and not in a log file they will never open.
+        net.trouble = "no route to that address".into();
+        let said = words(|ui| together(ui, &mut net, &fleet, here));
+        assert!(
+            said.contains("no route to that address"),
+            "the reason it failed has to be visible: {said:?}"
+        );
+    }
+
+    /// A boat in the list comes with how far off she is — the thing a sailor actually
+    /// wants from a list of names, and the thing this panel once promised in a comment
+    /// while printing the name alone. That lie survived a review; this does not let it
+    /// come back.
+    #[test]
+    fn a_boat_in_the_list_comes_with_how_far_off_she_is() {
+        let mut fleet = Fleet::default();
+        let her = sail_net::Drawn {
+            pos: [0.0, 2778.0], // a mile and a half north
+            ..Default::default()
+        };
+        fleet.boats.push(Ghost {
+            id: 2,
+            name: "miki".into(),
+            drawn: her,
+            age: 0.0,
+        });
+        // The third state needs a real link, because the page reads the link and the
+        // joined flag together — a flag on its own is the "not in a game" state, which is
+        // what this test found when it tried to fake it. Nobody has to be listening on
+        // the other end: a link is a socket and a thread, and it knocks into the dark
+        // quite happily.
+        let mut net = Net {
+            link: Some(sail_net::link::Link::join("127.0.0.1:1", "test").expect("a socket")),
+            joined: true,
+            ..Default::default()
+        };
+        let said = words(|ui| together(ui, &mut net, &fleet, glam::DVec2::ZERO));
+        assert!(
+            said.contains("miki"),
+            "her name is not in the list: {said:?}"
+        );
+        assert!(
+            said.contains("1.50 nm"),
+            "and nor is how far off she is: {said:?}"
+        );
     }
 }
