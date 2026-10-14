@@ -434,6 +434,27 @@ pub fn deck_half_beam(z: f32) -> f32 {
     sheer_at(z).0
 }
 
+/// How far out the **hull** is on the quarters, metres — which is not where the deck is.
+///
+/// The table above is a *fitted* sheer, faired over seven stations because a scan's raw
+/// gunwale is lumpy and a sheerline is the one line on a boat that is never allowed to
+/// be. Aft, that fairing and the planking part company: at station 4.3 the table gives a
+/// half-beam of 0.55 m while the scan's topsides reach 0.79 m at the height things hang
+/// at, her counter standing well outboard of the deck it carries.
+///
+/// So anything hung on a quarter and placed from [`deck_half_beam`] is a quarter of a
+/// metre inside the planking. That has now been got wrong three times by two people — a
+/// lifebuoy twice and a creel once — which is three times more than a number deserves to
+/// be rediscovered, so it lives here beside the table it contradicts rather than in
+/// whichever module happened to find it.
+///
+/// Measured off `assets/venus.glb` through the same transform `boat.rs` applies to it —
+/// quarter turn, scaled to length, dropped by the sinkage — over a band of vertices
+/// either side of the station. A constant rather than a function of `z` because the
+/// measurement is a band on the quarters and claiming a curve from it would be claiming
+/// more than was measured.
+pub const HULL_ON_THE_QUARTER: f32 = 0.79;
+
 /// Where the cockpit sole is, which is where the helmsman is standing.
 pub fn cockpit_sole() -> f32 {
     deck_height(2.6) - SOLE_DROP

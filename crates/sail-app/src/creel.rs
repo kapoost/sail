@@ -151,11 +151,17 @@ fn basket_mesh(bottom: f32, mouth: f32, depth: f32) -> Mesh {
     mesh
 }
 
-/// Where the lanyard is made fast, in boat coordinates.
+/// Where the basket swings from, in boat coordinates.
+///
+/// The cleat is on the deck, where a cleat is; the basket hangs over the rail, so what
+/// it actually swings about is a point outboard of her planking. Placed off
+/// [`crate::deck::HULL_ON_THE_QUARTER`] and not off `deck_half_beam`, because aft those
+/// are two different lines a quarter of a metre apart — this hung inside the boat until
+/// somebody measured the hull, which is the whole of what that constant is for.
 fn cleat() -> Vec3 {
     Vec3::new(
-        -(crate::deck::deck_half_beam(CLEAT_Z) - 0.05),
-        crate::deck::deck_height(CLEAT_Z) + 0.04,
+        -(crate::deck::HULL_ON_THE_QUARTER + 0.07),
+        crate::deck::deck_height(CLEAT_Z) + 0.02,
         CLEAT_Z,
     )
 }
@@ -265,8 +271,12 @@ pub fn update(
     // in the moment she comes back up rather than at the end of the roll.
     swing.rate -= st.roll_rate as f32 * dt * 2.4;
     swing.angle += swing.rate * dt;
-    // It cannot swing past the quarter it is tied to.
-    swing.angle = swing.angle.clamp(-0.8, 0.8);
+    // It can swing out as far as it likes and barely in at all, because inboard of it
+    // is the boat. A basket on a lanyard off the quarter fetches up against the topsides
+    // and stops, which is a limit with a reason rather than a pair of matched numbers:
+    // seven centimetres of clearance over a lanyard this long is about a tenth of a
+    // radian before the wicker is on the planking.
+    swing.angle = swing.angle.clamp(-0.85, 0.11);
     for mut transform in &mut creel {
         transform.rotation = Quat::from_rotation_z(swing.angle);
     }
