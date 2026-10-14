@@ -76,7 +76,8 @@ const KEYS: [(&str, &[(&str, &str)]); 5] = [
         &[
             (
                 "Enter",
-                "throw the lifebuoy — the throw is the part that cannot be late",
+                "throw the lifebuoy, while somebody is in the water — and the throw is \
+                 the part that cannot be late",
             ),
             (" ", "Esc, then DRILL, practises the whole thing on Oscar"),
         ],

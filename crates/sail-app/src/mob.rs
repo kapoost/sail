@@ -84,20 +84,18 @@ const RUN_DOWN_SPEED: f64 = 3.0;
 /// difficulty setting, which is why it is a constant with a reason rather than a knob.
 pub const ENDURANCE: f64 = 600.0;
 
-/// Where the lifebuoy is stowed, along the boat.
+/// Where the lifebuoy is lashed: on the starboard quarter, outboard, behind the
+/// helmsman's shoulder.
 ///
-/// Right aft, behind the helmsman, which is where it has to be — and the arithmetic says
-/// so rather than taste. A tiller sweeps forty degrees each way about a stock a little
-/// forward of the transom and reaches a metre and a quarter ahead of it, which is the
-/// whole cockpit: there is no station between the companionway and the stock where
-/// three quarters of a metre of ring clears both the tiller and the sheer. Abaft the
-/// stock there is nothing in the way, and that is a step behind the helmsman's shoulder.
-///
-/// It overhangs the quarters by a hand's breadth each side, because the counter there is
-/// only half a metre across. That is not a mistake: a lifebuoy lashed across a transom
-/// overhangs on every boat this size, and the alternative is a ring small enough to be
-/// no use to anybody.
-const RACK_Z: f32 = 4.72;
+/// Three things decide it and none is taste. A tiller sweeps forty degrees each way
+/// about its stock and reaches a metre and a quarter forward, which is the whole cockpit
+/// — so nothing of this size stands anywhere inboard between the hatch and the transom.
+/// Hung *outboard* on the quarter it is clear of that sweep entirely, which is also where
+/// a boat with no pushpit carries one: lashed to the topsides, half of it above the rail,
+/// where a hand falls on it from the helm. And it goes to **starboard** because the creel
+/// hangs off the port quarter on its lanyard, and the two would otherwise be swinging
+/// through each other.
+const RACK_Z: f32 = 4.30;
 /// How big a lifebuoy is: a ring three quarters of a metre across.
 const RING: (f32, f32) = (0.24, 0.37);
 
@@ -201,6 +199,15 @@ impl Overboard {
         matches!(self.drill, Drill::Overboard { .. })
     }
 
+    /// Where the alarm was raised, which is what a plotter's MOB button records and what
+    /// the first leg of the pattern is measured from.
+    pub fn mark(&self) -> Option<DVec2> {
+        match self.drill {
+            Drill::Overboard { mark, .. } => Some(mark),
+            _ => None,
+        }
+    }
+
     /// Where he is, for anything that has to work out a course to him.
     pub fn oscar(&self) -> Option<DVec2> {
         match self.drill {
@@ -295,25 +302,31 @@ pub fn setup(
         return;
     };
 
-    // On edge across the counter, facing aft so it is a ring from the cockpit and a turn
-    // of the head from the helm. A torus lies in its own XZ plane, so it is stood up.
+    // Lashed flat against the topsides on the starboard quarter, standing on edge with
+    // its top above the rail and the rest of it over the water. A torus lies in its own
+    // XZ plane, so turning it about Z puts its face athwartships — which is a ring seen
+    // from outside the boat and a line seen from the cockpit, exactly as one looks.
     let deck = crate::deck::deck_height(RACK_Z);
+    let out = crate::deck::deck_half_beam(RACK_Z) - 0.02;
     commands.entity(root).with_children(|b| {
         b.spawn((
             Stowed,
-            Transform::from_xyz(0.0, deck + RING.1 + 0.02, RACK_Z)
-                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            Transform::from_xyz(out, deck + 0.10, RACK_Z)
+                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
             Visibility::default(),
         ))
         .with_children(|p| {
             p.spawn((Mesh3d(ring.clone()), MeshMaterial3d(orange.clone())));
-            // The lashing that holds it there, which is the difference between a
-            // lifebuoy stowed and a lifebuoy left lying on the deck.
-            p.spawn((
-                Mesh3d(w.meshes.add(Cylinder::new(0.012, 0.42))),
-                MeshMaterial3d(tape.clone()),
-                Transform::from_xyz(0.0, -0.1, -RING.1 + 0.02),
-            ));
+            // The two lashings that hold it to her side, which are the difference
+            // between a lifebuoy stowed and a lifebuoy left lying about.
+            for at in [-0.22_f32, 0.22] {
+                p.spawn((
+                    Mesh3d(w.meshes.add(Cylinder::new(0.011, 0.30))),
+                    MeshMaterial3d(tape.clone()),
+                    Transform::from_xyz(0.0, 0.0, at)
+                        .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                ));
+            }
         });
     });
 
@@ -466,6 +479,15 @@ pub fn update(
             Visibility::Inherited
         };
     }
+    // And the ring that was thrown is picked up with him, or left floating while the
+    // debrief for a man who was not. What it must not do is stay in the water for the
+    // rest of the passage and be there again at the start of the next drill, which is
+    // what it did: nothing ever took it out once the drill it belonged to had ended.
+    if !live && !matches!(over.drill, Drill::Lost { .. }) {
+        if let Ok((_, mut vis)) = ring.single_mut() {
+            *vis = Visibility::Hidden;
+        }
+    }
     if let Ok((_, mut vis)) = oscar.single_mut() {
         *vis = if live {
             Visibility::Inherited
@@ -573,7 +595,14 @@ pub fn verdict(
         _ => said.push_str(" — and nobody threw him anything"),
     }
     if run_downs > 0 {
-        said.push_str(&format!(", sailed over him {run_downs} time(s)"));
+        said.push_str(
+            match run_downs {
+                1 => ", and sailed over him once".to_string(),
+                2 => ", and sailed over him twice".to_string(),
+                n => format!(", and sailed over him {n} times"),
+            }
+            .as_str(),
+        );
     }
     said
 }
@@ -585,33 +614,28 @@ mod tests {
 
     /// The lifebuoy is where one goes, and nothing on the boat sweeps through it.
     ///
-    /// The tiller is the whole constraint and it is the reason this is right aft: it
-    /// pivots at the stock, reaches a metre and a quarter forward and swings forty
-    /// degrees each way, so it sweeps the entire cockpit and every station between the
-    /// companionway and the transom. Three quarters of a metre of ring does not fit
-    /// beside it anywhere — tried, and the arithmetic refused every position before
-    /// anything was drawn.
+    /// The tiller is the whole constraint: it pivots at the stock, reaches a metre and a
+    /// quarter forward and swings forty degrees each way, so it sweeps every station
+    /// between the companionway and the transom. Three quarters of a metre of ring does
+    /// not fit beside it anywhere inboard — tried, and the arithmetic refused every
+    /// position before anything was drawn. Outboard on the quarter it is clear of the
+    /// sweep by the width of the side deck.
     #[test]
     fn nothing_aboard_sweeps_through_the_lifebuoy() {
         let stock = 4.60_f32;
-        // Abaft the stock, so the tiller cannot reach it at all.
+        let out = crate::deck::deck_half_beam(RACK_Z) - 0.02;
+        // Outboard of anything the tiller can reach at that station.
+        let sweep = (stock - RACK_Z).max(0.0) * (40.0_f32).to_radians().tan();
         assert!(
-            RACK_Z > stock,
-            "the ring at z {RACK_Z:.2} is inside the tiller's sweep"
+            out > sweep + 0.15,
+            "the tiller reaches {sweep:.2} m out at z {RACK_Z:.2} and the ring is at \
+             {out:.2}"
         );
+        // To starboard, because the creel hangs off the port quarter and the two would
+        // otherwise swing through each other.
+        assert!(out > 0.0, "the lifebuoy is on the creel's side");
         // Forward of the wind vane, which stands on the centreline right aft.
-        let vane_z = stock + 0.34;
-        assert!(
-            RACK_Z + RING.1 * 0.2 < vane_z,
-            "the ring at z {RACK_Z:.2} is standing in the wind vane at {vane_z:.2}"
-        );
-        // Still on the boat: the counter is narrow there and it overhangs, but only by a
-        // hand's breadth, which is what a lifebuoy on a transom does.
-        let overhang = RING.1 - crate::deck::deck_half_beam(RACK_Z);
-        assert!(
-            overhang < 0.20,
-            "it hangs {overhang:.2} m over the water each side, which is a ring on a pole"
-        );
+        assert!(RACK_Z + RING.1 < stock + 0.34 + RING.1);
         // And it is a lifebuoy rather than a bracelet: three quarters of a metre across.
         assert!(
             (0.60..0.85).contains(&(RING.1 * 2.0)),
@@ -666,7 +690,7 @@ mod tests {
         assert!(said.contains("after 3 s"), "{said}");
         let nothing = verdict(61.0, None, None, 2);
         assert!(nothing.contains("nobody threw him anything"), "{nothing}");
-        assert!(nothing.contains("2 time"), "{nothing}");
+        assert!(nothing.contains("sailed over him twice"), "{nothing}");
         assert!(nothing.contains("1:01"), "{nothing}");
     }
 

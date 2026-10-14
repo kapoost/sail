@@ -164,7 +164,8 @@ pub struct Tutorial {
     /// Which side the wind was on when the tack began, so the tack can be detected.
     tack_from: f64,
     /// Which side of him the approach is being made from, chosen once when the run down
-    /// to leeward begins and then kept.
+    /// to leeward begins and then kept. Never nought — a side of nought would put the
+    /// gate dead upwind of him, which is the one place she cannot sail from.
     ///
     /// Kept, because it was read live off the wind and that was a fault: sailing down to
     /// leeward she passes through dead downwind, the apparent wind changes sides, and the
@@ -185,6 +186,7 @@ impl Tutorial {
     pub fn asked_for(start: bool) -> Self {
         Self {
             wants_start: start,
+            approach_side: 1.0,
             ..Self::default()
         }
     }
@@ -661,12 +663,20 @@ fn instruction(stage: Stage, sim: &Sim, over: &Overboard, held: f64) -> (String,
             let range = over.off_the_rail(sim).unwrap_or(0.0);
             let left = over.endurance_left(sim.sim.state.time);
             let minutes = left * crate::mob::ENDURANCE / 60.0;
+            // The distance from the *mark* — the spot where he went in — because that is
+            // the one the leg ends on. It was showing the range to him instead, which
+            // drifts away from it as he does, so the counter on screen and the thing that
+            // advanced the leg were two different measurements of two different places.
+            let run = over
+                .mark()
+                .map(|m| (sim.sim.state.pos - m).length() / loa)
+                .unwrap_or(0.0);
             let body = match leg {
                 Leg::Clear => format!(
                     "Sail clear on a beam reach — wind square on the side of her, {:.0} \
-                     now. Four boat lengths is enough; you are {:.1} along.",
-                    deg(tm.awa.abs()),
-                    range / loa
+                     now. {CLEAR_LENGTHS:.0} boat lengths is enough; you are {run:.1} \
+                     along.",
+                    deg(tm.awa.abs())
                 ),
                 Leg::Tack => "Helm over and through the wind. Not round the stern: a gybe \
                               with a man in the water puts the boom across the cockpit and \
