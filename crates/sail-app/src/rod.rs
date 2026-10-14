@@ -60,6 +60,26 @@ const AROUND: usize = 6;
 /// Points in the drawn line. Enough for the belly in it to be a curve.
 const LINE_POINTS: usize = 14;
 
+/// Where the rings sit along the blank and how big each one is, metres.
+///
+/// Six, which is what a two-metre boat rod carries. The butt ring is the size of a
+/// wedding ring and the tip ring is barely bigger than the line.
+/// How a ring is tessellated: points round the ring, and round the wire it is bent
+/// from. Named rather than inlined because the test that counts the blank's vertices
+/// has to agree with it, and a magic number in two places is a test that will one day
+/// be edited to match the bug.
+const RING_ROUND: usize = 8;
+const RING_THROUGH: usize = 4;
+
+const RINGS: [(f32, f32); 6] = [
+    (0.20, 0.0130),
+    (0.38, 0.0100),
+    (0.54, 0.0082),
+    (0.68, 0.0068),
+    (0.82, 0.0056),
+    (0.97, 0.0044),
+];
+
 /// The spring rate the bend is drawn from. The same number the fight uses, deliberately:
 /// see `fishing::ROD`, which is private because nothing outside the model is allowed to
 /// reason with it — this is the one exception and it is a drawing, so it is stated here
@@ -94,16 +114,50 @@ pub struct Line;
 #[derive(Component)]
 pub struct Terminal;
 
-/// How much line has run off the spool since the ratchet last clicked, metres.
-///
-/// A ratchet is a pawl over a toothed wheel and it clicks once a tooth, so the sound is
-/// a function of *distance*, not of time — which is why a run starts as a rattle and
-/// turns into a scream without anything changing its pitch. Eight centimetres a click is
-/// about right for a small multiplier.
-#[derive(Resource, Default)]
-pub struct Ratchet(f32);
+/// The drum, which turns. Separate from the frame, which does not.
+#[derive(Component)]
+pub struct Spool;
 
-const TOOTH: f32 = 0.08;
+/// The far end of the line: where it is, and the skin that tells a lure from a fish.
+///
+/// Named because the filters have to spell out that it cannot be the spool, and a query
+/// with two components and two filters written inline is a signature nobody reads.
+type FarEnd<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut Transform,
+        &'static MeshMaterial3d<StandardMaterial>,
+    ),
+    (With<Terminal>, Without<Spool>),
+>;
+
+/// What the reel was doing last frame.
+///
+/// Four small memories, and every one of them exists because a *change* is the event and
+/// a state is not: a drag that is at a third tells you nothing, a drag that moved to a
+/// third is somebody's hand on the star and is worth looking at.
+#[derive(Resource, Default)]
+pub struct Ratchet {
+    /// Whether line was going out, so the drag breaking away is heard once rather than
+    /// every frame it stays broken away.
+    running: bool,
+    /// Where the spool stood, radians, so the drum can be drawn turning.
+    turn: f32,
+    /// What was on the line, so a take can be told from a fish that is merely still on.
+    playing: bool,
+    /// Where the drag star was, and how much line was out.
+    drag: f64,
+    line_out: f64,
+}
+
+/// Radius of the spool with line on it, metres. A small multiplier.
+///
+/// It decides how fast the drum is drawn turning, and it is the real relation rather
+/// than a chosen speed: a metre of line a second off a thirty millimetre spool is
+/// thirty-three radians a second — five turns — which is a blur, and a blur is what a
+/// running reel looks like.
+const SPOOL_RADIUS: f32 = 0.030;
 
 pub fn setup(
     mut commands: Commands,
@@ -188,6 +242,111 @@ pub fn setup(
         Transform::default(),
         Visibility::Hidden,
     ));
+    // --- The reel -----------------------------------------------------------
+    //
+    // Two parts, and the split is the whole of what makes it read as a reel rather than
+    // as a disc: the **frame** is bolted to the rod and never moves, and the **spool**
+    // inside it turns. One entity for both would mean either a reel whose foot rotates
+    // with the line — a thing no tackle shop has ever sold — or a drum that does not
+    // turn, which is the one thing a reel is for.
+    let (seat, lie) = reel_seat();
+    let frame_metal = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.26, 0.27, 0.30),
+        metallic: 0.85,
+        perceptual_roughness: 0.35,
+        ..default()
+    });
+    let plate_metal = materials.add(StandardMaterial {
+        // Anodised, which is what every reel made since about 1970 is finished in.
+        base_color: Color::srgb(0.38, 0.40, 0.44),
+        metallic: 0.9,
+        perceptual_roughness: 0.28,
+        ..default()
+    });
+    let dark = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.08, 0.08, 0.09),
+        perceptual_roughness: 0.5,
+        ..default()
+    });
+    let braid = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.62, 0.64, 0.63),
+        perceptual_roughness: 0.95,
+        ..default()
+    });
+    commands.entity(root).with_children(|b| {
+        b.spawn((
+            Gear,
+            Mesh3d(meshes.add(Cuboid::new(0.018, 0.052, 0.030))),
+            MeshMaterial3d(frame_metal.clone()),
+            // The foot, standing between the blank and the reel. Halfway down the gap
+            // the seat leaves, which is what a reel foot is.
+            Transform::from_translation(seat - lie * Vec3::Y * 0.0 - (seat - butt()) * 0.08)
+                .with_rotation(lie),
+            Visibility::Hidden,
+        ))
+        .with_children(|b| {
+            // The star drag, outboard of the frame on the handle side: the thing the
+            // `-` and `=` keys are turning, and worth being able to see them turn.
+            b.spawn((
+                Mesh3d(meshes.add(Cylinder::new(0.016, 0.006))),
+                MeshMaterial3d(dark.clone()),
+                Transform::from_xyz(0.0, 0.034, 0.0),
+                Visibility::default(),
+            ));
+        });
+
+        b.spawn((
+            Gear,
+            Spool,
+            // The spool itself: the drum the line is on. Everything that turns hangs
+            // off this one entity, which is why the handle goes round with it — on a
+            // multiplier the handle and the drum are geared together, so a running fish
+            // spins the handle too. That is a real and slightly alarming property of
+            // the things.
+            Mesh3d(meshes.add(Cylinder::new(SPOOL_RADIUS, 0.040))),
+            MeshMaterial3d(braid),
+            Transform::from_translation(seat).with_rotation(lie),
+            Visibility::Hidden,
+        ))
+        .with_children(|b| {
+            // The two side plates. Flat discs, which is what you see of a reel from
+            // anywhere but dead abeam.
+            for side in [1.0_f32, -1.0] {
+                b.spawn((
+                    Mesh3d(meshes.add(Cylinder::new(0.046, 0.008))),
+                    MeshMaterial3d(plate_metal.clone()),
+                    Transform::from_xyz(0.0, side * 0.024, 0.0),
+                    Visibility::default(),
+                ));
+                // Ported: the ring of holes drilled through a side plate to save weight,
+                // and the detail that tells you at a glance that the thing is turning.
+                // A plain disc spinning looks exactly like a plain disc standing still.
+                for hole in 0..6 {
+                    let angle = hole as f32 / 6.0 * std::f32::consts::TAU;
+                    b.spawn((
+                        Mesh3d(meshes.add(Cylinder::new(0.0075, 0.004))),
+                        MeshMaterial3d(dark.clone()),
+                        Transform::from_xyz(angle.cos() * 0.032, side * 0.029, angle.sin() * 0.032),
+                        Visibility::default(),
+                    ));
+                }
+            }
+            // The crank: an arm on the handle side with a knob on the end of it.
+            b.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.046, 0.005, 0.010))),
+                MeshMaterial3d(frame_metal.clone()),
+                Transform::from_xyz(0.013, 0.033, 0.0),
+                Visibility::default(),
+            ));
+            b.spawn((
+                Mesh3d(meshes.add(Sphere::new(0.009).mesh().ico(2).expect("a knob"))),
+                MeshMaterial3d(dark.clone()),
+                Transform::from_xyz(0.034, 0.036, 0.0),
+                Visibility::default(),
+            ));
+        });
+    });
+
     commands.init_resource::<Ratchet>();
 }
 
@@ -203,6 +362,28 @@ fn butt() -> Vec3 {
 /// Which way the blank points with nothing on it.
 fn unloaded_direction() -> Vec3 {
     Vec3::new(-HOLDER_OUT, HOLDER_UP, 0.49).normalize()
+}
+
+/// Where the reel sits and which way its axle lies.
+///
+/// A multiplier goes on *top* of the rod, which is not a style choice — the line comes
+/// off the spool straight down into the butt ring, and the whole reason the big ring is
+/// big is that it is gathering line off a drum eighty millimetres across. Hung
+/// underneath, as a fixed-spool reel is, none of that geometry would be right.
+///
+/// Worked out from the blank's own direction rather than written down, so moving the rod
+/// holder moves the reel with it and the two cannot drift apart.
+fn reel_seat() -> (Vec3, Quat) {
+    let along = unloaded_direction();
+    // Across the rod and level: a reel's axle is athwart the blank.
+    let axle = along.cross(Vec3::Y).normalize_or(Vec3::X);
+    // And the remaining axis, which points away from the blank on the side the reel
+    // stands.
+    let up = axle.cross(along).normalize_or(Vec3::Y);
+    (
+        butt() + along * 0.26 + up * 0.052,
+        Quat::from_rotation_arc(Vec3::Y, axle),
+    )
 }
 
 /// Build the blank, bent by `deflection` metres towards `pull`.
@@ -267,6 +448,64 @@ fn blank_mesh(deflection: f32, pull: Vec3) -> Mesh {
             indices.extend_from_slice(&[i, k, i + 1, i + 1, k, k + 1]);
         }
     }
+
+    // The rings, in the same mesh as the blank they are whipped to.
+    //
+    // In the same mesh because they have to *bend with it*, and the blank's shape is
+    // rebuilt from its spine every frame rather than being a transform anything could be
+    // parented to. Emitting them here means a guide cannot come adrift from the rod it
+    // is on, which is the only interesting way a separate entity could have failed and
+    // is exactly how it would have.
+    //
+    // They crowd towards the tip and shrink as they go, which is how a rod is really
+    // ringed: the line has to be held close to the blank where the blank bends most, or
+    // it bowstrings across the curve and the top of the rod's action does nothing. The
+    // butt ring is the big one because it has to gather line coming off a spool.
+    for (station, radius) in RINGS {
+        let joint = (station * JOINTS as f32).min(JOINTS as f32 - 1e-3);
+        let lower = joint.floor() as usize;
+        let upper = (lower + 1).min(JOINTS);
+        let at = spine[lower].lerp(spine[upper], joint - lower as f32);
+        let direction = (spine[upper] - spine[lower]).normalize_or(start);
+        // Standing off on the side the line runs, which is the inside of the bend: the
+        // load pulls the line against the guides, which is what they are for. With no
+        // bend there is no side to take, so they hang under the rod.
+        let foot = if across.length_squared() > 1e-6 {
+            across
+        } else {
+            (Vec3::NEG_Y - direction * Vec3::NEG_Y.dot(direction)).normalize_or(Vec3::NEG_Y)
+        };
+        let blank_radius = 0.009 * (1.0 - station) + 0.0014;
+        let centre = at + foot * (blank_radius + radius * 0.85);
+        // A torus: wire of this thickness bent into a ring of that radius, lying across
+        // the rod.
+        const WIRE: f32 = 0.0016;
+        let sideways = direction.cross(foot).normalize_or(Vec3::X);
+        let base = positions.len() as u32;
+        for a in 0..=RING_ROUND {
+            let round = a as f32 / RING_ROUND as f32 * std::f32::consts::TAU;
+            let out = foot * round.cos() + sideways * round.sin();
+            for b in 0..=RING_THROUGH {
+                let through = b as f32 / RING_THROUGH as f32 * std::f32::consts::TAU;
+                let normal = out * through.cos() + direction * through.sin();
+                positions.push(centre + out * radius + normal * WIRE);
+                normals.push(normal);
+                uvs.push(Vec2::new(
+                    a as f32 / RING_ROUND as f32,
+                    b as f32 / RING_THROUGH as f32,
+                ));
+            }
+        }
+        let ring_stride = RING_THROUGH + 1;
+        for a in 0..RING_ROUND {
+            for b in 0..RING_THROUGH {
+                let i = base + (a * ring_stride + b) as u32;
+                let k = i + ring_stride as u32;
+                indices.extend_from_slice(&[i, k, i + 1, i + 1, k, k + 1]);
+            }
+        }
+    }
+
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
@@ -325,7 +564,12 @@ pub fn update(
     mut shown: Query<&mut Visibility, With<Gear>>,
     blanks: Query<&Mesh3d, With<Blank>>,
     lines: Query<&Mesh3d, With<Line>>,
-    mut terminals: Query<(&mut Transform, &MeshMaterial3d<StandardMaterial>), With<Terminal>>,
+    mut attention: ResMut<crate::camera::Attention>,
+    // `Without` each other, because Bevy will not run a system holding two mutable
+    // Transform queries unless the filters *prove* they cannot overlap — a marker
+    // component each is not a proof, since nothing stops an entity carrying both.
+    mut terminals: FarEnd,
+    mut spools: Query<&mut Transform, (With<Spool>, Without<Terminal>)>,
 ) {
     let Overside {
         sim,
@@ -467,24 +711,70 @@ pub fn update(
         }
     }
 
-    // --- The ratchet ----------------------------------------------------------
+    // --- The spool turns ----------------------------------------------------------
     //
-    // Clicked by distance rather than by time, because a pawl over a toothed wheel is a
-    // distance counter. One tooth is one clack, and the frame rate puts a ceiling on how
-    // fast they can be heard — which is honest enough: past about sixty a second a real
-    // ratchet stops being a click and becomes a note, and a note is not what this file
-    // is for.
-    if showing && fishing.paying > 0.0 {
-        ratchet.0 += fishing.paying as f32 * time.delta_secs();
-        if ratchet.0 >= TOOTH {
-            ratchet.0 = 0.0;
-            // Quiet. A reel's ratchet carries across a harbour because it is sharp, not
-            // because it is loud, and a boom arriving must stay the loudest thing aboard.
-            sound.0.clack(0.22);
-        }
-    } else {
-        ratchet.0 = 0.0;
+    // At the rate the line is actually moving divided by the radius it is coming off,
+    // which is the whole of the relation and is why a run is a blur: a metre a second off
+    // a thirty millimetre spool is five turns a second. Line going out unwinds it and
+    // winding in turns it back, so the drum answers the arrow keys and the fish alike —
+    // and the ported side plates are there so that turning is visible at all, a plain
+    // disc spinning being indistinguishable from a plain disc at rest.
+    let moved = fishing.line_out - ratchet.line_out;
+    ratchet.turn -= (moved / SPOOL_RADIUS as f64) as f32;
+    let (seat, lie) = reel_seat();
+    for mut transform in &mut spools {
+        transform.translation = seat;
+        transform.rotation = lie * Quat::from_rotation_y(ratchet.turn);
     }
+
+    // --- What the eye ought to be on ------------------------------------------------
+    //
+    // Posted as claims on the camera rather than as camera commands — `camera.rs` owns
+    // the angles and the hold-off that keeps all of this out of your way for a few
+    // seconds after your own hand has moved the view.
+    //
+    // The order is the order a person's attention actually goes, which is not the order
+    // of importance: a fish taking wins outright, but a hand on the drag star beats
+    // watching the fish, because you looked at the star *on purpose* and the fish is
+    // still going to be there.
+    if showing {
+        let playing = fishing.fish().is_some();
+        let reel_world = hull + attitude * seat;
+        if playing && !ratchet.playing {
+            attention.look(far, 5.0, 4);
+        } else if (fishing.drag - ratchet.drag).abs() > 1e-5 {
+            attention.look(reel_world, 2.0, 3);
+        } else if playing {
+            // Refreshed every frame with where the fish now is, so the eye follows it
+            // rather than staring at where it was when it took.
+            attention.look(far, 0.4, 2);
+        } else if moved.abs() > 1e-4 {
+            attention.look(tip_world, 1.2, 1);
+        }
+        ratchet.playing = playing;
+        ratchet.drag = fishing.drag;
+    }
+    ratchet.line_out = fishing.line_out;
+
+    // --- The drag breaking away -------------------------------------------------
+    //
+    // One sharp clack at the moment a run starts, and nothing after it. The run itself
+    // is a click train and a click train belongs on the audio thread, where it can be
+    // generated at its own rate instead of at the frame rate — see the pawl voice in
+    // `sound.rs`, which a reel and a winch now share because a reel pawl and a winch
+    // pawl are the same sprung steel finger on the same toothed wheel.
+    //
+    // That sharing is also the fix for a thing you could hear: clacking once a frame
+    // capped the ratchet at sixty a second *and* tied its tempo to the frame rate, so a
+    // run sounded slower on a bad frame. The pawls run off the audio clock now.
+    //
+    // The breakaway keeps a clack of its own because it is a different event — static
+    // friction letting go — and it is the one you want to hear across the cockpit.
+    let running = fishing.paying > 0.01;
+    if showing && running && !ratchet.running {
+        sound.0.clack(0.3);
+    }
+    ratchet.running = running && showing;
 }
 
 /// Where the tip ends up, for a given bend: the same walk as `blank_mesh` without the
@@ -641,6 +931,25 @@ pub fn gauge(ui: &mut bevy_egui::egui::Ui, fishing: &mut Fishing, sim: &Sim) {
 
     // --- What is on --------------------------------------------------------------
     match fishing.fish() {
+        Some(fish) if fish.alongside > 0.0 => {
+            // Alongside and waiting. The prompt is the whole of how anybody discovers
+            // that the last move is a question of timing, so it is the brightest thing
+            // on the console and it says which key.
+            let now = crate::fishing::on_the_rise(
+                sim.sim.state.heave_rate,
+                sim.sim.telemetry.significant_height,
+            );
+            ui.label(
+                egui::RichText::new(if now {
+                    "LIFT HER  —  J"
+                } else {
+                    "wait for the rise"
+                })
+                .color(if now { paint::GOOD } else { paint::LABEL })
+                .monospace()
+                .size(13.0),
+            );
+        }
         Some(fish) => {
             small(ui, format!("ON  {}", fish.doing.name()), paint::NEEDLE);
             let (bar, _) = ui.allocate_exact_size(egui::vec2(160.0, 6.0), egui::Sense::hover());
@@ -758,7 +1067,9 @@ mod tests {
             let bevy::mesh::VertexAttributeValues::Float32x3(points) = positions else {
                 panic!("positions are three floats");
             };
-            assert_eq!(points.len(), (JOINTS + 1) * (AROUND + 1));
+            // The blank's own tube, plus a ring of wire at each guide.
+            let rings = RINGS.len() * (RING_ROUND + 1) * (RING_THROUGH + 1);
+            assert_eq!(points.len(), (JOINTS + 1) * (AROUND + 1) + rings);
             assert!(
                 points.iter().flatten().all(|v| v.is_finite()),
                 "a vertex is not a number with the pull at {pull}"

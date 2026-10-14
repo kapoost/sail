@@ -87,7 +87,10 @@ const KEYS: [(&str, &[(&str, &str)]); 5] = [
     (
         "THE ROD",
         &[
-            ("J", "the rod: over the stern, and away again"),
+            (
+                "J",
+                "the rod over the stern — and the lift, with one alongside",
+            ),
             (
                 "↑ ↓",
                 "the reel: wind in, give line — and line out is depth",
@@ -99,6 +102,10 @@ const KEYS: [(&str, &[(&str, &str)]); 5] = [
             (
                 " ",
                 "a fish on and the way still on her is a fish you will lose",
+            ),
+            (
+                " ",
+                "lift her on the rise — one swung as she drops is one lost",
             ),
         ],
     ),

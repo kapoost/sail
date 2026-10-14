@@ -181,6 +181,23 @@ const TOW: f64 = 3.3;
 /// Line left when the fish is at the rod tip and the fight is over, metres.
 const LEADER: f64 = 1.6;
 
+/// How long a beaten fish will lie alongside before it finds one more run, seconds.
+///
+/// Twelve, which is two or three waves — long enough to pick a good one and far too
+/// short to think about it.
+const PATIENCE: f64 = 12.0;
+
+/// Below this sea there is nothing to time: you lean over and lift it, metres.
+const CALM: f64 = 0.25;
+
+/// How much of the sea's own rise you have to catch it on.
+///
+/// A quarter, with a floor, which works out at about a third of each wave — generous
+/// enough to be learnable and tight enough that a fish is not landed by holding the key
+/// down. It scales with the sea rather than being an absolute, so a big day is not
+/// easier merely because everything is moving faster.
+const ON_THE_RISE: f64 = 0.25;
+
 /// Gravity, for turning a weight into a force.
 const G: f64 = 9.81;
 
@@ -453,6 +470,16 @@ pub fn lure_depth(line_out: f64, stw: f64) -> f64 {
     (down / k) * (asinh((lure + k * line_out) / down) - asinh(lure / down))
 }
 
+/// Whether the sea is lifting her hard enough to swing a fish aboard on.
+///
+/// A free function with the two numbers that decide it, because it is asked twice — once
+/// by the hand on the key and once by the prompt that tells you the moment is there — and
+/// a prompt that lit at a different instant from the one the key was judged against would
+/// be worse than no prompt at all.
+pub fn on_the_rise(lift: f64, swell: f64) -> bool {
+    swell < CALM || lift > (ON_THE_RISE * swell).max(0.12)
+}
+
 /// A Gaussian preference: one where the thing is right, falling away either side.
 fn liking(x: f64, (mean, spread): (f64, f64)) -> f64 {
     let z = (x - mean) / spread.max(1e-6);
@@ -469,6 +496,17 @@ pub struct Sea {
     pub sounding: f64,
     /// Solar elevation, radians. Negative is below the horizon.
     pub sun: f64,
+    /// How fast she is rising, metres a second, positive up.
+    ///
+    /// The thing you time the last movement of the whole business to. Lifting a fish
+    /// over a rail is not a feat of strength, it is a feat of timing: you let the sea
+    /// bring the fish up to you and you swing it aboard on the rise. Do it as she drops
+    /// away and the fish's whole weight comes onto a hook that has been working loose
+    /// for five minutes.
+    pub lift: f64,
+    /// The sea running, metres. In flat water there is nothing to time and you simply
+    /// lift the thing aboard, which is also true.
+    pub swell: f64,
 }
 
 /// What the hands are doing this frame.
@@ -506,6 +544,14 @@ pub struct Hooked {
     pub seen: bool,
     /// Seconds it has been on.
     pub fought: f64,
+    /// Seconds it has lain alongside waiting to be lifted. Nought until it gets there.
+    ///
+    /// The one state in the fight that is *yours* to end rather than the fish's, and it
+    /// does not last: a fish beside a boat is a fish with one more run in it, and every
+    /// second you spend deciding is a second the hook works looser.
+    pub alongside: f64,
+    /// Whether it has made its run at the sight of the hull yet.
+    bolted: bool,
 }
 
 impl Hooked {
@@ -690,6 +736,53 @@ impl Fishing {
         }
     }
 
+    /// Whether there is a fish alongside waiting to be lifted, and whether this is the
+    /// moment to do it. For the prompt on the console, which is the whole of how anybody
+    /// learns that the moment exists.
+    pub fn ready_to_lift(&self, sea: Sea) -> Option<bool> {
+        let fish = self.fish()?;
+        if fish.alongside <= 0.0 {
+            return None;
+        }
+        Some(on_the_rise(sea.lift, sea.swell))
+    }
+
+    /// Swing it aboard.
+    ///
+    /// The one moment in the whole business that is a question of timing rather than of
+    /// judgement, and it is the moment that is actually like that on the water: you wait
+    /// for the sea to bring the fish up to the rail and you lift on the rise. Pull as she
+    /// drops away from under it and you are lifting the fish *and* the boat's departure,
+    /// which is how a hook that has held for five minutes comes out in the last metre.
+    pub fn lift_aboard(&mut self, sea: Sea) -> Option<String> {
+        let ready = self.ready_to_lift(sea)?;
+        let Rod::Playing(fish) = &mut self.rod else {
+            return None;
+        };
+        if ready {
+            let (what, mass, fought) = (fish.what, fish.mass, fish.fought);
+            self.rod = Rod::Trolling;
+            self.stretch = 0.0;
+            self.line_out = 4.0;
+            self.quiet = 0.0;
+            self.caught.push(Landed { what, mass });
+            return Some(format!(
+                "{} — {mass:.1} kg, {fought:.0} seconds",
+                what.name()
+            ));
+        }
+        // Mistimed. Not fatal on its own — it costs you a chunk of the hook hold and
+        // another run — because a game that ended on one badly judged keypress after a
+        // minute of work would be a game nobody pressed the key in.
+        fish.alongside = 0.0;
+        fish.bolted = false;
+        fish.hold -= 0.12;
+        fish.doing = Doing::Run;
+        fish.until = 2.0;
+        self.stretch = self.stretch.max(0.4);
+        Some("you lifted as she dropped away — it is off again".into())
+    }
+
     /// Advance the gear. Returns anything worth saying out loud.
     pub fn step(&mut self, dt: f64, sea: Sea, hands: Hands) -> Option<String> {
         self.drag = hands.drag.clamp(0.0, 1.0);
@@ -866,6 +959,8 @@ impl Fishing {
             until: 3.0 + 4.0 * self.rng.next_f64(),
             seen: false,
             fought: 0.0,
+            alongside: 0.0,
+            bolted: false,
         });
         self.quiet = 0.0;
         if what == Quarry::Mackerel {
@@ -1018,10 +1113,7 @@ impl Fishing {
         fish.hold -= wear * dt;
 
         // --- Everything that ends it -----------------------------------------------
-        let what = fish.what;
-        let mass = fish.mass;
         let beaten = fish.beaten();
-        let fought = fish.fought;
         let hold = fish.hold;
 
         if self.tension > BREAKING {
@@ -1058,27 +1150,41 @@ impl Fishing {
             return None;
         }
         if self.line_out <= LEADER {
-            if beaten > 0.8 {
-                self.rod = Rod::Trolling;
-                self.stretch = 0.0;
-                self.line_out = 4.0;
-                self.quiet = 0.0;
-                self.caught.push(Landed { what, mass });
-                return Some(format!(
-                    "{} — {mass:.1} kg, {fought:.0} seconds",
-                    what.name()
-                ));
-            }
-            // Brought to the boat before it was ready, which is where most fish are
-            // actually lost: it sees the hull, bolts under the counter, and the leader is
-            // the shortest and least forgiving piece of line in the system.
-            if let Rod::Playing(fish) = &mut self.rod {
+            let roll = self.rng.next_f64();
+            let Rod::Playing(fish) = &mut self.rod else {
+                return None;
+            };
+            fish.seen = true;
+            // **Every fish does this, and it is where most fish are lost.** It comes up,
+            // sees the hull, finds something it did not have thirty seconds ago and goes
+            // under the boat with it — and the leader is the shortest and least forgiving
+            // piece of line in the whole system. There is no fish that comes quietly, and
+            // a model in which a beaten one simply arrived was a model missing the most
+            // famous ten seconds in angling.
+            if !fish.bolted {
+                fish.bolted = true;
                 fish.doing = Doing::Run;
-                fish.until = 3.0;
-                fish.hold -= 0.06;
-                fish.seen = true;
+                fish.until = 1.6 + 2.2 * roll;
+                fish.hold -= 0.04;
+                self.stretch = self.stretch.max(0.3);
+                return Some("it has seen the boat — and gone again".into());
             }
-            self.stretch = self.stretch.max(0.25);
+            if beaten > 0.78 {
+                // Alongside, beaten, and waiting for you to pick your moment.
+                fish.alongside += dt;
+                if fish.alongside > PATIENCE {
+                    fish.alongside = 0.0;
+                    fish.bolted = false;
+                    fish.hold -= 0.05;
+                    fish.doing = Doing::Run;
+                    fish.until = 2.0;
+                    return Some("it would not lie there for ever".into());
+                }
+            } else {
+                // Still has something left, so it will do it again when it comes back.
+                fish.bolted = false;
+            }
+            self.stretch = self.stretch.max(0.15);
         }
         None
     }
@@ -1119,9 +1225,31 @@ pub fn work(
     let dt = time.delta_secs_f64();
     let fine = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
-    // The rod comes out of the locker and goes back into it.
+    let sea = Sea {
+        stw: sim.sim.telemetry.stw,
+        // What the sounder reads. Trolling is the one activity in this game that cares
+        // where the deep water is, which is what makes the chart worth opening for a
+        // reason other than not hitting anything.
+        sounding: sim.sim.telemetry.depth,
+        sun: sky.elevation() as f64,
+        // The integrator's own heave rate rather than a difference of positions: it is
+        // the quantity being timed, and differencing a drawn height would put the window
+        // a frame late on exactly the frames that matter.
+        lift: sim.sim.state.heave_rate,
+        swell: sim.sim.telemetry.significant_height,
+    };
+
+    // One key, and what it does depends on what is on the end — which is not a trick,
+    // it is the same hand doing the same thing. It reaches for the rod when there is
+    // nothing on, and it reaches for the fish when there is.
     if keys.just_pressed(KeyCode::KeyJ) {
-        info!("{}", gear.stow_or_set());
+        if gear.ready_to_lift(sea).is_some() {
+            if let Some(said) = gear.lift_aboard(sea) {
+                info!("{said}");
+            }
+        } else {
+            info!("{}", gear.stow_or_set());
+        }
     }
 
     // The drag. A position your hand leaves behind, so it is set and kept rather than
@@ -1151,14 +1279,6 @@ pub fn work(
         reel *= 0.35;
     }
 
-    let sea = Sea {
-        stw: sim.sim.telemetry.stw,
-        // What the sounder reads. Trolling is the one activity in this game that cares
-        // where the deep water is, which is what makes the chart worth opening for a
-        // reason other than not hitting anything.
-        sounding: sim.sim.telemetry.depth,
-        sun: sky.elevation() as f64,
-    };
     if let Some(said) = gear.step(dt, sea, Hands { reel, drag }) {
         info!("{said}");
     }
@@ -1191,11 +1311,26 @@ pub fn work(
 mod tests {
     use super::*;
 
+    /// Flat water, where the lift is free: there is no sea to time and you simply
+    /// reach over and pick the fish up.
     fn sea(knots: f64, sounding: f64) -> Sea {
         Sea {
             stw: sail_core::units::kn_to_ms(knots),
             sounding,
             sun: 0.1,
+            lift: 0.0,
+            swell: 0.0,
+        }
+    }
+
+    /// A metre of sea with the boat at a given point in it, so the timing can be tested.
+    fn seaway(knots: f64, lift: f64) -> Sea {
+        Sea {
+            stw: sail_core::units::kn_to_ms(knots),
+            sounding: 30.0,
+            sun: 0.1,
+            lift,
+            swell: 1.0,
         }
     }
 
@@ -1206,6 +1341,25 @@ mod tests {
         while t < seconds {
             if let Some(word) = f.step(1.0 / 60.0, sea, hands) {
                 said.push(word);
+            }
+            t += 1.0 / 60.0;
+        }
+        said
+    }
+
+    /// Fish it properly: work the gear, and lift when the sea offers the moment. What a
+    /// player does, as against `sail`, which only holds the reel.
+    fn fish_it(f: &mut Fishing, seconds: f64, sea: Sea, hands: Hands) -> Vec<String> {
+        let mut said = Vec::new();
+        let mut t = 0.0;
+        while t < seconds {
+            if let Some(word) = f.step(1.0 / 60.0, sea, hands) {
+                said.push(word);
+            }
+            if f.ready_to_lift(sea) == Some(true) {
+                if let Some(word) = f.lift_aboard(sea) {
+                    said.push(word);
+                }
             }
             t += 1.0 / 60.0;
         }
@@ -1229,6 +1383,8 @@ mod tests {
             until: 5.0,
             seen: false,
             fought: 0.0,
+            alongside: 0.0,
+            bolted: false,
         });
         f
     }
@@ -1313,9 +1469,11 @@ mod tests {
     #[test]
     fn a_properly_set_drag_beats_a_saithe() {
         let mut f = with(Quarry::Saithe, 2.5);
-        let said = sail(&mut f, 400.0, sea(1.5, 25.0), hands(1.0, 1.0 / 3.0));
+        let said = fish_it(&mut f, 400.0, sea(1.5, 25.0), hands(1.0, 1.0 / 3.0));
         assert_eq!(f.caught.len(), 1, "{said:?}");
         assert_eq!(f.caught[0].what, Quarry::Saithe);
+        // And it did not come quietly.
+        assert!(said.iter().any(|s| s.contains("seen the boat")), "{said:?}");
     }
 
     /// And a drag screwed down hard loses the big one.
@@ -1339,7 +1497,7 @@ mod tests {
     #[test]
     fn a_locked_drag_is_no_trouble_on_a_mackerel() {
         let mut f = with(Quarry::Mackerel, 0.45);
-        let said = sail(&mut f, 180.0, sea(1.5, 25.0), hands(1.0, 1.0));
+        let said = fish_it(&mut f, 180.0, sea(1.5, 25.0), hands(1.0, 1.0));
         assert_eq!(f.caught.len(), 1, "{said:?}");
     }
 
@@ -1481,6 +1639,66 @@ mod tests {
         assert!(freed.iter().any(|s| s.contains("came away")), "{freed:?}");
     }
 
+    /// Every fish makes one more run at the sight of the hull, however beaten it is.
+    /// There is no fish that comes quietly, and a model in which a tired one simply
+    /// arrived was missing the most famous ten seconds in angling.
+    #[test]
+    fn nothing_comes_quietly() {
+        for what in [Quarry::Mackerel, Quarry::Saithe, Quarry::Cod] {
+            let mut f = with(what, 2.0);
+            let said = fish_it(&mut f, 400.0, sea(1.0, 25.0), hands(1.0, 1.0 / 3.0));
+            assert!(
+                said.iter().any(|s| s.contains("seen the boat")),
+                "{what:?}: {said:?}"
+            );
+        }
+    }
+
+    /// In a seaway the lift has to be timed to the rise, and lifting as she drops away
+    /// costs you the fish's place alongside and a piece of the hook hold.
+    #[test]
+    fn lifting_as_she_drops_loses_the_moment() {
+        let mut f = with(Quarry::Saithe, 2.0);
+        // Beaten and alongside. Run until it gets there rather than for a fixed time:
+        // a fish will not lie beside the boat for ever — see `PATIENCE` — so "alongside"
+        // is a window that opens and shuts, and a test that sampled it at four hundred
+        // seconds would be sampling the phase of a cycle.
+        let water = sea(1.0, 25.0);
+        let mut t = 0.0;
+        while t < 400.0 && f.fish().is_some_and(|fish| fish.alongside <= 0.0) {
+            f.step(1.0 / 60.0, water, hands(1.0, 1.0 / 3.0));
+            t += 1.0 / 60.0;
+        }
+        assert!(
+            f.fish().is_some_and(|fish| fish.alongside > 0.0),
+            "it never got alongside"
+        );
+        let hold = f.fish().unwrap().hold;
+
+        // Now a sea, with her dropping away under it.
+        let dropping = seaway(1.0, -0.4);
+        assert_eq!(f.ready_to_lift(dropping), Some(false));
+        let said = f.lift_aboard(dropping).expect("it should say so");
+        assert!(said.contains("dropped away"), "{said}");
+        assert!(f.caught.is_empty());
+        assert!(f.fish().unwrap().hold < hold - 0.1);
+
+        // And on the rise it comes aboard.
+        let rising = seaway(1.0, 0.5);
+        sail(&mut f, 60.0, rising, hands(1.0, 1.0 / 3.0));
+        assert_eq!(f.ready_to_lift(rising), Some(true));
+        f.lift_aboard(rising);
+        assert_eq!(f.caught.len(), 1, "it should have come aboard on the rise");
+    }
+
+    /// And in flat water there is nothing to time: you lean over and pick it up.
+    #[test]
+    fn flat_water_asks_for_no_timing() {
+        assert!(on_the_rise(0.0, 0.0));
+        assert!(!on_the_rise(0.0, 1.2));
+        assert!(on_the_rise(0.6, 1.2));
+    }
+
     /// The gear cannot be stowed with a fish on it, and saying so is better than doing
     /// nothing silently.
     #[test]
@@ -1499,7 +1717,11 @@ mod tests {
             let mut f = with(Quarry::Saithe, 2.5);
             let mut t = 0.0;
             while t < 400.0 {
-                f.step(frame, sea(1.5, 25.0), hands(1.0, 1.0 / 3.0));
+                let water = sea(1.5, 25.0);
+                f.step(frame, water, hands(1.0, 1.0 / 3.0));
+                if f.ready_to_lift(water) == Some(true) {
+                    f.lift_aboard(water);
+                }
                 t += frame;
             }
             f.caught.len()

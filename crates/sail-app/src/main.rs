@@ -12,6 +12,7 @@ mod chart;
 mod clouds;
 mod clutch;
 mod course;
+mod creel;
 mod curve;
 mod deck;
 mod deck_texture;
@@ -252,8 +253,10 @@ fn main() {
                 rain::setup,
                 rig::setup,
                 panel::setup,
-                stowage::setup,
-                rod::setup,
+                // The deck gear, the rod, and the basket the catch goes in: things put
+                // on the boat once she exists. Grouped because a startup tuple is
+                // twenty long at the most and this one is full.
+                (stowage::setup, rod::setup, creel::setup),
                 (mob::setup, net::setup),
                 windstreaks::setup,
             )
@@ -312,7 +315,7 @@ fn main() {
                     world::update_sea,
                     course::float_marks,
                     // The things that live in the water she has just left.
-                    (wake::update, rod::update, mob::update),
+                    (wake::update, rod::update, creel::update, mob::update),
                     rig::update,
                     camera::follow,
                     sound::update,

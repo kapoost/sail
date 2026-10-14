@@ -112,6 +112,93 @@ impl HeadMotion {
 pub struct ViewAim {
     yaw: f32,
     pitch: f32,
+    /// Seconds since the hand last moved the view.
+    ///
+    /// Everything automatic in here is gated on it. A view that corrects itself the
+    /// instant you stop dragging is a view that argues with you, and one that corrects
+    /// itself while you are *still looking at the thing you turned to look at* is worse
+    /// — so the eye holds where it was put, and only afterwards does it drift home or
+    /// let anything else have it.
+    since_hand: f32,
+}
+
+/// How long the eye stays where your hand left it, seconds.
+///
+/// Long enough to look at the thing you turned to see and think about it, short enough
+/// that a view left alone comes back on its own. Nothing automatic happens inside it.
+const DWELL: f32 = 3.0;
+
+/// Something worth looking at, and how badly.
+///
+/// The camera is told *what* to look at and works out the angles itself, because the
+/// modules that know where things are — the rod knows where its tip is, the fight knows
+/// where the fish is — have no business computing yaw and pitch, and would each do it
+/// slightly differently.
+///
+/// Priority rather than a queue. These are not events to be played in order; they are
+/// claims on one pair of eyes, and the right behaviour when two arrive together is that
+/// the more interesting one wins outright. A fish taking beats a hand on the drag beats
+/// line going out.
+#[derive(Resource, Default)]
+pub struct Attention {
+    at: Option<Vec3>,
+    priority: u8,
+    left: f32,
+}
+
+impl Attention {
+    /// Ask the eye to go there. A fresh call at the same priority moves the point, so a
+    /// caller can simply post where its fish is every frame and have the view follow it.
+    pub fn look(&mut self, at: Vec3, hold: f32, priority: u8) {
+        if self.left <= 0.0 || priority >= self.priority {
+            self.at = Some(at);
+            self.priority = priority;
+            self.left = hold;
+        }
+    }
+
+    fn fade(&mut self, dt: f32) {
+        self.left -= dt;
+        if self.left <= 0.0 {
+            self.at = None;
+            self.priority = 0;
+        }
+    }
+
+    fn held(&self) -> Option<Vec3> {
+        self.at
+    }
+}
+
+/// How fast the eye swings onto something it has been asked to look at, per second.
+///
+/// Deliberately not instant. A head turns, and a cut is the one thing a camera standing
+/// in for a person must never do.
+const SETTLE: f32 = 4.5;
+
+impl ViewAim {
+    /// Swing towards a point in the world, given the frame the aim is applied inside.
+    ///
+    /// The derivation, because it is sign-error country. The eye's rotation is
+    /// `base * Ry(yaw) * Rx(pitch)` and a camera looks down its own -Z, so for a
+    /// direction `d` expressed in `base`'s frame, `Ry(ψ)·Rx(θ)·(0,0,-1)` is
+    /// `(-cosθ·sinψ, sinθ, -cosθ·cosψ)` — which inverts to `θ = asin(d.y)` and
+    /// `ψ = atan2(-d.x, -d.z)`.
+    fn settle_towards(&mut self, base: Quat, eye: Vec3, target: Vec3, dt: f32) {
+        let d = base.inverse() * (target - eye);
+        if d.length_squared() < 1e-6 {
+            return;
+        }
+        let d = d.normalize();
+        // Clamped to the same travel a hand gets, because it is the same neck. Asked to
+        // look dead astern from the cockpit, you look over your shoulder as far as you
+        // can and no further, which is the honest answer and reads as one.
+        let yaw = (-d.x).atan2(-d.z).clamp(-AIM_YAW, AIM_YAW);
+        let pitch = d.y.asin().clamp(-AIM_PITCH_DOWN, AIM_PITCH_UP);
+        let k = 1.0 - (-SETTLE * dt).exp();
+        self.yaw += (yaw - self.yaw) * k;
+        self.pitch += (pitch - self.pitch) * k;
+    }
 }
 
 /// How far round you can look, radians. Most of the way, but not through your own neck.
@@ -130,15 +217,34 @@ pub fn aim(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut aim: ResMut<ViewAim>,
+    mut attention: ResMut<Attention>,
 ) {
+    aim.since_hand += time.delta_secs();
     if buttons.pressed(MouseButton::Right) {
         aim.yaw = (aim.yaw - motion.delta.x * AIM_RATE).clamp(-AIM_YAW, AIM_YAW);
         aim.pitch = (aim.pitch - motion.delta.y * AIM_RATE).clamp(-AIM_PITCH_DOWN, AIM_PITCH_UP);
+        aim.since_hand = 0.0;
+        // And whatever the gear wanted you to look at, it does not want it any more.
+        // A hand on the view is a decision, and nothing in here outranks it.
+        *attention = Attention::default();
         return;
     }
     // Space already means "put the helm amidships"; it means "look ahead" too, which
-    // is the same instinct.
+    // is the same instinct — and asking for it explicitly skips the wait.
     let home = keys.pressed(KeyCode::Space);
+    if home {
+        aim.since_hand = DWELL;
+        *attention = Attention::default();
+    }
+    // The wait. Inside it the view simply stays where it was put.
+    if aim.since_hand < DWELL {
+        return;
+    }
+    // And nothing drifts home while the eye is on something, or the drift and the
+    // settle would pull against each other and land somewhere between the two.
+    if attention.held().is_some() {
+        return;
+    }
     let k = if home {
         1.0 - (-6.0 * time.delta_secs()).exp()
     } else {
@@ -152,6 +258,10 @@ pub fn aim(
 pub struct ChaseState {
     position: Vec3,
     initialised: bool,
+    /// Where the outside camera is pointed, eased rather than snapped — see the focus
+    /// in `follow`.
+    looking: Vec3,
+    looking_set: bool,
 }
 
 impl ChaseState {
@@ -168,6 +278,7 @@ impl ChaseState {
     /// Carry the stored camera position across a change of render origin.
     pub fn shift(&mut self, by: Vec3) {
         self.position += by;
+        self.looking += by;
     }
 }
 
@@ -259,16 +370,22 @@ pub fn setup(
     commands.init_resource::<View>();
     commands.init_resource::<ChaseState>();
     commands.init_resource::<HeadMotion>();
+    commands.init_resource::<Attention>();
 }
 
 pub fn toggle(keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>, mut view: ResMut<View>) {
     let pressed = keys.just_pressed(KeyCode::KeyC)
         || pads.iter().any(|p| p.just_pressed(GamepadButton::Select));
     if pressed {
+        // Top, forward, back. The order is a journey inwards rather than a list: you
+        // start outside her where you can see the whole boat, step aboard and look
+        // where she is going, then turn round and look at what she is leaving. Cockpit
+        // first was the old order and it opened the game standing at the helm, which is
+        // the one place a newcomer cannot tell what the boat is doing.
         *view = match *view {
-            View::Cockpit => View::Chase,
-            View::Chase => View::Astern,
-            View::Astern => View::Cockpit,
+            View::Chase => View::Cockpit,
+            View::Cockpit => View::Astern,
+            View::Astern => View::Chase,
         };
     }
 }
@@ -278,13 +395,14 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>, mut view: 
 pub struct Eye<'w> {
     sim: Res<'w, Sim>,
     origin: Res<'w, frame::RenderOrigin>,
-    aim: Res<'w, ViewAim>,
     view: Res<'w, View>,
     time: Res<'w, Time>,
 }
 
 pub fn follow(
     eye: Eye,
+    mut aim: ResMut<ViewAim>,
+    mut attention: ResMut<Attention>,
     mut chase: ResMut<ChaseState>,
     mut head: ResMut<HeadMotion>,
     mut q: Query<&mut Transform, With<MainCamera>>,
@@ -292,54 +410,63 @@ pub fn follow(
     let Eye {
         sim,
         origin,
-        aim,
         view,
         time,
     } = eye;
     let st = &sim.render_state();
     let hull = origin.hull_translation(st);
-    head.follow(
-        st.heel as f32,
-        st.pitch as f32,
-        st.heave as f32,
-        time.delta_secs().max(1e-5),
-    );
+    let dt = time.delta_secs().max(1e-5);
+    head.follow(st.heel as f32, st.pitch as f32, st.heave as f32, dt);
+
+    // What the eye has been asked to look at, if anything, and if your hand has let go
+    // of it for long enough.
+    attention.fade(dt);
+    let focus = if aim.since_hand >= DWELL {
+        attention.held()
+    } else {
+        None
+    };
 
     for mut cam in &mut q {
         match *view {
             View::Cockpit => {
-                // Standing at the helm. The eye sits where the hull puts it, but it
-                // does not take the hull's full attitude — see HeadMotion.
-                // The head turns on the body: the aim is applied inside the hull's
-                // own attitude, so looking to leeward on a heeled boat looks *down*
-                // the heel the way it does in life, rather than along a level horizon.
-                let eye = head.attitude(st.heading as f32)
-                    * Quat::from_rotation_y(aim.yaw)
-                    * Quat::from_rotation_x(aim.pitch);
-                // Standing in the cockpit well, which is a real place now: the sole
-                // is below the sheer, so the eye is lower than it was when the deck
-                // was a number. Far enough aft to be at the helm and to see the whole
-                // sail plan rather than the back of the coachroof.
+                // Standing in the cockpit well, which is a real place: the sole is
+                // below the sheer, so the eye is lower than it was when the deck was a
+                // number. Far enough aft to be at the helm and to see the whole sail
+                // plan rather than the back of the coachroof.
                 let eye_local = Vec3::new(0.0, crate::deck::cockpit_sole() + 1.62, 3.3);
                 // The eye's own height is filtered too, so a sharp heave moves the
                 // boat under you rather than throwing the view.
                 let base = Vec3::new(hull.x, head.heave, hull.z);
-                cam.translation = base + frame::attitude(st) * eye_local;
+                let stand = base + frame::attitude(st) * eye_local;
+                // The head turns on the body: the aim is applied inside the hull's own
+                // attitude, so looking to leeward on a heeled boat looks *down* the
+                // heel the way it does in life, rather than along a level horizon.
+                let body = head.attitude(st.heading as f32);
+                if let Some(target) = focus {
+                    aim.settle_towards(body, stand, target, dt);
+                }
+                let eye = body * Quat::from_rotation_y(aim.yaw) * Quat::from_rotation_x(aim.pitch);
+                cam.translation = stand;
                 cam.rotation = eye * Quat::from_rotation_x(-0.10);
                 chase.initialised = false;
             }
             View::Astern => {
                 // Standing in the after end of the cockpit, turned round. The same head
                 // and neck as the cockpit view — it is the same person — with the whole
-                // frame swung through half a turn.
-                let eye = head.attitude(st.heading as f32)
-                    * Quat::from_rotation_y(std::f32::consts::PI + aim.yaw)
-                    * Quat::from_rotation_x(aim.pitch);
-                // A little to port, where the rod is, and low: the thing worth looking
-                // at from here is forty metres of water, not the sky over it.
+                // frame swung through half a turn, so the aim is measured from dead
+                // astern and a glance at the lure is a small turn rather than a
+                // full one.
                 let eye_local = Vec3::new(-0.34, crate::deck::cockpit_sole() + 1.58, 3.6);
                 let base = Vec3::new(hull.x, head.heave, hull.z);
-                cam.translation = base + frame::attitude(st) * eye_local;
+                let stand = base + frame::attitude(st) * eye_local;
+                let body =
+                    head.attitude(st.heading as f32) * Quat::from_rotation_y(std::f32::consts::PI);
+                if let Some(target) = focus {
+                    aim.settle_towards(body, stand, target, dt);
+                }
+                let eye = body * Quat::from_rotation_y(aim.yaw) * Quat::from_rotation_x(aim.pitch);
+                cam.translation = stand;
                 // Tipped down more than the cockpit view, because the line goes into the
                 // water astern and that is where the eye wants to be.
                 cam.rotation = eye * Quat::from_rotation_x(-0.17);
@@ -363,9 +490,31 @@ pub fn follow(
                 let k = 1.0 - (-3.0 * time.delta_secs()).exp();
                 chase.position = chase.position.lerp(target, k);
                 cam.translation = chase.position;
-                // Aim at the filtered height, or a sharp heave swings the whole
+                // From outside her the camera does not fly anywhere either: it stands
+                // where it stands and opens the frame *towards* the thing, which is a
+                // different gesture from the head turn the on-board views make and is
+                // the same instruction — stay where you are, look that way.
+                //
+                // Blended rather than aimed. Pointing it at the fish alone puts the fish
+                // in the middle of the screen and the boat off the edge of it, which is
+                // not what anybody asked for: the boat is the subject, and the fish is a
+                // thing happening forty metres astern of the subject. Looking between
+                // them keeps both in the frame and swings the view the right way, which
+                // is what a person standing off in a dinghy with a camera would do.
+                //
+                // By default the filtered height, or a sharp heave swings the whole
                 // frame about a boat that has barely moved.
-                cam.look_at(Vec3::new(hull.x, head.heave + 4.5, hull.z), Vec3::Y);
+                let boat = Vec3::new(hull.x, head.heave + 4.5, hull.z);
+                let wanted = match focus {
+                    Some(target) => boat.lerp(target, 0.42),
+                    None => boat,
+                };
+                if !chase.looking_set {
+                    chase.looking = wanted;
+                    chase.looking_set = true;
+                }
+                chase.looking = chase.looking.lerp(wanted, 1.0 - (-SETTLE * dt).exp());
+                cam.look_at(chase.looking, Vec3::Y);
             }
         }
     }

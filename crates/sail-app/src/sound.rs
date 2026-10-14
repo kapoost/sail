@@ -1156,6 +1156,11 @@ const STROUHAL: f32 = 0.2;
 /// What the lines were doing last frame, so this one can tell how fast they moved.
 #[derive(Default)]
 pub struct Worked {
+    /// Where the spool was last frame, metres. Kept here beside the sheet positions
+    /// because it is the same question asked of a different drum — how fast is it
+    /// turning — and answered the same way: by differencing the thing itself rather than
+    /// by asking which key is down. The reel turns when the autopilot of a fish turns it.
+    line_out: f64,
     lines: [f64; 6],
     boom: f64,
     started: bool,
@@ -1165,6 +1170,7 @@ pub fn update(
     sound: Res<SoundHandle>,
     sim: Res<Sim>,
     rain: Res<crate::rain::Rain>,
+    fishing: Res<crate::fishing::Fishing>,
     time: Res<Time>,
     mut was: Local<Worked>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -1260,10 +1266,55 @@ pub fn update(
     // Reaching full on a moderate haul rather than only on a sprint: with the dead band
     // taking the first two percent, a brisk but ordinary grind was only getting a third
     // of the voice.
-    store(&p.gear_level, (rate * 1.7).min(1.0));
+    // And the reel, which goes through the *same* voice rather than being given one of
+    // its own. A winch pawl and a reel pawl are the same object: a sprung steel finger
+    // riding a toothed wheel, and what distinguishes them is how fast the wheel turns.
+    // Writing a second click train would have been writing this one twice.
+    //
+    // The two differ in one way that matters and it is in the rates. A winch is worked
+    // by a person and tops out around twenty clicks a second; a reel is turned by a fish
+    // and a tooth goes past every few centimetres of line, so a run is up at the ceiling
+    // and that is why it sounds like a scream rather than a rattle. Finer teeth than the
+    // ratchet is *drawn* with — the ear hears the pitch of a click train long after the
+    // eye has given up counting, so the sound wants the real tooth and the drawing wants
+    // one it can show.
+    const TOOTH: f32 = 0.035;
+    // Metres a second coming in, by differencing the spool rather than reading the key.
+    let winding = if was.started {
+        ((was.line_out - fishing.line_out) / dt).max(0.0) as f32
+    } else {
+        0.0
+    };
+    was.line_out = fishing.line_out;
+    let (reel_rate, reel_hz) = if fishing.paying > 0.01 {
+        // Line going out against the drag: the ratchet, loud, and the one sound in this
+        // game that means put your book down.
+        let hz = (fishing.paying as f32 / TOOTH).clamp(0.0, 90.0);
+        // Past one, which nothing else in here goes to.
+        //
+        // A reel screaming is not a background noise and it is not in proportion to
+        // anything else on the boat: it is six inches from your hand, it is metal
+        // hammering metal eighty times a second, and the whole reason the sound exists
+        // is that it is the thing that makes a person put down what they are holding.
+        // Levelled with the pawls of a winch — a person's steady grinding — it was
+        // polite, which is the one thing it must never be.
+        //
+        // It stops short of the clack, because a boom coming across stays the loudest
+        // thing aboard and that is a rule about safety rather than about mixing.
+        (0.8 + 1.1 * (hz / 55.0).min(1.0), hz)
+    } else if fishing.out() && winding > 0.02 {
+        // Winding in. Much quieter: on a multiplier the ratchet is usually off while you
+        // wind and what you hear is the gears, which is a softer and slower version of
+        // the same click.
+        let hz = (winding / TOOTH * 0.5).clamp(0.0, 45.0);
+        (0.22 * (hz / 25.0).min(1.0), hz)
+    } else {
+        (0.0, 0.0)
+    };
+    store(&p.gear_level, (rate * 1.7).min(1.0).max(reel_rate));
     // Pawls per second. A two-speed winch at a hard grind clicks about twenty times a
     // second; eased by hand it is a slow tick you can count.
-    store(&p.gear_hz, 3.0 + 26.0 * rate.min(1.2));
+    store(&p.gear_hz, (3.0 + 26.0 * rate.min(1.2)).max(reel_hz));
     // Kept, because it is what found the three faults behind a winch that clattered in
     // an empty cockpit — an unfloored frame time, a dead band that was not there, and a
     // debug line that compared the current controls against themselves because the

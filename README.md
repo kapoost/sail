@@ -294,6 +294,21 @@ fish with infinite patience and lets go only when the way is off her.
 A mackerel does not, a pollack does not, and a cod has never left the water under its own
 power in its life.
 
+**Nothing comes quietly, and the last move is timed.** Every fish, however beaten, finds
+one more run at the sight of the hull — that is where most fish are actually lost, and a
+model in which a tired one simply arrived was missing the most famous ten seconds in
+angling. What is left after that is not a question of strength but of timing: a fish
+alongside is lifted *on the rise*, letting the sea bring it up to the rail, and one swung
+aboard as she drops away takes its whole weight on a hook that has been working loose for
+five minutes. `J` is the lift, the console says when the moment is there, and a fish will
+not lie beside the boat for ever while you decide.
+
+The catch goes in a creel on a lanyard off the port quarter, where the sea keeps it cool,
+and it swings — as a real pendulum with a real period rather than a filtered copy of the
+roll, because what hanging gear mostly does is swing *against* the boat, and a filter
+cannot do that. A score is not a thing; three fish in a basket off the quarter is an
+afternoon, and you can see it from the helm without asking.
+
 `C` now gives a third view, facing aft from the cockpit down the wake — which is worth
 having without a rod in your hand, because ahead is where you are going and astern is
 where your wake, your gear and anything overtaking you are. `SAIL_ROD=30` streams thirty
@@ -378,6 +393,13 @@ least-work answer is one Tailscale network between friends: no port forwarding a
 code. `docs/online.md` is the whole design, including what it deliberately does not do.
 
 ## Controls
+
+The camera looks at what just happened: the rod tip when line is moving, the reel when
+your hand is on the drag, and the fish when something takes. It is posted as a *claim* on
+the eye rather than as a camera command, highest claim wins, and your own hand on the
+right mouse button outranks all of it and is remembered for three seconds afterwards —
+because a view that corrects itself while you are still looking at the thing you turned to
+see is a view that argues with you.
 
 **They live in the program.** Press `?` or `F1`, or click the mark in the bottom-right
 corner. This list used to be here as well, and three of the keys in it were wrong — a
