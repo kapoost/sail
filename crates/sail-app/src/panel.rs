@@ -383,6 +383,29 @@ pub fn draw(
                                 .size(9.0),
                         );
                         ui.add_space(4.0);
+                        // The preventer, which is a thing that is either on or off and
+                        // therefore a light rather than a slider. Beside the sail
+                        // buttons because it belongs to the same decision: what you are
+                        // carrying and how you have made it safe.
+                        let rigged = sim.controls.preventer;
+                        if ui
+                            .selectable_label(
+                                rigged,
+                                egui::RichText::new("PREVENTER (F)")
+                                    .monospace()
+                                    .size(10.0)
+                                    .color(if rigged {
+                                        egui::Color32::from_rgb(20, 20, 20)
+                                    } else {
+                                        egui::Color32::from_rgb(150, 150, 130)
+                                    }),
+                            )
+                            .on_hover_text("stops the boom crossing — rig it before a run")
+                            .clicked()
+                        {
+                            sim.controls.preventer = !rigged;
+                        }
+                        ui.add_space(3.0);
                         let rolled = sim.controls.furl > 0.9;
                         for sail in [
                             Headsail::Genoa,

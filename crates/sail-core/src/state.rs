@@ -212,6 +212,13 @@ pub struct Controls {
     /// somebody pulls, and it is the only shape control the sail has. Hauled, the boom
     /// comes in and the leech tightens; eased, the boom swings out and the sail opens.
     pub staysail_sheet: f64,
+    /// A preventer on the boom: rigged or not.
+    ///
+    /// The one line aboard that exists to stop something rather than to make it happen.
+    /// Led from the boom end forward to the rail and made fast, it is what a cruising
+    /// crew rigs before a long run, so that an accidental gybe is a backed mainsail and a
+    /// round-up rather than a spar across the cockpit.
+    pub preventer: bool,
 }
 
 /// Hand-written rather than derived, because a derived default would put the outhaul
@@ -233,6 +240,7 @@ impl Default for Controls {
             headsail: Headsail::Genoa,
             staysail: 0.0,
             staysail_sheet: 0.35,
+            preventer: false,
         }
     }
 }

@@ -532,6 +532,7 @@ pub fn update(
                     &sim.controls,
                     t.jib_side as f32,
                     t.jib.chord_angle as f32,
+                    1.0 - t.jib.coeffs.luffing as f32,
                 );
                 // And where the *cloth* ends, not where the geometry says: the corner is
                 // pushed off the mast, the shrouds and the deck like every other point

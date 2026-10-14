@@ -95,7 +95,7 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
 /// help does not mention is a feature nobody will find; a key the help promises and
 /// nothing reads is a lie, and both have happened here.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const DOCUMENTED: [KeyCode; 35] = [
+pub const DOCUMENTED: [KeyCode; 36] = [
     // At the helm.
     KeyCode::ArrowLeft,
     KeyCode::ArrowRight,
@@ -120,6 +120,7 @@ pub const DOCUMENTED: [KeyCode; 35] = [
     KeyCode::KeyT,
     KeyCode::KeyR,
     KeyCode::KeyG,
+    KeyCode::KeyF,
     // Looking at it.
     KeyCode::KeyC,
     KeyCode::KeyV,

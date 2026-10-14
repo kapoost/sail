@@ -607,7 +607,18 @@ impl Simulation {
         // gennaker before you harden up, not after.
         let fill = if flying.flying() {
             let limit = flying.fills_above();
-            smoothstep(limit - rad(8.0), limit + rad(8.0), jib_awa.abs())
+            let filled = smoothstep(limit - rad(8.0), limit + rad(8.0), jib_awa.abs());
+            // A symmetric goes out like a light rather than fading. There is nothing
+            // holding its luff and nothing it can luff *along*: brought too far forward
+            // the whole shoulder falls in at once, the sail comes back against the rig
+            // and it is cloth. Asked for from the deck — kill it at the angles where it
+            // should not be working, and let it flog — and the sharp band is what makes
+            // that read as a collapse rather than as a sail going quietly soft.
+            if matches!(flying, crate::state::Headsail::Spinnaker) {
+                smoothstep(limit - rad(3.0), limit + rad(3.0), jib_awa.abs())
+            } else {
+                filled
+            }
         } else {
             1.0
         };
@@ -1228,6 +1239,25 @@ impl Simulation {
             // sheet in a calm is doing the opposite thing and must be left alone to do it.
             if s.boom_angle < 0.0 && s.boom_rate > 0.0 {
                 s.boom_rate = s.boom_rate.max(BOOM_CROSSING);
+            }
+            // Unless there is a preventer on it, in which case it comes across over
+            // somebody's dead body.
+            //
+            // A preventer is a line from the end of the boom, led forward to the rail and
+            // made fast — the one piece of string on a cruising boat that is there purely
+            // to stop something happening. Running downwind the wind gets behind the main
+            // every time she rolls or the helm wanders, and an unprevented boom crossing
+            // the cockpit at thirty knots is how people are killed. With it rigged, the
+            // wind going across the stern backs the mainsail and leaves it backed: she
+            // rounds up, which is unpleasant and survivable, and the boom stays exactly
+            // where it was put.
+            if controls.preventer {
+                if s.boom_angle < 0.0 {
+                    s.boom_rate = s.boom_rate.min(0.0);
+                }
+                // And it is a rope rather than a bar, so it holds the boom out against
+                // the sheet's slack as well: no working about in a seaway.
+                s.boom_rate *= 0.3;
             }
             s.boom_angle += s.boom_rate * dt;
             // The cap shroud stops it on either side — the same limit the force model

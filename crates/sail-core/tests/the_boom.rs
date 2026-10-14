@@ -181,3 +181,49 @@ fn an_eased_vang_lets_the_boom_lift_off_the_wind() {
         lift(eased)
     );
 }
+
+/// A preventer stops the gybe, which is the whole of what it is for.
+///
+/// Asked for from the deck as a toggle that would be useful running downwind, and it is
+/// the one line on a cruising boat that exists to stop something rather than to make it
+/// happen: led from the boom end forward to the rail and made fast. With it on, the wind
+/// crossing the stern backs the mainsail and leaves it backed — she rounds up, which is
+/// unpleasant and survivable — and the boom stays exactly where it was put.
+#[test]
+fn a_preventer_keeps_the_boom_where_it_was_put() {
+    let gybe_with = |preventer: bool| -> f64 {
+        let cfg = BoatConfig::archipelago_packet();
+        let mut sim = Simulation::new(
+            cfg,
+            BoatState::at_rest(wrap_tau(0.0 - rad(165.0))),
+            Box::new(SteadyWind::new(0.0, kn_to_ms(12.0))) as Box<dyn WindField>,
+        );
+        let mut controls = Controls {
+            main_sheet: 0.95,
+            jib_sheet: 0.85,
+            preventer,
+            ..Default::default()
+        };
+        for _ in 0..(60.0 / SUBSTEP) as u64 {
+            let off = deg(sim.telemetry.twa) - 165.0;
+            controls.rudder = rad((off * 0.5).clamp(-25.0, 25.0));
+            sim.run(SUBSTEP, &controls);
+        }
+        let before = sim.telemetry.boom;
+        controls.rudder = rad(-18.0);
+        for _ in 0..(20.0 / SUBSTEP) as u64 {
+            sim.run(SUBSTEP, &controls);
+        }
+        // Positive if the boom is still on the side it started, negative if it crossed.
+        sim.telemetry.boom * before.signum()
+    };
+
+    assert!(
+        gybe_with(false) < 0.0,
+        "without one she gybes, which is what the last commit was about"
+    );
+    assert!(
+        gybe_with(true) > 0.0,
+        "with one rigged the boom stays where it was, and she has to be sailed out of it"
+    );
+}

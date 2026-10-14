@@ -386,6 +386,21 @@ pub fn gather(
     // It stops at the heel it is aiming for rather than running the sheets right out,
     // and it never hauls anything back in — this is a release, and a control that both
     // eased and trimmed would be `T` with a different name.
+    // The preventer. A toggle rather than a held key, because it is a rope somebody ties
+    // on and leaves: you rig it at the top of a long run and you take it off before you
+    // mean to gybe, and forgetting which of those you have done is part of the thing.
+    if keys.just_pressed(KeyCode::KeyF) {
+        sim.controls.preventer = !sim.controls.preventer;
+        info!(
+            "preventer {}",
+            if sim.controls.preventer {
+                "rigged — she will not gybe until it is off"
+            } else {
+                "off"
+            }
+        );
+    }
+
     if keys.pressed(KeyCode::KeyR) || pad.is_some_and(|p| p.pressed(GamepadButton::West)) {
         let heel = sim.sim.telemetry.heel.abs();
         let over = ((heel - sail_core::autopilot::OVERPOWERED_HEEL)
