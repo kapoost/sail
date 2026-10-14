@@ -15,6 +15,7 @@ mod course;
 mod curve;
 mod deck;
 mod deck_texture;
+mod fishing;
 mod fittings;
 mod fleet;
 mod frame;
@@ -30,6 +31,7 @@ mod panel;
 mod rain;
 mod retro;
 mod rig;
+mod rod;
 mod sail_texture;
 mod sea_texture;
 mod settings;
@@ -219,6 +221,10 @@ fn main() {
         .init_resource::<chart::Track>()
         .init_resource::<world::SurfaceDrift>()
         .init_resource::<camera::ChaseState>()
+        // The gear is drawn against the same seed as the weather, so a day worth
+        // sailing again is also a day worth fishing again: the same fish take in the
+        // same places, and a passage can be repeated rather than merely re-rolled.
+        .insert_resource(fishing::Fishing::new(weather.seed))
         .init_resource::<camera::ViewAim>()
         .add_systems(
             Startup,
@@ -240,6 +246,7 @@ fn main() {
                 rig::setup,
                 panel::setup,
                 stowage::setup,
+                rod::setup,
                 net::setup,
                 windstreaks::setup,
             )
@@ -253,6 +260,11 @@ fn main() {
                 // Intent, then physics, then everything that reads the result.
                 input::gather,
                 clutch::handle,
+                // The rod is worked before the physics for the same reason the helm is:
+                // it is intent, and intent belongs at the top of the frame. The fight
+                // reads last frame's speed through the water, which is five milliseconds
+                // stale and matters to nothing.
+                fishing::work,
                 sim::advance,
                 // Pick where the world is drawn from before anything is placed in it,
                 // so the whole frame agrees on one mark.
@@ -292,7 +304,8 @@ fn main() {
                     course::update,
                     world::update_sea,
                     course::float_marks,
-                    wake::update,
+                    // The two things that live in the water she has just left.
+                    (wake::update, rod::update),
                     rig::update,
                     camera::follow,
                     sound::update,
@@ -337,6 +350,7 @@ fn main() {
                 settings::draw,
                 help::draw,
                 chart::draw,
+                rod::draw,
                 hud::draw,
             )
                 .chain(),

@@ -224,6 +224,62 @@ enters as an offset to the heel it is evaluated at.
 Flat water remains the default, so the polar is unchanged to the last digit and every
 flat-water test still measures what it did before.
 
+## Fishing
+
+She was an open fishing boat until 1964, so there is a rod in a holder on her port
+quarter. It is not a minigame beside the sailing; it is bolted to it, and the join is
+one fact: **a fish on the line at six knots is a fish you are going to lose.** The water
+dragging a nine-kilo ling broadside at that speed pulls harder than the line will stand,
+so the first thing you do when something takes is get the way off her — and the gear for
+that is the mainsheet, the dump, the backed headsail and the helm you already have. The
+rod has no speed control. The boat is the speed control.
+
+Three things to work, and they match the gear they stand for the way the sheets do:
+
+| control | nature | what it decides |
+|---|---|---|
+| the reel | a rate — a handle you turn | line in, line out |
+| the drag | a position — a star you screw down | whether the fish tires, or the hook pulls |
+| line out | a length | how deep the lure swims, and therefore what can see it |
+
+The drag is the whole game, and it is wrong in both directions. Too tight and the hook
+comes out of the fish's mouth, because load is what opens the hole it sits in. Too light
+and the fish never tires at all — fatigue is charged for *work done against the line*,
+so a drag you have backed off is a fish you are not beating. The rule printed on every
+spool is a quarter to a third of the line's breaking strain, and that band is painted on
+the dial rather than written anywhere.
+
+The line is a spring with a slipping clutch at one end and an animal at the other, and
+the ways to lose a fish fall out of that rather than being special-cased. The fish is a
+force-velocity relation and not a force, which is one line of arithmetic and the
+difference between something that pulls and something that is alive: held hard it swims
+slowly, given slack it swims fast.
+
+**Depth is a length of line.** A diving lure's downforce and the line's drag both go as
+the square of the speed, so the angle the line takes up is nearly the same at two knots
+and at six — which is what a line counter is sold on. The depth is an integral along the
+line rather than a triangle, because the drag is distributed: everything near the lure
+hangs steep and everything near the rod lies flat. Done as a triangle it saturates
+around fifteen metres however much line you let out, which deletes the deep fish from
+the game, and that is exactly what the first version did.
+
+**Five fish, and they differ in a table rather than in code** — weight, pull per
+kilogramme, burst speed, stamina, how well a hook holds, and the depth, speed and ground
+they are found at. A mackerel out-pulls everything here pound for pound and tires in
+twenty seconds; a pollack's whole fight is one savage dive in the first ten; a cod is
+dead weight and a head-shake; a saithe runs and keeps running; a ling has to be given
+line or it takes the lot. The sixth thing you can hook is the ground, which fights like a
+fish with infinite patience and lets go only when the way is off her.
+
+**Nothing jumps.** A fishing game puts a leaping fish on the box because a salmon leaps.
+A mackerel does not, a pollack does not, and a cod has never left the water under its own
+power in its life.
+
+`C` now gives a third view, facing aft from the cockpit down the wake — which is worth
+having without a rod in your hand, because ahead is where you are going and astern is
+where your wake, your gear and anything overtaking you are. `SAIL_ROD=30` streams thirty
+metres before the first frame, for the same reason `SAIL_SQUALL` exists.
+
 ## Deliberate decisions
 
 * **Real time, 1:1.** No time compression yet. It will have to come back — forty miles

@@ -31,7 +31,7 @@ use crate::sim::Sim;
 
 /// Painted metal, cream dial faces, red needles. A deliberately small palette: the
 /// old panels were cheap to print and that is exactly why they read so well.
-mod paint {
+pub mod paint {
     use bevy_egui::egui::Color32;
     pub const CASE: Color32 = Color32::from_rgb(38, 40, 43);
     pub const BEZEL: Color32 = Color32::from_rgb(62, 65, 69);

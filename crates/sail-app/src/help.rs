@@ -33,7 +33,7 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut help: ResMut<Help>) {
 /// Grouped the way a person needs them rather than the way the code is laid out: what
 /// your hands do first, then the sails, then what you are looking at. A list in
 /// alphabetical order of key would be easier to write and useless to read.
-const KEYS: [(&str, &[(&str, &str)]); 3] = [
+const KEYS: [(&str, &[(&str, &str)]); 4] = [
     (
         "AT THE HELM",
         &[
@@ -72,9 +72,27 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
         ],
     ),
     (
+        "THE ROD",
+        &[
+            ("J", "the rod: over the stern, and away again"),
+            (
+                "↑ ↓",
+                "the reel: wind in, give line — and line out is depth",
+            ),
+            (
+                "- =",
+                "the drag: a third of the line's strength is the rule",
+            ),
+            (
+                " ",
+                "a fish on and the way still on her is a fish you will lose",
+            ),
+        ],
+    ),
+    (
         "LOOKING AT IT",
         &[
-            ("C", "view: from the helm, or from astern"),
+            ("C", "view: from the helm, from behind her, down the wake"),
             ("V", "picture: sharp, 960, 720, 480 pixels"),
             ("B", "the ink drawing"),
             ("M", "the chart, and [ ] to zoom it"),
@@ -95,7 +113,7 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
 /// help does not mention is a feature nobody will find; a key the help promises and
 /// nothing reads is a lie, and both have happened here.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const DOCUMENTED: [KeyCode; 36] = [
+pub const DOCUMENTED: [KeyCode; 41] = [
     // At the helm.
     KeyCode::ArrowLeft,
     KeyCode::ArrowRight,
@@ -121,6 +139,12 @@ pub const DOCUMENTED: [KeyCode; 36] = [
     KeyCode::KeyR,
     KeyCode::KeyG,
     KeyCode::KeyF,
+    // The rod.
+    KeyCode::KeyJ,
+    KeyCode::ArrowUp,
+    KeyCode::ArrowDown,
+    KeyCode::Minus,
+    KeyCode::Equal,
     // Looking at it.
     KeyCode::KeyC,
     KeyCode::KeyV,

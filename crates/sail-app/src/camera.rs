@@ -27,6 +27,17 @@ pub enum View {
     /// photograph is taken from and for the same reason.
     #[default]
     Chase,
+    /// Facing aft from the after end of the cockpit, down the wake.
+    ///
+    /// Added for the rod and worth having without one. A boat gives you two directions
+    /// that matter and a simulator usually gives you one: ahead is where you are going
+    /// and astern is where your wake, your gear and anything overtaking you are. The
+    /// chase camera looks *at* the boat from behind her, which is a different thing
+    /// entirely — it shows you the boat, and this shows you what the boat is leaving.
+    ///
+    /// It is on board, so it heels. The wake tilting as she lies over is most of what
+    /// tells you how hard she is pressed when you cannot see the sails.
+    Astern,
 }
 
 /// A head and neck, in effect.
@@ -256,7 +267,8 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>, mut view: 
     if pressed {
         *view = match *view {
             View::Cockpit => View::Chase,
-            View::Chase => View::Cockpit,
+            View::Chase => View::Astern,
+            View::Astern => View::Cockpit,
         };
     }
 }
@@ -314,6 +326,23 @@ pub fn follow(
                 let base = Vec3::new(hull.x, head.heave, hull.z);
                 cam.translation = base + frame::attitude(st) * eye_local;
                 cam.rotation = eye * Quat::from_rotation_x(-0.10);
+                chase.initialised = false;
+            }
+            View::Astern => {
+                // Standing in the after end of the cockpit, turned round. The same head
+                // and neck as the cockpit view — it is the same person — with the whole
+                // frame swung through half a turn.
+                let eye = head.attitude(st.heading as f32)
+                    * Quat::from_rotation_y(std::f32::consts::PI + aim.yaw)
+                    * Quat::from_rotation_x(aim.pitch);
+                // A little to port, where the rod is, and low: the thing worth looking
+                // at from here is forty metres of water, not the sky over it.
+                let eye_local = Vec3::new(-0.34, crate::deck::cockpit_sole() + 1.58, 3.6);
+                let base = Vec3::new(hull.x, head.heave, hull.z);
+                cam.translation = base + frame::attitude(st) * eye_local;
+                // Tipped down more than the cockpit view, because the line goes into the
+                // water astern and that is where the eye wants to be.
+                cam.rotation = eye * Quat::from_rotation_x(-0.17);
                 chase.initialised = false;
             }
             View::Chase => {
