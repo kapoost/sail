@@ -78,3 +78,21 @@ Nothing yet. It counts releases so that "the one with the bell in it" has a name
 the installer can tell whether it already has the newest. There is no stability promise
 and no changelog file: the commit messages are the changelog, and they are written to be
 read.
+
+## When somebody says `irm is not recognized`
+
+They pasted it into the Command Prompt. `irm` is `Invoke-RestMethod` and it is a
+PowerShell word; `cmd.exe` has never heard of it and never will. The release notes now
+say "press Start, type powershell" in as many words, and carry a second line that works
+from either shell and from the Run box:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12'; irm https://raw.githubusercontent.com/kapoost/sail/main/dist/install.ps1 | iex"
+```
+
+The two extra pieces are for older machines and neither is superstition: `-ExecutionPolicy
+Bypass` for one that refuses to run scripts, and the TLS line for a Windows 10 whose
+PowerShell 5.1 still opens connections with a protocol GitHub stopped accepting in 2018.
+
+Reported from a friend's machine the first time anybody who had not seen the instruction
+written down tried to follow it, which is the only test a set of instructions has.

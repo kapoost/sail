@@ -131,11 +131,25 @@ jobs:
 
             ## Windows
 
-            Paste this into PowerShell:
+            Paste this into **PowerShell** — press Start, type `powershell`, press
+            Enter, and paste it there:
 
             ```
             irm https://raw.githubusercontent.com/kapoost/sail/main/dist/install.ps1 | iex
             ```
+
+            **`irm` is not recognized?** Then it went into the Command Prompt rather than
+            into PowerShell — `irm` is a PowerShell word and `cmd` has never heard of it.
+            This line works from either, and from the Run box as well:
+
+            ```
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12'; irm https://raw.githubusercontent.com/kapoost/sail/main/dist/install.ps1 | iex"
+            ```
+
+            The two extra pieces are for older machines: `-ExecutionPolicy Bypass` for
+            one that refuses to run scripts at all, and the TLS line for a Windows 10
+            whose PowerShell still opens connections with a protocol GitHub stopped
+            accepting years ago.
 
             It puts the game in `%LOCALAPPDATA%\Sail`, brings `sail-server.exe` with
             it, adds a Start menu entry, and asks for no administrator rights. Run
