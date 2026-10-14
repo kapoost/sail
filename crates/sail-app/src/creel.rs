@@ -103,6 +103,9 @@ fn looks(what: Quarry) -> (f32, Color) {
         Quarry::Pollack => (0.46, Color::srgb(0.33, 0.27, 0.18)),
         Quarry::Cod => (0.52, Color::srgb(0.38, 0.36, 0.24)),
         Quarry::Ling => (0.68, Color::srgb(0.30, 0.26, 0.19)),
+        // Slate grey above and white below, and longer for its weight than anything
+        // else in the basket, because a shark is built as a tube.
+        Quarry::Tope => (0.95, Color::srgb(0.30, 0.32, 0.34)),
         Quarry::Bottom => (0.2, Color::srgb(0.2, 0.3, 0.2)),
     }
 }

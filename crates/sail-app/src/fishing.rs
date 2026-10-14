@@ -302,6 +302,8 @@ pub enum Quarry {
     Pollack,
     Cod,
     Ling,
+    /// The shark. See [`TOPE`].
+    Tope,
     /// The ground. It fights like a fish with infinite patience, which is to say it is
     /// the one thing here you cannot beat — you get the lure back by taking the way off
     /// her so the angle of pull can change, or you do not get it back.
@@ -393,6 +395,17 @@ struct Nature {
     ground: (f64, f64),
     /// How many there are, relative to each other.
     plenty: f64,
+    /// Whether it can bite through what it is hooked on, per second, with the load up.
+    ///
+    /// The one thing that makes a shark a different animal rather than a bigger fish.
+    /// Everything else in this table is hooked in a mouth made of bone and skin and
+    /// stays hooked until the hook pulls; a tope has a mouth full of teeth, and a leader
+    /// of monofilament in it is a matter of time. Serious shark anglers use a wire trace
+    /// for exactly this reason and nobody trolling a lure off a cruising boat is carrying
+    /// one.
+    ///
+    /// Nought for everything that is not a shark, which is everything else here.
+    bite_through: f64,
     /// How often a fish that hits the lure ends up on it.
     ///
     /// The miss is half of trolling and it was missing. A fish slashes at a moving lure
@@ -418,6 +431,7 @@ const MACKEREL: Nature = Nature {
     speed: (5.0, 1.6),
     ground: (25.0, 40.0),
     plenty: 1.0,
+    bite_through: 0.0,
     sticks: 0.70,
     opening: Doing::Circle,
     repertoire: &[Doing::Circle, Doing::Circle, Doing::Shake],
@@ -434,6 +448,7 @@ const SAITHE: Nature = Nature {
     speed: (3.6, 1.4),
     ground: (18.0, 25.0),
     plenty: 0.9,
+    bite_through: 0.0,
     sticks: 0.80,
     opening: Doing::Run,
     repertoire: &[Doing::Run, Doing::Run, Doing::Circle, Doing::Shake],
@@ -450,6 +465,7 @@ const POLLACK: Nature = Nature {
     speed: (2.8, 1.2),
     ground: (22.0, 25.0),
     plenty: 0.7,
+    bite_through: 0.0,
     sticks: 0.72,
     opening: Doing::Sound,
     repertoire: &[Doing::Sound, Doing::Shake, Doing::Hang, Doing::Sound],
@@ -466,6 +482,7 @@ const COD: Nature = Nature {
     speed: (2.2, 1.0),
     ground: (35.0, 25.0),
     plenty: 0.55,
+    bite_through: 0.0,
     sticks: 0.86,
     opening: Doing::Hang,
     repertoire: &[Doing::Shake, Doing::Hang, Doing::Hang, Doing::Run],
@@ -479,12 +496,61 @@ const LING: Nature = Nature {
     stamina: 130.0,
     hold: 0.90,
     depth: (28.0, 12.0),
-    speed: (1.8, 0.8),
+    // Slower than it looked, and the page in `logbook.rs` is what found it: at one and
+    // eight tenths of a knot the lure cannot be got to twenty-eight metres on the whole
+    // spool — a hundred and forty metres of line gets to twenty-four. So the band was
+    // asking for a depth that could not be reached at the speed it asked for, which is a
+    // fish nobody could have caught on purpose. One and four tenths is where the
+    // arithmetic says it has to be, and it is the right answer anyway: a ling is a
+    // bottom fish and you are barely moving.
+    speed: (1.4, 0.6),
     ground: (60.0, 30.0),
     plenty: 0.15,
+    bite_through: 0.0,
     sticks: 0.80,
     opening: Doing::Sound,
     repertoire: &[Doing::Hang, Doing::Sound, Doing::Run, Doing::Hang],
+};
+
+/// A tope: the shark that is actually here.
+///
+/// Asked for as "sharks", and this is the one these waters have. A tope is a two-metre
+/// requiem shark that comes into the Irish and Scottish coast in spring and summer, takes
+/// a bait or a lure on the move, and makes the first run anybody who has caught one talks
+/// about afterwards — a hundred metres of line in the time it takes to get your hand to
+/// the reel. It is caught on purpose here every season and released again.
+///
+/// Three things make it a different animal in this table rather than a heavier fish.
+///
+/// **It cannot be stopped.** A hundred and fifteen newtons against braid that parts at
+/// eighty-nine means the drag has to be giving line or the line is going. You do not
+/// fight a tope, you let it run and you keep in touch with it.
+///
+/// **It does not tire in a hurry.** The stamina is the highest in the list by half
+/// again, which with a hundred and sixty metres on the spool is the real question: it is
+/// a race between the fish tiring and the spool emptying, and on a big one the spool
+/// wins.
+///
+/// **It has teeth.** See [`Nature::bite_through`]: without a wire trace, a leader in that
+/// mouth is a matter of time, and that is a way of losing a fish that nothing else here
+/// can do to you.
+const TOPE: Nature = Nature {
+    name: "tope",
+    mass: (9.0, 3.5),
+    power: 1.3,
+    dash: 3.4,
+    stamina: 150.0,
+    hold: 0.78,
+    // Mid-water over a clean bottom, and it will come up for something moving.
+    depth: (12.0, 7.0),
+    speed: (2.6, 1.2),
+    ground: (40.0, 25.0),
+    // Rare, and meant to be. One in a long afternoon, and you will remember which one.
+    plenty: 0.09,
+    bite_through: 0.016,
+    sticks: 0.74,
+    opening: Doing::Run,
+    repertoire: &[Doing::Run, Doing::Run, Doing::Sound, Doing::Hang],
 };
 
 /// The ground, given a nature so the fight code never has to ask whether it is fishing.
@@ -503,6 +569,7 @@ const GROUND: Nature = Nature {
     speed: (0.0, 1.0),
     ground: (0.0, 1.0),
     plenty: 0.0,
+    bite_through: 0.0,
     sticks: 1.0,
     opening: Doing::Hang,
     repertoire: &[Doing::Hang],
@@ -523,6 +590,7 @@ impl Quarry {
             Quarry::Pollack => &POLLACK,
             Quarry::Cod => &COD,
             Quarry::Ling => &LING,
+            Quarry::Tope => &TOPE,
             Quarry::Bottom => &GROUND,
         }
     }
@@ -530,16 +598,46 @@ impl Quarry {
     pub fn name(self) -> &'static str {
         self.nature().name
     }
+
+    /// Where it feeds, how fast it will chase a lure, and the water it is over —
+    /// depth in metres, speed in knots, ground in metres.
+    ///
+    /// The three numbers the page in `logbook.rs` is built from. Read off the same table
+    /// the fish themselves are drawn from, so a species whose numbers are tuned cannot
+    /// end up with a page that lies about it.
+    pub fn hunting(self) -> (f64, f64, f64) {
+        let n = self.nature();
+        (n.depth.0, n.speed.0, n.ground.0)
+    }
+
+    /// What it does when it feels the hook, in the words somebody would use.
+    ///
+    /// Written out rather than derived from the repertoire, because "Sound, Shake, Hang,
+    /// Sound" is a list of states and what a person wants is the character. The states
+    /// are the truth and this is the description of it; if they ever disagree, the states
+    /// are right and this line is out of date.
+    pub fn fights(self) -> &'static str {
+        match self {
+            Quarry::Mackerel => "tight circles, over in twenty seconds, paper mouth",
+            Quarry::Saithe => "runs, and keeps running — the best fight per pound",
+            Quarry::Pollack => "one savage dive at the hook; survive it and it is yours",
+            Quarry::Cod => "dead weight and a head-shake, no runs at all",
+            Quarry::Ling => "give it line or it takes the lot",
+            Quarry::Tope => "a hundred metres before your hand reaches the reel — and teeth",
+            Quarry::Bottom => "it does not fight, it waits",
+        }
+    }
 }
 
 /// Every species that swims, in the order they are rolled for. The ground is not in the
 /// list because it is not caught, it is run into.
-pub const SPECIES: [Quarry; 5] = [
+pub const SPECIES: [Quarry; 6] = [
     Quarry::Mackerel,
     Quarry::Saithe,
     Quarry::Pollack,
     Quarry::Cod,
     Quarry::Ling,
+    Quarry::Tope,
 ];
 
 /// How deep a trolled lure swims, metres.
@@ -928,6 +1026,34 @@ impl Fishing {
             }
             Rod::Playing(_) => "not with a fish on",
         }
+    }
+
+    /// How hard the fight is pressing the gear, nought to one.
+    ///
+    /// For the band. `music.rs` already has a measure of how far past her own numbers
+    /// the *boat* is — cloth over its rated wind, knocked down, a sea too big for her —
+    /// and when that passes a third it changes language entirely, into something with a
+    /// flattened second in it. This is the same question asked of the tackle, and it goes
+    /// into the same place.
+    ///
+    /// Which is the whole design: there is no fish theme and there is no sting. A
+    /// mackerel does not reach it, because a mackerel is eleven newtons against braid
+    /// that stands eighty-nine and nothing is in danger. A tope running reaches it
+    /// outright, because it is, and so does a ling you are trying to stop. **What the
+    /// music responds to is the line, not the fish** — so a big one played properly, on a
+    /// drag set right and given its head, does not get the full treatment until you make
+    /// a mistake, and that is exactly the right way round.
+    ///
+    /// Two measures, worst wins. The load against what the line will stand, reading as
+    /// past it at fifty-five per cent; and line leaving the spool, which is the other way
+    /// a fight gets away from you and the one you can hear from the cockpit.
+    pub fn pressing(&self) -> f32 {
+        if self.fish().is_none() {
+            return 0.0;
+        }
+        let load = (self.tension / BREAKING - 0.55) / 0.35;
+        let running = (self.paying - 0.8) / 2.0;
+        load.max(running).clamp(0.0, 1.0) as f32
     }
 
     /// Whether there is a fish alongside waiting to be lifted, and whether this is the
@@ -1380,6 +1506,14 @@ impl Fishing {
             };
         fish.hold -= wear * dt;
 
+        // And the teeth, which are not wear on a hook but a leader being sawn through.
+        // Only while there is load on it: a slack trace is a trace lying in a mouth
+        // rather than being drawn across it, which is also why a shark is lost on the
+        // *run* and not while it is hanging there.
+        let sawing = n.bite_through > 0.0
+            && self.tension > 0.25 * BREAKING
+            && self.rng.next_f64() < n.bite_through * dt;
+
         // --- Everything that ends it -----------------------------------------------
         let beaten = fish.beaten();
         let hold = fish.hold;
@@ -1390,6 +1524,10 @@ impl Fishing {
                 "the line parted — {BREAKING:.0} N of braid against {:.0}",
                 self.tension.max(BREAKING)
             ));
+        }
+        if sawing {
+            self.lost_the_lot();
+            return Some("it bit through the leader — that was a tope".into());
         }
         if hold <= 0.0 {
             let pulled = self.tension > 0.45 * BREAKING;
@@ -1836,13 +1974,28 @@ mod tests {
     fn no_drag_never_tires_the_fish() {
         let tired = |drag: f64| {
             let mut f = with(Quarry::Pollack, 4.0);
-            sail(&mut f, 120.0, sea(1.0, 30.0), hands(0.0, drag));
-            f.fish().map(|f| f.beaten()).unwrap_or(1.0)
+            sail(&mut f, 35.0, sea(1.0, 30.0), hands(0.0, drag));
+            // **The same fish**, and that is the whole correction. Run long enough and
+            // the pollack is finished, the lure goes back in the water, and at a knot it
+            // sinks onto the ground inside a minute — so what was being measured was the
+            // seabed, which has a stamina of a thousand million and is never beaten at
+            // all. It read as both drags tiring nothing, which is half the claim being
+            // made here and was true for the wrong reason.
+            match f.fish() {
+                Some(fish) if fish.what == Quarry::Pollack => fish.beaten(),
+                _ => 1.0,
+            }
         };
         let slack = tired(0.02);
         let proper = tired(1.0 / 3.0);
+        // Twice over, not three times, and the gap between those two numbers is worth
+        // knowing: a backed-off drag is not *no* load. A spool turning fast has its own
+        // resistance — `SLIP` is viscous, nine newtons for every metre a second — so a
+        // fish running at two and a half metres a second puts twenty-five newtons on the
+        // line through a drag set at under two. Which is true of a real reel and is why
+        // a screaming spool still tires a fish, slowly.
         assert!(
-            proper > slack * 3.0,
+            proper > slack * 1.8,
             "a third of the breaking strain tires it {proper}, nothing tires it {slack}"
         );
     }

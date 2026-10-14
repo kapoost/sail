@@ -508,6 +508,7 @@ pub fn compose(
     sky: Res<crate::sky::Sky>,
     ink: Res<crate::world::Ink>,
     pilot: Res<crate::input::Pilot>,
+    fishing: Res<crate::fishing::Fishing>,
     course: Res<crate::course::Course>,
     sound: Res<SoundHandle>,
     mut music: ResMut<Music>,
@@ -629,11 +630,24 @@ pub fn compose(
     // rather than near-it — which is what makes this honest. Strain especially: it is a
     // countdown that reaches one and blows the sail out, so it is the sea's own clock
     // and the music is simply reading it.
+    // The boat past her numbers, and the tackle past its own, and the worse of the two.
+    //
+    // A fight goes in here rather than getting a theme of its own, and that is the whole
+    // of the design. Everything this composer plays is read off something that has
+    // already happened — the cloth's countdown, the heel, the sea against her length —
+    // and a line at four fifths of its breaking strain is the same kind of fact about a
+    // different object. So the band tightens because the *line* is tight.
+    //
+    // What it buys is that nothing has to decide which fish is a boss. A mackerel never
+    // reaches it; a tope running reaches it outright; and a big one played properly, on a
+    // drag set right and given its head, does not get the full treatment until you make a
+    // mistake — which is the right way round and is not a thing a trigger could express.
     let beyond = beyond_her(
         t,
         sail_core::units::ms_to_kn(cfg_headsail_limit(&sim)),
         cfg_loa(&sim),
-    );
+    )
+    .max(fishing.pressing());
 
     // The sea stops setting the pace. Everywhere else in this composer the tempo comes
     // from the encounter period, because the hull meeting the waves is the rhythm
