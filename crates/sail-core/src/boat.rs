@@ -764,6 +764,27 @@ impl BoatConfig {
             * self.x_rudder.abs()
     }
 
+    /// The most helm a pilot asks for, which on this boat is the mechanical stop.
+    ///
+    /// Named rather than written out because it was nearly something else, and the
+    /// measurement is worth keeping. The stock turns forty degrees each way, the blade
+    /// stalls at twenty-eight, and past the stall it keeps about half the side force it
+    /// had — so a pilot that answers a bad knock by going to the stop looks like a pilot
+    /// throwing away half its rudder at the one moment it needs all of it.
+    ///
+    /// It is not. Held at the stall angle instead, over five seas and two wind strengths
+    /// running under spinnaker, it was better in one case out of four and worse in two:
+    /// her wander in twenty knots under kite and main went from twenty-seven degrees to
+    /// thirty-six. A rudder hard over past its stall is also a brake, right aft, and
+    /// braking the stern is half of what stops a boat being slewed by a following sea —
+    /// which is why a helmsman fighting a broach does put it on the stop, and feels it go
+    /// light, and leaves it there anyway.
+    ///
+    /// So this is the stop, and it is a function because the question was real.
+    pub fn pilot_helm_limit(&self) -> f64 {
+        self.max_rudder_angle
+    }
+
     /// PID gains for a tiller pilot on this boat, derived rather than tuned.
     ///
     /// Picks a closed-loop yaw frequency and a damping ratio, then solves for the

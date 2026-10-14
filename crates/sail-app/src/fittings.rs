@@ -449,34 +449,117 @@ fn wind_vane(w: &mut Workshop, b: &mut ChildSpawnerCommands, varnish: &Handle<St
     .with_children(|t| {
         // The post it all stands on.
         t.spawn((
-            Mesh3d(w.meshes.add(Cylinder::new(0.028, 0.52))),
+            Mesh3d(w.meshes.add(Cylinder::new(0.030, PIVOT))),
             MeshMaterial3d(varnish.clone()),
-            Transform::from_xyz(0.0, 0.26, 0.0),
+            Transform::from_xyz(0.0, PIVOT * 0.5, 0.0),
         ));
         // The counterweight arm across the top, which is what makes a vane fall over
         // slowly and deliberately rather than slamming: it is balanced just off
-        // vertical so gravity brings it back.
+        // vertical so gravity brings it back. With the lead on the end of it, because
+        // an arm with nothing on it is a stick.
         t.spawn((
-            Mesh3d(w.meshes.add(Cuboid::new(0.30, 0.022, 0.022))),
+            Mesh3d(w.meshes.add(Cuboid::new(ARM, 0.024, 0.024))),
             MeshMaterial3d(varnish.clone()),
-            Transform::from_xyz(0.0, 0.50, 0.0),
+            Transform::from_xyz(0.0, PIVOT - 0.02, 0.0),
+        ));
+        t.spawn((
+            Mesh3d(w.meshes.add(Cylinder::new(0.035, 0.07))),
+            MeshMaterial3d(w.materials.add(StandardMaterial {
+                base_color: Color::srgb(0.38, 0.38, 0.41),
+                perceptual_roughness: 0.6,
+                metallic: 0.5,
+                ..default()
+            })),
+            Transform::from_xyz(ARM * 0.5, PIVOT - 0.02, 0.0)
+                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
         ));
         t.spawn((
             VaneBlade,
-            Transform::from_xyz(0.0, 0.52, 0.0),
+            Transform::from_xyz(0.0, PIVOT, 0.0),
             Visibility::default(),
         ))
         .with_children(|v| {
-            // Plywood, a foot wide and twice that tall, and set *fore and aft* when the
-            // turret is at zero: a vane holds a wind angle by presenting its edge to
-            // that wind, so its plane lies along the wind it is set for.
+            // The blade, set *fore and aft* when the turret is at zero: a vane holds a
+            // wind angle by presenting its edge to that wind, so its plane lies along
+            // the wind it is set for.
             v.spawn((
-                Mesh3d(w.meshes.add(Cuboid::new(0.012, 0.56, 0.30))),
+                Mesh3d(w.meshes.add(plywood_blade())),
                 MeshMaterial3d(varnish.clone()),
-                Transform::from_xyz(0.0, 0.28, -0.04),
+                Transform::from_xyz(0.0, 0.0, -0.04),
             ));
         });
     });
+}
+
+/// How high the blade pivots above the stern deck, and how long the counterweight arm
+/// across the top of the post is.
+const PIVOT: f32 = 0.58;
+const ARM: f32 = 0.36;
+
+/// The blade: height, and its chord at the root and at the tip.
+///
+/// Reported from the deck as looking pretty feeble, and it was — a foot and a half tall
+/// and a foot wide, which is a sixth of a square metre. That is a weathervane on a shed.
+/// The air vane on a self-steering gear is a plywood plate about a metre tall and a foot
+/// or so across at the head, a third of a square metre of it, standing well above the
+/// pushpit where the air is clean — it is one of the two or three things you can pick out
+/// on a boat from a mile off, and it has to be that big for a reason: all the gear has to
+/// work with is the difference between the wind on one face of it and the other, and
+/// below about a quarter of a square metre there is not enough of that to move a helm.
+const BLADE: (f32, f32, f32) = (1.02, 0.26, 0.40);
+
+/// A tapered plywood plate, wider at the head than at the root.
+///
+/// Which is both what they look like and why: the taper puts the area high, where the
+/// air is cleanest and the lever on the pivot is longest, without the weight that a
+/// plate that wide the whole way down would carry at the top of a post. The leading edge
+/// is straight and the trailing edge rakes aft, which is how one is cut out of a sheet.
+fn plywood_blade() -> Mesh {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::mesh::PrimitiveTopology;
+
+    let (height, root, tip) = BLADE;
+    const THICK: f32 = 0.014;
+    // Four corners of the plate, from the root forward corner round to the head.
+    let front = -root * 0.5;
+    let corners = [
+        [front, 0.0],
+        [front + root, 0.0],
+        [front + tip, height],
+        [front, height],
+    ];
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    // The two faces, and then the four edges of the sheet, each with its own vertices so
+    // that the normals are flat rather than smeared round the corner.
+    for side in [-1.0_f32, 1.0] {
+        let base = positions.len() as u32;
+        for c in corners {
+            positions.push([side * THICK * 0.5, c[1], c[0]]);
+        }
+        if side < 0.0 {
+            indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        } else {
+            indices.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
+        }
+    }
+    for i in 0..4 {
+        let (a, b) = (corners[i], corners[(i + 1) % 4]);
+        let base = positions.len() as u32;
+        positions.push([-THICK * 0.5, a[1], a[0]]);
+        positions.push([THICK * 0.5, a[1], a[0]]);
+        positions.push([THICK * 0.5, b[1], b[0]]);
+        positions.push([-THICK * 0.5, b[1], b[0]]);
+        indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_indices(bevy::render::mesh::Indices::U32(indices));
+    mesh.compute_normals();
+    mesh
 }
 
 /// Where the apparent wind comes *from*, as a direction in the boat's own frame.
@@ -692,6 +775,47 @@ mod vane {
                 assert!(along.dot(wind).abs() > 0.999);
             }
         }
+    }
+
+    /// The blade is the size an air vane has to be, and it is where one stands.
+    ///
+    /// Reported from the deck as feeble-looking, which it was: a sixth of a square metre.
+    /// The number is not cosmetic — a vane gear works on the difference in wind pressure
+    /// between the two faces of this plate and nothing else, so a small plate is a gear
+    /// that cannot steer, and every real one is about a third of a square metre. The
+    /// drawing is the only place that number exists, so this is where it is held.
+    #[test]
+    fn the_vane_is_big_enough_to_steer_with() {
+        let (height, root, tip) = BLADE;
+        let area = (root + tip) * 0.5 * height;
+        assert!(
+            (0.28..0.45).contains(&area),
+            "a vane blade of {area:.2} square metres is not a self-steering gear"
+        );
+        // Taller than it is wide, and wider at the head: that is a vane rather than a
+        // signboard, and the taper is what puts the area up in the clean air.
+        assert!(height > tip * 2.0, "that is a signboard, not a vane");
+        assert!(
+            tip > root,
+            "an air vane is wider at the head than at the root"
+        );
+        // Standing clear above the pushpit, in air the crew and the coamings have not
+        // already spoiled.
+        assert!(
+            PIVOT + height > 1.4,
+            "the head of it is {:.2} m above the deck, which is inside the mess",
+            PIVOT + height
+        );
+        // And abaft everything the mainsail swings: the gear is at the extreme stern and
+        // the boom ends over the cockpit, so they cannot meet — but both of those are
+        // numbers somebody could change.
+        let vane_z = STOCK_Z + 0.34;
+        let boom_end = crate::boat::MAST_FOOT_Z + crate::rig::BOOM_LENGTH;
+        assert!(
+            vane_z > boom_end + 0.5,
+            "the vane at z {vane_z:.2} is inside the boom's sweep, which ends at \
+             {boom_end:.2}"
+        );
     }
 
     /// The wind direction itself, against the convention the windex has always used.

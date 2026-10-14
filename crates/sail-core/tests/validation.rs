@@ -2604,17 +2604,22 @@ fn the_vane_does_not_gybe_itself_across_the_stern() {
         deg(gybed),
         deg(tacked)
     );
-    // Four degrees across the stern is a nudge, and the measure of that is *against a
-    // real gybe recovery* rather than against an absolute. The harness holds the error
-    // constant for two seconds with the boat not answering, which winds the integral up
-    // in a way the sea never would, so what matters is the ratio: before the fix both
-    // of these came out at forty degrees, which is the rudder stop, because both were
-    // being treated as a change of tack.
+    // Four degrees across the stern is a nudge, and a gybe is the helm hard over, and
+    // the measure of both is *the most helm this pilot asks for*.
+    //
+    // Against each other is how this was written, and that was fragile: the harness
+    // holds the error constant for two seconds with the boat not answering, which winds
+    // the integral up in a way the sea never would, so the gybe case sits on the limit
+    // and the ratio between them is measuring the limit. Against the limit itself says
+    // the thing the test is actually for — before the fix the four-degree shift came out
+    // on the stop, the same answer as a real gybe.
+    let limit = cfg.pilot_helm_limit();
     assert!(
-        nudge.abs() < gybed.abs() / 2.5,
-        "a four degree shift should not be answered like a gybe: {:.1} against {:.1}",
+        nudge.abs() < limit * 0.6,
+        "a four degree shift should not be answered like a gybe: {:.1} of a possible \
+         {:.1}",
         deg(nudge),
-        deg(gybed)
+        deg(limit)
     );
     // And it has to be the *right* nudge. The wind has gone six degrees further aft on
     // the starboard side, so she luffs a little — towards the wind, which is to
@@ -2624,9 +2629,10 @@ fn the_vane_does_not_gybe_itself_across_the_stern() {
     // A real gybe, though, has to be answered as one: the wind is on the other quarter
     // by sixty degrees and the way back is round the stern, bearing away.
     assert!(
-        deg(gybed) > 10.0,
-        "properly gybed, it should put the helm over: got {:.1} deg",
-        deg(gybed)
+        gybed > limit * 0.9,
+        "properly gybed, it should put the helm over: got {:.1} of a possible {:.1}",
+        deg(gybed),
+        deg(limit)
     );
 
     // And upwind the way back is the other way round — through the wind, which is a
