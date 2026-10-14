@@ -112,21 +112,11 @@ const RING: (f32, f32) = (0.24, 0.37);
 /// Half that tube, which is how far the ring stands proud of whatever it is lashed to.
 const TUBE: f32 = (RING.1 - RING.0) * 0.5;
 
-/// How wide the **drawn hull** is at the rack, half-beam in metres, at the height the
-/// ring hangs at.
-///
-/// Measured off the scan's own vertices rather than guessed, because guessing it twice
-/// is what put the ring inside the boat twice. The deck is drawn to a fitted sheer table
-/// in `deck.rs` and the hull is a photogrammetric scan, and **aft they are not the same
-/// line**: at this station the sheer table gives a half-beam of 0.55 m and the scan's
-/// topsides reach 0.79 m at the height this hangs, the counter standing well outboard of
-/// the deck it carries. Anything placed from `deck_half_beam` back here is a quarter of a
-/// metre inside the planking, which is exactly what it looked like.
-///
-/// Taken from `assets/venus.glb` through the same transform `boat.rs` applies to it —
-/// quarter turn, scaled to length, dropped by the sinkage — over a band of vertices
-/// either side of the rack's station.
-const HULL_AT_RACK: f32 = 0.79;
+// How wide the drawn hull is where the ring hangs is `deck::HULL_ON_THE_QUARTER`, and it
+// lives there rather than here on purpose: it is a fact about the boat's planking, not
+// about this fitting. It has now been rediscovered three times — twice on this lifebuoy
+// and once on the creel — and a measurement found three times should not live in
+// whichever module last tripped over it.
 
 /// What fraction of the wind a thing in the water goes downwind at.
 ///
@@ -355,9 +345,9 @@ pub fn setup(
     // version put its centre on the sheer line, which buries half of it; the second moved
     // it outboard of `deck_half_beam`, which is still inside the boat, because back here
     // the deck is drawn a quarter of a metre inside the scanned hull — see
-    // `HULL_AT_RACK`. It is placed off the hull now, not off the deck.
+    // `crate::deck::HULL_ON_THE_QUARTER`. It is placed off the hull now, not off the deck.
     let deck = crate::deck::deck_height(RACK_Z);
-    let x = HULL_AT_RACK + TUBE + 0.02;
+    let x = crate::deck::HULL_ON_THE_QUARTER + TUBE + 0.02;
     commands.entity(root).with_children(|b| {
         b.spawn((
             Stowed,
@@ -678,7 +668,7 @@ mod tests {
     #[test]
     fn nothing_aboard_sweeps_through_the_lifebuoy() {
         let stock = 4.60_f32;
-        let out = HULL_AT_RACK + TUBE + 0.02;
+        let out = crate::deck::HULL_ON_THE_QUARTER + TUBE + 0.02;
         // Outboard of anything the tiller can reach at that station.
         let sweep = (stock - RACK_Z).max(0.0) * (40.0_f32).to_radians().tan();
         assert!(
@@ -695,16 +685,16 @@ mod tests {
         // this against the deck is what buried the ring in the boat twice.
         let inboard_face = out - TUBE;
         assert!(
-            inboard_face >= HULL_AT_RACK,
+            inboard_face >= crate::deck::HULL_ON_THE_QUARTER,
             "the ring reaches {:.3} m into her planking",
-            HULL_AT_RACK - inboard_face
+            crate::deck::HULL_ON_THE_QUARTER - inboard_face
         );
         // Not standing off in the air either: a hand's breadth at most.
-        assert!(inboard_face - HULL_AT_RACK < 0.06);
+        assert!(inboard_face - crate::deck::HULL_ON_THE_QUARTER < 0.06);
         // The hull really is outboard of the deck back there. If somebody re-fairs the
         // sheer table and the two lines meet again, this is the line that says so.
         assert!(
-            HULL_AT_RACK > crate::deck::deck_half_beam(RACK_Z),
+            crate::deck::HULL_ON_THE_QUARTER > crate::deck::deck_half_beam(RACK_Z),
             "the deck is now as wide as the hull at z {RACK_Z:.2}; re-measure the scan"
         );
         // Forward of the wind vane, which stands on the centreline right aft.
