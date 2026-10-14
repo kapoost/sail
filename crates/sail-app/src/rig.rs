@@ -108,6 +108,14 @@ enum Kind {
     /// and on to the car. With nothing in the way the join sits on the straight line
     /// between the ends and cannot be seen.
     JibSheet(bool, u8),
+    /// The preventer on the main boom, and the foreguy on the spinnaker pole.
+    ///
+    /// One button rigs both, because on a boat one decision does: you are about to run
+    /// for an hour and you make the two spars safe. They do the same job at opposite ends
+    /// of the deck — a line forward from a spar that would otherwise come across with the
+    /// wind behind it — and nobody rigs one and not the other.
+    Preventer,
+    PoleForeguy,
     /// The staysail's sheet, and the two further parts of the tackle it runs in.
     ///
     /// Drawn as the three parts it has rather than as one rope, because that is what is
@@ -118,7 +126,7 @@ enum Kind {
 }
 
 /// All the lines, in the order they are packed into the mesh.
-const LINES: [Kind; 17] = [
+const LINES: [Kind; 19] = [
     Kind::Outhaul,
     Kind::Bobstay,
     Kind::SpritShroud(false),
@@ -129,6 +137,8 @@ const LINES: [Kind; 17] = [
     Kind::Shroud(true),
     Kind::MainSheet,
     Kind::Vang,
+    Kind::Preventer,
+    Kind::PoleForeguy,
     // Both genoa sheets. Only one is ever working; the other lies across the deck with
     // a loop in it, and seeing which is which is half of knowing what tack you are on.
     Kind::JibSheet(false, 0),
@@ -443,6 +453,59 @@ pub fn update(
                 colour: vang_green,
                 stiff: false,
             },
+            Kind::Preventer => {
+                // From the boom end forward to the toe rail, well forward of the
+                // gooseneck: the further forward it is made fast the better it holds, and
+                // on a boat this size it goes to a block by the shrouds and back to a
+                // cleat. Drawn as the one run that matters.
+                let on = sim.controls.preventer;
+                let end = Vec3::new(
+                    boom.sin() * BOOM_LENGTH * boom_lift.cos(),
+                    BOOM_HEIGHT + BOOM_LENGTH * boom_lift.sin(),
+                    MAST_FOOT_Z + boom.cos() * BOOM_LENGTH * boom_lift.cos(),
+                );
+                let rail = Vec3::new(
+                    (cfg.beam as f32 * 0.42) * boom.sin().signum(),
+                    crate::deck::deck_height(MAST_FOOT_Z - 1.6) + 0.06,
+                    MAST_FOOT_Z - 1.6,
+                );
+                Span {
+                    from: if on { end } else { rail },
+                    to: rail,
+                    // Bar taut when it is on: the whole point of it is that it does not
+                    // give. Nothing at all when it is off, which is one rope not drawn
+                    // rather than a rope lying about.
+                    tension: if on { 0.95 } else { 0.0 },
+                    width: 0.023,
+                    colour: vang_green,
+                    stiff: false,
+                }
+            }
+            Kind::PoleForeguy => {
+                // The pole's half of the same decision: a line from the end of the pole
+                // down to the foredeck, which stops it skying when the kite lifts and
+                // stops it swinging forward when she rolls. Without one the pole is held
+                // by the guy alone and a spinnaker that collapses throws it about.
+                let on = sim.controls.preventer
+                    && sim.controls.headsail == sail_core::state::Headsail::Spinnaker
+                    && sim.controls.furl < 0.9;
+                let windward = t.awa.signum() as f32;
+                let end =
+                    crate::boat::pole_end(cfg.loa as f32, windward, t.jib.chord_angle.abs() as f32);
+                let deck = Vec3::new(
+                    0.0,
+                    crate::deck::deck_height(end.z + 0.9) + 0.06,
+                    end.z + 0.9,
+                );
+                Span {
+                    from: if on { end } else { deck },
+                    to: deck,
+                    tension: if on { 0.9 } else { 0.0 },
+                    width: 0.02,
+                    colour: vang_green,
+                    stiff: false,
+                }
+            }
             Kind::StaysailSheet(part) => {
                 // From a point part way out along the club boom down to a deck eye on
                 // the centreline. That is the whole of a self-tacker's rigging: nothing
