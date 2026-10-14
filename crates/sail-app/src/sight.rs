@@ -74,23 +74,29 @@ pub fn aim(
     mut nav: ResMut<Navigation>,
     mut chart: ResMut<crate::chart::Chart>,
 ) {
-    // **One key does the whole gesture**, because the gesture is one thing: you raise the
-    // compass, you put the notch on the mark, you shoot it, and it comes down. So `N`
-    // raises it, and `N` again takes whatever is in the notch and lowers it — and if
-    // there is nothing in the notch it just comes down, which is also what happens on a
-    // boat when you cannot find the thing you were looking for.
+    // **Shift and N has the compass in your hand; N shoots what is in the notch.**
     //
-    // Reported from the deck on a trackpad, and it was a fair complaint: aiming is a
-    // right-button drag and taking it was a left click, which on a trackpad is two
-    // fingers and a third hand. The click still works for anybody with a mouse.
-    let shoot_key = keys.just_pressed(KeyCode::KeyN) && sighting.up;
-    if keys.just_pressed(KeyCode::KeyN) && !sighting.up {
-        sighting.up = true;
+    // Asked for from the deck after the first arrangement, which put it down again after
+    // every sight — and that is wrong for the thing it is: you do not pick a hand bearing
+    // compass up three times to take three bearings, you stand there with it and swing it
+    // round the horizon, shooting what you recognise. Having it up is a *mode*, and modes
+    // get a modifier.
+    //
+    // Taking the bearing is still a key rather than a click, because aiming is a
+    // right-button drag and the deck is a trackpad; the click works too for anybody with
+    // a mouse.
+    let shifted = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    if keys.just_pressed(KeyCode::KeyN) && shifted {
+        sighting.up = !sighting.up;
+        if !sighting.up {
+            sighting.on = None;
+        }
         return;
     }
     if !sighting.up {
         return;
     }
+    let shoot_key = keys.just_pressed(KeyCode::KeyN);
     let Ok(eye) = camera.single() else {
         return;
     };
@@ -160,31 +166,29 @@ pub fn aim(
                     bearing: took,
                 });
                 // Three is a fix and four is a navigator who has stopped sailing. The
-                // oldest goes, because it is the one taken from the furthest back.
+                // oldest goes, because it is the one taken from the furthest back — and
+                // a bearing taken five minutes ago is a bearing on water she has left.
                 if nav.sights.len() > 3 {
                     nav.sights.remove(0);
                 }
                 // And it goes on the chart, because a bearing you have not plotted is a
                 // number you will have forgotten by the time you get below.
+                // On the chart, and only the ones that are still part of a fix: a plot
+                // with ten old position lines on it is not a plot, it is a scribble, and
+                // the first thing a navigator does with a stale line is rub it out.
+                chart.plot.retain(|item| {
+                    !matches!(item, crate::chart::Plotted::Line { .. })
+                        || nav
+                            .sights
+                            .iter()
+                            .any(|s| (s.mark - line_mark(item)).length() < 1.0)
+                });
                 chart.plot.push(crate::chart::Plotted::Line {
                     through: mark.at,
                     bearing: took,
                 });
-                if chart.plot.len() > 12 {
-                    chart.plot.remove(0);
-                }
             }
         }
-        // Down again once it is shot, which is what you do with it: a hand bearing
-        // compass is not something you sail holding.
-        if shoot_key {
-            sighting.up = false;
-            sighting.on = None;
-        }
-    } else if shoot_key {
-        // Nothing in the notch, so it just comes down.
-        sighting.up = false;
-        sighting.on = None;
     }
 }
 
@@ -282,10 +286,10 @@ pub fn draw(
                 Mark::Lighthouse => format!("{name} Lt  {}", crate::marks::light_character(name)),
                 _ => format!("{name}  {}", kind.abbreviation()),
             };
-            format!("{what}   {:.1} M — N or click to take it", range / 1_852.0)
+            format!("{what}   {:.1} M — N takes it", range / 1_852.0)
         }
-        None => "nothing in the notch — aim with the right button held, or N to put it \
-                 down"
+        None => "nothing in the notch — aim with the right button held, Shift N to put \
+                 it down"
             .to_string(),
     };
     painter.text(
@@ -310,4 +314,12 @@ pub fn draw(
         ink,
     );
     Ok(())
+}
+
+/// Where a plotted line's mark is, for keeping the chart tidy.
+fn line_mark(item: &crate::chart::Plotted) -> glam::DVec2 {
+    match item {
+        crate::chart::Plotted::Line { through, .. } => *through,
+        crate::chart::Plotted::Cross { at } => *at,
+    }
 }

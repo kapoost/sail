@@ -574,16 +574,30 @@ pub fn draw(
                 }
             }
 
+            // Where the lines cross, if they do — worked out before they are drawn, so
+            // that each of them can be drawn the length that reaches the crossing.
+            let crossing_at = sail_core::fix::plot(&nav.sights).map(|f| f.at);
+
             // --- What is already on the chart --------------------------------
             for item in &chart.plot {
                 match *item {
                     Plotted::Line { through, bearing } => {
-                        // Both ways from the mark and a long way: a position line runs
-                        // off the edge of the chart, because all it says is *somewhere
-                        // on here*.
-                        let along = glam::DVec2::new(bearing.sin(), bearing.cos());
-                        let reach = chart.range as f64 * 2.4;
-                        let a = to_screen(through - along * reach);
+                        // Drawn the length a navigator draws one, which is not across the
+                        // whole chart: a position line is a *pencil line near where you
+                        // think you are*, long enough to cross the others and no longer.
+                        // Lines run off both edges make a cobweb and hide the coast under
+                        // it — reported from the deck in those words.
+                        //
+                        // So it runs from the mark towards the observer, as far as the
+                        // crossing it makes plus a little, and when there is no crossing
+                        // yet, far enough to be worth looking at.
+                        let away =
+                            (bearing + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
+                        let along = glam::DVec2::new(away.sin(), away.cos());
+                        let reach = crossing_at
+                            .map(|c| ((c - through).length() * 1.25).max(chart.range as f64 * 0.25))
+                            .unwrap_or(chart.range as f64 * 0.9);
+                        let a = to_screen(through);
                         let b = to_screen(through + along * reach);
                         p.line_segment([a, b], egui::Stroke::new(1.1, ink::PENCIL));
                         p.text(
