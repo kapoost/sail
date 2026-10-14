@@ -630,17 +630,14 @@ impl Ink {
     }
 }
 
-/// `B` for the drawn sea.
-///
-/// The key only flips the flag. What follows the flag is below, on `is_changed`, so
-/// that the settings panel can flip the same flag and get the same sea — the key used
-/// to *be* the switch, which meant anything else that wanted to turn the ink on had to
-/// pretend to be a keypress or duplicate the material work.
-pub fn toggle_ink(keys: Res<ButtonInput<KeyCode>>, mut ink: ResMut<Ink>) {
-    if keys.just_pressed(KeyCode::KeyB) {
-        ink.0 = !ink.0;
-    }
-}
+// The ink drawing had a key — `B` — and the key is gone. The keys on this boat should be
+// things you do to the boat: trim, steer, navigate, look. Which of two pictures the sea
+// is drawn in is a preference, and a preference on a key is a line in the help that
+// everybody reads past while looking for something they need; the list had three of them.
+//
+// Nothing else had to change when it went, which is the part worth recording: `apply_ink`
+// has always watched the *flag* rather than the keypress, so the settings panel was
+// already the other way in.
 
 /// Take the lighting off the water, or put it back, whenever the flag moves.
 pub fn apply_ink(

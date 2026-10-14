@@ -124,11 +124,16 @@ impl Retro {
     }
 }
 
-/// `V` steps through sharp, 960, 720, 480 and back.
-pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut retro: ResMut<Retro>) {
-    if !keys.just_pressed(KeyCode::KeyV) {
-        return;
-    }
+/// Steps through sharp, 960, 720, 480 and back — from the settings panel, which is
+/// where it belongs.
+///
+/// It had a key, and the key is gone. The list of keys on this boat should be things
+/// you do *to the boat*: trim, steer, navigate, look. How many pixels the picture is
+/// drawn with is not one of those, it is a preference, and a preference on a key is a
+/// line in the help that every player reads past looking for something they need.
+/// Asked for from the deck in those words.
+#[allow(dead_code)]
+pub fn step(retro: &mut Retro) {
     retro.step = match retro.step {
         None => Some(2),
         Some(2) => Some(1),

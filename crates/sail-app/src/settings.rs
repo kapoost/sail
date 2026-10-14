@@ -244,7 +244,7 @@ pub fn draw(
                     });
                     // The drawn sea. Not a quality setting: a different picture, and the one
                     // this boat was always headed for.
-                    if ui.selectable_label(ink.0, "the ink drawing  (B)").clicked() {
+                    if ui.selectable_label(ink.0, "the ink drawing").clicked() {
                         ink.0 = !ink.0;
                     }
                     // Resolution. Named in pixels of height, because that is what the old
