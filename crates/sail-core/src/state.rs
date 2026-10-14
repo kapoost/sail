@@ -44,6 +44,15 @@ pub struct BoatState {
     /// cloth hanging off a lever and a sheet that can only pull. See
     /// [`crate::sim::Simulation`] for what that costs in a seaway.
     pub boom_angle: f64,
+    /// How far through changing sides the headsail is, nought to one.
+    ///
+    /// Nought is the instant the wind crossed: the sail is still sheeted on what has just
+    /// become the windward side, backed and pushing her bow round, which is the one
+    /// moment in a tack when a jib is doing something useful by being wrong. One is set
+    /// and drawing on the new side. In between it is across the foretriangle, flogging,
+    /// making nothing — and that crossing is most of what a tack *looks* like from the
+    /// cockpit.
+    pub jib_across: f64,
     /// How fast it is swinging, rad/s.
     pub boom_rate: f64,
     /// Seconds since start.
@@ -77,6 +86,7 @@ impl BoatState {
             pitch: f(a.pitch, b.pitch),
             pitch_rate: f(a.pitch_rate, b.pitch_rate),
             boom_angle: f(a.boom_angle, b.boom_angle),
+            jib_across: f(a.jib_across, b.jib_across),
             boom_rate: f(a.boom_rate, b.boom_rate),
             time: f(a.time, b.time),
         }
@@ -98,6 +108,8 @@ impl BoatState {
             pitch_rate: 0.0,
             boom_angle: 0.0,
             boom_rate: 0.0,
+            // Set and drawing, because a boat at rest is not in the middle of a tack.
+            jib_across: 1.0,
             time: 0.0,
         }
     }
@@ -414,6 +426,15 @@ pub struct Telemetry {
     ///
     /// The worst of the three sails, because the first one to go is the one that matters.
     pub strain: f64,
+
+    /// Where the headsail's clew is, as a fraction from port to starboard.
+    ///
+    /// Plus one is hard on the starboard side, minus one on the port, and nought is the
+    /// sail streaming straight back down the centreline with the wind in neither side of
+    /// it — which is what it is doing in the middle of a tack. For the picture, which
+    /// otherwise has to pick a side from the wind and therefore flicks the sail across
+    /// the foretriangle in a single frame.
+    pub jib_side: f64,
 
     /// Where the boom actually is, radians, **positive to starboard**.
     ///

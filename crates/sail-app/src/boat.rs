@@ -804,10 +804,14 @@ pub fn update_sails(
                 // `sail_core`, so the cloth is drawn on the side the force model is
                 // pulling from — two descriptions of one sheet is the fault this file
                 // has been caught by three times.
+                // Not `clew_side`, which answers with a whole side and therefore flicks
+                // the sail across the foretriangle in one frame. `jib_side` is a
+                // *fraction*: on the old side, streaming down the middle, on the new one
+                // — the five seconds of a tack that the picture used to skip.
                 headsail_shape(
                     &cfg,
                     &sim.controls,
-                    sail_core::sail::clew_side(t_.awa, sim.controls.headsail_aback) as f32,
+                    t_.jib_side as f32,
                     t_.jib.chord_angle as f32,
                 ),
             ),

@@ -440,6 +440,11 @@ impl Simulation {
             self.wind_side = lower_awa.signum();
             self.state.boom_angle = -self.state.boom_angle;
             self.state.boom_rate = -self.state.boom_rate;
+            // And the headsail starts its own crossing, from where it is: sheeted on
+            // what has just become the windward side. For a tack that is the backed jib
+            // that pushes her bow round; for a gybe it is the sail having to come round
+            // the forestay. Both are the same event to this number.
+            self.state.jib_across = 0.0;
         }
         let boom_angle = if st.boom_angle == 0.0 && st.boom_rate == 0.0 {
             boom_set
@@ -612,17 +617,26 @@ impl Simulation {
             0.0
         };
 
+        // Mid-crossing the sail is not a sail. It is cloth streaming down the middle of
+        // the foretriangle with the wind in neither side of it, and the area that is
+        // doing anything is a fifth of what is up there. Triangular rather than smooth on
+        // purpose: it is full at both ends of the crossing — backed at the start, which is
+        // what pushes her bow round, and drawing at the end.
+        let thrashing = (1.0 - (2.0 * st.jib_across - 1.0).abs()).clamp(0.0, 1.0);
+        let crossing_fill = 1.0 - 0.8 * thrashing;
+        // And on the wrong side of the boat for the first half of it.
+        let jib_aback = controls.headsail_aback || st.jib_across < 0.5;
         let jib = crate::sail::sail_forces_in_slot(
             &head.profile,
             jib_awa,
             jib_aws,
             controls.jib_sheet,
-            jib_lower_area * fill,
+            jib_lower_area * fill * crossing_fill,
             st.heel,
             shadow,
             jib_camber,
             jib_slot_support,
-            controls.headsail_aback,
+            jib_aback,
         )
         .scaled(jib_lift, jib_drag);
         // A sail that has collapsed is not a sail quietly making less force: it is cloth
@@ -640,12 +654,12 @@ impl Simulation {
             jib_upper_awa,
             jib_upper_aws,
             jib_upper_sheet,
-            jib_upper_area * fill,
+            jib_upper_area * fill * crossing_fill,
             st.heel,
             shadow_upper,
             jib_camber,
             jib_slot_support,
-            controls.headsail_aback,
+            jib_aback,
         )
         .scaled(jib_upper_lift, jib_upper_drag);
         let mut jib_upper = jib_upper;
@@ -1113,6 +1127,24 @@ impl Simulation {
         s.heave_rate += dw * dt;
         s.pitch_rate += dq * dt;
 
+        // --- The headsail changing sides ---------------------------------------------
+        //
+        // A tack is not the wind crossing the bow. It is the next five seconds: the jib
+        // backs and stops her, somebody lets the sheet fly, the sail thrashes across the
+        // foretriangle, and the new sheet is ground on until it fills. The model had the
+        // first instant and none of the rest — the sail was simply on the other side, in
+        // the same frame, drawing.
+        //
+        // Quicker in more wind for the same reason the boom is: it is the air that blows
+        // it across, and a crew in a breeze is also in more of a hurry. Three and a half
+        // seconds in a drifter, down to a second and a bit when it is blowing — which is
+        // about what a cruising crew with a winch handle manages.
+        {
+            let across =
+                1.2 + 2.3 * (1.0 - (crate::units::ms_to_kn(jib_aws) / 22.0).clamp(0.0, 1.0));
+            s.jib_across = (s.jib_across + dt / across).min(1.0);
+        }
+
         // --- The boom ---------------------------------------------------------------
         // Its own little pendulum, swinging about the mast. Four things act on it and
         // the first is the only one that is ever large: the sail's own force, which
@@ -1301,6 +1333,15 @@ impl Simulation {
             // looked right when the wind line was crossed slowly — reported from the deck
             // exactly that way, and that observation is what found it.
             boom: -self.wind_side * self.state.boom_angle,
+            // Where the clew has got to: on the old side at the start of the crossing,
+            // streaming down the middle halfway through, hard on the new one at the end.
+            // And held to windward for as long as somebody is holding it there, which is
+            // a different thing from being caught there by a tack.
+            jib_side: if controls.headsail_aback {
+                self.wind_side
+            } else {
+                self.wind_side * (1.0 - 2.0 * self.state.jib_across.clamp(0.0, 1.0))
+            },
             strain: self.strain_main.max(self.strain_head).max(self.strain_stay),
             bend_main,
             bend_jib,
