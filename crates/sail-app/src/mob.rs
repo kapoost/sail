@@ -96,8 +96,11 @@ pub const ENDURANCE: f64 = 600.0;
 /// hangs off the port quarter on its lanyard, and the two would otherwise be swinging
 /// through each other.
 const RACK_Z: f32 = 4.30;
-/// How big a lifebuoy is: a ring three quarters of a metre across.
+/// How big a lifebuoy is: a ring three quarters of a metre across, with a tube as thick
+/// as a wrist.
 const RING: (f32, f32) = (0.24, 0.37);
+/// Half that tube, which is how far the ring stands proud of whatever it is lashed to.
+const TUBE: f32 = (RING.1 - RING.0) * 0.5;
 
 /// What fraction of the wind a thing in the water goes downwind at.
 ///
@@ -302,28 +305,43 @@ pub fn setup(
         return;
     };
 
-    // Lashed flat against the topsides on the starboard quarter, standing on edge with
-    // its top above the rail and the rest of it over the water. A torus lies in its own
-    // XZ plane, so turning it about Z puts its face athwartships — which is a ring seen
-    // from outside the boat and a line seen from the cockpit, exactly as one looks.
+    // Lashed **flat against her topsides** on the starboard quarter: the ring's own plane
+    // lies along the side of the boat, its top a hand above the rail and the rest of it
+    // down the planking, well above the waterline. That is how one is carried on a boat
+    // with nothing to hang it from, and outboard of the sheer it is the only place clear
+    // of the tiller, which sweeps every station inboard of here.
+    //
+    // It sits *outside* her, by its own tube and a little more. The deck edge is the
+    // widest the hull gets at that station — she narrows going down from the sheer — so a
+    // ring whose inboard face is outboard of the sheer line cannot be inside the planking
+    // anywhere, at any height. Reported from the deck as the ring going through the hull,
+    // which is what putting its centre on the sheer line does.
     let deck = crate::deck::deck_height(RACK_Z);
-    let out = crate::deck::deck_half_beam(RACK_Z) - 0.02;
+    let rail = crate::deck::deck_half_beam(RACK_Z);
+    let x = rail + TUBE + 0.02;
     commands.entity(root).with_children(|b| {
         b.spawn((
             Stowed,
-            Transform::from_xyz(out, deck + 0.10, RACK_Z)
-                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+            Transform::from_xyz(x, deck - 0.22, RACK_Z),
             Visibility::default(),
         ))
         .with_children(|p| {
-            p.spawn((Mesh3d(ring.clone()), MeshMaterial3d(orange.clone())));
-            // The two lashings that hold it to her side, which are the difference
-            // between a lifebuoy stowed and a lifebuoy left lying about.
-            for at in [-0.22_f32, 0.22] {
+            // A torus lies in its own XZ plane with its axis up, so a right angle about
+            // the fore-and-aft axis lays that plane along her side.
+            p.spawn((
+                Mesh3d(ring.clone()),
+                MeshMaterial3d(orange.clone()),
+                Transform::from_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+            ));
+            // And the two straps over it, at its fore and after ends, reaching inboard to
+            // her side. They are the difference between a lifebuoy fastened to a boat and
+            // a lifebuoy drawn next to one — and they are what makes the small gap at the
+            // bottom of it read as chocks rather than as a mistake.
+            for at in [-RING.1 + 0.07, RING.1 - 0.07] {
                 p.spawn((
-                    Mesh3d(w.meshes.add(Cylinder::new(0.011, 0.30))),
+                    Mesh3d(w.meshes.add(Cylinder::new(0.013, TUBE * 2.0 + 0.16))),
                     MeshMaterial3d(tape.clone()),
-                    Transform::from_xyz(0.0, 0.0, at)
+                    Transform::from_xyz(-(TUBE + 0.04), 0.0, at)
                         .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
                 ));
             }
@@ -623,7 +641,7 @@ mod tests {
     #[test]
     fn nothing_aboard_sweeps_through_the_lifebuoy() {
         let stock = 4.60_f32;
-        let out = crate::deck::deck_half_beam(RACK_Z) - 0.02;
+        let out = crate::deck::deck_half_beam(RACK_Z) + TUBE + 0.02;
         // Outboard of anything the tiller can reach at that station.
         let sweep = (stock - RACK_Z).max(0.0) * (40.0_f32).to_radians().tan();
         assert!(
@@ -634,6 +652,18 @@ mod tests {
         // To starboard, because the creel hangs off the port quarter and the two would
         // otherwise swing through each other.
         assert!(out > 0.0, "the lifebuoy is on the creel's side");
+        // And outside her planking rather than through it. The deck edge is the widest
+        // she is at that station, so a ring whose inboard face is outboard of the sheer
+        // cannot be inside the hull at any height — which is the fault this replaced.
+        let rail = crate::deck::deck_half_beam(RACK_Z);
+        let inboard_face = rail + TUBE + 0.02 - TUBE;
+        assert!(
+            inboard_face >= rail,
+            "the ring reaches {:.3} m inside her sheer",
+            rail - inboard_face
+        );
+        // Not standing off in the air either: a hand's breadth at most.
+        assert!(inboard_face - rail < 0.06);
         // Forward of the wind vane, which stands on the centreline right aft.
         assert!(RACK_Z + RING.1 < stock + 0.34 + RING.1);
         // And it is a lifebuoy rather than a bracelet: three quarters of a metre across.
