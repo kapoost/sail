@@ -73,6 +73,16 @@ pub fn exchange(mut net: ResMut<Net>, mut fleet: ResMut<Fleet>, mut sim: ResMut<
             Event::Joined { id, world, .. } => {
                 net.joined = true;
                 info!("joined as boat {id}");
+                // The day as that machine drew it. The trends the weather wanders on are
+                // measured against this base, so without taking it over, following the
+                // far end's wind would mean asking our own process for a speed it is
+                // clamped out of reaching — a boat in a drawn force 3 cannot follow a
+                // force 7 by trend alone, and the two would sit in different weather
+                // while both believed they were synchronised.
+                if let Some(w) = sim.sim.wind.adjustable() {
+                    w.synoptic.base_speed = world.tws as f64;
+                    w.synoptic.base_direction = world.wind_from as f64;
+                }
                 if world.seed != sim.weather.seed {
                     // Not fixed here on purpose. Rebuilding the archipelago under a boat
                     // that is sailing in it is a different piece of work — the islands,
@@ -93,15 +103,25 @@ pub fn exchange(mut net: ResMut<Net>, mut fleet: ResMut<Fleet>, mut sim: ResMut<
                 if sky.t <= 0.0 {
                     continue;
                 }
-                // Through the same seam the settings panel uses, which is the point of
-                // that seam: a wind handed over from outside and a wind dragged about by
-                // a slider are the same operation, and there is one place that does it.
+                // Through the same seam the weather sliders use. The first version of
+                // this wrote the means directly and did *nothing at all*: the synoptic
+                // process sets `mean_speed` from its own trend on every substep, two
+                // hundred times a second, so the server's number survived for five
+                // milliseconds and was then overwritten by the weather this machine was
+                // having anyway. Reported from the deck as the server holding the
+                // weather, which was exactly backwards — it was not holding it at all.
+                //
+                // `follow` sets the trends the dice would have set, so the correction
+                // lands in the one place the weather is actually decided and the process
+                // carries on from there between packets.
                 if let Some(w) = sim.sim.wind.adjustable() {
-                    w.mean_speed = sky.tws as f64;
-                    w.mean_direction = sky.wind_from as f64;
-                    w.synoptic.start_cover(sky.cover as f64);
+                    w.follow(
+                        sky.tws as f64,
+                        sky.wind_from as f64,
+                        sky.cover as f64,
+                        squalls.iter().map(|s| s.into_core()).collect(),
+                    );
                 }
-                let _ = squalls;
             }
             Event::Lost(why) => {
                 warn!("network: {why}");

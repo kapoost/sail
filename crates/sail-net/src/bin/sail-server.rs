@@ -57,14 +57,28 @@ fn main() -> std::io::Result<()> {
 
     // The sea everybody will be in. The archipelago is a pure function of this, so it is
     // the whole of what a new arrival needs to be sailing the same water.
+    //
+    // The day is drawn here rather than fixed, and drawn from the same seed, so two
+    // people who agree on a number get the same morning and a different number is a
+    // different one. Force three to six: below three this model is known to be poor
+    // company and above six a shared passage turns into everybody separately surviving.
+    let mut dice = sail_core::rng::Pcg32::new(seed ^ 0xDA1_5EED);
+    let force = 3.0 + 3.0 * dice.next_f64();
     let world = World {
         seed,
-        tws: 7.5,
-        wind_from: 2.6,
+        // Beaufort to metres a second, by the usual 0.836·B^1.5.
+        tws: (0.836 * force.powf(1.5)) as f32,
+        wind_from: (dice.next_f64() * std::f64::consts::TAU) as f32,
         fetch: 14_000.0,
         start_hour: 8.0,
-        cover: 0.4,
+        cover: (0.25 + 0.5 * dice.next_f64()) as f32,
     };
+    println!(
+        "force {:.1}, {:.0} knots from {:03.0}",
+        force,
+        world.tws * 1.9438,
+        world.wind_from.to_degrees()
+    );
     // And the weather, which is the one thing a client is not allowed to decide for
     // itself. Everything else about the world is derivable from the seed and therefore
     // free; the weather is a process with state, and two people in different winds is the
@@ -181,15 +195,7 @@ fn main() -> std::io::Result<()> {
         // the squalls — which have a position and a radius of their own — travel.
         if told.elapsed() >= Duration::from_secs(1) {
             told = Instant::now();
-            let squalls: Vec<Squall> = wind
-                .squalls()
-                .into_iter()
-                .map(|(at, radius, strength)| Squall {
-                    pos: [at.x as f32, at.y as f32],
-                    radius: radius as f32,
-                    strength: strength as f32,
-                })
-                .collect();
+            let squalls: Vec<Squall> = wind.squall_state().iter().map(Squall::of).collect();
             let weather = encode(&ToClient::Weather {
                 sky: sky_now(&wind, t),
                 squalls,
@@ -200,13 +206,15 @@ fn main() -> std::io::Result<()> {
 }
 
 fn sky_now(wind: &SyntheticWind, t: f32) -> Sky {
-    // Sampled at the world origin rather than at anybody's boat: this is the synoptic
-    // state, which is the thing that is the same everywhere, and the local variation is
-    // what the gust field is for.
-    let at = glam::DVec2::ZERO;
+    // The *synoptic* state, not a sample of it. Those are different numbers, and sending
+    // the wrong one was the first version of this: `speed_at` includes the gust at that
+    // spot, so the far end would have taken a local wobble for the state of the day and
+    // then added its own gusts on top of it. The gusts are a stateless function of
+    // position and time and every client already computes the same ones; what has to
+    // travel is only the slow weather underneath them.
     Sky {
-        tws: wind.speed_at(at, t as f64) as f32,
-        wind_from: wind.direction_at(at, t as f64) as f32,
+        tws: wind.synoptic.speed_now() as f32,
+        wind_from: wind.synoptic.direction_now() as f32,
         cover: wind.synoptic.cover() as f32,
         t,
     }

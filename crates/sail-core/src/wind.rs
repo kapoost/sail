@@ -217,6 +217,40 @@ impl Synoptic {
         (self.cover_mean + self.cover_trend + COVER_FROM_WIND * self.speed_trend).clamp(0.0, 1.0)
     }
 
+    /// Take the weather from somewhere else rather than from the dice.
+    ///
+    /// For a game with more than one boat in it. Everything else about that world is a
+    /// pure function of the seed and therefore needs no agreement — the islands, the
+    /// depths, the gust *pattern* — but the synoptic wind is a process with state, and
+    /// two machines rolling their own cannot be relied on to stay in the same breeze.
+    /// Being in different winds is the one divergence that would actually spoil sailing
+    /// together: you would be watching somebody sail beautifully in air that is not
+    /// there.
+    ///
+    /// Written as the inverse of `speed`, `direction` and `cover` rather than as a
+    /// separate "override" path, so there is one definition of what the weather is and
+    /// following somebody else's is a matter of setting the same three trends the dice
+    /// would have set. The process then carries on from there under its own relaxation,
+    /// which is what makes a once-a-second correction smooth rather than a step: between
+    /// packets the weather here evolves plausibly, and every second it is told where it
+    /// actually is.
+    pub fn follow(&mut self, speed: f64, direction: f64, cover: f64) {
+        self.speed_trend = speed / self.base_speed.max(0.5) - 1.0;
+        self.direction_trend = crate::units::wrap_pi(direction - self.base_direction);
+        self.start_cover(cover);
+    }
+
+    /// The two the rest of the world is allowed to read, because a game with more than
+    /// one boat in it has to be able to say what the weather is without sampling it
+    /// somewhere in particular.
+    pub fn speed_now(&self) -> f64 {
+        self.speed()
+    }
+
+    pub fn direction_now(&self) -> f64 {
+        self.direction()
+    }
+
     fn speed(&self) -> f64 {
         (self.base_speed * (1.0 + self.speed_trend)).clamp(
             self.base_speed * SYNOPTIC_FLOOR,
@@ -558,6 +592,27 @@ impl SyntheticWind {
         )
     }
 
+    /// The weather as somebody else has it. See [`Synoptic::follow`].
+    ///
+    /// The squalls come over with it, because a squall is the opposite of a pure function
+    /// of the seed: it is born at a time, it is carried downwind, and it dies. One of
+    /// those arriving for you and not for the boat half a mile away would be the most
+    /// visible possible way for two people to be in different weather — you would be
+    /// reefing in the sunshine.
+    pub fn follow(&mut self, speed: f64, direction: f64, cover: f64, squalls: Vec<Squall>) {
+        self.synoptic.follow(speed, direction, cover);
+        self.mean_speed = self.synoptic.speed();
+        self.mean_direction = self.synoptic.direction();
+        self.squalls = squalls;
+        // And stop making our own, which would be weather nobody else has.
+        self.next_squall = f64::INFINITY;
+    }
+
+    /// The squalls as they stand, with their ages, for handing to somebody else.
+    pub fn squall_state(&self) -> &[Squall] {
+        &self.squalls
+    }
+
     /// Freeze the stochastic state. Handy for reproducing a moment while tuning.
     pub fn frozen(mut self) -> Self {
         self.squalls.clear();
@@ -673,6 +728,7 @@ fn ou_step(x: &mut f64, sigma: f64, tau: f64, dt: f64, rng: &mut Pcg32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::units::{deg, kn_to_ms, ms_to_kn, rad};
 
     /// `intensity` has to mean what it says, or every wind speed in the simulator is
     /// quietly a few percent wrong and nothing else says so. The shape function's own
@@ -722,6 +778,84 @@ mod tests {
         assert!(
             (now - later).abs() < 1e-9,
             "what is upwind now should be here later: {now:.4} then {later:.4}"
+        );
+    }
+
+    /// Following somebody else's weather has to survive the next step.
+    ///
+    /// This is the test the first attempt needed. The game wrote the server's wind
+    /// straight into `mean_speed` and `mean_direction`, which looked right and did
+    /// nothing: `step` recomputes both from the synoptic trend two hundred times a
+    /// second, so the number handed over lived for five milliseconds and was then
+    /// replaced by the weather that machine was having anyway. Both boats sailed on in
+    /// their own breeze while the code claimed they were in one.
+    #[test]
+    fn a_wind_told_to_follow_another_one_keeps_following_it() {
+        let mut wind = SyntheticWind::new(rad(200.0), kn_to_ms(12.0), 7);
+        let asked_speed = kn_to_ms(21.0);
+        let asked_from = rad(250.0);
+        wind.follow(asked_speed, asked_from, 0.8, Vec::new());
+        assert!(
+            (wind.synoptic.speed_now() - asked_speed).abs() < 0.05,
+            "it should arrive at once: {:.2} against {asked_speed:.2}",
+            wind.synoptic.speed_now()
+        );
+
+        // And still be there a minute later, having been stepped the way the simulation
+        // steps it.
+        for _ in 0..12_000 {
+            wind.step(0.005);
+        }
+        let drift = ms_to_kn(wind.synoptic.speed_now() - asked_speed).abs();
+        assert!(
+            drift < 0.6,
+            "a minute on it had wandered {drift:.2} kn from the wind it was given"
+        );
+        let veered = deg(crate::units::wrap_pi(
+            wind.synoptic.direction_now() - asked_from,
+        ))
+        .abs();
+        assert!(veered < 4.0, "and {veered:.1} degrees");
+
+        // The direct route, for the record: written to the mean, gone on the first step.
+        let mut naive = SyntheticWind::new(rad(200.0), kn_to_ms(12.0), 7);
+        naive.mean_speed = asked_speed;
+        naive.step(0.005);
+        assert!(
+            (naive.mean_speed - asked_speed).abs() > 1.0,
+            "writing the mean directly should not survive a step — if this ever passes, \
+             the weather sync could have been four lines after all"
+        );
+    }
+
+    /// Squalls travel with their ages, because a squall is the one piece of weather that
+    /// is not a function of the seed.
+    #[test]
+    fn squalls_come_across_with_their_lives() {
+        let mut wind = SyntheticWind::new(rad(200.0), kn_to_ms(18.0), 3);
+        let theirs = vec![Squall {
+            at: DVec2::new(400.0, -250.0),
+            radius: 320.0,
+            strength: 0.55,
+            age: 90.0,
+            life: 300.0,
+        }];
+        wind.follow(kn_to_ms(18.0), rad(200.0), 0.5, theirs);
+        let here = wind.squall_state();
+        assert_eq!(here.len(), 1);
+        // Half-grown rather than new-born: the age is what says so.
+        assert!(
+            here[0].maturity() > 0.5,
+            "a squall copied across without its age arrives as a baby: {:.2}",
+            here[0].maturity()
+        );
+        // And this machine stops inventing its own, which nobody else would have.
+        for _ in 0..200_000 {
+            wind.step(0.005);
+        }
+        assert!(
+            wind.squall_state().len() <= 1,
+            "a client following somebody else's weather should not be making squalls"
         );
     }
 }

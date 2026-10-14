@@ -190,11 +190,41 @@ pub struct Sky {
 }
 
 /// A squall: a thing with a position, so the tension can be keyed to the real distance.
+///
+/// With its age and its life, which are not decoration: a squall grows, peaks and dies,
+/// so one copied across without them would arrive full-grown on the other screen and sit
+/// there. The whole list is sent every second and replaces what was there — there are
+/// never more than a few, and a list that is replaced cannot drift out of step with the
+/// one it came from.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Squall {
     pub pos: [f32; 2],
     pub radius: f32,
     pub strength: f32,
+    pub age: f32,
+    pub life: f32,
+}
+
+impl Squall {
+    pub fn of(s: &sail_core::wind::Squall) -> Self {
+        Self {
+            pos: [s.at.x as f32, s.at.y as f32],
+            radius: s.radius as f32,
+            strength: s.strength as f32,
+            age: s.age as f32,
+            life: s.life as f32,
+        }
+    }
+
+    pub fn into_core(self) -> sail_core::wind::Squall {
+        sail_core::wind::Squall {
+            at: glam::DVec2::new(self.pos[0] as f64, self.pos[1] as f64),
+            radius: self.radius as f64,
+            strength: self.strength as f64,
+            age: self.age as f64,
+            life: self.life as f64,
+        }
+    }
 }
 
 /// The sea everybody is in, sent once at the handshake.
