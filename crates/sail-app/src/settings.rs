@@ -442,7 +442,7 @@ pub fn draw(
                 }
 
                 if settings.tab == Tab::Network {
-                    together(ui, &mut net, &fleet);
+                    together(ui, &mut net, &fleet, sim.sim.state.pos);
                 } else {
                     // Stop looking the moment the page is not showing. The comment on
                     // `scan` said it only ran while the page was open and that was not
@@ -489,7 +489,12 @@ fn footer(ui: &mut egui::Ui, close: &mut bool) {
 /// the list only finds games on the same network, and the whole point of the internet
 /// milestone is a game that is not. An address from a Tailscale tailnet goes in there and
 /// works exactly the same.
-fn together(ui: &mut egui::Ui, net: &mut crate::net::Net, fleet: &crate::fleet::Fleet) {
+fn together(
+    ui: &mut egui::Ui,
+    net: &mut crate::net::Net,
+    fleet: &crate::fleet::Fleet,
+    here: glam::DVec2,
+) {
     heading(ui, "SAILING TOGETHER");
 
     match (&net.link, net.joined) {
@@ -506,10 +511,19 @@ fn together(ui: &mut egui::Ui, net: &mut crate::net::Net, fleet: &crate::fleet::
                 .size(11.0),
             );
             for boat in &fleet.boats {
-                // How far away, because in a list of names the only thing a sailor
-                // actually wants to know is whether they can see them.
+                // With how far off she is, because in a list of names the only thing a
+                // sailor actually wants to know is whether they can see her. Under a mile
+                // on a clear day you can; over two you are looking at empty water.
+                //
+                // The comment here said exactly this while the code printed the name
+                // alone, which is the defect this project keeps producing: a sentence
+                // describing the intention rather than the program.
+                let away = (glam::DVec2::new(boat.drawn.pos[0] as f64, boat.drawn.pos[1] as f64)
+                    - here)
+                    .length()
+                    / 1852.0;
                 ui.label(
-                    egui::RichText::new(format!("   {}", boat.name))
+                    egui::RichText::new(format!("   {}   {away:.2} nm", boat.name))
                         .color(egui::Color32::from_rgb(186, 192, 198))
                         .monospace()
                         .size(11.0),
