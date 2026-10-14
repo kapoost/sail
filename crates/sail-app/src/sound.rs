@@ -631,6 +631,8 @@ pub struct SeaStream {
     water_hp: OnePole,
     rain_lp: OnePole,
     rope_lp: OnePole,
+    /// Canvas has a body to it. See the flogging block.
+    flog_lp: OnePole,
     pawl_phase: f32,
     pawl_env: f32,
     pawl_hz: f32,
@@ -707,6 +709,7 @@ impl SeaStream {
             water_hp: OnePole::default(),
             rain_lp: OnePole::default(),
             rope_lp: OnePole::default(),
+            flog_lp: OnePole::default(),
             pawl_phase: 0.0,
             pawl_env: 0.0,
             pawl_hz: 2_000.0,
@@ -946,6 +949,20 @@ impl Iterator for SeaStream {
         }
 
         // --- Flogging canvas: gated bursts with a hard attack ----------------------
+        //
+        // **Canvas does not hiss.** This was unfiltered white noise, which is both the
+        // wrong sound and the worst possible one to put next to a tune: white noise is
+        // the most effective masker there is, so a sail flogging four times a second was
+        // laying a broadband blanket over the whole mix. Reported from the deck as the
+        // music disappearing and the sea covering everything — and measured afterwards at
+        // twenty-three decibels over the sea in a light breeze, which is not a sea
+        // covering anything, it is a sail.
+        //
+        // A sail slatting is a *crack and a body*: the snap of the leech going over, and
+        // then the sheet of cloth behind it, which has no top end at all. So the body is
+        // the noise with the top taken off, and the crack is a few milliseconds of the
+        // raw stuff on the attack only — `env` to the eighth, which is three milliseconds
+        // at this decay and gone.
         let flog_hz = flog_hz.clamp(0.5, 14.0);
         self.flog_phase += flog_hz * dt;
         if self.flog_phase >= 1.0 {
@@ -954,7 +971,10 @@ impl Iterator for SeaStream {
         }
         self.flog_env *= 0.9994;
         let n3 = self.noise();
-        let flog = n3 * self.flog_env * self.flog_env * self.smooth.flog * 0.9;
+        let body = self.flog_lp.run(n3, 820.0) * 2.1;
+        let snap = self.flog_env.powi(8);
+        let flog =
+            (body * self.flog_env * self.flog_env + n3 * 0.45 * snap) * self.smooth.flog * 0.9;
 
         // The alarm sits outside the master gain and inside only the mute: it is a
         // warning rather than part of the picture, and a volume turned down because the
@@ -1212,7 +1232,15 @@ pub fn update(
         .coeffs
         .luffing
         .max(t.jib.coeffs.luffing * (1.0 - sim.controls.furl)) as f32;
-    store(&p.flog_level, luffing.clamp(0.0, 1.0));
+    // How loud it is, which until now was not a question the wind got a vote in: a sail
+    // luffing in four knots was drawn at exactly the level of one luffing in thirty. The
+    // noise a flogging sail makes is the dynamic pressure in it, so it goes with the
+    // square of the wind — amplitude with something near the first power and a bit, which
+    // is what the exponent here is. In a drifter it is a soft slatting you can talk over;
+    // at twenty-five knots it is the loudest thing on the boat and the reason people
+    // shout at each other on foredecks.
+    let press = (aws / 18.0).clamp(0.0, 1.4).powf(1.6);
+    store(&p.flog_level, (luffing * press).clamp(0.0, 1.0));
     store(&p.flog_hz, 2.6 + 0.22 * aws.min(28.0));
 
     // Rain. The one voice here driven by something other than the boat, and the first
@@ -1678,11 +1706,12 @@ mod tests {
 }
 
 #[cfg(test)]
-mod balance_probe {
+mod what_is_loud {
     use super::*;
     use std::sync::Arc;
 
-    fn group_rms(seconds: f32, set: impl Fn(&Arc<SeaParams>), music: bool) -> f32 {
+    /// How loud one group of the mix is on its own, at the settings panel's defaults.
+    fn group(seconds: f32, set: impl Fn(&Arc<SeaParams>), music: bool) -> f32 {
         let rate = SAMPLE_RATE as f32;
         let p = Arc::new(SeaParams::default());
         p.set_master(crate::settings::Settings::default().volume);
@@ -1714,15 +1743,32 @@ mod balance_probe {
         20.0 * x.max(1e-9).log10()
     }
 
+    /// The level the game asks for when a sail is flogging in a given breeze.
+    ///
+    /// The same expression as `update`, which is the point of it being a function: the
+    /// test and the game have to be asking for the same sound or the test is measuring
+    /// something nobody hears.
+    fn flogging_at(aws: f32) -> f32 {
+        (aws / 18.0).clamp(0.0, 1.4).powf(1.6).min(1.0)
+    }
+
+    /// A sail flogging in a drifter is not a sail flogging in a gale, and until this test
+    /// existed it was exactly that.
+    ///
+    /// Reported from the deck as three things — the music disappearing, the main's
+    /// flapping being relentless, the sea covering everything — which measurement turned
+    /// into one thing. The sea was never the problem: it sits at -49 dBFS in a light air
+    /// and -33 in a fresh breeze, twenty to thirty-five decibels under the band. What was
+    /// covering everything was a sail luffing in eight knots of wind, drawn at the level
+    /// of one luffing in thirty, out of *unfiltered white noise* — which is both the
+    /// wrong sound for canvas and the most effective masker there is.
+    ///
+    /// Measured before: the boat group at -26.1 dBFS with the music only twelve decibels
+    /// over it. After: -41.8, and twenty-eight decibels of daylight.
     #[test]
-    fn what_is_actually_loud() {
-        for (what, aws, stw, luff) in [
-            ("drill, sheets eased", 7.8f32, 0.7f32, 1.0f32),
-            ("sailing, 8 kn breeze", 8.0, 3.5, 0.0),
-            ("sailing, fresh", 18.0, 5.5, 0.0),
-            ("fresh, genoa flogging", 18.0, 5.5, 1.0),
-        ] {
-            let elements = move |p: &Arc<SeaParams>| {
+    fn a_sail_flogging_in_a_drifter_is_not_a_sail_flogging_in_a_gale() {
+        let state = |aws: f32, stw: f32, luff: f32| {
+            move |p: &Arc<SeaParams>| {
                 store(
                     &p.wind_level,
                     (aws / 20.0).clamp(0.0, 1.6).powf(1.5).min(1.15),
@@ -1730,41 +1776,44 @@ mod balance_probe {
                 store(&p.wind_cutoff, 320.0 + 95.0 * aws.min(30.0));
                 store(&p.water_level, (stw / 7.0).clamp(0.0, 1.3).powf(1.4));
                 store(&p.water_cutoff, 260.0 + 150.0 * stw.min(9.0));
-            };
-            let gear = move |p: &Arc<SeaParams>| {
                 store(
                     &p.rig_level,
                     ((aws - 11.0) / 16.0).clamp(0.0, 1.0).powf(1.6),
                 );
                 store(&p.rig_hz, 300.0);
-                store(&p.flog_level, luff);
+                store(&p.flog_level, luff * flogging_at(aws));
                 store(&p.flog_hz, 2.6 + 0.22 * aws.min(28.0));
-            };
-            let sea = group_rms(9.0, elements, false);
-            let boat = group_rms(9.0, gear, false);
-            let all_quiet = group_rms(
-                9.0,
-                move |p| {
-                    elements(p);
-                    gear(p);
-                },
-                false,
-            );
-            let with_music = group_rms(
-                9.0,
-                move |p| {
-                    elements(p);
-                    gear(p);
-                },
-                true,
-            );
-            let music = (with_music * with_music - all_quiet * all_quiet)
-                .max(0.0)
-                .sqrt();
-            println!(
-                "{what:<24} sea {:>6.1}  boat {:>6.1}  music {:>6.1} dBFS   music over sea {:>+5.1} dB, over boat {:>+5.1} dB",
-                db(sea), db(boat), db(music), db(music) - db(sea), db(music) - db(boat)
-            );
-        }
+            }
+        };
+        // Sheets eased in a light breeze, which is where the drill begins and where the
+        // complaint came from.
+        let light = db(group(9.0, state(7.8, 0.7, 1.0), false));
+        // And the same sail in a fresh one, which has to still be the loudest thing on
+        // the boat, because it is.
+        let fresh = db(group(9.0, state(18.0, 5.5, 1.0), false));
+        println!("flogging: light {light:.1} dBFS, fresh {fresh:.1} dBFS");
+        assert!(
+            fresh - light > 10.0,
+            "a drifter and a fresh breeze are {:.1} dB apart, which is one sound for both",
+            fresh - light
+        );
+        // Still there, though. A sail flogging is never nothing — it is the sound of
+        // something being done wrong and it has to be audible over the sea.
+        let sea = db(group(9.0, state(7.8, 0.7, 0.0), false));
+        assert!(
+            light > sea + 4.0,
+            "flogging at {light:.1} against a sea at {sea:.1} is a sail nobody can hear"
+        );
+        // And the band is over it rather than under it.
+        let quiet = group(9.0, state(7.8, 0.7, 1.0), false);
+        let with_band = group(9.0, state(7.8, 0.7, 1.0), true);
+        let band = (with_band * with_band - quiet * quiet).max(0.0).sqrt();
+        let over = db(band) - light;
+        println!("the band stands {over:+.1} dB over a flogging main in a light breeze");
+        assert!(
+            over > 20.0,
+            "the music is only {over:+.1} dB over a flogging sail, which is why it \
+             disappeared"
+        );
     }
 }
