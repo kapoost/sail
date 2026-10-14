@@ -123,3 +123,61 @@ fn the_boom_feels_the_boat_turning_under_it() {
          {light:.2}"
     );
 }
+
+/// With the vang eased on a broad reach, does the boom lift? Asked from the deck, and
+/// the answer is a number rather than a yes.
+///
+/// The end of the spar riding up is the twist seen from the other end: the leech falls
+/// off *because* the boom has lifted, so the picture takes a third of the twist angle as
+/// the lift and the two cannot disagree. What this asserts is that the vang is a control
+/// with a visible range — eased, the end of the boom is up where you can see it; hauled
+/// on, it is where it was put.
+#[test]
+fn an_eased_vang_lets_the_boom_lift_off_the_wind() {
+    let twist_at = |twa: f64, sheet: f64, vang: f64| -> f64 {
+        let cfg = BoatConfig::archipelago_packet();
+        let mut start = BoatState::at_rest(wrap_tau(0.0 - rad(twa)));
+        start.surge = kn_to_ms(4.0);
+        let mut sim = Simulation::new(
+            cfg,
+            start,
+            Box::new(SteadyWind::new(0.0, kn_to_ms(14.0))) as Box<dyn WindField>,
+        );
+        let mut c = Controls {
+            main_sheet: sheet,
+            jib_sheet: 0.6,
+            vang,
+            ..Default::default()
+        };
+        for _ in 0..(50.0 / SUBSTEP) as u64 {
+            let off = deg(sim.telemetry.twa) - twa;
+            c.rudder = rad((off * 0.5).clamp(-15.0, 15.0));
+            sim.run(SUBSTEP, &c);
+        }
+        sim.telemetry.twist
+    };
+    // A third of the twist, which is what `boat::BOOM_LIFT_PER_TWIST` draws.
+    let lift = |twist: f64| 4.6 * (twist * 0.34).sin();
+
+    let eased = twist_at(135.0, 0.8, 0.0);
+    let hauled = twist_at(135.0, 0.8, 1.0);
+    assert!(
+        lift(eased) > 0.3,
+        "broad reach, vang off: the end of the boom should be a visible distance up, \
+         and it is {:.2} m",
+        lift(eased)
+    );
+    assert!(
+        lift(hauled) < 0.05,
+        "and hauled on it should be back down: {:.2} m",
+        lift(hauled)
+    );
+    // Deeper still and it is more, because the sheet has stopped pulling down at all.
+    let running = twist_at(160.0, 0.95, 0.0);
+    assert!(
+        lift(running) > lift(eased),
+        "running with the vang off should lift it further: {:.2} against {:.2} m",
+        lift(running),
+        lift(eased)
+    );
+}
