@@ -255,13 +255,32 @@ force-velocity relation and not a force, which is one line of arithmetic and the
 difference between something that pulls and something that is alive: held hard it swims
 slowly, given slack it swims fast.
 
-**Depth is a length of line.** A diving lure's downforce and the line's drag both go as
-the square of the speed, so the angle the line takes up is nearly the same at two knots
-and at six — which is what a line counter is sold on. The depth is an integral along the
-line rather than a triangle, because the drag is distributed: everything near the lure
-hangs steep and everything near the rod lies flat. Done as a triangle it saturates
-around fifteen metres however much line you let out, which deletes the deep fish from
-the game, and that is exactly what the first version did.
+**Depth is the boat's speed.** A plain trolled lure's downforce is its own weight, which
+is constant, and the line's drag goes as the square of the speed — so the whole thing
+collapses as she goes faster. At five knots it skips along in the first metre or two and
+you can watch it work; take the way off her and it sinks hard, nine metres at two knots
+and thirty at one. That is why mackerel are caught fast and shallow and cod are caught
+slow and deep: **the boat chooses the quarry before the tackle does.**
+
+This was wrong twice. First as a triangle, with the line's drag lumped at the lure, which
+saturates around fifteen metres however much line you let out and deletes the deep fish
+from the game — the drag is distributed, so everything near the lure hangs steep and
+everything near the rod lies flat, and done properly it is an integral with a closed
+form. Then as a *diving* lure, whose vane lift goes as the square of the speed just as
+the line's drag does, so it held fifteen metres at every speed. That is a deep-diving
+plug on a downrigger, not anything a small boat tows, and it made the one thing you can
+actually see — the lure working astern — invisible at all times.
+
+Which is the other half of it: **the splash is the depth gauge**. The lure is a hand's
+length of metal under an opaque sea, so what you see is what it does to the water, and
+the mark fades out as it sinks and is gone by four metres. No disturbance astern means
+the lure is down. The number is on the console for when you want it.
+
+A line long enough and a boat fast enough will also part the line with nothing whatever
+on the hook — a hundred and sixty metres towed at six knots pulls harder than twenty
+pound braid will stand. That is the commonest way to lose tackle off a sailing boat,
+because the load builds while you are busy with the sails and the first you know of it is
+a straight rod.
 
 **Five fish, and they differ in a table rather than in code** — weight, pull per
 kilogramme, burst speed, stamina, how well a hook holds, and the depth, speed and ground

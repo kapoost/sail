@@ -141,18 +141,27 @@ const LINE_DRAG: f64 = 0.0553;
 /// curve is decided.
 const LURE_DRAG: f64 = 0.18;
 
-/// Downforce from the lure's diving vane, newtons per (metre per second) squared, and
-/// what the lure weighs in water.
+/// What the lure weighs in water, newtons. Forty grammes of leaded spinner.
 ///
-/// A diving plug is a hydrofoil pointed down. Its lift goes as the square of the speed
-/// and so does the line's drag, which is the elegant part: the angle the line takes up
-/// is very nearly the same at two knots and at six, so the depth depends on how much
-/// line is out and hardly at all on how fast you are going. That is exactly how divers
-/// behave on the water, and it is why the troller's instrument is a line counter.
+/// It is the *only* thing pulling the lure down, and that is a correction rather than a
+/// simplification. The first version gave it a diving vane — a hydrofoil pointed down,
+/// whose lift goes as the square of the speed exactly as the line's drag does, so the
+/// angle came out the same at two knots and at six and the lure sat fifteen metres down
+/// whatever you did. That is a deep-diving plug on a downrigger. It is not what anybody
+/// tows behind a small boat, and it made the one thing you can actually see — the lure
+/// working in the water astern — invisible at every speed.
 ///
-/// Slowly, the vane stops flying and the lure's own weight takes over, so the line hangs
-/// steeper and the lure goes deeper. Also true, and it is where lures are lost.
-const VANE: f64 = 0.95;
+/// A plain weighted lure behaves the other way round, and far more interestingly: the
+/// weight is constant and the drag goes as the speed squared, so **speed is the depth
+/// control**. At five knots it skips along in the first metre or two and you can watch
+/// it. Take the way off her and it sinks fast — nine metres at two knots, thirty at
+/// one — which is how you reach the fish that live deep, and is also why slowing down
+/// for a fish puts the next cast of the lure on the bottom.
+///
+/// Two consequences worth stating because they are the whole of the game loop. Mackerel
+/// are caught fast and shallow and cod are caught slow and deep, so the boat's speed
+/// chooses the quarry before the tackle does. And the splash the lure makes is a depth
+/// gauge you can see: no disturbance on the water means the lure is down.
 const LURE_WEIGHT: f64 = 0.35;
 
 /// How hard the water holds a fish being hauled sideways through it, newtons per
@@ -286,7 +295,7 @@ const MACKEREL: Nature = Nature {
     dash: 3.2,
     stamina: 20.0,
     hold: 0.62,
-    depth: (4.0, 4.0),
+    depth: (2.5, 3.0),
     speed: (5.0, 1.6),
     ground: (25.0, 40.0),
     plenty: 1.0,
@@ -301,7 +310,7 @@ const SAITHE: Nature = Nature {
     dash: 2.8,
     stamina: 80.0,
     hold: 0.88,
-    depth: (9.0, 5.0),
+    depth: (5.0, 4.0),
     speed: (3.6, 1.4),
     ground: (18.0, 25.0),
     plenty: 0.9,
@@ -316,7 +325,7 @@ const POLLACK: Nature = Nature {
     dash: 2.6,
     stamina: 45.0,
     hold: 0.80,
-    depth: (12.0, 6.0),
+    depth: (9.0, 5.0),
     speed: (2.8, 1.2),
     ground: (22.0, 25.0),
     plenty: 0.7,
@@ -331,8 +340,8 @@ const COD: Nature = Nature {
     dash: 1.6,
     stamina: 35.0,
     hold: 0.95,
-    depth: (22.0, 10.0),
-    speed: (2.4, 1.0),
+    depth: (16.0, 8.0),
+    speed: (2.2, 1.0),
     ground: (35.0, 25.0),
     plenty: 0.55,
     opening: Doing::Hang,
@@ -346,8 +355,8 @@ const LING: Nature = Nature {
     dash: 2.2,
     stamina: 130.0,
     hold: 0.90,
-    depth: (38.0, 15.0),
-    speed: (2.2, 0.9),
+    depth: (28.0, 12.0),
+    speed: (1.8, 0.8),
     ground: (60.0, 30.0),
     plenty: 0.15,
     opening: Doing::Sound,
@@ -425,13 +434,14 @@ pub const SPECIES: [Quarry; 5] = [
 /// the next eighty buy the rest, which is exactly the complaint every troller has about
 /// getting a lure down without a downrigger.
 ///
-/// Both `W` and `k` go as the square of the speed, so the shape is nearly
-/// speed-independent and the depth is set by the line out. That is the behaviour a line
-/// counter is sold on, and it is why the player's depth control is a length of line.
+/// `W` is a constant — the lure's weight — and `k` goes as the square of the speed, so
+/// the whole thing collapses as she goes faster. That is the behaviour of every plain
+/// trolled lure there has ever been, and it is why the troller's depth control is the
+/// throttle and not the line counter. Here the throttle is the mainsheet.
 pub fn lure_depth(line_out: f64, stw: f64) -> f64 {
     let v2 = (stw * stw).max(0.0);
     let line_out = line_out.max(0.0);
-    let down = VANE * v2 + LURE_WEIGHT;
+    let down = LURE_WEIGHT;
     let k = LINE_DRAG * v2;
     if k < 1e-9 {
         // Stopped: the line has no drag on it at all and the lure is straight under the
@@ -564,6 +574,15 @@ pub struct Fishing {
     pub line_out: f64,
     /// What the line is feeling, newtons. The number the whole game is about.
     pub tension: f64,
+    /// How deep the far end of the line is, metres — and never deeper than there is
+    /// water, which is the correction this field exists for.
+    ///
+    /// It used to be worked out again wherever it was wanted: once in the model, once in
+    /// the readout, once in the drawing. The readout's copy was the raw geometry with
+    /// nothing clamping it, so it cheerfully reported the lure forty-nine metres down
+    /// over forty metres of water — a lure eight metres inside the seabed. Three copies
+    /// of an expression is three chances to forget the one thing that keeps it honest.
+    pub depth: f64,
     /// Extension of the rod-and-line spring, metres. Negative is slack.
     stretch: f64,
     /// How fast line is leaving the spool against the drag, m/s. Drives the ratchet.
@@ -612,6 +631,7 @@ impl Fishing {
             line_out: streamed.unwrap_or(0.0),
             drag: 1.0 / 3.0,
             tension: 0.0,
+            depth: 0.0,
             stretch: 0.0,
             paying: 0.0,
             caught: Vec::new(),
@@ -663,6 +683,7 @@ impl Fishing {
                 self.tension = 0.0;
                 self.stretch = 0.0;
                 self.paying = 0.0;
+                self.depth = 0.0;
                 "rod stowed"
             }
             Rod::Playing(_) => "not with a fish on",
@@ -708,6 +729,9 @@ impl Fishing {
         }
         if matches!(self.rod, Rod::Trolling) {
             let depth = lure_depth(self.line_out, sea.stw);
+            // Never below the ground. The geometry does not know the sea has a bottom,
+            // and a lure reported under it is the one reading nobody can believe.
+            self.depth = depth.min((sea.sounding - 0.2).max(0.0));
             // Towing the lure and the line: the bend in the rod while you are simply
             // sailing along, which is most of what tells you the gear is fishing.
             let tow =
@@ -716,6 +740,37 @@ impl Fishing {
             self.paying = ((self.tension - cap) / SLIP).max(0.0);
             self.line_out = (self.line_out + (self.paying - reel) * dt).clamp(0.0, SPOOL);
             self.stretch = 0.0;
+            // A hundred and sixty metres of line towed at six knots pulls harder than
+            // twenty pound braid will stand, with nothing whatever on the hook. That is
+            // not a curiosity — it is the commonest way to lose tackle off a sailing
+            // boat, because the load builds while you are busy with the sails and the
+            // first you know of it is a straight rod. The line used to be checked for
+            // breaking only during a fight, so this situation simply persisted: a
+            // hundred newtons on an eighty-nine newton line, for ever.
+            if self.tension > BREAKING {
+                self.rod = Rod::Stowed;
+                self.line_out = 0.0;
+                self.tension = 0.0;
+                self.paying = 0.0;
+                self.depth = 0.0;
+                return Some(format!(
+                    "the line parted at {:.0} N with nothing on it — too much line at \
+                     this speed",
+                    BREAKING
+                ));
+            }
+            // And the other end of the same story: the drag is lighter than the tow, so
+            // line has been going out all along and there is none left.
+            if self.line_out >= SPOOL - 0.01 && self.paying > 0.0 {
+                self.rod = Rod::Stowed;
+                self.line_out = 0.0;
+                self.tension = 0.0;
+                self.paying = 0.0;
+                self.depth = 0.0;
+                return Some(
+                    "the spool emptied and the knot went — tighten the drag or slow down".into(),
+                );
+            }
             if self.line_out <= 0.05 && wanted > 0.0 {
                 // Wound right in: the lure is at the rod tip and there is nothing left to
                 // fish with, so the gear comes in rather than sitting there pretending.
@@ -925,6 +980,7 @@ impl Fishing {
         fish.depth = (fish.depth + down * travel * dt * 0.8)
             .clamp(0.3, floor)
             .min(self.line_out.max(1.0));
+        self.depth = fish.depth;
         fish.across = (fish.across + across * fish.sway * travel * dt * 0.08).clamp(-0.75, 0.75);
         if fish.depth < 1.5 && self.line_out < 14.0 {
             fish.seen = true;
@@ -1213,31 +1269,41 @@ mod tests {
         assert!(f.line_out < given - 1.0, "wound back to {}", f.line_out);
     }
 
+    /// More line is more depth. The triangle version of this function saturated and no
+    /// amount of line got past fifteen metres, which is the failure this catches.
     #[test]
     fn the_lure_goes_deeper_the_more_line_is_out() {
         let shallow = lure_depth(20.0, 2.0);
         let deep = lure_depth(60.0, 2.0);
-        assert!(deep > shallow * 1.8, "{deep} against {shallow}");
-        // And a hundred metres of line reaches the ground a ling lives on.
-        assert!(lure_depth(100.0, 1.2) > 35.0, "{}", lure_depth(100.0, 1.2));
+        assert!(deep > shallow * 1.4, "{deep} against {shallow}");
     }
 
-    /// The claim the whole depth control rests on: a diving vane holds its angle, so
-    /// doubling the speed must not halve the depth.
+    /// The claim the whole depth control rests on, and it belongs to the boat: a plain
+    /// lure's downforce is its own weight and the line's drag goes as the square of the
+    /// speed, so slowing down sinks it hard and driving her plane it up to the surface.
+    ///
+    /// This is the opposite of what the file used to assert. The old answer held its
+    /// depth against speed, which is true of a deep-diving plug on a downrigger and not
+    /// of anything a small boat tows — and it put the lure fifteen metres down at every
+    /// speed, where nobody could see it do anything.
     #[test]
-    fn a_diving_vane_holds_its_depth_against_speed() {
-        let slow = lure_depth(40.0, 1.5);
-        let fast = lure_depth(40.0, 3.0);
-        assert!(
-            fast > slow * 0.75,
-            "the vane should hold it: {fast} against {slow}"
-        );
-        // And it does plane up a little, or there would be no reason to slow down.
-        assert!(fast < slow);
+    fn speed_is_the_depth_control() {
+        let fast = lure_depth(30.0, 2.6);
+        let slow = lure_depth(30.0, 0.8);
+        assert!(fast < 4.0, "five knots should skip it along: {fast} m");
+        assert!(slow > fast * 4.0, "{slow} against {fast}");
     }
 
-    /// Below trolling speed the vane stops flying and the lure hangs nearly straight
-    /// down, which is how a lure finds the bottom at the end of a leg.
+    /// Which is what puts the deep fish within reach: a long line behind a boat barely
+    /// moving gets down to the ground a ling is on, and nothing else does.
+    #[test]
+    fn a_long_line_on_a_slow_boat_reaches_the_bottom_fish() {
+        let deep = lure_depth(100.0, 0.77);
+        assert!(deep > 25.0, "{deep} m");
+    }
+
+    /// Stopped, the lure hangs nearly straight down under the rod tip, which is how one
+    /// finds the bottom at the end of a leg.
     #[test]
     fn a_lure_hangs_when_the_boat_stops() {
         assert!(lure_depth(30.0, 0.1) > 29.0);
@@ -1350,6 +1416,46 @@ mod tests {
             !said.iter().any(|s| s.contains("something has it")),
             "{said:?}"
         );
+    }
+
+    /// A hundred and sixty metres of line towed at six knots parts it with nothing on
+    /// the hook at all, and the gear has to notice. It did not: breaking was only ever
+    /// checked during a fight, so a hundred newtons sat on an eighty-nine newton line
+    /// indefinitely while the spool emptied. Reported from the deck with a photograph of
+    /// the gauge saying exactly that.
+    #[test]
+    fn too_much_line_at_speed_parts_it_with_nothing_on() {
+        let mut f = rig(9);
+        f.stow_or_set();
+        f.line_out = 150.0;
+        let said = sail(&mut f, 12.0, sea(6.3, 60.0), hands(0.0, 1.0));
+        assert!(said.iter().any(|s| s.contains("parted")), "{said:?}");
+        assert!(!f.out(), "the gear should have come in with the lure");
+    }
+
+    /// And with the drag left light it goes the other way: the line streams out until
+    /// there is none, and then the knot gives.
+    #[test]
+    fn a_light_drag_at_speed_empties_the_spool() {
+        let mut f = rig(9);
+        f.stow_or_set();
+        f.line_out = 120.0;
+        let said = sail(&mut f, 60.0, sea(5.0, 60.0), hands(0.0, 0.02));
+        assert!(said.iter().any(|s| s.contains("spool")), "{said:?}");
+    }
+
+    /// The lure is never below the ground. The readout worked the depth out for itself
+    /// from the raw geometry and reported it eight metres inside the seabed.
+    #[test]
+    fn the_lure_is_never_deeper_than_the_water() {
+        let mut f = rig(4);
+        f.stow_or_set();
+        f.line_out = 120.0;
+        // Barely moving over shoal ground, which is where the geometry wants to put the
+        // lure thirty metres down in twelve metres of water.
+        sail(&mut f, 3.0, sea(0.8, 12.0), hands(0.0, 1.0 / 3.0));
+        assert!(f.depth <= 12.0, "lure at {} m over 12 m", f.depth);
+        assert!(lure_depth(120.0, sail_core::units::kn_to_ms(0.8)) > 12.0);
     }
 
     /// Dragging the lure along the bottom finds the bottom.

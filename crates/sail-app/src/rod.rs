@@ -69,6 +69,14 @@ const ROD_SPRING: f32 = 120.0;
 /// a rod that has gone, and nothing in the model lets the tension get there anyway.
 const MAX_DEFLECTION: f32 = 1.15;
 
+/// How deep the lure can be and still mark the surface, metres.
+///
+/// Four, which is generous and is meant to be: the point of the mark is to say *roughly
+/// how deep* at a glance, so it has to fade over a useful range rather than switch off.
+/// A lure actually breaking the surface at five knots on a short line is at half a
+/// metre, and the mark is at its strongest there.
+const SURFACE_MARK: f32 = 4.0;
+
 /// On every part of the gear. The rod, the line and the lure come out together and go
 /// away together, so whether they are drawn is one fact about one piece of equipment
 /// rather than three facts that have to be kept in step.
@@ -278,15 +286,11 @@ fn blank_mesh(deflection: f32, pull: Vec3) -> Mesh {
 /// the lure at the right *distance*, which is the thing the eye checks.
 fn terminal(sim: &Sim, fishing: &Fishing) -> (glam::DVec2, f64) {
     let st = sim.render_state();
-    let depth = match &fishing.rod {
-        Rod::Playing(fish) => fish.depth,
-        _ => crate::fishing::lure_depth(fishing.line_out, sim.sim.telemetry.stw),
-    };
     let across = match &fishing.rod {
         Rod::Playing(fish) => fish.across,
         _ => 0.0,
     };
-    let depth = depth.min(fishing.line_out.max(0.5));
+    let depth = fishing.depth.min(fishing.line_out.max(0.5));
     let horizontal = (fishing.line_out * fishing.line_out - depth * depth)
         .max(0.0)
         .sqrt();
@@ -312,6 +316,7 @@ pub struct Overside<'w> {
 pub fn update(
     overside: Overside,
     mut ratchet: ResMut<Ratchet>,
+    mut spray: ResMut<crate::spray::Spray>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     // Whether the gear is drawn is one query over all of it; what each part is doing
@@ -420,6 +425,48 @@ pub fn update(
         transform.rotation = Quat::from_rotation_arc(Vec3::Z, towards);
     }
 
+    // --- The mark on the water --------------------------------------------------
+    //
+    // The lure is a hand's length of metal and the sea is opaque, so at any resolution —
+    // let alone this one — there is nothing to see of it. What you see on the water is
+    // what it is *doing* to the water: a swirl trailing behind a spinner working two
+    // metres down, and a proper spatter when it is skipping along in the first metre
+    // behind a boat driving at five knots.
+    //
+    // Which makes it a depth gauge, and the best one in the game. The mark fades out as
+    // the lure sinks and is gone by four metres, so **no disturbance means the lure is
+    // down** — and that is the whole of what the player needs to know to choose between
+    // mackerel and cod without reading a number at all. The number is on the console for
+    // when they want it.
+    //
+    // Thrown into `spray.rs` rather than given a particle system of its own. It is the
+    // same stuff: foam on water, lit the same way, dying the same way, counted against
+    // the same budget.
+    if showing {
+        let knots = sail_core::units::ms_to_kn(sim.sim.telemetry.stw).max(0.0) as f32;
+        let working = (knots / 5.0).clamp(0.0, 1.2);
+        let shallow = (1.0 - depth as f32 / SURFACE_MARK).clamp(0.0, 1.0);
+        // The water the lure stirred keeps a little of her way on it and then stops,
+        // which is why the swirls fall astern in a line rather than sitting where the
+        // boat is.
+        let drift = st.forward() * 0.25;
+        // Raised to the three halves rather than squared, and measured against the
+        // bow's own rate so the two are in proportion: at five knots on a short line
+        // this throws about as much water as her stem does, which is right for
+        // something skipping on the surface, and it falls away to the odd fleck by
+        // three metres rather than switching off.
+        let rate = 90.0 * shallow.powf(1.5) * (0.3 + 0.7 * working);
+        spray.disturb(at, drift, rate * time.delta_secs(), 0.5);
+        // And a boil when the fish itself is near the surface, which is the moment the
+        // whole view exists for: something heavy turning just under the water, throwing
+        // it about, a little before you can make out what it is.
+        if let Rod::Playing(fish) = &fishing.rod {
+            let up = (1.0 - fish.depth as f32 / 3.5).clamp(0.0, 1.0);
+            let heavy = (fish.mass as f32 / 3.0).clamp(0.4, 2.5);
+            spray.disturb(at, drift, 90.0 * up * heavy * time.delta_secs(), 0.8);
+        }
+    }
+
     // --- The ratchet ----------------------------------------------------------
     //
     // Clicked by distance rather than by time, because a pawl over a toothed wheel is a
@@ -494,7 +541,10 @@ pub fn gauge(ui: &mut bevy_egui::egui::Ui, fishing: &mut Fishing, sim: &Sim) {
     let drag = fishing.drag;
     let drag_force = fishing.drag_force();
     let line_out = fishing.line_out;
-    let depth = crate::fishing::lure_depth(line_out, sim.sim.telemetry.stw);
+    // The model's own figure, which is clamped to the water there is. Working it out
+    // again here is how the readout came to claim the lure was eight metres inside the
+    // seabed.
+    let depth = fishing.depth;
     let sounding = sim.sim.telemetry.depth;
     let clear = sounding - depth;
 
@@ -621,13 +671,20 @@ pub fn gauge(ui: &mut bevy_egui::egui::Ui, fishing: &mut Fishing, sim: &Sim) {
 
     if !fishing.caught.is_empty() || fishing.lost > 0 {
         let weight: f64 = fishing.caught.iter().map(|c| c.mass).sum();
+        // An empty box says so rather than reporting minus nought kilogrammes, which is
+        // what the sum of no fish formats as and is a genuinely dispiriting thing to
+        // read after losing three.
         small(
             ui,
-            format!(
-                "BOX {} fish {weight:.1} kg  lost {}",
-                fishing.caught.len(),
-                fishing.lost
-            ),
+            if fishing.caught.is_empty() {
+                format!("BOX empty   lost {}", fishing.lost)
+            } else {
+                format!(
+                    "BOX {} fish {weight:.1} kg  lost {}",
+                    fishing.caught.len(),
+                    fishing.lost
+                )
+            },
             paint::LABEL,
         );
         if let Some(best) = fishing

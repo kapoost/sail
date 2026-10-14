@@ -164,6 +164,49 @@ pub struct Spray {
     darts: f32,
 }
 
+impl Spray {
+    /// Throw foam at a patch of water that is not the hull.
+    ///
+    /// Exposed because the hull is not the only thing out there disturbing the surface.
+    /// A lure skipping along two metres down leaves a swirl you can follow, and that
+    /// swirl is the only way to see where your gear is — the lure itself is a hand's
+    /// length of metal under the water and invisible at any resolution, let alone this
+    /// one. See `rod.rs`, which uses the presence and absence of it as a depth gauge:
+    /// no mark on the water means the lure is down.
+    ///
+    /// Takes a fractional count and rounds it with the generator rather than by
+    /// truncating, so a tenth of a speck a frame comes out as one speck every ten
+    /// frames instead of as nothing at all for ever.
+    pub fn disturb(&mut self, at: glam::DVec2, drift: glam::DVec2, specks: f32, scale: f32) {
+        let whole = specks.floor();
+        let n = whole as usize
+            + usize::from((self.seed.next_f64() as f32) < (specks - whole).clamp(0.0, 1.0));
+        for _ in 0..n {
+            if self.live.len() >= budget() {
+                return;
+            }
+            let r = &mut self.seed;
+            let spread = r.next_f64() * std::f64::consts::TAU;
+            let out = 0.55 * r.next_f64().sqrt();
+            self.live.push(Speck {
+                at: at + glam::DVec2::new(spread.cos(), spread.sin()) * out,
+                drift,
+                // Born a little old, which is how they get the short life this wants
+                // without a second lifetime constant and a second branch in the ageing
+                // loop. A lure's swirl closes up in a second or so; the hull's foam has
+                // a boat's worth of water in it and lasts.
+                age: LIFE * 0.55,
+                scale: scale * (0.7 + 0.8 * r.next_f64() as f32),
+                phase: r.next_f64() as f32 * std::f32::consts::TAU,
+                tint: 0.45 + 0.55 * r.next_f64() as f32,
+                claw: false,
+                beat: beat_of(r.next_f64() as f32),
+                sparkle: sparkle_of(r.next_f64() as f32),
+            });
+        }
+    }
+}
+
 pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
