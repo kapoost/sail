@@ -58,7 +58,7 @@ impl Default for Settings {
             // the gear and the music come up over it where they can be made out.
             volume: 0.70,
             music: 0.70,
-            sea: 0.13,
+            sea: 0.22,
             boat: 0.70,
             weather_touched: false,
         }

@@ -45,7 +45,7 @@ use crate::sim::Sim;
 
 const SAMPLE_RATE: u32 = 44_100;
 /// Master gain. Deliberately modest — this is an ambience bed, not a soundtrack.
-const MASTER: f32 = 0.26;
+const MASTER: f32 = 1.0;
 
 /// Parameters the simulation writes and the audio thread reads.
 ///
@@ -67,6 +67,8 @@ impl Default for SeaParams {
             wind_cutoff: AtomicU32::default(),
             rig_level: AtomicU32::default(),
             rig_hz: AtomicU32::default(),
+            notes_played: AtomicU32::default(),
+            notes_lost: AtomicU32::default(),
             water_level: AtomicU32::default(),
             water_cutoff: AtomicU32::default(),
             flog_level: AtomicU32::default(),
@@ -99,6 +101,12 @@ pub struct SeaParams {
     wind_cutoff: AtomicU32,
     rig_level: AtomicU32,
     rig_hz: AtomicU32,
+    /// Notes that found a slot, and notes that did not. Counted because "I cannot hear
+    /// the music" has three quite different causes — nothing composed, something
+    /// composed and dropped, something composed and drowned — and a counter tells them
+    /// apart without anybody having to guess.
+    notes_played: AtomicU32,
+    notes_lost: AtomicU32,
     water_level: AtomicU32,
     water_cutoff: AtomicU32,
     flog_level: AtomicU32,
@@ -198,7 +206,20 @@ impl SeaParams {
     /// dropped, which is the right failure — a dropped note is a thinner chord and a
     /// blocked audio thread is a click.
     pub fn strike(&self, hz: f32, velocity: f32) -> bool {
-        self.strike_damped(hz, velocity, 0.0)
+        self.strike_as(hz, velocity, 0.0, Voice::Struck)
+    }
+
+    /// The same, in one of the three colours the band has.
+    ///
+    /// This is what was missing when the music was reported as changing too subtly to
+    /// hear. Every part of it — melody, bass, pedal, the chord under a storm — was coming
+    /// out of one struck string, so a change of *language* arrived as the same sound
+    /// playing different notes, and a listener who is steering a boat is not going to
+    /// catch that. An orchestra does not tell you the scene has changed by moving the
+    /// tune; it tells you by bringing in a different section, and that is audible across
+    /// a room with the kettle on.
+    pub fn strike_voiced(&self, hz: f32, velocity: f32, damp: f32, voice: Voice) -> bool {
+        self.strike_as(hz, velocity, damp, voice)
     }
 
     /// The same, told how soon to let go of it.
@@ -215,26 +236,41 @@ impl SeaParams {
     /// little silence between the sounds, which is exactly what a singer does without
     /// being asked.
     pub fn strike_damped(&self, hz: f32, velocity: f32, damp: f32) -> bool {
+        self.strike_as(hz, velocity, damp, Voice::Struck)
+    }
+
+    fn strike_as(&self, hz: f32, velocity: f32, damp: f32, voice: Voice) -> bool {
         if hz < 20.0 || hz > 8000.0 || velocity <= 0.0 {
             return false;
         }
-        // Packed into one atomic so a note is never half-written: twelve bits of
-        // frequency in tenths of a hertz is a tenth of a cent at the top of the
-        // keyboard, and eight of velocity is finer than a hand.
-        // Frequency, velocity, and how soon to let go — three fields in one word so a
-        // note is never half-written.
-        let packed = ((hz.round() as u32).min(0x7FFF) << 17)
-            | (((velocity.clamp(0.0, 1.0) * 255.0) as u32).min(255) << 9)
-            | ((damp.clamp(0.0, 1.0) * 255.0) as u32).min(255);
+        // Frequency, velocity, how soon to let go and which voice, packed into one
+        // atomic so a note is never half-written: fourteen bits of whole hertz reaches
+        // past the top of the keyboard, seven of velocity is finer than a hand, six of
+        // damping is finer than the ear, and two name the voice.
+        let packed = ((hz.round() as u32).min(0x3FFF) << 15)
+            | (((velocity.clamp(0.0, 1.0) * 127.0) as u32).min(127) << 8)
+            | (((damp.clamp(0.0, 1.0) * 63.0) as u32).min(63) << 2)
+            | (voice as u32 & 0x3);
         for slot in &self.notes {
             if slot
                 .compare_exchange(0, packed, Ordering::Relaxed, Ordering::Relaxed)
                 .is_ok()
             {
+                self.notes_played.fetch_add(1, Ordering::Relaxed);
                 return true;
             }
         }
+        self.notes_lost.fetch_add(1, Ordering::Relaxed);
         false
+    }
+
+    /// How many notes have been asked for and how many were dropped, since the
+    /// beginning. The panel takes the difference between two readings.
+    pub fn notes(&self) -> (u32, u32) {
+        (
+            self.notes_played.load(Ordering::Relaxed),
+            self.notes_lost.load(Ordering::Relaxed),
+        )
     }
 
     /// A single tick on the beat, taken the same way as the clack.
@@ -281,6 +317,37 @@ impl Decodable for SeaVoice {
 
     fn decoder(&self) -> Self::Decoder {
         SeaStream::new(self.params.clone())
+    }
+}
+
+/// The three colours the band has, and the reason it has three.
+///
+/// One voice doing everything is why a change of language was arriving inaudibly. These
+/// are not three instruments in the sampled sense — they are the same six partials shaped
+/// three ways — but they are *categorically* different to the ear, which is the only
+/// thing that matters here:
+///
+/// * **Struck** is the piano: an instant attack and a decay from the first sample.
+///   Everything with a tune in it.
+/// * **Bowed** swells. It takes a fifth of a second to arrive and then holds, which is
+///   the one thing a struck string cannot do, and it is what a film score is made of. A
+///   held note under a scene is a thing being waited for; a struck one is an event.
+/// * **Ground** is the bass: dark, slow to die, with the upper partials taken out so it
+///   sits under everything without competing with the tune.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Voice {
+    Struck = 0,
+    Bowed = 1,
+    Ground = 2,
+}
+
+impl From<u32> for Voice {
+    fn from(v: u32) -> Self {
+        match v {
+            1 => Voice::Bowed,
+            2 => Voice::Ground,
+            _ => Voice::Struck,
+        }
     }
 }
 
@@ -377,18 +444,57 @@ struct Plucked {
     fade: [f32; 6],
     /// A short noise burst for the hammer, which is most of the attack.
     knock: f32,
+    /// How far open the note is, and how fast it opens. Nought to one, one multiply a
+    /// sample. A struck string opens in two milliseconds, which is also what keeps a
+    /// note from starting with a click; a bowed one takes a fifth of a second, and that
+    /// single number is most of what makes it a different instrument.
+    open: f32,
+    open_rate: f32,
     /// Nought for a struck string, one for a chip's square wave.
     shape: f32,
 }
 
 impl Plucked {
-    fn strike(&mut self, hz: f32, velocity: f32, shape: f32, sample_rate: f32, damp: f32) {
+    fn strike(
+        &mut self,
+        hz: f32,
+        velocity: f32,
+        shape: f32,
+        sample_rate: f32,
+        damp: f32,
+        voice: Voice,
+    ) {
         self.hz = hz;
         self.shape = shape;
-        self.knock = velocity * 0.5;
+        // A bow has no hammer, and that absence is half of why it does not sound struck.
+        self.knock = match voice {
+            Voice::Struck => velocity * 0.5,
+            Voice::Ground => velocity * 0.35,
+            Voice::Bowed => 0.0,
+        };
+        self.open = 0.0;
+        self.open_rate = match voice {
+            // A fifth of a second to arrive. Long enough to be heard as a swell rather
+            // than a soft attack, short enough that it is in time with the bar it was
+            // asked for on.
+            Voice::Bowed => 1.0 / (0.20 * sample_rate),
+            _ => 1.0 / (0.002 * sample_rate),
+        };
         // How quickly this note dies: about eight seconds at the bottom of the keyboard
         // and one at the top, which is roughly what a real one does.
-        let natural = 0.55 + 6.0 * (1.0 - (hz / 900.0).clamp(0.0, 1.0)).powi(2);
+        let natural = match voice {
+            // A struck string's length is a property of the string: eight seconds at the
+            // bottom of the keyboard and one at the top.
+            Voice::Struck => 0.55 + 6.0 * (1.0 - (hz / 900.0).clamp(0.0, 1.0)).powi(2),
+            // A bow's is a property of the *player*, so it is the same at every pitch and
+            // it is chosen by the music: long enough to hold under the bar it was struck
+            // on and the next one, short enough that eight of them do not pile up into a
+            // wash. The first version made it four times the string's own, which at the
+            // bottom of the register was sixteen seconds — a pad that never stops is not
+            // a pad, it is a drone, and the voice pool is twelve.
+            Voice::Bowed => 1.6,
+            Voice::Ground => 1.2,
+        };
         // Damped, the note is stopped rather than left to die.
         //
         // Geometrically rather than by subtracting a fraction, because the range is
@@ -412,10 +518,25 @@ impl Plucked {
             // Falling roughly as one over n, and harder as the note is played softer —
             // a quiet piano note is not a loud one turned down, it is rounder.
             let brightness = 0.35 + 0.65 * velocity;
-            self.amp[n] = 1.0 / partial.powf(1.25 + 0.9 * (1.0 - brightness));
+            // How fast the spectrum falls away, which *is* the colour. A piano at 1.25,
+            // a bow brighter and more even because a sawtooth is what a bow makes, and
+            // the ground much darker so it never argues with the tune.
+            let rolloff = match voice {
+                Voice::Struck => 1.25 + 0.9 * (1.0 - brightness),
+                Voice::Bowed => 0.95,
+                Voice::Ground => 2.1,
+            };
+            self.amp[n] = 1.0 / partial.powf(rolloff);
             // The stretched partial, and its own decay — higher partials die first.
             // Per sample, so the inner loop is a multiply.
-            let per_second = (1.0 + 0.55 * n as f32) / base;
+            // Higher partials die first on a struck string. Under a bow they do not —
+            // the bow keeps feeding them — so the spectrum stays put while the note lasts,
+            // and that steadiness is the other half of sounding sustained.
+            let spread = match voice {
+                Voice::Bowed => 0.08,
+                _ => 0.55,
+            };
+            let per_second = (1.0 + spread * n as f32) / base;
             self.fade[n] = (-per_second / sample_rate).exp();
             self.freq[n] = hz * partial * (1.0 + b * partial * partial).sqrt();
         }
@@ -440,6 +561,9 @@ impl Plucked {
     fn next(&mut self, dt: f32, noise: f32) -> f32 {
         if self.hz < 20.0 {
             return 0.0;
+        }
+        if self.open < 1.0 {
+            self.open = (self.open + self.open_rate).min(1.0);
         }
         let mut out = 0.0;
         let mut alive = false;
@@ -479,7 +603,7 @@ impl Plucked {
         if !alive {
             self.hz = 0.0;
         }
-        out
+        out * self.open
     }
 }
 
@@ -511,7 +635,6 @@ pub struct SeaStream {
     flog_phase: f32,
     /// Twelve voices, each one a note that has been struck and is dying.
     voices: [Plucked; 12],
-    next_voice: usize,
     poll: u32,
     tick_env: f32,
     tick_phase: f32,
@@ -548,7 +671,6 @@ impl SeaStream {
     fn new(params: Arc<SeaParams>) -> Self {
         Self {
             voices: [Plucked::default(); 12],
-            next_voice: 0,
             poll: 0,
             tick_env: 0.0,
             tick_phase: 0.0,
@@ -831,15 +953,37 @@ impl Iterator for SeaStream {
                 if packed == 0 {
                     continue;
                 }
-                let hz = (packed >> 17) as f32;
-                let velocity = ((packed >> 9) & 0xFF) as f32 / 255.0;
-                let damp = (packed & 0xFF) as f32 / 255.0;
-                // Round robin, so a long bass note is not stolen by the next chord. With
-                // twelve voices and notes that die in a few seconds, stealing is rare
-                // enough that the simplest rule is the right one.
-                let v = self.next_voice;
-                self.next_voice = (self.next_voice + 1) % self.voices.len();
-                self.voices[v].strike(hz, velocity, t_shape, 1.0 / dt, damp);
+                let hz = (packed >> 15) as f32;
+                let velocity = ((packed >> 8) & 0x7F) as f32 / 127.0;
+                let damp = ((packed >> 2) & 0x3F) as f32 / 63.0;
+                let voice = Voice::from(packed & 0x3);
+                // The quietest voice gets taken, not the next one round.
+                //
+                // Round robin was right while every note was a struck string that had
+                // mostly died by the time its turn came round again. It stopped being
+                // right the moment there were bowed notes: a pad held for four seconds is
+                // four bars at this tempo, three or four of them are sounding at once in
+                // the cinematic and siege treatments, and the round robin would cut one
+                // off in the middle — which is not a quiet note disappearing, it is a
+                // click, because the amplitudes are reset where the waveform was.
+                //
+                // Taking the quietest means what gets interrupted is whatever had least
+                // left to say. Twelve comparisons per note, against a budget of
+                // forty-eight thousand samples a second.
+                let mut v = 0;
+                let mut least = f32::INFINITY;
+                for (i, voice) in self.voices.iter().enumerate() {
+                    let loudness = if voice.hz < 20.0 {
+                        -1.0
+                    } else {
+                        voice.amp.iter().sum::<f32>() * voice.open
+                    };
+                    if loudness < least {
+                        least = loudness;
+                        v = i;
+                    }
+                }
+                self.voices[v].strike(hz, velocity, t_shape, 1.0 / dt, damp, voice);
             }
         }
         for v in 0..self.voices.len() {
@@ -1095,7 +1239,7 @@ mod tests {
     fn masks_for(hz: f32, damp: f32) -> f32 {
         let rate = 48_000.0;
         let mut v = Plucked::default();
-        v.strike(hz, 1.0, 0.0, rate, damp);
+        v.strike(hz, 1.0, 0.0, rate, damp, Voice::Struck);
         let mut peak = 0.0f32;
         let mut last_loud = 0.0f32;
         for i in 0..(rate as usize * 10) {
@@ -1125,6 +1269,150 @@ mod tests {
             sum += (out * out) as f64;
         }
         (sum / n as f64).sqrt() as f32
+    }
+
+    /// How loud each part of the mix actually is, in the state the game spends most of
+    /// its time in: a fresh breeze, five knots through the water, and the band playing.
+    ///
+    /// Reported from the deck as barely being able to hear the music change, which is a
+    /// balance question before it is a composition question — a difference you cannot
+    /// hear is not subtle, it is absent. So the first thing is a number: how far above
+    /// or below the sea the music actually sits at the defaults.
+    #[test]
+    fn where_the_music_sits_against_the_sea() {
+        let rate = SAMPLE_RATE as f32;
+        let sea_only = |music_on: bool| -> f32 {
+            let p = Arc::new(SeaParams::default());
+            // The defaults the settings panel starts at.
+            p.set_master(0.70);
+            p.set_sea(0.22);
+            p.set_boat(0.70);
+            p.set_music(0.70);
+            // A fresh breeze: eighteen knots apparent, five and a half through the water.
+            store(&p.wind_level, (18.0f32 / 20.0).powf(1.5));
+            store(&p.wind_cutoff, 320.0 + 95.0 * 18.0);
+            store(&p.water_level, (5.5f32 / 7.0).powf(1.4));
+            store(&p.water_cutoff, 260.0 + 150.0 * 5.5);
+            store(&p.rig_level, ((18.0 - 11.0) / 16.0f32).powf(1.6));
+            store(&p.rig_hz, 300.0);
+            let mut s = SeaStream::new(p.clone());
+            // Settle the mute ramp and the slews.
+            let mut sum = 0.0f64;
+            let mut n = 0usize;
+            let every = (rate * 0.35) as usize;
+            for i in 0..(rate as usize * 12) {
+                if music_on && i > (rate as usize * 4) && i % every == 0 {
+                    // A melody note at the level the composer actually asks for: 0.55
+                    // from `Asking`, times a sail that is working well.
+                    p.strike_damped(330.0, 0.55 * 0.85, 0.76);
+                }
+                let out = s.next().unwrap_or(0.0);
+                if i > (rate as usize * 4) {
+                    sum += (out * out) as f64;
+                    n += 1;
+                }
+            }
+            (sum / n as f64).sqrt() as f32
+        };
+        let sea = sea_only(false);
+        let both = sea_only(true);
+        // The music's own contribution, pulled out of the sum of squares.
+        let music = (both * both - sea * sea).max(0.0).sqrt();
+        let db = 20.0 * (music / sea).log10();
+        let bed = 20.0 * sea.log10();
+        // Where a bed belongs. Measured at -39.9 dBFS to begin with, which is why the
+        // whole game sounded like it was playing in the next room and why a change inside
+        // the music could not be heard at all: everything was within a few decibels of
+        // nothing. A game's ambience sits around -24 dBFS, and the rest of the mix is
+        // placed against that rather than against the headroom.
+        assert!(
+            (-27.0..=-20.0).contains(&bed),
+            "the sea should be a bed at about -24 dBFS, measured {bed:.1}"
+        );
+        // And the music a few decibels under it in average level, because its notes are
+        // sparse and peaky: what makes a piano audible over rain is the peaks standing
+        // clear, not the average being loud. Reported from the deck as wanting it louder
+        // *or* much quieter, which is what a mix sounds like when the absolute level is
+        // wrong and the balance is roughly right.
+        assert!(
+            (-12.0..=-2.0).contains(&db),
+            "music should sit a few dB under the sea in RMS, measured {db:+.1}"
+        );
+    }
+
+    /// The three voices have to be different *instruments* to the ear, not three settings
+    /// of one. Two measurements say whether they are: how long each takes to arrive, and
+    /// how bright it is.
+    #[test]
+    fn the_band_has_three_colours() {
+        let rate = SAMPLE_RATE as f32;
+        let render = |voice: Voice| -> (f32, f32, f32) {
+            let mut v = Plucked::default();
+            v.strike(220.0, 0.9, 0.0, rate, 0.0, voice);
+            // A short-term envelope rather than the sample values: the peak *sample* of a
+            // note made of six stretched partials lands wherever they happen to line up,
+            // which the first version of this measured and got a hundred and forty
+            // milliseconds for a piano. What the ear calls the attack is how fast the
+            // envelope gets there.
+            let window = (rate * 0.005) as usize;
+            let mut env = Vec::new();
+            // Brightness as the energy in the *difference* between one sample and the
+            // next against the energy in the samples themselves, which rises with the
+            // frequencies present. Zero crossings were the first attempt and they count
+            // the fundamental and almost nothing else — a dark note and a bright one at
+            // the same pitch cross zero the same number of times.
+            let (mut here, mut edge, mut power, mut last) = (0.0f32, 0.0f64, 0.0f64, 0.0f32);
+            for i in 0..(rate as usize * 6) {
+                let out = v.next(1.0 / rate, 0.0);
+                here = here.max(out.abs());
+                edge += ((out - last) * (out - last)) as f64;
+                power += (out * out) as f64;
+                last = out;
+                if i % window == window - 1 {
+                    env.push(here);
+                    here = 0.0;
+                }
+            }
+            let loudest = env.iter().copied().fold(0.0f32, f32::max);
+            let step = window as f32 / rate;
+            let attack = env.iter().position(|&e| e > loudest * 0.5).unwrap_or(0) as f32 * step;
+            // How much louder it is a quarter of a second in than it was at fifty
+            // milliseconds, which is the whole of what "swells" means.
+            let at = |t: f32| env[((t / step) as usize).min(env.len() - 1)].max(1e-6);
+            (
+                attack,
+                (edge / power.max(1e-12)).sqrt() as f32,
+                at(0.25) / at(0.05),
+            )
+        };
+        let (struck_attack, struck_bright, struck_swell) = render(Voice::Struck);
+        let (bowed_attack, _, bowed_swell) = render(Voice::Bowed);
+        let (ground_attack, ground_bright, _) = render(Voice::Ground);
+
+        // A struck string is there at once; a bow arrives. A fifth of a second is the
+        // difference between an event and something coming on, and it is the single most
+        // audible distinction in this whole synthesiser.
+        assert!(
+            struck_attack < 0.02 && ground_attack < 0.02,
+            "struck {struck_attack:.3} s, ground {ground_attack:.3} s"
+        );
+        assert!(
+            bowed_attack > 0.1,
+            "a bow has to be heard arriving: {bowed_attack:.3} s"
+        );
+        // Said the other way round, which is the way a listener hears it: a quarter of a
+        // second in, a bowed note is still getting louder and a struck one is already on
+        // its way down.
+        assert!(
+            bowed_swell > 1.5 && struck_swell < 1.0,
+            "swell from 50 ms to 250 ms: bowed x{bowed_swell:.2}, struck x{struck_swell:.2}"
+        );
+        // The ground is dark. Fewer zero crossings is less upper spectrum, and that is
+        // what keeps a bass from arguing with the tune above it.
+        assert!(
+            ground_bright < struck_bright * 0.85,
+            "ground {ground_bright:.4} against struck {struck_bright:.4}"
+        );
     }
 
     /// The rig lets go of its note when the wind changes, and finds it again when the

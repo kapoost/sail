@@ -64,6 +64,7 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut visible: ResMut<HudVisible>) 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
     sim: Res<Sim>,
@@ -72,6 +73,10 @@ pub fn draw(
     course: Res<Course>,
     pilot: Res<Pilot>,
     bank: Res<crate::clutch::Bank>,
+    music: Res<crate::music::Music>,
+    sound: Res<crate::sound::SoundHandle>,
+    time: Res<Time>,
+    mut heard: Local<(u32, u32, f32, f32)>,
 ) -> Result {
     if !visible.0 {
         return Ok(());
@@ -125,6 +130,38 @@ pub fn draw(
                         }
                     ),
                 );
+                ui.end_row();
+            });
+
+            // --- What the band is doing ------------------------------------------
+            //
+            // Here because "I cannot hear the music" is not one fault. The composer may
+            // have chosen something thin, or chosen something and had it dropped for want
+            // of a slot, or chosen well and been drowned by the sea — and from outside the
+            // window all three sound identical. The rate of notes actually reaching the
+            // synthesiser separates the first two; the sail columns say why the band is
+            // the size it is, since the sails *are* the voices.
+            ui.separator();
+            let r = &music.report;
+            let (played, lost) = sound.0.notes();
+            heard.2 += time.delta_secs();
+            if heard.2 >= 1.0 {
+                heard.3 = (played - heard.0) as f32 / heard.2;
+                *heard = (played, lost, 0.0, heard.3);
+            }
+            egui::Grid::new("music").num_columns(4).show(ui, |ui| {
+                row(ui, "music", &format!("{:.0} bpm in {}", r.tempo, r.beats));
+                row(ui, "notes", &format!("{:.0}/s  lost {}", heard.3, lost));
+                ui.end_row();
+                row(ui, "playing", &format!("{} / {}", r.going, r.mode));
+                row(
+                    ui,
+                    "voices",
+                    &format!("head {:.2}  main {:.2}", r.head, r.main),
+                );
+                ui.end_row();
+                row(ui, "drama", &format!("{:.2}", r.drama));
+                row(ui, "beyond", &format!("{:.2}", r.beyond));
                 ui.end_row();
             });
 

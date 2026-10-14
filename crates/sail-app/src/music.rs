@@ -45,7 +45,7 @@ use bevy::prelude::*;
 
 use crate::course::Leg;
 use crate::sim::Sim;
-use crate::sound::SoundHandle;
+use crate::sound::{SoundHandle, Voice};
 
 /// Semitones above the tonic, for the two modes that matter.
 ///
@@ -54,6 +54,18 @@ use crate::sound::SoundHandle;
 /// the same notes in D minor sag.
 const AEOLIAN: [i32; 7] = [0, 2, 3, 5, 7, 8, 10];
 const DORIAN: [i32; 7] = [0, 2, 3, 5, 7, 9, 10];
+
+/// And the third one, for when the sea is winning.
+///
+/// Phrygian is the minor with a *flattened second* — one semitone above the tonic
+/// instead of a whole tone — and that single note is the most menacing interval in
+/// Western music. It is the Dies Irae, it is every flamenco cadence, and it is under
+/// essentially every boss theme ever written, which is not a coincidence: a note a
+/// semitone above the home note leans on it and will not get off, so the key itself
+/// sounds like something pressing down on it. The rest of the scale is the minor
+/// everybody already knows, so the mode change is heard as *this one thing has gone
+/// wrong* rather than as different music.
+const PHRYGIAN: [i32; 7] = [0, 1, 3, 5, 7, 8, 10];
 
 /// Chord roots as scale degrees, in the two progressions folk music actually uses.
 ///
@@ -72,6 +84,16 @@ const TURNING: [usize; 4] = [0, 6, 3, 0];
 /// which is exactly the feeling of being on a boat that is going too fast to be
 /// comfortable and cannot be slowed down.
 const CINEMATIC: [usize; 4] = [0, 5, 2, 6];
+
+/// And the one for a fight that is being lost.
+///
+/// i–bII–i–bVI: the Phrygian see-saw, two chords a semitone apart rocking against each
+/// other with nowhere to go. Everything else in this file walks or slides somewhere;
+/// this one is deliberately *stuck*, because the feeling being played is not tension
+/// about what happens next — it is being held down by something stronger than you. The
+/// flat sixth at the end of the bar is the only movement allowed, and it moves the wrong
+/// way, further from home instead of back towards it.
+const SIEGE: [usize; 4] = [0, 1, 0, 5];
 
 /// How long a phrase is, in bars. Eight, because every tune in this tradition is eight.
 const PHRASE: u32 = 8;
@@ -172,8 +194,31 @@ fn how_to_say_it(bar: u32) -> (usize, i32, bool, bool) {
     }
 }
 
+/// What the composer is doing, for the instrument panel.
+///
+/// Observability, because the alternative is guessing. Reported from the deck as not
+/// being able to hear the music at a moment when it should obviously have been playing
+/// something cheerful, and there was no way to tell from outside whether the composer
+/// had chosen something thin, or chosen nothing, or chosen well and been drowned. Three
+/// very different faults with one symptom, and a panel line settles it in a keypress.
+#[derive(Clone, Copy, Default)]
+pub struct Report {
+    pub tempo: f32,
+    pub beats: u32,
+    pub mode: &'static str,
+    pub going: &'static str,
+    pub drama: f32,
+    pub beyond: f32,
+    /// What each sail is contributing, which is what decides whether there is a tune,
+    /// a chord, or neither.
+    pub head: f32,
+    pub main: f32,
+}
+
 #[derive(Resource)]
 pub struct Music {
+    /// The last thing it decided, so the panel can say what it is playing.
+    pub report: Report,
     /// Musical time, in beats since the passage began.
     beat: f64,
     /// The step last played, so a note is placed once rather than every frame.
@@ -207,6 +252,7 @@ pub struct Music {
 impl Default for Music {
     fn default() -> Self {
         Self {
+            report: Report::default(),
             beat: 0.0,
             last_step: -1,
             // D, which is the key half this music is written in and the one every whistle
@@ -564,7 +610,37 @@ pub fn compose(
         return;
     }
 
-    music.beat += time.delta_secs_f64() * (want.tempo as f64 / 60.0);
+    // --- Past what she can take ---------------------------------------------------
+    //
+    // `drama` is the boat being *pressed*: heeled past where a cruising crew reefs, a
+    // sea throwing her about, the pilot handing back the helm. All of that is hard
+    // sailing, and hard sailing is what this game is for — the cinematic treatment is
+    // the right answer to it, because a film score under a scene that has not resolved
+    // is exactly what being overpowered feels like.
+    //
+    // This is the other thing, and conflating the two was the gap. There is a line past
+    // which the boat is not being sailed hard, she is *beyond her numbers*: the cloth is
+    // carrying more wind than it is cut for and has a measurable number of seconds left,
+    // or she is over the peak of her righting arm and going. That is not tension about
+    // what might happen. It is a fight with something bigger than the boat, and it is
+    // the only state in this game that has a *boss* in it.
+    //
+    // All three measures are already in the model, and all three are past-the-limit
+    // rather than near-it — which is what makes this honest. Strain especially: it is a
+    // countdown that reaches one and blows the sail out, so it is the sea's own clock
+    // and the music is simply reading it.
+    let beyond = beyond_her(
+        t,
+        sail_core::units::ms_to_kn(cfg_headsail_limit(&sim)),
+        cfg_loa(&sim),
+    );
+
+    // The sea stops setting the pace. Everywhere else in this composer the tempo comes
+    // from the encounter period, because the hull meeting the waves is the rhythm
+    // section — but a fight has its own pulse and it is faster than the one you are
+    // being given. A fifth quicker at the worst of it, which is enough to feel like
+    // being hurried and not enough to lose the lock on the sea underneath.
+    music.beat += time.delta_secs_f64() * ((want.tempo * (1.0 + 0.2 * beyond)) as f64 / 60.0);
     // Two notes to the beat, which is a quaver — the unit nearly every tune in this
     // idiom is actually made of.
     let step = (music.beat * 2.0).floor() as i64;
@@ -608,7 +684,13 @@ pub fn compose(
         music.playing = Some(asked);
     }
 
-    let scale = if want.dorian { DORIAN } else { AEOLIAN };
+    let scale = if beyond > 0.35 {
+        PHRYGIAN
+    } else if want.dorian {
+        DORIAN
+    } else {
+        AEOLIAN
+    };
     let per_bar = (want.beats * 2) as i64;
     let bar = step.div_euclid(per_bar) as u32 % PHRASE;
     let in_bar = step.rem_euclid(per_bar) as usize;
@@ -642,7 +724,9 @@ pub fn compose(
     // The harmony changes language when she is in trouble. Same tune, different world
     // under it — which is exactly what a film score does with a theme and why the theme
     // is worth having.
-    let progression = if drama > 0.45 {
+    let progression = if beyond > 0.35 {
+        SIEGE
+    } else if drama > 0.45 {
         CINEMATIC
     } else if want.dorian {
         TURNING
@@ -661,7 +745,11 @@ pub fn compose(
     // exactly what a player does when the tune lifts.
     let going = (sail_core::units::ms_to_kn(t.stw) / sail_core::units::ms_to_kn(cfg_hull(&sim)))
         .clamp(0.0, 1.15) as f32;
-    let flying = going > 0.82;
+    // How much of the band is out. A boat at four knots and the same boat at seven are
+    // not the same scene, and the difference belongs in the *level* as well as in the
+    // number of notes — a crew on a boat that is going sings up.
+    let gusto = 0.75 + 0.5 * going.min(1.1);
+    let flying = going > 0.72;
 
     // Invented once, when she casts off, and then said over and over for the whole
     // passage. That is the point of it: by the third phrase you know this tune.
@@ -679,8 +767,24 @@ pub fn compose(
     let motifs = music.motif.expect("just set");
 
     // What each sail is doing, which is what each voice is.
-    let head_work = worked(&t.jib).max(worked(&t.jib_upper) * 0.8);
-    let main_work = worked(&t.main).max(worked(&t.main_upper) * 0.8);
+    //
+    // Two different questions, and running them together was a real fault: whether the
+    // sail is *there* decides whether the voice exists, and how hard it is working
+    // decides how loud it is. A mainsail that luffs for four seconds in a lull is still
+    // the mainsail — it does not stop being the ground the harmony stands on — but the
+    // first version gated the whole left hand on the instantaneous force, so every time
+    // the main shook the chords vanished and the band fell to a melody on its own.
+    // Reported from the deck as not being able to hear the music on a beam reach at six
+    // knots, which is exactly where a main luffs: eased for the reach and shaking at the
+    // luff, while the genoa does the work.
+    //
+    // So: set, and then weighted, with a floor under the weight. A sail that is up never
+    // counts for less than a third, and only taking it off her silences its voice.
+    let voice_of = |work: f32, set: bool| if set { 0.35 + 0.65 * work } else { 0.0 };
+    let main_set = cfg_main_area(&sim) > 0.5;
+    let head_set = sim.controls.furl < 0.985;
+    let head_work = voice_of(worked(&t.jib).max(worked(&t.jib_upper) * 0.8), head_set);
+    let main_work = voice_of(worked(&t.main).max(worked(&t.main_upper) * 0.8), main_set);
     let stay_work = if sim.controls.staysail > 0.02 {
         // The staysail shares the headsail's telemetry slot, so what says it is there is
         // the halyard rather than a force of its own.
@@ -690,6 +794,10 @@ pub fn compose(
     };
 
     let (strain, lift, upside_down, cadence) = how_to_say_it(bar);
+    // Nothing lands while this is going on. A cadence is a sentence finishing, and the
+    // one thing a fight with the weather does not do is finish a sentence — which is
+    // also why the siege progression has no resolution in it to reach.
+    let cadence = cadence && beyond < 0.35;
     let motif = motifs[strain];
     // Which time through this is. A session player never plays a repeat the way he
     // played it the first time — same bones, different flesh — and that is most of what
@@ -721,6 +829,14 @@ pub fn compose(
     // The cinematic treatment below gets none of this. There the long ring is the sound.
     let quaver = 30.0 / want.tempo.max(30.0);
     let detach = (0.25 / quaver).clamp(0.45, 0.85);
+
+    // And how much of the tune is left. The siege does not play *over* the song — it
+    // takes the song's place, because the point being made is that the thing you were
+    // doing has stopped: you are not on a passage any more, you are trying not to break
+    // anything. The danger voices below (the squall, the ground, the harbour) keep their
+    // own level, because those are warnings and a warning does not get quieter when
+    // things get worse.
+    let tune = hush * (1.0 - beyond);
 
     // The tune. The motif, said the way this bar says it, on the chord this bar sits on.
     let spoken = motif.at(in_bar).map(|d| {
@@ -757,17 +873,25 @@ pub fn compose(
         // tune, and it carries it only while there is a headsail doing something.
         // The tune thins out as a squall comes on and is gone before it arrives.
         let left = (1.0 - approach * 1.3).clamp(0.0, 1.0);
-        p.strike_damped(
-            hz(degree, 1.0),
-            want.level * weight * hush * head_work * left,
-            detach,
-        );
-        // Going well, the melody is doubled an octave up — the oldest way there is of
-        // saying the same thing brighter, and it arrives exactly when she does.
-        if flying && strong {
-            p.strike_damped(hz(degree, 2.0), want.level * 0.4 * hush * head_work, detach);
+        // A silent note is not free: it takes a slot out of the eight a step has and a
+        // voice out of the twelve, and the siege below needs both.
+        if tune > 0.02 {
+            p.strike_damped(
+                hz(degree, 1.0),
+                want.level * weight * gusto * tune * head_work * left,
+                detach,
+            );
+            // Going well, the melody is doubled an octave up — the oldest way there is of
+            // saying the same thing brighter, and it arrives exactly when she does.
+            if flying && strong {
+                p.strike_damped(
+                    hz(degree, 2.0),
+                    want.level * 0.4 * gusto * tune * head_work,
+                    detach,
+                );
+            }
         }
-    } else if going > 0.35 {
+    } else if going > 0.35 && tune > 0.02 {
         // The quaver the motif does not speak on, and what a player puts there.
         //
         // Not a random passing note, which is what was here and which sounds like
@@ -786,12 +910,12 @@ pub fn compose(
         if let Some(next) = coming {
             // A step above whatever is about to be played, which is what a cut is.
             // Stopped almost at once: a cut is a flick of a note, not a note.
-            p.strike_damped(hz(next + 1, 1.0), want.level * 0.22 * going * hush, 0.95);
+            p.strike_damped(hz(next + 1, 1.0), want.level * 0.22 * going * tune, 0.95);
         } else if going > 0.55 && !ink.0 {
             // And in the gaps with nothing coming, a passing note towards where the tune
             // was — only in the vanilla picture, because a chip has no voice to spare.
             let step_to = music.degree + if music.next() < 0.5 { 1 } else { -1 };
-            p.strike_damped(hz(step_to, 1.0), want.level * 0.3 * going * hush, detach);
+            p.strike_damped(hz(step_to, 1.0), want.level * 0.3 * going * tune, detach);
         }
     }
 
@@ -812,14 +936,18 @@ pub fn compose(
     if approach > 0.15 && !inside {
         let near = ((approach - 0.15) / 0.85).clamp(0.0, 1.0);
         if strong {
-            p.strike(hz(0, -2.0), (0.25 + 0.6 * near) * hush);
+            // Bowed, because that is what a thing being waited for sounds like: it
+            // arrives, it holds, and it does not stop when the bar does.
+            p.strike_voiced(hz(0, -2.0), (0.25 + 0.6 * near) * hush, 0.0, Voice::Bowed);
         }
         if near > 0.45 && strong {
             // The semitone. Not in the scale at all, which is the point — it is not part
             // of the music, it is the thing arriving.
-            p.strike(
+            p.strike_voiced(
                 music.tonic * 2.0_f32.powf(1.0 / 12.0) * 0.25,
                 0.3 * near * hush,
+                0.0,
+                Voice::Bowed,
             );
         }
         // The pulse quickens by *thinning the gaps* rather than by playing faster than
@@ -858,15 +986,21 @@ pub fn compose(
     if miles < 1.2 && !matches!(course.leg, Leg::Idle) {
         let home = ((1.2 - miles) / 1.2).clamp(0.0, 1.0) as f32;
         if strong && bar.is_multiple_of(2) {
-            p.strike_damped(hz(0, 0.0), want.level * 0.5 * home * hush, detach * 0.3);
+            p.strike_voiced(
+                hz(0, 0.0),
+                want.level * 0.5 * home * hush,
+                0.0,
+                Voice::Bowed,
+            );
             // The third. In a passage that has been in a minor mode for half an hour,
             // one major third is an enormous event, and it costs nothing because it has
             // been withheld all along.
             if home > 0.45 {
-                p.strike_damped(
+                p.strike_voiced(
                     music.tonic * 2.0_f32.powf(4.0 / 12.0),
                     want.level * 0.45 * home * hush,
-                    detach * 0.3,
+                    0.0,
+                    Voice::Bowed,
                 );
             }
         }
@@ -900,9 +1034,11 @@ pub fn compose(
         if in_bar.is_multiple_of(every) {
             // A semitone *below* the tonic, which is the note that does not belong to
             // anything above it. Rising harmony is hope; this is the floor coming up.
-            p.strike(
+            p.strike_voiced(
                 music.tonic * 0.25 * 2.0_f32.powf(-1.0 / 12.0),
                 (0.2 + 0.6 * shoal) * hush,
+                0.0,
+                Voice::Ground,
             );
         }
     }
@@ -940,15 +1076,22 @@ pub fn compose(
         if strong {
             // The pedal: the tonic, low, held under everything whatever the chord above
             // is doing. It is what a film score puts under a scene that has not resolved.
-            p.strike(hz(0, -2.0), want.level * 0.85 * hush);
+            // The whole cinematic shift in one decision: the same notes, bowed. A pedal
+            // and two open fifths that swell and hold are an orchestra; struck, they were
+            // a piano playing fifths, and nobody could hear the language had changed.
+            p.strike_voiced(hz(0, -2.0), want.level * 0.85 * hush, 0.0, Voice::Ground);
             // And the chord as an open fifth, wide apart.
-            p.strike(
+            p.strike_voiced(
                 hz(chord, -1.0),
                 want.level * 0.6 * hush * main_work.max(0.35),
+                0.0,
+                Voice::Bowed,
             );
-            p.strike(
+            p.strike_voiced(
                 hz(chord + 4, 0.0),
                 want.level * 0.5 * hush * main_work.max(0.35),
+                0.0,
+                Voice::Bowed,
             );
         }
         // Three and three and two, which is a bar of eight read the way a heartbeat
@@ -960,7 +1103,31 @@ pub fn compose(
 
     // --- What kind of sailing this is, played rather than described -----------------
     let going_kind = Going::of(sail_core::units::deg(t.twa) as f32);
-    match going_kind {
+    music.report = Report {
+        tempo: want.tempo,
+        beats: want.beats,
+        mode: if beyond > 0.35 {
+            "phrygian"
+        } else if want.dorian {
+            "dorian"
+        } else {
+            "aeolian"
+        },
+        going: match going_kind {
+            Going::Beating => "beating",
+            Going::Reaching => "reaching",
+            Going::Running => "running",
+        },
+        drama,
+        beyond,
+        head: head_work,
+        main: main_work,
+    };
+    match if tune > 0.02 {
+        going_kind
+    } else {
+        Going::Running
+    } {
         // **The fight.** Everything lands where it is not expected. Syncopation is
         // effort — a beat pushed off its place is the sound of something resisting — and
         // close-hauled is the only point of sail where the boat is being made to do
@@ -970,9 +1137,11 @@ pub fn compose(
             if in_bar % 4 == 3 && drama < 0.45 {
                 // The off-beat push, under the melody: a second voice leaning where the
                 // beat is not.
-                p.strike(
+                p.strike_voiced(
                     hz(chord + 4, -1.0),
-                    want.level * 0.4 * hush * main_work * going.max(0.3),
+                    want.level * 0.4 * tune * main_work * going.max(0.3),
+                    0.3,
+                    Voice::Ground,
                 );
             }
         }
@@ -988,9 +1157,11 @@ pub fn compose(
                 let next = progression[((bar + 1) % 4) as usize] as i32;
                 let along = (in_bar as i32).min(per_bar as i32 - 1);
                 let reach_to = chord + (next - chord) * along / per_bar.max(1) as i32;
-                p.strike(
+                p.strike_voiced(
                     hz(reach_to, -1.0),
-                    want.level * 0.3 * hush * main_work * (0.5 + 0.5 * going),
+                    want.level * 0.3 * gusto * tune * main_work * (0.5 + 0.5 * going),
+                    0.35,
+                    Voice::Ground,
                 );
             }
         }
@@ -998,8 +1169,13 @@ pub fn compose(
         // away, the boat goes quiet, and the music should do the same — the mistake would
         // be to fill it, when what a run actually sounds like is space with a boat in it.
         Going::Running => {
-            if strong && bar.is_multiple_of(2) {
-                p.strike(hz(chord, -1.0), want.level * 0.45 * hush * main_work);
+            if strong && bar.is_multiple_of(2) && tune > 0.02 {
+                p.strike_voiced(
+                    hz(chord, -1.0),
+                    want.level * 0.45 * tune * main_work,
+                    0.0,
+                    Voice::Bowed,
+                );
             }
         }
     }
@@ -1011,7 +1187,7 @@ pub fn compose(
     // is to a sail plan. Reef it down and the harmony goes quiet; hand it and there is no
     // chord at all and the melody is left standing on its own, which is precisely how a
     // boat under headsail alone sounds to sail.
-    if strong && !ink.0 && main_work > 0.05 && drama <= 0.45 {
+    if strong && !ink.0 && main_work > 0.05 && drama <= 0.45 && tune > 0.02 {
         // Both of these modes are minor, so the third of the chord is the same in each —
         // which is worth saying because it is the one interval somebody would expect to
         // change with the mode and it does not. What dorian moves is the sixth, four
@@ -1025,7 +1201,7 @@ pub fn compose(
             };
             p.strike(
                 hz(chord + tone, -1.0),
-                want.level * 0.5 * fatten * hush * main_work * (1.0 - 0.1 * i as f32),
+                want.level * 0.5 * gusto * fatten * tune * main_work * (1.0 - 0.1 * i as f32),
             );
         }
     }
@@ -1033,16 +1209,86 @@ pub fn compose(
     // And the bass, which holds under a long sea and walks under a short one.
     let swell = sim.sim.water.significant_height() > 1.2;
     if (strong || (!swell && in_bar == (per_bar / 2) as usize && going > 0.5)) && main_work > 0.05 {
-        p.strike(hz(chord, -2.0), want.level * 0.7 * hush * main_work);
+        p.strike(hz(chord, -2.0), want.level * 0.7 * gusto * tune * main_work);
     }
 
     // And the staysail, when it is set, is the counter-line under the melody — a second
     // voice that is only there when there is a second sail making it.
-    if stay_work > 0.05 && in_bar % 4 == 2 {
-        p.strike(
+    if stay_work > 0.05 && in_bar % 4 == 2 && tune > 0.02 {
+        p.strike_voiced(
             hz(music.degree - 2, 0.0),
-            want.level * 0.45 * hush * stay_work,
+            want.level * 0.45 * tune * stay_work,
+            0.0,
+            Voice::Bowed,
         );
+    }
+
+    // --- Beyond her: a fight with something bigger than the boat --------------------
+    //
+    // Everything above this line is a passage: the music of being somewhere, going
+    // somewhere, working the boat. This is what replaces it when the boat has run out of
+    // numbers, and it is built as a boss theme because that is honestly what the
+    // situation is — a thing arrives that is stronger than you are, you cannot outrun it,
+    // and the only question left is whether you survive the next minute.
+    //
+    // Five parts, and not one of them is a new tune, because a boss theme is not a tune:
+    //
+    // * **The treadmill.** The low note on every quaver without exception, alternating
+    //   tonic and flat second. A pedal that *moves* a semitone and comes straight back is
+    //   the most relentless figure in the idiom — it is going nowhere at speed, which is
+    //   precisely what being overpowered is.
+    // * **The cluster.** Root, flat second and fifth together on the downbeat. Not a
+    //   chord anybody would write for a song: the second is a semitone off the root and
+    //   grinds against it, and that grinding is the whole point.
+    // * **The tritone**, once she is genuinely over. The interval the church banned,
+    //   and the only one in this file that is not in the scale at all.
+    // * **A cell, not a melody.** Four notes said the same way every bar, high and
+    //   hammered short — tonic, flat second, tonic, down a fourth. A tune invites you to
+    //   follow it somewhere; a cell says the same thing at you until the situation
+    //   changes, and the difference between those two is the difference between sailing
+    //   and surviving.
+    // * **The block on every quaver**, which is the one part that needs no explanation.
+    //
+    // It comes in from eight per cent rather than at a threshold, so the first thing a
+    // sailor hears is the pedal arriving underneath the tune they were already in —
+    // which is the right order: you feel the boat go over her numbers, and the music is
+    // already there.
+    if beyond > 0.08 {
+        let fight = ((beyond - 0.08) / 0.92).clamp(0.0, 1.0);
+        p.strike_voiced(
+            hz(if in_bar.is_multiple_of(2) { 0 } else { 1 }, -2.0),
+            want.level * (0.45 + 0.4 * fight) * hush,
+            0.45,
+            Voice::Ground,
+        );
+        if strong {
+            for (tone, loud) in [(0, 0.8), (1, 0.62), (4, 0.55)] {
+                // Bowed and held: a cluster that is struck is a bang, and a bang is over.
+                // This one has to still be there when the next bar arrives.
+                p.strike_voiced(
+                    hz(tone, -1.0),
+                    want.level * loud * (0.4 + 0.6 * fight) * hush,
+                    0.0,
+                    Voice::Bowed,
+                );
+            }
+        }
+        if fight > 0.5 && in_bar == (per_bar / 2) as usize {
+            p.strike_voiced(
+                music.tonic * 2.0_f32.powf(6.0 / 12.0),
+                want.level * 0.5 * fight * hush,
+                0.0,
+                Voice::Bowed,
+            );
+        }
+        // Hammered on the even quavers, which at this tempo is a note every third of a
+        // second and is as fast as this synthesiser can speak.
+        const CELL: [i32; 4] = [0, 1, 0, -3];
+        if in_bar.is_multiple_of(2) {
+            let say = CELL[(in_bar / 2) % 4];
+            p.strike_damped(hz(say, 1.0), want.level * (0.3 + 0.45 * fight) * hush, 0.8);
+        }
+        p.tick((0.25 + 0.5 * fight) * hush);
     }
 
     if strong || (want.beats == 4 && in_bar == (per_bar / 2) as usize) {
@@ -1056,6 +1302,159 @@ fn cfg_headsail_limit(sim: &Sim) -> f64 {
 }
 
 /// This hull's own speed, which is what "going well" is measured against.
+/// How far past her own numbers the boat is, nought to one.
+///
+/// Its own function because it is the one state in this composer worth arguing about on
+/// the water, and an argument needs something to point at. Five measures, every one of
+/// them a thing that has already happened rather than a thing that might:
+fn beyond_her(t: &sail_core::state::Telemetry, headsail_limit_kn: f64, loa: f64) -> f32 {
+    use sail_core::units::{ms_to_kn, rad};
+    // **The cloth's own clock.** A sail over the wind it is cut for has a measurable
+    // number of seconds left, and this is that countdown. The shortest fuse here.
+    let cloth = t.strain;
+    // **Carrying more than the sail plan can carry.** Reads as beyond at a tenth over
+    // the number and fully so at a quarter, which is also about where the strain above
+    // starts running fast enough to matter.
+    let over = (ms_to_kn(t.aws) / headsail_limit_kn - 1.0) / 0.25;
+    // **Knocked down.** Thirty-five degrees is not sailing — the side deck is in, the
+    // rudder is coming out, and a cruising boat there is being held down rather than
+    // sailed. Not the capsize criterion, which is twice as far and much too late to be
+    // worth scoring.
+    let knocked = (t.heel.abs() - rad(35.0)) / rad(15.0);
+    // **A sea too big for the boat**, and the measure is the height against her own
+    // length, because that is what decides whether a wave is a motion or an event: two
+    // metres under an eleven-metre hull is sailing, three and a half is being thrown
+    // about by something that does not care. This is the one of the five that *lasts* —
+    // the others are a few seconds each — and it is why this state is music rather than
+    // a sting.
+    let sea = (t.significant_height / loa.max(5.0) - 0.18) / 0.14;
+    // **And not steering.** The blade has lost its grip while she is still making way,
+    // which is the one that frightens people who have actually been out there: the
+    // tiller goes light, nothing answers, and the next wave decides where the bow goes.
+    let helpless = if ms_to_kn(t.stw) > 1.5 {
+        (0.3 - t.rudder_bite) / 0.3
+    } else {
+        0.0
+    };
+    // The worst of them, because being past any one of these is being past her.
+    let worst = cloth
+        .max(over)
+        .max(knocked)
+        .max(sea)
+        .max(helpless)
+        .clamp(0.0, 1.0);
+    worst as f32
+}
+
+/// How much mainsail is actually up, square metres. Nought means it is off her.
+fn cfg_main_area(sim: &Sim) -> f64 {
+    sim.config().reefed_main(sim.controls.reef).0
+}
+
+/// Her length overall, which is the yardstick a sea is measured against.
+fn cfg_loa(sim: &Sim) -> f64 {
+    sim.config().loa
+}
+
 fn cfg_hull(sim: &Sim) -> f64 {
     sim.config().hull_speed()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sail_core::state::Telemetry;
+    use sail_core::units::{kn_to_ms, rad};
+
+    /// An eleven-metre charter sloop with a genoa on, which is the boat this is for.
+    const LIMIT_KN: f64 = 42.0;
+    const LOA: f64 = 11.0;
+
+    fn at_sea() -> Telemetry {
+        Telemetry {
+            aws: kn_to_ms(16.0),
+            stw: kn_to_ms(5.5),
+            heel: rad(14.0),
+            significant_height: 0.6,
+            rudder_bite: 0.8,
+            strain: 0.0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_good_days_sailing_is_not_a_boss_fight() {
+        // Fourteen degrees of heel, sixteen knots over the deck and a half-metre sea is
+        // a lovely afternoon, and the music has no business changing language for it.
+        assert_eq!(beyond_her(&at_sea(), LIMIT_KN, LOA), 0.0);
+        // Nor is being pressed. Twenty-eight degrees and twenty-six knots apparent is
+        // hard work and wants a reef — that is what `drama` is for, and it must not
+        // reach this.
+        let pressed = Telemetry {
+            aws: kn_to_ms(26.0),
+            heel: rad(28.0),
+            significant_height: 1.4,
+            rudder_bite: 0.55,
+            ..at_sea()
+        };
+        assert_eq!(beyond_her(&pressed, LIMIT_KN, LOA), 0.0);
+    }
+
+    #[test]
+    fn five_ways_of_being_past_her_numbers() {
+        // The cloth's clock, which is the shortest fuse: half spent is half of this.
+        let fraying = Telemetry {
+            strain: 0.5,
+            ..at_sea()
+        };
+        assert!((beyond_her(&fraying, LIMIT_KN, LOA) - 0.5).abs() < 0.01);
+
+        // Carrying more than the sail is cut for. A genoa in forty-seven knots is a
+        // tenth over its number.
+        let too_much = Telemetry {
+            aws: kn_to_ms(47.0),
+            ..at_sea()
+        };
+        assert!(beyond_her(&too_much, LIMIT_KN, LOA) > 0.35);
+
+        // Knocked down: the side deck is in and the rudder is coming out.
+        let over = Telemetry {
+            heel: rad(44.0),
+            ..at_sea()
+        };
+        assert!(beyond_her(&over, LIMIT_KN, LOA) > 0.5);
+
+        // And the one that lasts: a three-metre sea under an eleven-metre hull.
+        let gale = Telemetry {
+            significant_height: 3.0,
+            ..at_sea()
+        };
+        assert!(
+            beyond_her(&gale, LIMIT_KN, LOA) > 0.5,
+            "a gale is beyond her for hours: {}",
+            beyond_her(&gale, LIMIT_KN, LOA)
+        );
+        // Two metres is not, which is the line that matters: it is the difference
+        // between a rough day and a bad one.
+        let rough = Telemetry {
+            significant_height: 2.0,
+            ..at_sea()
+        };
+        assert!(beyond_her(&rough, LIMIT_KN, LOA) < 0.25);
+
+        // Not steering. Making way, and the blade has nothing left.
+        let helpless = Telemetry {
+            rudder_bite: 0.1,
+            ..at_sea()
+        };
+        assert!(beyond_her(&helpless, LIMIT_KN, LOA) > 0.6);
+        // But a boat stopped has a dead rudder by definition, and that is not a boss
+        // fight — it is a boat going nowhere, which the music already has a word for.
+        let becalmed = Telemetry {
+            rudder_bite: 0.0,
+            stw: kn_to_ms(0.4),
+            ..at_sea()
+        };
+        assert_eq!(beyond_her(&becalmed, LIMIT_KN, LOA), 0.0);
+    }
 }
