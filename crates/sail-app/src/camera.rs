@@ -222,10 +222,25 @@ const AIM_PITCH_DOWN: f32 = 0.65;
 /// Radians per pixel of mouse.
 const AIM_RATE: f32 = 0.0042;
 /// How quickly an untouched view comes back to centre, per second.
-const AIM_RECENTRE: f32 = 0.9;
+///
+/// Slow, and half what it was. Reported from the deck as coming back too fast: a view
+/// that hurries home reads as a camera on a spring, and what it is meant to be is
+/// somebody who was looking at something and has gone back to watching where they are
+/// going. That takes a couple of seconds and nobody does it deliberately.
+const AIM_RECENTRE: f32 = 0.42;
+
+/// And how much her rolling holds it where it is.
+///
+/// A head does not drift back to centre while the boat is throwing it about — you are
+/// hanging on, and your eyes are busy with the horizon. So the homing lets go while she
+/// is rolling and gathers again as she steadies, which makes the return something that
+/// happens *between* the seas rather than across them. Nought and the view ignores her
+/// entirely, which is what it did.
+const ROLL_HOLDS_THE_EYE: f32 = 2.6;
 
 /// Swing the view with the right mouse button held.
 pub fn aim(
+    sim: Res<crate::sim::Sim>,
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -260,9 +275,13 @@ pub fn aim(
         return;
     }
     let k = if home {
+        // Asked for explicitly, which is a decision rather than a drift: it goes.
         1.0 - (-6.0 * time.delta_secs()).exp()
     } else {
-        1.0 - (-AIM_RECENTRE * time.delta_secs()).exp()
+        // How much of her roll is in it at the moment. A tenth of a radian a second is
+        // a boat working in a seaway; two tenths is one being thrown about.
+        let working = (sim.sim.state.roll_rate.abs() as f32 * ROLL_HOLDS_THE_EYE).min(0.92);
+        1.0 - (-AIM_RECENTRE * (1.0 - working) * time.delta_secs()).exp()
     };
     aim.yaw -= aim.yaw * k;
     aim.pitch -= aim.pitch * k;
