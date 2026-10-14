@@ -163,6 +163,13 @@ pub struct Tutorial {
     shout: Option<Shout>,
     /// Which side the wind was on when the tack began, so the tack can be detected.
     tack_from: f64,
+    /// Which side of him the approach is being made from, chosen once when the run down
+    /// to leeward begins and then kept.
+    ///
+    /// Kept, because it was read live off the wind and that was a fault: sailing down to
+    /// leeward she passes through dead downwind, the apparent wind changes sides, and the
+    /// mark she is steering at jumps seventy metres across to the other side of him.
+    approach_side: f64,
     /// Where she should be steering, if there is a mark to put in the water for it.
     gate: Option<DVec2>,
 }
@@ -335,16 +342,61 @@ pub fn run(
                 sound.0.ring(1);
                 lesson.shout("HE IS GONE", "", Tone::Dead, now);
             }
-            Drill::Overboard { mark, .. } => {
-                let next = advance(leg, &sim, &over, lesson.tack_from, mark);
-                if next != leg {
-                    lesson.stage = Stage::Search(next);
-                    lesson.since = now;
-                    if let Some((words, under)) = order_for(next) {
+            Drill::Overboard { mark, oscar, .. } => {
+                // Can the last leg be sailed from where she has got to? Asked before the
+                // leg is advanced, because the answer can send her back one — and being
+                // sent back with a reason is the coaching. The first version pointed the
+                // arrow straight at him whatever the wind was doing and said *steady as
+                // she goes*, which put her ten metres dead upwind of him being told she
+                // was doing well. Reported from the deck.
+                if leg == Leg::Approach {
+                    let aim = aim_point(oscar, tm.twd, sim.config().beam);
+                    let course = bearing(sim.sim.state.pos, aim);
+                    let (words, under) = match can_she_lay_him(tm.twd, course) {
+                        Lay::Good => ("", ""),
+                        Lay::DeadUpwind => (
+                            "HE IS DEAD UPWIND",
+                            "you cannot sail at him from there — fall off and come round \
+                             below him",
+                        ),
+                        Lay::FromWindward => (
+                            "YOU ARE ABOVE HIM",
+                            "never come down on a man with the wind behind you — go round \
+                             and come up from below",
+                        ),
+                    };
+                    if !words.is_empty() {
+                        lesson.approach_side = better_side(sim.sim.state.pos, oscar, tm.twd, loa);
+                        lesson.stage = Stage::Search(Leg::Downwind);
+                        lesson.since = now;
                         lesson.shout(words, under, Tone::Order, now);
                     }
-                    if next == Leg::Tack {
-                        lesson.tack_from = tm.awa.signum();
+                }
+                if let Stage::Search(leg) = lesson.stage {
+                    let next = advance(
+                        leg,
+                        &sim,
+                        &over,
+                        lesson.tack_from,
+                        mark,
+                        lesson.approach_side,
+                    );
+                    if next != leg {
+                        if next == Leg::Downwind {
+                            // Chosen here, and kept from here: read live off the wind it
+                            // jumped to the other side of him every time she went through
+                            // dead downwind.
+                            lesson.approach_side =
+                                better_side(sim.sim.state.pos, oscar, tm.twd, loa);
+                        }
+                        lesson.stage = Stage::Search(next);
+                        lesson.since = now;
+                        if let Some((words, under)) = order_for(next) {
+                            lesson.shout(words, under, Tone::Order, now);
+                        }
+                        if next == Leg::Tack {
+                            lesson.tack_from = tm.awa.signum();
+                        }
                     }
                 }
             }
@@ -367,7 +419,7 @@ pub fn run(
 
     // And the mark in the water, which is wherever this leg wants her to go.
     lesson.gate = match lesson.stage {
-        Stage::Search(leg) => steer_for(leg, &sim, &over),
+        Stage::Search(leg) => steer_for(leg, &sim, &over, lesson.approach_side),
         _ => None,
     };
     if let Ok((mut float, mut vis)) = guide.single_mut() {
@@ -384,6 +436,12 @@ pub fn run(
 fn step(lesson: &mut Tutorial, to: Stage, now: f64) {
     lesson.stage = to;
     lesson.since = now;
+}
+
+/// The true bearing from one place to another, clockwise from north.
+fn bearing(from: DVec2, to: DVec2) -> f64 {
+    let off = to - from;
+    off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU)
 }
 
 /// The course the final approach is sailed on: a close reach, on the tack she is on.
@@ -403,7 +461,7 @@ fn gate(oscar: DVec2, twd: f64, wind_side: f64, loa: f64) -> DVec2 {
 }
 
 /// Where she should be steering on this leg, if there is a point for it.
-fn steer_for(leg: Leg, sim: &Sim, over: &Overboard) -> Option<DVec2> {
+fn steer_for(leg: Leg, sim: &Sim, over: &Overboard, side: f64) -> Option<DVec2> {
     let oscar = over.oscar()?;
     let tm = &sim.sim.telemetry;
     let loa = sim.config().loa;
@@ -411,10 +469,71 @@ fn steer_for(leg: Leg, sim: &Sim, over: &Overboard) -> Option<DVec2> {
         // Nothing to steer at: the instruction is an angle to the wind and a distance,
         // and an arrow says it better than a mark would.
         Leg::Clear | Leg::Tack => None,
-        Leg::Downwind => Some(gate(oscar, tm.twd, tm.awa.signum(), loa)),
+        Leg::Downwind => Some(gate(oscar, tm.twd, side, loa)),
         // Nothing on the last leg: a light standing on top of him is a light in the way
         // of the one thing he is supposed to be looking at, which is the flag.
         Leg::Approach => None,
+    }
+}
+
+/// Where to aim on the last leg, which is **not** at him.
+///
+/// A boat's length to leeward of him, so that when she stops he is on her *windward*
+/// side: the mainsail and the boom are over the other rail where they cannot come across
+/// him, you are looking at him over the high side, and she is not being set down on top
+/// of his head by her own leeway. Aiming at him exactly is how a casualty ends up under
+/// the bow, which is the one outcome worse than missing him.
+fn aim_point(oscar: DVec2, twd: f64, beam: f64) -> DVec2 {
+    let downwind = DVec2::new(-twd.sin(), -twd.cos());
+    oscar + downwind * (beam * 0.5 + 1.2)
+}
+
+/// Which side of him to come up from, chosen once: whichever gate is nearer to where she
+/// is now, so the run down to leeward is the short way round rather than a lap of him.
+fn better_side(pos: DVec2, oscar: DVec2, twd: f64, loa: f64) -> f64 {
+    let (a, b) = (gate(oscar, twd, 1.0, loa), gate(oscar, twd, -1.0, loa));
+    if (pos - a).length() <= (pos - b).length() {
+        1.0
+    } else {
+        -1.0
+    }
+}
+
+/// How far off the true wind a course is, in radians, 0 dead into it and pi dead before
+/// it.
+fn off_the_wind(twd: f64, course: f64) -> f64 {
+    wrap_pi(twd - course).abs()
+}
+
+/// Whether a boat can actually sail the course to him from where she is.
+///
+/// Three answers, and the two bad ones are the whole of why this exists. The first
+/// version of the approach pointed the arrow straight at him and said *steady as she
+/// goes* whatever that course happened to be — which put her ten metres dead upwind of
+/// him, head to wind, being told she was doing well. Reported from the deck.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Lay {
+    /// He is in the no-go zone: she cannot sail at him at all from here.
+    DeadUpwind,
+    /// She is above him and sailing at him means bearing down on him with the wind
+    /// behind her, which no method of recovery allows: she cannot be stopped, and if
+    /// anything goes wrong she goes over the top of him.
+    FromWindward,
+    /// A close reach, or near enough to one to be slowed and stopped.
+    Good,
+}
+
+/// Forty degrees is about what a cruising boat tacks through either side of the wind, so
+/// inside that there is no course to him at all. Past a hundred she has the wind behind
+/// her and is running down on him.
+fn can_she_lay_him(twd: f64, course: f64) -> Lay {
+    let off = deg(off_the_wind(twd, course));
+    if off < 40.0 {
+        Lay::DeadUpwind
+    } else if off > 100.0 {
+        Lay::FromWindward
+    } else {
+        Lay::Good
     }
 }
 
@@ -423,7 +542,14 @@ fn steer_for(leg: Leg, sim: &Sim, over: &Overboard) -> Option<DVec2> {
 /// Every one of these is a fact about the boat rather than a key the player has to press,
 /// so somebody who sails the pattern without reading a word of it gets carried along by
 /// the same prompts as somebody following them exactly.
-fn advance(leg: Leg, sim: &Sim, over: &Overboard, tack_from: f64, mark: DVec2) -> Leg {
+fn advance(
+    leg: Leg,
+    sim: &Sim,
+    over: &Overboard,
+    tack_from: f64,
+    mark: DVec2,
+    approach_side: f64,
+) -> Leg {
     let tm = &sim.sim.telemetry;
     let loa = sim.config().loa;
     let pos = sim.sim.state.pos;
@@ -450,7 +576,7 @@ fn advance(leg: Leg, sim: &Sim, over: &Overboard, tack_from: f64, mark: DVec2) -
         }
         // Down to leeward of him, far enough out that the last of it is a close reach.
         Leg::Downwind => {
-            let here = gate(oscar, tm.twd, tm.awa.signum(), loa);
+            let here = gate(oscar, tm.twd, approach_side, loa);
             if (pos - here).length() < loa * 1.3 {
                 Leg::Approach
             } else {
@@ -545,8 +671,10 @@ fn instruction(stage: Stage, sim: &Sim, over: &Overboard, held: f64) -> (String,
                     .into(),
                 Leg::Approach => format!(
                     "Up at him on a close reach, sheets eased, as slowly as she will \
-                     still steer. {range:.0} m to go at {knots:.1} knots — he wants to \
-                     end up at your shoulder, never under your bow."
+                     still steer. {range:.0} m off at {knots:.1} knots. Aim a boat's \
+                     length below him so he finishes on your *windward* side, forward of \
+                     amidships: the boom is over the other rail, you can see him, and she \
+                     is not setting down on top of him."
                 ),
             };
             (
@@ -611,7 +739,13 @@ fn instruction(stage: Stage, sim: &Sim, over: &Overboard, held: f64) -> (String,
 /// Every one of these is a heading rather than a feeling, which is the hand-holding: the
 /// difference between "work down to leeward of him" and a number with an arrow beside it
 /// is the difference between a beginner guessing and a beginner steering.
-fn target_heading(stage: Stage, sim: &Sim, over: &Overboard, tack_from: f64) -> Option<f64> {
+fn target_heading(
+    stage: Stage,
+    sim: &Sim,
+    over: &Overboard,
+    tack_from: f64,
+    approach_side: f64,
+) -> Option<f64> {
     let tm = &sim.sim.telemetry;
     let side = if tm.awa.abs() < rad(1.0) {
         1.0
@@ -619,10 +753,7 @@ fn target_heading(stage: Stage, sim: &Sim, over: &Overboard, tack_from: f64) -> 
         tm.awa.signum()
     };
     let beam = |on: f64| (tm.twd - rad(90.0) * on).rem_euclid(std::f64::consts::TAU);
-    let bearing_to = |at: DVec2| {
-        let off = at - sim.sim.state.pos;
-        off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU)
-    };
+    let bearing_to = |at: DVec2| bearing(sim.sim.state.pos, at);
     match stage {
         // Getting her going in the first place: the wind on the beam is the easiest
         // thing to hold and the fastest way to four knots.
@@ -633,9 +764,13 @@ fn target_heading(stage: Stage, sim: &Sim, over: &Overboard, tack_from: f64) -> 
         Stage::Search(Leg::Tack) => Some(beam(-tack_from)),
         Stage::Search(Leg::Downwind) => over
             .oscar()
-            .map(|o| gate(o, tm.twd, side, sim.config().loa))
+            .map(|o| gate(o, tm.twd, approach_side, sim.config().loa))
             .map(bearing_to),
-        Stage::Search(Leg::Approach) => over.oscar().map(bearing_to),
+        // At a point a boat's length to leeward of him, not at him — see `aim_point`.
+        Stage::Search(Leg::Approach) => over
+            .oscar()
+            .map(|o| aim_point(o, tm.twd, sim.config().beam))
+            .map(bearing_to),
         _ => None,
     }
 }
@@ -687,9 +822,19 @@ pub fn draw(
                     );
                 }
                 // The helm cue, under the words, because it is the thing you act on.
-                if let Some(want) = target_heading(lesson.stage, &sim, &over, lesson.tack_from) {
+                if let Some(want) = target_heading(
+                    lesson.stage,
+                    &sim,
+                    &over,
+                    lesson.tack_from,
+                    lesson.approach_side,
+                ) {
                     ui.add_space(6.0);
-                    helm_cue(ui, wrap_pi(want - sim.sim.state.heading));
+                    // Never "steady as she goes" onto a course she cannot sail. The cue
+                    // knows what the wind is doing now, which is the difference between
+                    // an arrow and an instrument.
+                    let lay = can_she_lay_him(sim.sim.telemetry.twd, want);
+                    helm_cue(ui, wrap_pi(want - sim.sim.state.heading), lay);
                 }
                 // And how long he has, drawn as something emptying rather than as a
                 // number, because a bar going down is read without being looked at.
@@ -726,8 +871,18 @@ pub fn draw(
 /// Chevrons rather than a number alone: the number tells you how far off you are and the
 /// chevrons tell you which way to move your hand, and a beginner needs the second one
 /// first. Green inside eight degrees, which is as close as anybody steers by hand.
-fn helm_cue(ui: &mut egui::Ui, error: f64) {
+fn helm_cue(ui: &mut egui::Ui, error: f64, lay: Lay) {
     let off = deg(error);
+    // A course inside the no-go zone is not a course, however well she is steering it.
+    if lay == Lay::DeadUpwind {
+        ui.label(
+            egui::RichText::new("◀ THAT IS INTO THE WIND — FALL OFF ▶")
+                .color(egui::Color32::from_rgb(236, 110, 86))
+                .monospace()
+                .size(13.0),
+        );
+        return;
+    }
     let on_course = off.abs() < 8.0;
     let colour = if on_course {
         egui::Color32::from_rgb(120, 190, 130)
@@ -918,6 +1073,96 @@ mod tests {
                 // A sensible distance off, not a mile.
                 assert!(((2.0 * loa)..(5.0 * loa)).contains(&(here - oscar).length()));
             }
+        }
+    }
+
+    /// The approach is checked against the wind, which is the fault this fixed.
+    ///
+    /// Reported from the deck: *following the orders it put me ten metres from him,
+    /// exactly upwind, and said steady as she goes.* It did — the last leg pointed the
+    /// arrow at him and never asked whether that course could be sailed, or whether
+    /// sailing it meant bearing down on a man in the water with the wind behind her.
+    #[test]
+    fn she_is_never_told_to_steer_a_course_she_cannot_sail() {
+        for twd_deg in [0.0, 73.0, 180.0, 294.0] {
+            let twd = rad(twd_deg);
+            // Dead at the wind: no boat sails there and the drill must say so.
+            assert_eq!(can_she_lay_him(twd, twd), Lay::DeadUpwind);
+            assert_eq!(can_she_lay_him(twd, twd + rad(30.0)), Lay::DeadUpwind);
+            // Behind the wind: she is above him, running down on him, which no method of
+            // recovery allows.
+            assert_eq!(
+                can_she_lay_him(twd, twd + rad(180.0)),
+                Lay::FromWindward,
+                "running down on him with the wind behind is not an approach"
+            );
+            assert_eq!(can_she_lay_him(twd, twd - rad(140.0)), Lay::FromWindward);
+            // And a close reach either side is what the pattern is for.
+            for side in [1.0_f64, -1.0] {
+                assert_eq!(
+                    can_she_lay_him(twd, approach_course(twd, side)),
+                    Lay::Good,
+                    "the pattern's own approach course is not sailable"
+                );
+            }
+        }
+    }
+
+    /// From the gate, the course to the aim point is always one she can sail.
+    ///
+    /// Which is the claim the whole pattern rests on: if this were ever false the drill
+    /// would send her to a place from which it then told her off.
+    #[test]
+    fn the_gate_is_a_place_she_can_approach_from() {
+        let (loa, beam) = (10.4, 3.4);
+        for twd_deg in [0.0, 37.0, 151.0, 300.0] {
+            for side in [1.0_f64, -1.0] {
+                let twd = rad(twd_deg);
+                let oscar = DVec2::new(-60.0, 210.0);
+                let from = gate(oscar, twd, side, loa);
+                let course = bearing(from, aim_point(oscar, twd, beam));
+                assert_eq!(
+                    can_she_lay_him(twd, course),
+                    Lay::Good,
+                    "from the gate at {twd_deg:.0}/{side} she cannot lay him"
+                );
+            }
+        }
+    }
+
+    /// The aim is below him, so he finishes to windward of her.
+    ///
+    /// The boom and the mainsail are on the leeward rail, and a boat makes leeway: aim at
+    /// him exactly and she is set down on top of him, which is the one outcome worse than
+    /// missing him.
+    #[test]
+    fn she_is_aimed_below_him_rather_than_at_him() {
+        for twd_deg in [0.0, 88.0, 203.0] {
+            let twd = rad(twd_deg);
+            let oscar = DVec2::new(14.0, -3.0);
+            let aim = aim_point(oscar, twd, 3.4);
+            let downwind = DVec2::new(-twd.sin(), -twd.cos());
+            assert!(
+                (aim - oscar).dot(downwind) > 0.0,
+                "the aim is upwind of him, which puts him under the bow"
+            );
+            // A boat's beam and a bit, not a hundred metres.
+            assert!((aim - oscar).length() < 4.0);
+        }
+    }
+
+    /// The side is the near one, so the run to leeward is the short way round.
+    #[test]
+    fn the_approach_comes_from_whichever_side_she_is_already_on() {
+        let (twd, loa) = (rad(0.0), 10.4);
+        let oscar = DVec2::ZERO;
+        for side in [1.0_f64, -1.0] {
+            let near = gate(oscar, twd, side, loa);
+            // Standing right beside one gate, that is the one chosen.
+            assert_eq!(
+                better_side(near + DVec2::new(1.0, 1.0), oscar, twd, loa),
+                side
+            );
         }
     }
 
