@@ -151,6 +151,18 @@ pub struct Ratchet {
     line_out: f64,
 }
 
+/// How far down the line to look when the gear is working, metres.
+///
+/// The eye goes *along* the line rather than at either end of it. At the rod tip alone
+/// you cannot see where the line goes; at the far end alone the rod is out of frame and,
+/// with sixty metres out, so is the boat. Looking a short way down it puts the tip, the
+/// bend and the place the line enters the water in one picture, which is the picture.
+///
+/// And when the line is nearly all in — which is when you are winding and when the thing
+/// you want to see is about to appear — the far end is closer than this, so the view
+/// lands squarely on it.
+const LOOK_ALONG: f32 = 9.0;
+
 /// Radius of the spool with line on it, metres. A small multiplier.
 ///
 /// It decides how fast the drum is drawn turning, and it is the real relation rather
@@ -163,8 +175,21 @@ pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    fishing: Res<Fishing>,
     boat: Query<Entity, With<crate::boat::BoatRoot>>,
 ) {
+    // Before the early return, not after it. Everything that reads this resource takes
+    // it as a `ResMut` and fails every frame if it is missing — so a boat that failed to
+    // appear, which this branch exists to survive, would take the rest of the frame down
+    // with it instead of merely leaving the deck bare.
+    //
+    // Seeded with the drag the gear actually has rather than with zero, or the first
+    // frame the rod is out reads as somebody having just moved the star by a third of
+    // the line's strength and swings the camera onto the reel for two seconds.
+    commands.insert_resource(Ratchet {
+        drag: fishing.drag,
+        ..default()
+    });
     let Ok(root) = boat.single() else {
         warn!("no boat to put a rod on");
         return;
@@ -346,8 +371,6 @@ pub fn setup(
             ));
         });
     });
-
-    commands.init_resource::<Ratchet>();
 }
 
 /// Where the butt of the rod sits, in boat coordinates.
@@ -362,6 +385,12 @@ fn butt() -> Vec3 {
 /// Which way the blank points with nothing on it.
 fn unloaded_direction() -> Vec3 {
     Vec3::new(-HOLDER_OUT, HOLDER_UP, 0.49).normalize()
+}
+
+/// A point a short way down the line from the rod tip, for the camera to look at.
+fn along_the_line(tip: Vec3, far: Vec3) -> Vec3 {
+    let reach = far - tip;
+    tip + reach.normalize_or(Vec3::NEG_Z) * reach.length().min(LOOK_ALONG)
 }
 
 /// Where the reel sits and which way its axle lies.
@@ -745,19 +774,20 @@ pub fn update(
     if showing {
         let playing = fishing.fish().is_some();
         let reel_world = hull + attitude * seat;
+        let down_the_line = along_the_line(tip_world, far);
         if playing && !ratchet.playing {
             // A take. The longest claim of the three, because it is the one moment you
             // might genuinely be looking elsewhere — and what it shows you is the rod
             // going over, which is how you find out before any instrument tells you.
-            attention.look(tip_world, 5.0, 4);
+            attention.look(down_the_line, 5.0, 4);
         } else if (fishing.drag - ratchet.drag).abs() > 1e-5 {
             attention.look(reel_world, 2.0, 3);
         } else if playing {
             // Refreshed every frame, so the eye stays on the tip for as long as there is
             // something on the end of it.
-            attention.look(tip_world, 0.4, 2);
+            attention.look(down_the_line, 0.4, 2);
         } else if moved.abs() > 1e-4 {
-            attention.look(tip_world, 1.2, 1);
+            attention.look(down_the_line, 1.2, 1);
         }
         ratchet.playing = playing;
         ratchet.drag = fishing.drag;

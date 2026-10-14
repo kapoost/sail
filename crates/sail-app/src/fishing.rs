@@ -120,6 +120,20 @@ const RETRIEVE: f64 = 0.80;
 /// strength the handle simply stops, and the way to gain line is to let the fish tire.
 const STALL: f64 = 70.0;
 
+/// And the same two numbers in low gear.
+///
+/// A two-speed multiplier exists purely because of the problem above. Drop it into low
+/// and the handle turns against a load that stopped it dead a moment ago: the gearing
+/// trades the line you gain per turn for the force you can turn against, which is the
+/// whole of what a gearbox is for and is why every serious boat reel has two of them.
+///
+/// Roughly half the speed for not quite twice the pull, which is about what the real
+/// ratios come out at — six to one against three to one. The trade is not free and is
+/// not meant to be: winding against a heavy fish *puts that load on*, so low gear gains
+/// you line and wears the hook at the same time.
+const LOW_RETRIEVE: f64 = 0.34;
+const LOW_STALL: f64 = 110.0;
+
 /// How fast line runs off a spool in free spool, metres per second.
 const PAYOUT: f64 = 2.6;
 
@@ -516,6 +530,8 @@ pub struct Hands {
     pub reel: f64,
     /// Where the drag star is set, nought to one of the line's breaking strain.
     pub drag: f64,
+    /// Whether the reel is in low gear.
+    pub low_gear: bool,
 }
 
 /// A fish on the line.
@@ -811,9 +827,16 @@ impl Fishing {
         // past the stall you cannot turn the handle at all — and giving line is not,
         // because a free spool does not care.
         let wanted = hands.reel;
-        let reel = if wanted > 0.0 {
-            wanted * RETRIEVE * (1.0 - self.tension / STALL).clamp(0.0, 1.0)
+        let (gain, stall) = if hands.low_gear {
+            (LOW_RETRIEVE, LOW_STALL)
         } else {
+            (RETRIEVE, STALL)
+        };
+        let reel = if wanted > 0.0 {
+            wanted * gain * (1.0 - self.tension / stall).clamp(0.0, 1.0)
+        } else {
+            // Free spool does not care what gear the handle is in: it is not connected
+            // to anything, which is the point of it.
             wanted * PAYOUT
         };
 
@@ -1117,7 +1140,7 @@ impl Fishing {
         let hold = fish.hold;
 
         if self.tension > BREAKING {
-            self.give_up();
+            self.lost_the_lot();
             return Some(format!(
                 "the line parted — {BREAKING:.0} N of braid against {:.0}",
                 self.tension.max(BREAKING)
@@ -1133,8 +1156,7 @@ impl Fishing {
             });
         }
         if self.line_out >= SPOOL - 0.01 {
-            self.line_out = SPOOL;
-            self.give_up();
+            self.lost_the_lot();
             return Some("that was all the line there was".into());
         }
         if fixed {
@@ -1189,7 +1211,8 @@ impl Fishing {
         None
     }
 
-    /// It has gone. Back to a lure astern, with the line where the fight left it.
+    /// It has gone, and the lure is still on. Back to trolling with the line where the
+    /// fight left it — a thrown hook costs you the fish and nothing else.
     fn give_up(&mut self) {
         self.rod = Rod::Trolling;
         self.stretch = 0.0;
@@ -1197,6 +1220,23 @@ impl Fishing {
         self.paying = 0.0;
         self.lost += 1;
         self.quiet = 0.0;
+    }
+
+    /// It has gone and taken the tackle with it.
+    ///
+    /// A parted line does not leave you fishing. Everything beyond the break — the lure,
+    /// the leader and whatever length of braid was out — is in the sea, and what is on
+    /// the reel is whatever was inboard of it, which for these purposes is nothing you
+    /// can fish with until you have tied another lure on. So the rod comes in.
+    ///
+    /// Left as it was, the gear went back to trolling with a hundred and sixty metres
+    /// notionally still out, drew a line and a lure astern of a spool whose knot had
+    /// just gone, and then parted the same line a second time.
+    fn lost_the_lot(&mut self) {
+        self.give_up();
+        self.rod = Rod::Stowed;
+        self.line_out = 0.0;
+        self.depth = 0.0;
     }
 }
 
@@ -1275,11 +1315,18 @@ pub fn work(
     if keys.pressed(KeyCode::ArrowDown) || pad.is_some_and(|p| p.pressed(GamepadButton::DPadDown)) {
         reel -= 1.0;
     }
-    if fine {
-        reel *= 0.35;
-    }
-
-    if let Some(said) = gear.step(dt, sea, Hands { reel, drag }) {
+    if let Some(said) = gear.step(
+        dt,
+        sea,
+        Hands {
+            reel,
+            drag,
+            // Shift is low gear on the reel and a fine turn on the drag star, which is
+            // one meaning rather than two: slower and more deliberate, whichever of them
+            // your hand is on.
+            low_gear: fine,
+        },
+    ) {
         info!("{said}");
     }
 
@@ -1401,7 +1448,11 @@ mod tests {
     }
 
     fn hands(reel: f64, drag: f64) -> Hands {
-        Hands { reel, drag }
+        Hands {
+            reel,
+            drag,
+            low_gear: false,
+        }
     }
 
     /// More line is more depth, and it keeps being more depth. The triangle version of
@@ -1697,6 +1748,91 @@ mod tests {
         assert!(on_the_rise(0.0, 0.0));
         assert!(!on_the_rise(0.0, 1.2));
         assert!(on_the_rise(0.6, 1.2));
+    }
+
+    /// Low gear turns a handle that high gear cannot. This is the whole reason a boat
+    /// reel has two speeds, and the trade — half the line per turn — has to be there too
+    /// or it would simply be a better gear.
+    #[test]
+    fn low_gear_winds_when_high_gear_will_not() {
+        let against = |low_gear: bool| {
+            let mut f = with(Quarry::Pollack, 4.0);
+            // A pollack sounding, on a drag tight enough that nothing is slipping: the
+            // line is simply loaded to what the fish can pull, which is eighty-odd
+            // newtons — past where a handle in high gear stops turning and short of
+            // where the drag breaks away. That window is the gearbox's whole purpose and
+            // it is a narrow one, which is why the first version of this test used a
+            // ling, found the drag paying out in both gears, and measured nothing at all.
+            let before = f.line_out;
+            sail(
+                &mut f,
+                4.5,
+                sea(0.8, 40.0),
+                Hands {
+                    reel: 1.0,
+                    drag: 0.75,
+                    low_gear,
+                },
+            );
+            before - f.line_out
+        };
+        let high = against(false);
+        let low = against(true);
+        // Not nothing in high gear — the load takes a moment to come on and the handle
+        // turns freely until it does — but once it is on, the handle stops and low gear
+        // keeps coming.
+        assert!(
+            low > high * 2.0,
+            "low gained {low} m against high gear's {high} m"
+        );
+    }
+
+    /// And with nothing on the line, high gear is the quicker way to get the lure back,
+    /// or the gearbox would be free.
+    #[test]
+    fn high_gear_is_the_faster_wind() {
+        let wound = |low_gear: bool| {
+            let mut f = rig(2);
+            f.stow_or_set();
+            f.line_out = 60.0;
+            sail(
+                &mut f,
+                10.0,
+                sea(2.0, 40.0),
+                Hands {
+                    reel: 1.0,
+                    drag: 1.0 / 3.0,
+                    low_gear,
+                },
+            );
+            60.0 - f.line_out
+        };
+        assert!(wound(false) > wound(true) * 1.8);
+    }
+
+    /// A parted line does not leave you fishing: the lure and everything beyond the
+    /// break are in the sea, so the rod comes in rather than going on trolling with a
+    /// spool's worth of line notionally still out.
+    #[test]
+    fn a_parted_line_takes_the_tackle_with_it() {
+        let mut f = with(Quarry::Ling, 9.0);
+        let said = sail(&mut f, 90.0, sea(6.0, 70.0), hands(0.0, 1.0 / 3.0));
+        assert!(said.iter().any(|s| s.contains("parted")), "{said:?}");
+        assert!(!f.out(), "the rod should have come in");
+        assert_eq!(f.line_out, 0.0);
+    }
+
+    /// Where a thrown hook does not: the lure is still on the end and you carry on.
+    #[test]
+    fn a_thrown_hook_leaves_you_fishing() {
+        let mut f = with(Quarry::Pollack, 4.0);
+        let said = sail(&mut f, 200.0, sea(1.5, 30.0), hands(0.0, 1.0));
+        assert!(
+            said.iter().any(|s| s.contains("hook")),
+            "expected the hook to go: {said:?}"
+        );
+        assert!(f.out(), "the gear should still be fishing");
+        assert!(f.line_out > 1.0);
     }
 
     /// The gear cannot be stowed with a fish on it, and saying so is better than doing

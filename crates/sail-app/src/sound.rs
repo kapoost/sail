@@ -1303,11 +1303,13 @@ pub fn update(
         // thing aboard and that is a rule about safety rather than about mixing.
         (0.8 + 1.1 * (hz / 55.0).min(1.0), hz)
     } else if fishing.out() && winding > 0.02 {
-        // Winding in. Much quieter: on a multiplier the ratchet is usually off while you
-        // wind and what you hear is the gears, which is a softer and slower version of
-        // the same click.
-        let hz = (winding / TOOTH * 0.5).clamp(0.0, 45.0);
-        (0.22 * (hz / 25.0).min(1.0), hz)
+        // Winding in, and it rattles. The pawl is riding the same wheel the other way
+        // and a multiplier being wound is one of the noisier objects on a small boat —
+        // quieter than a fish taking line, because that is a sprung pawl being hammered
+        // rather than pushed, but nothing like silent. It was at a fifth of the voice
+        // and half the tooth rate, which is a reel being wound in another boat.
+        let hz = (winding / TOOTH).clamp(0.0, 70.0);
+        (0.40 + 0.55 * (hz / 22.0).min(1.0), hz)
     } else {
         (0.0, 0.0)
     };

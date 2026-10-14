@@ -166,6 +166,10 @@ pub fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     boat: Query<Entity, With<crate::boat::BoatRoot>>,
 ) {
+    // Before the early return: `update` takes this as a `ResMut` and would fail every
+    // frame if the boat had not appeared, which is the case this branch exists to
+    // survive gracefully.
+    commands.init_resource::<Swing>();
     let Ok(root) = boat.single() else {
         warn!("no boat to hang a creel on");
         return;
@@ -228,7 +232,6 @@ pub fn setup(
             }
         });
     });
-    commands.init_resource::<Swing>();
 }
 
 /// Swing the creel, and show what is in it.

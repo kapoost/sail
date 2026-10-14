@@ -98,6 +98,10 @@ const KEYS: [(&str, &[(&str, &str)]); 5] = [
                 "the drag: a third of the line's strength is the rule",
             ),
             (
+                "Shift",
+                "low gear: slower, and it winds when high gear will not",
+            ),
+            (
                 " ",
                 "a fish on and the way still on her is a fish you will lose",
             ),

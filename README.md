@@ -238,9 +238,15 @@ Three things to work, and they match the gear they stand for the way the sheets 
 
 | control | nature | what it decides |
 |---|---|---|
-| the reel | a rate — a handle you turn | line in, line out |
+| the reel | a rate — a handle you turn, in two gears | line in, line out |
 | the drag | a position — a star you screw down | whether the fish tires, or the hook pulls |
 | line out | a length | how deep the lure swims, and therefore what can see it |
+
+Shift is low gear, and it is the one piece of tackle here that exists purely to solve a
+problem the rest of the model creates: past about half the line's strength the handle
+simply stops turning, and low gear trades the line you gain per turn for the force you
+can turn against. It is not free — winding against a heavy fish *puts that load on* — so
+it gains you line and wears the hook at the same time.
 
 The drag is the whole game, and it is wrong in both directions. Too tight and the hook
 comes out of the fish's mouth, because load is what opens the hole it sits in. Too light
@@ -395,7 +401,8 @@ code. `docs/online.md` is the whole design, including what it deliberately does 
 ## Controls
 
 The camera looks at what just happened: the reel when your hand is on the drag, and
-otherwise the rod tip — including when something takes. Not the fish, which was the
+otherwise a short way *down the line* — tip, bend and the place it enters the water in
+one frame, landing squarely on the far end once most of the line is in — including when something takes. Not the fish, which was the
 obvious choice and the wrong one, because a fish is two metres under an opaque sea and
 aiming at it frames a patch of blank water. Where the fish appears is in the bend of the
 blank. It is posted as a *claim* on

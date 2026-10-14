@@ -450,6 +450,11 @@ pub fn follow(
                 cam.translation = stand;
                 cam.rotation = eye * Quat::from_rotation_x(-0.10);
                 chase.initialised = false;
+                // And the point it was looking at, which is a *world* position: left
+                // set, coming back to the chase view after a few minutes aboard aims it
+                // at where the fish was a mile astern, and it lerps home over a second
+                // while you wonder what you are looking at.
+                chase.looking_set = false;
             }
             View::Astern => {
                 // Standing in the after end of the cockpit, turned round. The same head
@@ -471,6 +476,11 @@ pub fn follow(
                 // water astern and that is where the eye wants to be.
                 cam.rotation = eye * Quat::from_rotation_x(-0.17);
                 chase.initialised = false;
+                // And the point it was looking at, which is a *world* position: left
+                // set, coming back to the chase view after a few minutes aboard aims it
+                // at where the fish was a mile astern, and it lerps home over a second
+                // while you wonder what you are looking at.
+                chase.looking_set = false;
             }
             View::Chase => {
                 let heading = frame::heading_only(st);
