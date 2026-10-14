@@ -397,38 +397,35 @@ impl Simulation {
         if st.boom_angle == 0.0 && st.boom_rate == 0.0 {
             self.state.boom_angle = boom_set;
         }
-        // Signed towards leeward: positive is where a drawing sail lives, negative is the
-        // boom having come across to windward, where its angle of attack is the apparent
-        // wind angle *plus* the swing and the sail does nothing but flog.
+        // The boom's angle is in the boat's own frame: positive is the spar out over the
+        // starboard side, negative over the port. Which tack she is on is then not a
+        // separate fact to be derived from the wind at all — it is where the boom is.
         //
-        // Which means that when the *wind* changes sides, the sign has to be flipped by
-        // hand, and this is the gybe.
+        // This replaces a leeward-signed angle and a hysteretic `wind_side` that flipped
+        // it, and the reason is the report that finally said it plainly: *she keeps
+        // jumping between gybes — think about it like a sailor.* A sailor does not
+        // compute which gybe they are on. The boom is on the port side, therefore
+        // starboard tack, and it stays that way until the spar physically comes across.
+        // Sailing by the lee — the wind a few degrees on the same side as the boom — is
+        // an ordinary thing to be doing, not a contradiction to be resolved by flipping
+        // the world; racers do it on purpose, and the main goes on drawing until the
+        // wind is far enough behind the leech to back it.
         //
-        // Without it a gybe cost nothing whatever. Measured before: she was steered from
-        // TWA +165 round through dead astern to −151, and the boom sat at +68 degrees the
-        // entire time with its rate at zero — because "sixty-eight degrees to leeward"
-        // silently became the other side of the boat the instant leeward did. The boom
-        // teleported across with the wind, no swing, no noise, no lost drive, and the
-        // most dangerous manoeuvre on a small boat was free.
-        //
-        // The wind going across the stern does not move the boom. It makes the boom
-        // *wrong*: the same spar, in the same place over the deck, is now to windward,
-        // and the sail is aback until the thing comes across. One sign change says all of
-        // that, and everything downstream — the pendulum below, the backed sail's angle
-        // of attack, the shadow the main casts — then does what it already knew how to
-        // do.
-        // With hysteresis, and that is not a detail. The first version flipped whenever
-        // the apparent wind changed sign while it was abaft the beam, which near dead
-        // astern it does constantly — every wave rolls the boat, the apparent swings
-        // across the stern and back, and the boom was teleporting from side to side
-        // several times a second. Measured in twenty-two knots: the crossing "took" ten
-        // milliseconds, because what was being measured was a spar flickering rather than
-        // a spar moving.
-        //
-        // The wind has to get ten degrees *past* dead astern before the world changes,
-        // which is also how it feels from the helm: a boat squared off dead downwind is
-        // on neither gybe, and nothing happens until the wind is properly behind the
-        // sail.
+        // With the angle in the boat's frame there is nothing to flip, so there is no
+        // threshold to tune and no band to be wrong about. The wind wanders across the
+        // stern as much as it likes; the boom notices only through the force on the sail,
+        // and a gybe happens when that force reverses hard enough to throw it — which is
+        // what a gybe is.
+        if st.boom_angle == 0.0 && st.boom_rate == 0.0 {
+            // Before the first step there is nothing to continue from: put the boom where
+            // the sheet has it, on the side the wind is not.
+            self.state.boom_angle = boom_set * -lower_awa.signum();
+        }
+        let boom_angle = self.state.boom_angle;
+        // The headsail still has a side to be on, and it is always the leeward one: a jib
+        // cannot be sailed by the lee, it simply comes across. Its own small hysteresis,
+        // because the sail changing sides is a thing that takes seconds and should not be
+        // restarted by every wave.
         if self.wind_side == 0.0 {
             self.wind_side = if lower_awa == 0.0 {
                 1.0
@@ -437,39 +434,32 @@ impl Simulation {
             };
         } else if lower_awa.signum() != self.wind_side && lower_awa.abs() < crate::units::rad(160.0)
         {
-            // Twenty degrees past dead astern, not ten.
-            //
-            // At ten the band was narrower than a boat squared away actually wanders: on
-            // a dead run she rolls, the apparent swings five or six degrees either side
-            // of the stern with every wave, and anything inside the band was being
-            // treated as a gybe. Reported from the deck as not settling at a hundred and
-            // eighty — and it was not, because every swing through the stern threw the
-            // boom and sent the headsail across the foretriangle again, so the sail spent
-            // its whole time crossing and never drawing.
             self.wind_side = lower_awa.signum();
-            self.state.boom_angle = -self.state.boom_angle;
-            self.state.boom_rate = -self.state.boom_rate;
-            // And the headsail starts its own crossing, from where it is: sheeted on
-            // what has just become the windward side. For a tack that is the backed jib
-            // that pushes her bow round; for a gybe it is the sail having to come round
-            // the forestay. Both are the same event to this number.
-            // Except for a symmetric kite, which does not cross anything. It is the
-            // same shape on both gybes: what changes sides is the *pole*, taken off one
-            // corner and clipped on to the other, and the sail goes on drawing
-            // throughout. A spinnaker that collapsed and thrashed across the foredeck at
-            // every gybe would be a sail nobody would ever set.
+            // A symmetric kite does not cross anything: it is the same shape on both
+            // gybes and what changes sides is the pole, taken off one corner and clipped
+            // on to the other. Everything else has to come round the forestay.
             if controls.headsail != crate::state::Headsail::Spinnaker {
                 self.state.jib_across = 0.0;
             }
         }
-        let boom_angle = if st.boom_angle == 0.0 && st.boom_rate == 0.0 {
-            boom_set
-        } else {
-            self.state.boom_angle
-        };
         // Aback: the boom is on the windward side and the sail is being pressed from the
         // front. A sail there makes no drive worth the name whatever its sheet says.
-        let boom_aback = boom_angle < 0.0;
+        // Aback, and the margin in it is the whole of sailing by the lee.
+        //
+        // The wind being on the same side as the boom is not enough. A boat squared away
+        // can carry the wind a good way round on to the boom's own side and the main goes
+        // on drawing: the flow is still attached on the right face, the sheet and the
+        // vang hold the spar out, and racers do it deliberately to sail deeper. What
+        // backs the sail is the wind getting far enough behind the leech, and twelve
+        // degrees past dead astern is about where a cruising main gives up.
+        //
+        // Reported from the deck as jumping between gybes, and the sign test on its own
+        // is why: at a hundred and eighty the apparent wind's *side* is decided by noise,
+        // so it flickered, and with it the force on the boom. With the margin there is
+        // nothing to flicker — dead downwind is simply not backed, whichever side the
+        // last wave put the apparent on.
+        let by_the_lee = std::f64::consts::PI - lower_awa.abs();
+        let boom_aback = boom_angle * lower_awa > 0.0 && by_the_lee > crate::units::rad(12.0);
         let twist = twist_for_vang(controls.vang, boom_angle.abs());
         // The upper section is eased by the twist, expressed back through the sheet
         // mapping so both sections go through the same force model.
@@ -1183,13 +1173,31 @@ impl Simulation {
         {
             let inertia = (cfg.boom_mass * cfg.boom_cg * cfg.boom_cg).max(1.0);
             // The sail pressing the boom to leeward, taken at the sail's own lever.
+            // Signed in the boat's frame: the sail pushes the boom away from the wind,
+            // so towards port when the wind is on the starboard side. That one sign is
+            // the whole gybe — when the wind crosses the stern it reverses, and the spar
+            // is pushed back the other way without anything having to be flipped by hand.
+            // Outboard while she draws, across when she is backed — and *outboard* means
+            // the way the spar already is, not the way the wind says. A drawing sail
+            // holds its boom out on its own side: that is why a boom does not wander in
+            // to the centreline every time the apparent wanders across the stern, and it
+            // is what makes dead downwind a place a boat can sit rather than a knife
+            // edge between two gybes.
+            let out = if boom_aback {
+                -boom_angle.signum()
+            } else {
+                boom_angle.signum()
+            };
             let push = (main.lift.hypot(main.drag) + main_upper.lift.hypot(main_upper.drag))
                 * cfg.boom_cg
-                * 0.45;
+                * 0.45
+                * out;
             // Heeled over, the boom's own weight pulls it downhill — which is to
             // leeward, and which is why a rolling boat's boom works against its sheet.
+            // Downhill is to leeward, and heel is positive to starboard, so a boat heeled
+            // to starboard has her boom pulled that way by its own weight.
             let gravity =
-                cfg.boom_mass * GRAVITY * cfg.boom_cg * st.heel.abs().sin() * st.boom_angle.cos();
+                cfg.boom_mass * GRAVITY * cfg.boom_cg * st.heel.sin() * st.boom_angle.cos();
             // The sheet. A rope: it pulls when it is tight and does nothing when it is
             // not, and the whole behaviour here comes out of that one asymmetry.
             //
@@ -1230,15 +1238,23 @@ impl Simulation {
             //
             // Both are written in the leeward-signed frame the boom lives in, which is
             // why the boat's yaw rate arrives multiplied by which side the wind is on.
-            let turning = self.wind_side * (damping * st.yaw_rate);
-            let accel = (push + gravity + sheet - damping * st.boom_rate + turning) / inertia
-                + self.wind_side * dr;
+            // Both are in the boat's own frame now, which is also the boom's, so the
+            // conversion that used to be here — a yaw rate multiplied by which side the
+            // wind was on — is gone with the frame it was converting from.
+            let turning = -damping * st.yaw_rate;
+            let accel = (push + gravity + sheet - damping * st.boom_rate + turning) / inertia - dr;
             s.boom_rate += accel * dt;
-            // Coming across, it comes across. Only while it is on the windward side and
-            // already heading the right way: a boom wandering about in the slack of its
-            // sheet in a calm is doing the opposite thing and must be left alone to do it.
-            if s.boom_angle < 0.0 && s.boom_rate > 0.0 {
-                s.boom_rate = s.boom_rate.max(BOOM_CROSSING);
+            // Coming across, it comes across: once the sail is aback and the spar is
+            // already moving the right way, it goes at a boom's pace rather than creeping.
+            // Not while it is merely wandering in the slack of its sheet in a calm, which
+            // is the opposite thing and must be left alone to do it.
+            if boom_aback && s.boom_rate * push > 0.0 {
+                let least = BOOM_CROSSING * push.signum();
+                s.boom_rate = if push > 0.0 {
+                    s.boom_rate.max(least)
+                } else {
+                    s.boom_rate.min(least)
+                };
             }
             // Unless there is a preventer on it, in which case it comes across over
             // somebody's dead body.
@@ -1252,8 +1268,15 @@ impl Simulation {
             // rounds up, which is unpleasant and survivable, and the boom stays exactly
             // where it was put.
             if controls.preventer {
-                if s.boom_angle < 0.0 {
-                    s.boom_rate = s.boom_rate.min(0.0);
+                // It cannot come back across the centreline. Which side it is held on is
+                // simply which side it is on: a preventer is tied to whatever the spar is
+                // doing when somebody rigs it.
+                let held = st.boom_angle.signum();
+                if s.boom_angle * held < 0.0 {
+                    s.boom_angle = 0.0;
+                }
+                if s.boom_rate * held < 0.0 && s.boom_angle.abs() < 1e-3 {
+                    s.boom_rate = 0.0;
                 }
                 // And it is a rope rather than a bar, so it holds the boom out against
                 // the sheet's slack as well: no working about in a seaway.
@@ -1382,7 +1405,9 @@ impl Simulation {
             // Which is why it looked like a teleport when the helm was put over hard and
             // looked right when the wind line was crossed slowly — reported from the deck
             // exactly that way, and that observation is what found it.
-            boom: -self.wind_side * self.state.boom_angle,
+            // Already in the boat's own frame, which is the whole point of the change:
+            // nothing has to agree with anything about which side leeward is.
+            boom: self.state.boom_angle,
             // Where the clew has got to: on the old side at the start of the crossing,
             // streaming down the middle halfway through, hard on the new one at the end.
             // And held to windward for as long as somebody is holding it there, which is

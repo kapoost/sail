@@ -227,3 +227,73 @@ fn a_preventer_keeps_the_boom_where_it_was_put() {
         "with one rigged the boom stays where it was, and she has to be sailed out of it"
     );
 }
+
+/// Dead downwind, in a seaway, for three minutes: she stays on the gybe she is on.
+///
+/// Reported from the deck as jumping between gybes continuously, with the instruction to
+/// think about it like a sailor — which turned out to be the whole answer. A sailor does
+/// not work out which gybe they are on; the boom is out to port, therefore starboard
+/// tack, and it stays that way until the spar physically comes across. The model was
+/// deciding it from the *sign of the apparent wind*, which at a hundred and eighty is
+/// decided by whichever wave went under her last, so it flickered — and a model that
+/// flickers between gybes several times a second is not a boat.
+///
+/// Two things fixed it and both are sailing rather than arithmetic. The boom's angle is
+/// in the boat's own frame, so which gybe she is on is simply where the spar is and there
+/// is nothing to flip. And a mainsail is not backed the moment the wind crosses the
+/// stern: she can be sailed a good way by the lee with it still drawing, and it is only
+/// when the wind gets far enough behind the leech that the sail backs and the boom goes.
+#[test]
+fn she_holds_her_gybe_dead_downwind() {
+    for kite in [false, true] {
+        let cfg = BoatConfig::archipelago_packet();
+        let tws = kn_to_ms(12.0);
+        let sea = sail_core::water::WindSea::new(tws, 14_000.0, 0.0, 0xC0FFEE);
+        let mut start = BoatState::at_rest(wrap_tau(0.0 - rad(178.0)));
+        start.surge = kn_to_ms(4.0);
+        let mut sim = Simulation::new(
+            cfg,
+            start,
+            Box::new(SteadyWind::new(0.0, tws)) as Box<dyn WindField>,
+        )
+        .with_water(Box::new(sea));
+        let mut controls = Controls {
+            headsail: if kite {
+                sail_core::state::Headsail::Spinnaker
+            } else {
+                sail_core::state::Headsail::Genoa
+            },
+            main_sheet: 0.95,
+            jib_sheet: 0.8,
+            furl: 0.0,
+            ..Default::default()
+        };
+        let want = sim.state.heading;
+        let (mut gybes, mut t) = (0, 0.0);
+        let mut was = sim.telemetry.boom.signum();
+        while t < 180.0 {
+            let off = wrap_pi(sim.state.heading - want);
+            controls.rudder = rad((deg(off) * -0.8).clamp(-20.0, 20.0));
+            sim.run(SUBSTEP, &controls);
+            t += SUBSTEP;
+            let now = sim.telemetry.boom.signum();
+            if now != was {
+                gybes += 1;
+            }
+            was = now;
+        }
+        // One is the boom settling on to its side at the start. Two in three minutes
+        // would be a boat gybing herself every ninety seconds, which is a boat nobody
+        // would sail; the fault this is guarding against was several a second.
+        assert!(
+            gybes <= 1,
+            "three minutes dead downwind and she gybed {gybes} times with the kite {kite}"
+        );
+        // And she is still pointing where she was put.
+        assert!(
+            deg(sim.telemetry.twa).abs() > 165.0,
+            "she should still be running: twa {:.0}",
+            deg(sim.telemetry.twa)
+        );
+    }
+}
