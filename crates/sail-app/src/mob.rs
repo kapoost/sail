@@ -526,6 +526,11 @@ mod tests {
     /// right aft. A pole that fouls either is obvious the first time the helm goes hard
     /// over on the water and invisible in the code.
     #[test]
+    // Constant assertions on purpose: these are the numbers somebody tuning the drill
+    // will reach for, and what they must not do is drift out of the band the comment
+    // above them claims. A test that can only fail when an edit happens is the test for
+    // that.
+    #[allow(clippy::assertions_on_constants)]
     fn nothing_aboard_knocks_the_dan_buoy_over() {
         let x = (crate::deck::deck_half_beam(TUBE_Z) - 0.16) as f64;
         assert!(

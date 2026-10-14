@@ -371,6 +371,11 @@ mod tests {
 
     /// The numbers the lesson waits on are the numbers of a boat sailing.
     #[test]
+    // Constant assertions on purpose: these are the numbers somebody tuning the drill
+    // will reach for, and what they must not do is drift out of the band the comment
+    // above them claims. A test that can only fail when an edit happens is the test for
+    // that.
+    #[allow(clippy::assertions_on_constants)]
     fn the_drill_waits_for_a_boat_that_is_actually_sailing() {
         assert_eq!(Stage::default(), Stage::Off);
         // Below three knots she has no steerage worth the name and the pole would not be
