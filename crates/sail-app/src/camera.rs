@@ -495,12 +495,12 @@ pub fn follow(
                 // different gesture from the head turn the on-board views make and is
                 // the same instruction — stay where you are, look that way.
                 //
-                // Blended rather than aimed. Pointing it at the fish alone puts the fish
-                // in the middle of the screen and the boat off the edge of it, which is
-                // not what anybody asked for: the boat is the subject, and the fish is a
-                // thing happening forty metres astern of the subject. Looking between
-                // them keeps both in the frame and swings the view the right way, which
-                // is what a person standing off in a dinghy with a camera would do.
+                // Blended rather than aimed. Pointing it at the thing alone puts the
+                // thing in the middle of the screen and the boat off the edge of it,
+                // which is not what anybody asked for: the boat is the subject and what
+                // is being looked at is something happening on her. Looking between them
+                // keeps both in frame and swings the view the right way, which is what a
+                // person standing off in a dinghy with a camera would do.
                 //
                 // By default the filtered height, or a sharp heave swings the whole
                 // frame about a boat that has barely moved.

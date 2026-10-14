@@ -729,25 +729,33 @@ pub fn update(
 
     // --- What the eye ought to be on ------------------------------------------------
     //
-    // Posted as claims on the camera rather than as camera commands — `camera.rs` owns
-    // the angles and the hold-off that keeps all of this out of your way for a few
-    // seconds after your own hand has moved the view.
+    // **The rod, and not the fish.** The fish was the obvious thing to look at and it is
+    // the wrong one: it is two metres under an opaque sea, so aiming the camera at it
+    // points it at a patch of blank water with nothing whatever happening in it. Where
+    // the fish actually *appears* is in the bend of the blank — which is the claim at the
+    // top of this file and is how anybody fishes — so that is where the eye goes, and the
+    // harder the fish pulls the more there is to see there.
     //
-    // The order is the order a person's attention actually goes, which is not the order
-    // of importance: a fish taking wins outright, but a hand on the drag star beats
-    // watching the fish, because you looked at the star *on purpose* and the fish is
-    // still going to be there.
+    // The one exception is the drag, because a hand on the star is a deliberate act and
+    // the thing you want to see is the star moving under it.
+    //
+    // Posted as claims on the camera rather than as camera commands: `camera.rs` owns the
+    // angles, and the hold-off that keeps all of this out of your way for a few seconds
+    // after your own hand has moved the view.
     if showing {
         let playing = fishing.fish().is_some();
         let reel_world = hull + attitude * seat;
         if playing && !ratchet.playing {
-            attention.look(far, 5.0, 4);
+            // A take. The longest claim of the three, because it is the one moment you
+            // might genuinely be looking elsewhere — and what it shows you is the rod
+            // going over, which is how you find out before any instrument tells you.
+            attention.look(tip_world, 5.0, 4);
         } else if (fishing.drag - ratchet.drag).abs() > 1e-5 {
             attention.look(reel_world, 2.0, 3);
         } else if playing {
-            // Refreshed every frame with where the fish now is, so the eye follows it
-            // rather than staring at where it was when it took.
-            attention.look(far, 0.4, 2);
+            // Refreshed every frame, so the eye stays on the tip for as long as there is
+            // something on the end of it.
+            attention.look(tip_world, 0.4, 2);
         } else if moved.abs() > 1e-4 {
             attention.look(tip_world, 1.2, 1);
         }

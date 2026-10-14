@@ -394,8 +394,11 @@ code. `docs/online.md` is the whole design, including what it deliberately does 
 
 ## Controls
 
-The camera looks at what just happened: the rod tip when line is moving, the reel when
-your hand is on the drag, and the fish when something takes. It is posted as a *claim* on
+The camera looks at what just happened: the reel when your hand is on the drag, and
+otherwise the rod tip — including when something takes. Not the fish, which was the
+obvious choice and the wrong one, because a fish is two metres under an opaque sea and
+aiming at it frames a patch of blank water. Where the fish appears is in the bend of the
+blank. It is posted as a *claim* on
 the eye rather than as a camera command, highest claim wins, and your own hand on the
 right mouse button outranks all of it and is remembered for three seconds afterwards —
 because a view that corrects itself while you are still looking at the thing you turned to
