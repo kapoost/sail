@@ -237,7 +237,19 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     // reason, and the crown is where the weight goes so that it falls the right way up.
     // None of which is drawn because it is pretty; it is drawn because an anchor on a
     // foredeck is how a boat says she goes somewhere and stops.
-    anchor(w, b, metal, loa);
+    anchor(w, b, metal, loa, Stowage::Bower);
+
+    // --- And the kedge on the counter ----------------------------------------
+    //
+    // The second anchor, smaller, lying flat on the aft deck. Every boat that goes
+    // anywhere carries two — the bower for the night and a kedge for the afternoon you
+    // have to lay one out astern to pull yourself off a bank, which is the day a second
+    // anchor earns its passage.
+    //
+    // Flat on the counter, which is the one way it fits: the tiller sweeps that whole
+    // deck a foot above it, so anything standing up there is in the helmsman's hand, and
+    // anything lying down is under it.
+    anchor(w, b, metal, loa, Stowage::Kedge);
 
     // --- The geranium --------------------------------------------------------
     //
@@ -612,16 +624,31 @@ fn navigation_lamp(
         });
 }
 
-/// A fisherman anchor lashed on the foredeck, with its chain made up beside it.
+/// Which of the two anchors this is.
+enum Stowage {
+    /// The bower: the one she anchors on, on the foredeck, head forward.
+    Bower,
+    /// The kedge: smaller, lying flat on the counter, under the tiller's sweep.
+    Kedge,
+}
+
+/// A fisherman anchor lashed on deck.
 fn anchor(
     w: &mut Workshop,
     b: &mut ChildSpawnerCommands,
     metal: &Handle<StandardMaterial>,
     loa: f32,
+    which: Stowage,
 ) {
-    // Far enough forward to be out of the way of everything and far enough aft that the
-    // deck is still wide enough to lash it down: a third of her length from the stem.
-    let z = -loa * 0.28;
+    // The bower: far enough forward to be out of the way and far enough aft that the
+    // deck is still wide enough to lash it down. The kedge: on the counter, between the
+    // cockpit and the vane.
+    let (z, scale, lie) = match which {
+        Stowage::Bower => (-loa * 0.28, 1.0, std::f32::consts::FRAC_PI_2),
+        // Flat, and turned so it lies along her rather than across: the counter is half
+        // a metre wide back there and an anchor athwartships would hang over both sides.
+        Stowage::Kedge => (4.25, 0.72, 0.0),
+    };
     let deck = deck::deck_height(z);
     let galv = w.materials.add(StandardMaterial {
         base_color: Color::srgb(0.46, 0.47, 0.49),
@@ -634,13 +661,13 @@ fn anchor(
     let fluke = w.meshes.add(Cuboid::new(0.015, 0.20, 0.30));
     let ring = w.meshes.add(Torus::new(0.018, 0.055));
     b.spawn((
-        Transform::from_xyz(0.0, deck + 0.07, z)
+        Transform::from_xyz(0.0, deck + 0.07 * scale, z)
             // Lying on its side on the deck, head forward, which is how one is stowed so
             // that it can be walked to the stemhead and dropped without being turned.
             .with_rotation(
-                Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)
-                    * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
-            ),
+                Quat::from_rotation_z(std::f32::consts::FRAC_PI_2) * Quat::from_rotation_y(lie),
+            )
+            .with_scale(Vec3::splat(scale)),
         Visibility::default(),
     ))
     .with_children(|a| {

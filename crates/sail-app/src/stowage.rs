@@ -37,6 +37,15 @@ pub struct Slack {
 #[derive(Component)]
 pub struct StowedPole;
 
+/// And the staysail's club, likewise, when there is no staysail on it.
+#[derive(Component)]
+pub struct StowedClub;
+
+/// Where the club lies: inboard of the pole, on the part of the foredeck that is wide
+/// enough to take it, and parallel to the centreline.
+const CLUB_X: f32 = -0.30;
+const CLUB_Z: f32 = -2.70;
+
 /// The one thing about a bag that is not its shape: what has been done to it.
 ///
 /// Four identical sausages in four colours read as inventory. What makes a real foredeck
@@ -513,6 +522,31 @@ pub fn setup(
         });
     }
 
+    // --- The staysail's club, when it is not in use ---------------------------
+    //
+    // A boom six feet long with no sail on it has to go somewhere, and where it goes is
+    // alongside the pole, inboard of it, on the one strip of the port foredeck that is
+    // neither the pole's chocks nor a sail bag. Lashed down parallel to the centreline
+    // rather than along the sheer, because a short spar on a deck that is narrowing does
+    // not follow the curve — it sits in the wide part and stops.
+    let club = crate::boat::staysail_boom_length(&sim.config());
+    let club_z = CLUB_Z;
+    let club_end = |z: f32| crate::deck::deck_height(z) + 0.055;
+    commands.entity(root).with_children(|b| {
+        b.spawn((
+            StowedClub,
+            Mesh3d(meshes.add(Cylinder::new(0.040, club))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.52, 0.38, 0.21),
+                perceptual_roughness: 0.22,
+                ..default()
+            })),
+            Transform::from_xyz(CLUB_X, club_end(club_z), club_z)
+                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            Visibility::default(),
+        ));
+    });
+
     for which in [Headsail::Genoa, Headsail::Spinnaker] {
         let spec = bagged(which);
         let (z, side) = berth(which);
@@ -535,7 +569,16 @@ pub fn setup(
     const INSET: f32 = 0.34;
     let end = |z: f32| {
         Vec3::new(
-            -(crate::deck::deck_half_beam(z) - INSET),
+            // Clamped off the centreline, which is the bug this had: forward of about
+            // three and a half metres ahead of amidships the sheer closes to less than
+            // the inset, so `half_beam - INSET` goes *negative* and the chock crossed to
+            // the other side of the boat. The spar was being drawn diagonally across the
+            // foredeck with its heel to port and its nose to starboard — arithmetic, and
+            // invisible in the code, and it has been there since the pole was stowed.
+            //
+            // A pole on a side deck does converge on the centreline as the deck narrows;
+            // what it does not do is cross it.
+            -(crate::deck::deck_half_beam(z) - INSET).max(0.10),
             crate::deck::deck_height(z) + 0.10,
             z,
         )
@@ -641,14 +684,25 @@ pub fn flutter(
 /// A bag is on deck when its sail is not up, and the pole is in its chocks when the kite
 /// is not the sail of the day. Which is one fact each, read from the same place the rig
 /// reads it.
+#[allow(clippy::type_complexity)]
 pub fn update(
     sim: Res<Sim>,
-    mut bags: Query<(&SailBag, &mut Visibility), Without<StowedPole>>,
-    mut pole: Query<&mut Visibility, With<StowedPole>>,
+    mut bags: Query<(&SailBag, &mut Visibility), (Without<StowedPole>, Without<StowedClub>)>,
+    mut pole: Query<&mut Visibility, (With<StowedPole>, Without<StowedClub>)>,
+    mut club: Query<&mut Visibility, (With<StowedClub>, Without<StowedPole>)>,
 ) {
     let up = sim.controls.headsail;
     for (bag, mut vis) in &mut bags {
         *vis = if bag.0 == up {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+    }
+    // The club is on deck whenever there is no staysail on it to hold out.
+    let club_in_use = sim.controls.staysail > 0.02;
+    for mut vis in &mut club {
+        *vis = if club_in_use {
             Visibility::Hidden
         } else {
             Visibility::Inherited
@@ -841,5 +895,60 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod spars {
+    use super::*;
+
+    /// Nothing stowed on the side deck crosses the centreline.
+    ///
+    /// The pole's chocks are set in from the sheer by a fixed hand's breadth, and forward
+    /// of about three and a half metres ahead of amidships the sheer closes to less than
+    /// that — so the subtraction went negative and the forward chock came out on the
+    /// *other side of the boat*. The spar was drawn diagonally across the foredeck, heel
+    /// to port and nose to starboard, and nothing in the code looks wrong.
+    #[test]
+    fn a_spar_on_the_port_side_stays_on_the_port_side() {
+        let loa = 10.4_f32;
+        let length = crate::boat::pole_length(loa);
+        let (aft, forward) = chocks(loa);
+        let mut z = forward;
+        while z <= aft {
+            let x = -(crate::deck::deck_half_beam(z) - 0.34).max(0.10);
+            assert!(
+                x < -0.05,
+                "the pole's chock at z {z:.2} is at x {x:+.3}, which is across the \
+                 centreline"
+            );
+            z += 0.1;
+        }
+        assert!(length > 2.0, "a pole {length:.2} m long is a boathook");
+    }
+
+    /// And the club lies on the part of the foredeck that is actually there.
+    ///
+    /// A metre and a half of spar laid down the port side has to be on deck at both ends:
+    /// forward of three and three quarter metres this boat is a hand's breadth wide at
+    /// the sheer, and a spar whose nose is out there is over the water.
+    #[test]
+    fn the_club_is_on_the_deck_at_both_ends() {
+        let cfg = sail_core::boat::BoatConfig::charter_sloop_34();
+        let club = crate::boat::staysail_boom_length(&cfg);
+        for end in [CLUB_Z - club * 0.5, CLUB_Z, CLUB_Z + club * 0.5] {
+            let rail = crate::deck::deck_half_beam(end);
+            assert!(
+                CLUB_X.abs() + 0.04 < rail,
+                "the club at z {end:.2} reaches {:.2} m out and the deck is {rail:.2}",
+                CLUB_X.abs() + 0.04
+            );
+        }
+        // Clear of the mast, which is stepped on the centreline a little forward of
+        // amidships and is the one thing on this foredeck that cannot be moved.
+        assert!(
+            CLUB_X.abs() > 0.22,
+            "the club is lying through the mast partners"
+        );
     }
 }
