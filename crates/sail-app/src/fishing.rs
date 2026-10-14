@@ -577,6 +577,9 @@ pub struct Fishing {
     quiet: f64,
     /// A shoal does not contain one fish. For a while after a mackerel there are more.
     shoal: f64,
+    /// How much more fish there are in the sea than there are, for looking at the
+    /// fight. One in a game being played.
+    plenty: f64,
     /// Leftover time, so the fight integrates at a fixed step whatever the frame rate.
     accumulator: f64,
 }
@@ -587,6 +590,16 @@ impl Fishing {
         // switch as `SAIL_HEADSAIL` and `SAIL_SQUALL`, and for the same reason: a take
         // happens every minute or two at best, and you cannot look at a thing that
         // seldom often enough to get it right. A knob beats sitting and waiting.
+        // `SAIL_FISH=20` makes them take twenty times as often. The fight is the
+        // interesting part and a take is a once-in-two-minutes event, so testing one by
+        // playing the other is an afternoon's work per change. It multiplies the rate
+        // and nothing else: what takes, where, and how it fights are all unaltered, so
+        // what you are looking at is the real thing arriving oftener.
+        let plenty = std::env::var("SAIL_FISH")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(1.0)
+            .clamp(0.0, 500.0);
         let streamed = std::env::var("SAIL_ROD")
             .ok()
             .map(|v| v.parse::<f64>().unwrap_or(16.0).clamp(1.0, SPOOL));
@@ -606,6 +619,7 @@ impl Fishing {
             rng: Pcg32::new(seed ^ 0xF15E),
             quiet: 0.0,
             shoal: 0.0,
+            plenty,
             accumulator: 0.0,
         }
     }
@@ -723,7 +737,7 @@ impl Fishing {
     fn take(&mut self, dt: f64, sea: Sea, depth: f64) -> Option<String> {
         self.quiet += dt;
         self.shoal = (self.shoal - dt).max(0.0);
-        if self.quiet < 6.0 {
+        if self.quiet < 6.0 / self.plenty.max(1.0) {
             return None;
         }
         let knots = sail_core::units::ms_to_kn(sea.stw);
@@ -759,7 +773,7 @@ impl Fishing {
             let n = species.nature();
             // One take in seventy seconds with everything right, which over a two-hour
             // passage is a fish box worth having and nowhere near a fish a minute.
-            let mut rate = n.plenty / 70.0
+            let mut rate = self.plenty * n.plenty / 70.0
                 * liking(swimming, n.depth)
                 * liking(knots, n.speed)
                 * liking(sea.sounding, n.ground)
@@ -1120,7 +1134,7 @@ mod tests {
 
     /// Put a known fish on the line, so a fight can be tested without waiting for one.
     fn with(what: Quarry, mass: f64) -> Fishing {
-        let mut f = Fishing::new(7);
+        let mut f = rig(7);
         f.line_out = 30.0;
         let n = what.nature();
         f.rod = Rod::Playing(Hooked {
@@ -1136,6 +1150,17 @@ mod tests {
             seen: false,
             fought: 0.0,
         });
+        f
+    }
+
+    /// The environment must not reach the tests. `Fishing::new` reads `SAIL_FISH` and
+    /// `SAIL_ROD`, and a suite whose answers depend on a shell variable is a suite that
+    /// passes on one machine.
+    fn rig(seed: u64) -> Fishing {
+        let mut f = Fishing::new(seed);
+        f.plenty = 1.0;
+        f.rod = Rod::Stowed;
+        f.line_out = 0.0;
         f
     }
 
@@ -1263,7 +1288,7 @@ mod tests {
     /// a factor of a hundred without noticing.
     #[test]
     fn an_hour_over_good_ground_catches_something() {
-        let mut f = Fishing::new(11);
+        let mut f = rig(11);
         f.stow_or_set();
         f.line_out = 14.0;
         let said = sail(&mut f, 3600.0, sea(3.6, 20.0), hands(0.0, 1.0 / 3.0));
@@ -1277,7 +1302,7 @@ mod tests {
     /// claim from the other side.
     #[test]
     fn nothing_takes_a_lure_towed_at_twelve_knots() {
-        let mut f = Fishing::new(11);
+        let mut f = rig(11);
         f.stow_or_set();
         let said = sail(&mut f, 3600.0, sea(12.0, 30.0), hands(0.0, 1.0));
         assert!(
@@ -1289,7 +1314,7 @@ mod tests {
     /// Dragging the lure along the bottom finds the bottom.
     #[test]
     fn trolling_too_deep_finds_the_ground() {
-        let mut f = Fishing::new(3);
+        let mut f = rig(3);
         f.stow_or_set();
         f.line_out = 60.0;
         let said = sail(&mut f, 600.0, sea(2.0, 12.0), hands(0.0, 1.0 / 3.0));

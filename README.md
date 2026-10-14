@@ -278,7 +278,9 @@ power in its life.
 `C` now gives a third view, facing aft from the cockpit down the wake — which is worth
 having without a rod in your hand, because ahead is where you are going and astern is
 where your wake, your gear and anything overtaking you are. `SAIL_ROD=30` streams thirty
-metres before the first frame, for the same reason `SAIL_SQUALL` exists.
+metres before the first frame and `SAIL_FISH=20` makes them take twenty times as often,
+for the same reason `SAIL_SQUALL` exists: the fight is the interesting part, and testing
+it by waiting for takes is an afternoon per change.
 
 ## Deliberate decisions
 
