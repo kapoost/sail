@@ -158,17 +158,26 @@ pub struct Ratchet {
     line_out: f64,
 }
 
-/// How far down the line to look when the gear is working, metres.
+/// How far down the line to look while the fish is still out there, metres.
+const LOOK_ALONG: f32 = 7.0;
+
+/// The line out at which the eye has gone fully over to the fish, and the line out at
+/// which it is still entirely on the gear, metres.
 ///
-/// The eye goes *along* the line rather than at either end of it. At the rod tip alone
-/// you cannot see where the line goes; at the far end alone the rod is out of frame and,
-/// with sixty metres out, so is the boat. Looking a short way down it puts the tip, the
-/// bend and the place the line enters the water in one picture, which is the picture.
+/// **The composition is the gear first and the fish second, until the fish is close
+/// enough to be worth looking at.** Which sounds like a preference and is not: for most
+/// of a fight the fish is twenty or forty metres away and two metres under an opaque
+/// sea, so a camera pointed at it is pointed at nothing, and everything you can actually
+/// read — the bend in the blank, the drum turning, whether the line is going out — is
+/// back at the boat. Aiming at the fish was tried and it framed blank water.
 ///
-/// And when the line is nearly all in — which is when you are winding and when the thing
-/// you want to see is about to appear — the far end is closer than this, so the view
-/// lands squarely on it.
-const LOOK_ALONG: f32 = 9.0;
+/// So the frame holds the tip and the reel, and *leans* the fish's way: the line leaves
+/// the picture in the direction the fish is, which is how you know where it has gone
+/// without looking at it. Inside five metres that stops being true, because at five
+/// metres it is about to come up where you can see it, and then it is the only thing
+/// worth having in shot.
+const CLOSE_ENOUGH: f32 = 5.0;
+const STILL_OUT_THERE: f32 = 16.0;
 
 /// Radius of the spool with line on it, metres. A small multiplier.
 ///
@@ -408,10 +417,26 @@ fn unloaded_direction() -> Vec3 {
     unloaded_direction_at(0.0)
 }
 
-/// A point a short way down the line from the rod tip, for the camera to look at.
-fn along_the_line(tip: Vec3, far: Vec3) -> Vec3 {
+/// What the eye should be on while a fish is on, given where everything is.
+///
+/// Three points blended by one number, and the number is how far away the fish is.
+///
+/// * **The gear**, which is the reel and the tip taken together, weighted towards the
+///   tip because that is the instrument and the reel is context. Having both means you
+///   can see the drum turn without looking away from the bend.
+/// * **A short way down the line**, which is what leans the frame the fish's way and
+///   lets the line leave the picture pointing at it.
+/// * **The fish**, once it is close enough to be a thing rather than a direction.
+fn watching(tip: Vec3, reel: Vec3, far: Vec3, line_out: f32) -> Vec3 {
+    let gear = reel.lerp(tip, 0.68);
     let reach = far - tip;
-    tip + reach.normalize_or(Vec3::NEG_Z) * reach.length().min(LOOK_ALONG)
+    let along = tip + reach.normalize_or(Vec3::NEG_Z) * reach.length().min(LOOK_ALONG);
+    // Tip and reel in the frame, leaning down the line.
+    let out_there = gear.lerp(along, 0.55);
+    let near = ((STILL_OUT_THERE - line_out) / (STILL_OUT_THERE - CLOSE_ENOUGH)).clamp(0.0, 1.0);
+    // Eased rather than linear, so the eye stays on the gear through most of the fight
+    // and goes over to the fish in the last few metres instead of drifting the whole way.
+    out_there.lerp(far, near * near)
 }
 
 /// Where the reel sits and which way its axle lies.
@@ -797,20 +822,20 @@ pub fn update(
     if showing {
         let playing = fishing.fish().is_some();
         let reel_world = hull + attitude * seat;
-        let down_the_line = along_the_line(tip_world, far);
+        let watch = watching(tip_world, reel_world, far, fishing.line_out as f32);
         if playing && !ratchet.playing {
             // A take. The longest claim of the three, because it is the one moment you
             // might genuinely be looking elsewhere — and what it shows you is the rod
             // going over, which is how you find out before any instrument tells you.
-            attention.look(down_the_line, 5.0, 4);
+            attention.look(watch, 5.0, 4);
         } else if (fishing.drag - ratchet.drag).abs() > 1e-5 {
             attention.look(reel_world, 2.0, 3);
         } else if playing {
             // Refreshed every frame, so the eye stays on the tip for as long as there is
             // something on the end of it.
-            attention.look(down_the_line, 0.4, 2);
+            attention.look(watch, 0.4, 2);
         } else if moved.abs() > 1e-4 {
-            attention.look(down_the_line, 1.2, 1);
+            attention.look(watch, 1.2, 1);
         }
         ratchet.playing = playing;
         ratchet.drag = fishing.drag;
@@ -1098,6 +1123,48 @@ pub fn gauge(ui: &mut bevy_egui::egui::Ui, fishing: &mut Fishing, sim: &Sim) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The frame holds the gear while the fish is out there and goes over to the fish
+    /// when it is close. Far off, what is in shot has to be the rod: the fish is two
+    /// metres under an opaque sea and there is nothing at that point to see.
+    #[test]
+    fn the_eye_stays_on_the_gear_until_the_fish_is_close() {
+        let tip = Vec3::new(0.0, 2.0, 0.0);
+        let reel = Vec3::new(0.0, 0.8, 0.5);
+        let far = Vec3::new(0.0, -2.0, 40.0);
+
+        let miles_off = watching(tip, reel, far, 40.0);
+        assert!(
+            miles_off.distance(tip) < miles_off.distance(far),
+            "with forty metres out the frame should be on the gear"
+        );
+        let alongside = watching(tip, reel, Vec3::new(0.0, -0.5, 3.0), 3.0);
+        assert!(
+            alongside.distance(Vec3::new(0.0, -0.5, 3.0)) < 0.5,
+            "at three metres it should be looking at the fish"
+        );
+    }
+
+    /// And it moves between the two without a jump, because a cut is the one thing a
+    /// camera standing in for a person must never do.
+    #[test]
+    fn the_frame_moves_over_smoothly() {
+        let tip = Vec3::new(0.0, 2.0, 0.0);
+        let reel = Vec3::new(0.0, 0.8, 0.5);
+        let mut last = watching(tip, reel, Vec3::new(0.0, -2.0, 30.0), 30.0);
+        let mut worst = 0.0_f32;
+        // Walk the fish in a metre at a time, which is faster than any fish comes.
+        for out in (3..30).rev() {
+            let far = Vec3::new(0.0, -1.0, out as f32);
+            let now = watching(tip, reel, far, out as f32);
+            worst = worst.max(now.distance(last));
+            last = now;
+        }
+        assert!(
+            worst < 2.5,
+            "the frame jumped {worst} m in one metre of line"
+        );
+    }
 
     /// A rod with nothing on it is a straight rod of its own length. Trivial, and it is
     /// the assertion that catches the walk in `tip_offset` drifting away from the walk
