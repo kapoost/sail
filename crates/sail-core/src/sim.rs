@@ -1147,7 +1147,29 @@ impl Simulation {
             } else {
                 (0.0, BOOM_DAMPING)
             };
-            let accel = (push + gravity + sheet - damping * st.boom_rate) / inertia;
+            // And the boat turning underneath it.
+            //
+            // The damping above is the sail dragging through the air, and until now it
+            // was told only how fast the boom was moving *relative to the deck* — which
+            // in a turn is the wrong question. Thirty square metres of cloth two metres
+            // out from the mast does not care what the deck is doing; it cares what the
+            // air is doing, and when the boat yaws the whole sail is swept sideways
+            // through it. So the damping sees the boom's rate through the *air*, which
+            // is its rate over the deck plus the boat's own, and the result is that a
+            // boat put hard into a turn leaves her boom behind for a moment and then
+            // takes it with her. Anybody who has looked up during a sharp luff has seen
+            // the boom lag and the leech shake.
+            //
+            // The second term is the same idea for acceleration rather than speed: the
+            // boom is a pendulum on a platform that is itself angularly accelerating, and
+            // in the deck's frame that is a force. It is what makes the boom snatch when
+            // the helm goes over rather than easing into the turn.
+            //
+            // Both are written in the leeward-signed frame the boom lives in, which is
+            // why the boat's yaw rate arrives multiplied by which side the wind is on.
+            let turning = self.wind_side * (damping * st.yaw_rate);
+            let accel = (push + gravity + sheet - damping * st.boom_rate + turning) / inertia
+                + self.wind_side * dr;
             s.boom_rate += accel * dt;
             // Coming across, it comes across. Only while it is on the windward side and
             // already heading the right way: a boom wandering about in the slack of its
