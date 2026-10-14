@@ -297,3 +297,76 @@ fn she_holds_her_gybe_dead_downwind() {
         );
     }
 }
+
+/// How far by the lee she will sail before the main backs and she gybes.
+///
+/// Asked for from the deck as a wider angle under the kite, and it is a real asymmetry
+/// between the two ways of running: a cruising main eased out with a soft vang invites
+/// the wind round the back of its open leech early, and a boat with a pole up and the
+/// vang on will sit there with the wind a long way round and nothing happening. That is
+/// not a trick — it is how you sail deep with a symmetric, and racers live there.
+///
+/// Measured by steering her past dead downwind half a degree at a time and asking where
+/// the spar went.
+#[test]
+fn a_kite_lets_her_sail_further_by_the_lee() {
+    let gybes_at = |headsail: sail_core::state::Headsail, vang: f64| -> f64 {
+        let cfg = BoatConfig::archipelago_packet();
+        let mut start = BoatState::at_rest(wrap_tau(0.0 - rad(170.0)));
+        start.surge = kn_to_ms(4.0);
+        let mut sim = Simulation::new(
+            cfg,
+            start,
+            Box::new(SteadyWind::new(0.0, kn_to_ms(12.0))) as Box<dyn WindField>,
+        );
+        let mut controls = Controls {
+            headsail,
+            main_sheet: 0.95,
+            jib_sheet: 0.8,
+            vang,
+            furl: 0.0,
+            ..Default::default()
+        };
+        for _ in 0..(40.0 / SUBSTEP) as u64 {
+            let off = deg(sim.telemetry.twa) - 170.0;
+            controls.rudder = rad((off * 0.5).clamp(-20.0, 20.0));
+            sim.run(SUBSTEP, &controls);
+        }
+        let side = sim.telemetry.boom.signum();
+        let mut lee = 0.0;
+        while lee < 45.0 {
+            lee += 0.5;
+            let aim = -(180.0 - lee);
+            for _ in 0..(2.0 / SUBSTEP) as u64 {
+                let off = wrap_pi(sim.telemetry.twa - rad(aim));
+                controls.rudder = rad((deg(off) * 0.4).clamp(-20.0, 20.0));
+                sim.run(SUBSTEP, &controls);
+                if sim.telemetry.boom.signum() != side {
+                    return lee;
+                }
+            }
+        }
+        lee
+    };
+
+    let working = gybes_at(sail_core::state::Headsail::Genoa, 0.6);
+    let kite = gybes_at(sail_core::state::Headsail::Spinnaker, 0.6);
+    let kite_vanged = gybes_at(sail_core::state::Headsail::Spinnaker, 1.0);
+
+    // A working rig gybes when you sail a little past dead downwind, which is what makes
+    // an accidental gybe a thing that happens to people.
+    assert!(
+        (8.0..26.0).contains(&working),
+        "under the genoa she should gybe soon after dead downwind: {working:.0} deg"
+    );
+    // And under the pole she will sit there.
+    assert!(
+        kite > working * 2.0,
+        "the kite should hold her much further round: {kite:.0} against {working:.0} deg"
+    );
+    // The vang is the other half of it, and the smaller half.
+    assert!(
+        kite_vanged >= kite,
+        "and vanging on should not make it worse: {kite_vanged:.0} against {kite:.0}"
+    );
+}

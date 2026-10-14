@@ -459,7 +459,36 @@ impl Simulation {
         // nothing to flicker — dead downwind is simply not backed, whichever side the
         // last wave put the apparent on.
         let by_the_lee = std::f64::consts::PI - lower_awa.abs();
-        let boom_aback = boom_angle * lower_awa > 0.0 && by_the_lee > crate::units::rad(12.0);
+        // How far by the lee she will go before the main backs, and it is not one number.
+        //
+        // Twelve degrees is a cruising main eased out with a soft vang: the leech is open,
+        // the top of the sail is already spilling, and the wind gets behind it early. Two
+        // things push that a long way out, and both are what a boat running under a kite
+        // actually has.
+        //
+        // **The vang.** It holds the leech down and stops the top of the main twisting
+        // away and inviting the wind round the back of it. Hauled on, the sail keeps its
+        // shape with the wind well behind the beam — which is why you vang hard before a
+        // run, and why the vang is the first thing eased when you want her to gybe.
+        //
+        // **The kite.** With a spinnaker pulling, the main is in its lee: there is little
+        // pressure in it left to reverse, it is lying against the shrouds rather than
+        // being held out by its own force, and a boat under a symmetric is routinely
+        // sailed fifteen to twenty-five degrees by the lee with nothing happening. That
+        // is not a trick, it is how you sail deep with a pole.
+        //
+        // Asked for from the deck as a wider angle under the kite, and the answer is the
+        // one a sailor gives: the pole is squared, the vang is on, and she will sit there.
+        let kite_up =
+            controls.headsail == crate::state::Headsail::Spinnaker && controls.furl < 0.985;
+        let margin = crate::units::rad(12.0)
+            + crate::units::rad(9.0) * controls.vang.clamp(0.0, 1.0)
+            + if kite_up {
+                crate::units::rad(12.0)
+            } else {
+                0.0
+            };
+        let boom_aback = boom_angle * lower_awa > 0.0 && by_the_lee > margin;
         let twist = twist_for_vang(controls.vang, boom_angle.abs());
         // The upper section is eased by the twist, expressed back through the sheet
         // mapping so both sections go through the same force model.
