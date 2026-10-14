@@ -474,6 +474,78 @@ impl Island {
     }
 }
 
+/// Something you can take a bearing on.
+///
+/// The whole of terrestrial navigation is this: a thing you can see, that is drawn on the
+/// chart, that you can name. Without marks a chart is a picture of some islands; with
+/// them it is an instrument, because two bearings and a straight edge put you somewhere
+/// and three put you somewhere and tell you how well you did it.
+///
+/// They are derived from the islands rather than scattered separately, for the same
+/// reason the harbours are: the archipelago is a pure function of the seed, so a passage
+/// can be sailed twice and the mark that was on the headland is still on the headland.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Landmark {
+    pub at: DVec2,
+    pub name: String,
+    pub kind: Mark,
+    /// How high the ground under it stands, metres. A tower is built on what is there.
+    pub ground: f64,
+    /// And how high its light or its top is above the *sea*, which is the number a pilot
+    /// book gives and the one that decides how far off it can be seen. The two together
+    /// are what the structure's own height is, which is what gets drawn.
+    pub height: f64,
+}
+
+/// What kind of thing it is, which is also how it is drawn on a chart and recognised
+/// through a pair of binoculars.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mark {
+    /// A lighthouse on an outer skerry: the one that is there because the rock is
+    /// dangerous, which is why it is where it is and why it is the tallest thing about.
+    Lighthouse,
+    /// A church spire over a settlement. The oldest navigation mark there is, and still
+    /// the one every pilot book leads with, because a village builds the tallest thing
+    /// it can afford and then paints it white.
+    Spire,
+    /// A beacon: a pole on a rock with a topmark, unlit, which exists only to be seen.
+    Beacon,
+    /// A cairn on a summit. Stones piled by somebody who wanted to be found again.
+    Cairn,
+}
+
+impl Mark {
+    /// How it is written on a chart.
+    pub fn abbreviation(&self) -> &'static str {
+        match self {
+            Mark::Lighthouse => "Lt",
+            Mark::Spire => "Spire",
+            Mark::Beacon => "Bn",
+            Mark::Cairn => "Cairn",
+        }
+    }
+
+    /// Whether it shows a light after dark, and so whether it is any use at night.
+    pub fn lit(&self) -> bool {
+        matches!(self, Mark::Lighthouse)
+    }
+}
+
+impl Landmark {
+    /// How far off it can be seen, metres, from an eye this high.
+    ///
+    /// The geometric range, which is the one a pilot book gives: the horizon from the
+    /// mark plus the horizon from the eye. Two point zero eight times the square root of
+    /// the height in metres gives nautical miles, and the rest is arithmetic.
+    ///
+    /// It is not clairvoyance about weather — rain and haze cut it and the game cuts the
+    /// visibility separately — it is the curve of the earth, which nothing cuts.
+    pub fn visible_from(&self, eye: f64) -> f64 {
+        const NM: f64 = 1_852.0;
+        2.08 * (self.height.max(0.0).sqrt() + eye.max(0.0).sqrt()) * NM
+    }
+}
+
 /// Place names, assembled rather than listed.
 ///
 /// Norse, because these islands are shaped like Norse ones and because a delivery run
@@ -500,6 +572,81 @@ impl Archipelago {
     /// Only islands big enough to have somebody living on them. A skerry is a hazard,
     /// not a destination, and a run between two rocks a hundred metres apart is not a
     /// passage.
+    /// The marks, one to an island that is worth marking.
+    ///
+    /// Which kind goes where is not decoration — it is the rule a coast is actually
+    /// built by, and following it means the chart teaches something true:
+    ///
+    /// * **Lighthouses go on the outermost dangerous rocks**, because that is what a
+    ///   light is for. A skerry in the middle of an archipelago with islands all round
+    ///   it drowns in the clutter; the one on the edge, that a boat meets first and in
+    ///   the dark, is the one worth lighting.
+    /// * **Spires stand over settlements**, which on these islands means the ones big
+    ///   enough to have a harbour. A village builds the tallest thing it can afford and
+    ///   whitewashes it, and every pilot book in the world leads with it.
+    /// * **Beacons go on middling rocks** near a channel: unlit, cheap, and there only
+    ///   to be seen.
+    /// * **Cairns go on summits** of anything else big enough to have one.
+    pub fn landmarks(&self) -> Vec<Landmark> {
+        /// A harbour's island is settled, and a settled island has a church.
+        const SETTLED: f64 = 240.0;
+        /// Below this an island is a rock rather than a place.
+        const WORTH_MARKING: f64 = 70.0;
+        // How far out a rock has to be to be an outer one: beyond this from the middle
+        // of the whole scatter, where a boat meets it before it meets anything else.
+        let furthest = self
+            .islands
+            .iter()
+            .map(|i| i.centre.length())
+            .fold(0.0_f64, f64::max);
+        self.islands
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.radius >= WORTH_MARKING)
+            .map(|(index, i)| {
+                let seed = (i.centre.x.abs() as u64).wrapping_mul(0x9E37_79B9)
+                    ^ (i.centre.y.abs() as u64).wrapping_mul(0x85EB_CA6B)
+                    ^ (index as u64).wrapping_mul(0xC2B2_AE35);
+                let outer = i.centre.length() > furthest * 0.66;
+                let kind = if i.radius >= SETTLED {
+                    Mark::Spire
+                } else if outer {
+                    Mark::Lighthouse
+                } else if i.radius >= 140.0 {
+                    Mark::Beacon
+                } else {
+                    Mark::Cairn
+                };
+                // Where on the island it stands. A spire is in the village, which is
+                // over the anchorage; everything else is on the summit, which is the
+                // middle, because that is where you can see it from and see from.
+                let at = if kind == Mark::Spire {
+                    let bay = i.anchorage();
+                    i.centre + (bay - i.centre) * 0.55
+                } else {
+                    i.centre
+                };
+                let ground = i.elevation(at);
+                // How tall the thing itself is. The light is on the rock and the rock is
+                // low, so its tower is the tallest of them — which is not a flourish,
+                // it is why lighthouses look like they do.
+                let structure = match kind {
+                    Mark::Spire => 22.0,
+                    Mark::Lighthouse => 26.0,
+                    Mark::Beacon => 7.0,
+                    Mark::Cairn => 3.0,
+                };
+                Landmark {
+                    at,
+                    name: place_name(seed ^ 0x5BF0_3635),
+                    kind,
+                    ground,
+                    height: ground + structure,
+                }
+            })
+            .collect()
+    }
+
     pub fn harbours(&self) -> Vec<Harbour> {
         // Two hundred and forty metres rather than three hundred and twenty. A smaller
         // archipelago has fewer islands over any given size, and the harbours are what

@@ -36,6 +36,7 @@
 
 pub mod autopilot;
 pub mod boat;
+pub mod fix;
 pub mod hull;
 pub mod hydrostatics;
 pub mod land;

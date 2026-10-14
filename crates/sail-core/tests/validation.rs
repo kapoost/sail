@@ -3634,3 +3634,64 @@ fn the_glass_falls_as_the_wind_builds() {
         }
     }
 }
+
+/// The marks are where a coast actually puts them, and they are nameable.
+///
+/// Terrestrial navigation is the whole reason they exist: a thing you can see, that is
+/// on the chart, that you can name. If two of them share a name the fix is a guess, and
+/// if the lighthouses are not on the outside they are lighting water nobody arrives from.
+#[test]
+fn the_marks_are_where_a_coast_puts_them() {
+    use sail_core::land::{Archipelago, Mark};
+    let sea = Archipelago::generate(4, 9_000.0, 70);
+    let marks = sea.landmarks();
+    assert!(
+        marks.len() > 8,
+        "an archipelago with {} marks on it is unnavigable",
+        marks.len()
+    );
+    // Lighthouses on the outside, spires on the inside: a light is there because a boat
+    // meets that rock first and in the dark, and a church is there because people are.
+    let middle = |kind: Mark| -> f64 {
+        let of: Vec<f64> = marks
+            .iter()
+            .filter(|m| m.kind == kind)
+            .map(|m| m.at.length())
+            .collect();
+        if of.is_empty() {
+            return f64::NAN;
+        }
+        of.iter().sum::<f64>() / of.len() as f64
+    };
+    let lights = middle(Mark::Lighthouse);
+    let spires = middle(Mark::Spire);
+    if lights.is_finite() && spires.is_finite() {
+        assert!(
+            lights > spires,
+            "the lighthouses average {lights:.0} m from the middle and the churches \
+             {spires:.0}, which is a coast with its lights in the wrong place"
+        );
+    }
+    // Every one of them stands above the sea, and the lit ones stand highest — the tower
+    // is tall *because* the rock is low, which is why lighthouses look like they do.
+    for m in &marks {
+        assert!(m.height > 2.0, "{} is {:.1} m high", m.name, m.height);
+        // And visible from further than you can see a boat, which is the point of height.
+        assert!(
+            m.visible_from(2.0) > 8_000.0,
+            "{} can only be seen from {:.0} m",
+            m.name,
+            m.visible_from(2.0)
+        );
+    }
+    // Names you can call out. Two marks with one name is a cocked hat that lies.
+    let mut names: Vec<&str> = marks.iter().map(|m| m.name.as_str()).collect();
+    names.sort();
+    let before = names.len();
+    names.dedup();
+    assert!(
+        names.len() as f64 > before as f64 * 0.8,
+        "{} of {before} marks share a name with another",
+        before - names.len()
+    );
+}
