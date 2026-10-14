@@ -36,13 +36,32 @@ afterwards.
 ## Before the tag
 
 ```sh
-cargo test --release          # 127 of them, about half a minute
+cargo test --release          # 205 of them, about half a minute
 cargo clippy --release --all-targets    # has to be silent
 cargo fmt --all
 ```
 
 Nothing in CI runs these — the only workflow is the release one. Until that changes, the
 tests passing is a thing a person did, not a thing the repository knows.
+
+### `--release` on that first line is load-bearing
+
+Four tests in `settings.rs` **fail in a debug build and pass in a release one**, and they
+are not flaky: `cargo test -p sail-app` panics in all four with
+
+```
+Dropped TexturesDelta with 1 unapplied deltas.
+```
+
+which is a debug assertion inside `epaint`, fired by the egui harness those tests drive
+and not by anything in this repository. In release the assertion is compiled out, the
+harness behaves, and the suite is clean.
+
+Written down because two people spent an evening reporting those four to each other and
+to the user as a standing failure that "also fails on main" — which was true, and which
+meant everybody stopped looking. It is a property of the profile, not of the code. If you
+are about to fix them, measure in release first and find out whether there is anything
+there to fix.
 
 ## Getting at a build before the release is published
 
