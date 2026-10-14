@@ -144,6 +144,7 @@ pub fn draw(
     fleet: Res<crate::fleet::Fleet>,
 ) -> Result {
     if !settings.open {
+        net.scan = None;
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
@@ -442,6 +443,13 @@ pub fn draw(
 
                 if settings.tab == Tab::Network {
                     together(ui, &mut net, &fleet);
+                } else {
+                    // Stop looking the moment the page is not showing. The comment on
+                    // `scan` said it only ran while the page was open and that was not
+                    // true of the first version: nothing ever dropped it, so one visit to
+                    // the page left the game broadcasting at everybody's switch once a
+                    // second for the rest of the passage.
+                    net.scan = None;
                 }
                 footer(ui, &mut close);
             });

@@ -80,7 +80,7 @@ pub fn exchange(mut net: ResMut<Net>, mut fleet: ResMut<Fleet>, mut sim: ResMut<
     let events = link.drain();
     for event in events {
         match event {
-            Event::Joined { id, world, .. } => {
+            Event::Joined { id, world, sky } => {
                 net.joined = true;
                 info!("joined as boat {id}");
                 // The day as that machine drew it. The trends the weather wanders on are
@@ -93,6 +93,21 @@ pub fn exchange(mut net: ResMut<Net>, mut fleet: ResMut<Fleet>, mut sim: ResMut<
                     w.synoptic.base_speed = world.tws as f64;
                     w.synoptic.base_direction = world.wind_from as f64;
                 }
+                // And the clock, which matters more than it looks.
+                //
+                // "The gust field needs no packets because it is a stateless function of
+                // position and time" is true of the position and was *false of the time*:
+                // two machines that started four minutes apart were evaluating the same
+                // function at different `t` and therefore making different gusts. Both
+                // would have been computing them perfectly and neither would have been
+                // sailing in the other's air — which is the exact thing this was all
+                // supposed to prevent, hiding inside the sentence that claimed to prevent
+                // it.
+                //
+                // Safe to snap: the simulation clock drives the wave field, the gusts and
+                // the squalls, and nothing else. The passage deadline counts frame time
+                // and the time of day has its own hour.
+                sim.sim.state.time = sky.t as f64;
                 if world.seed != sim.weather.seed {
                     // Not fixed here on purpose. Rebuilding the archipelago under a boat
                     // that is sailing in it is a different piece of work — the islands,
@@ -124,6 +139,16 @@ pub fn exchange(mut net: ResMut<Net>, mut fleet: ResMut<Fleet>, mut sim: ResMut<
                 // `follow` sets the trends the dice would have set, so the correction
                 // lands in the one place the weather is actually decided and the process
                 // carries on from there between packets.
+                // And the clocks stay together. Both machines advance real time at one
+                // to one, so the error is only ever what a stutter left behind — nudged
+                // rather than snapped, because a jump in `t` is a jump in the wave field
+                // and you would see the sea flinch.
+                let error = sky.t as f64 - sim.sim.state.time;
+                if error.abs() > 3.0 {
+                    sim.sim.state.time = sky.t as f64;
+                } else {
+                    sim.sim.state.time += 0.05 * error;
+                }
                 if let Some(w) = sim.sim.wind.adjustable() {
                     w.follow(
                         sky.tws as f64,
@@ -137,6 +162,10 @@ pub fn exchange(mut net: ResMut<Net>, mut fleet: ResMut<Fleet>, mut sim: ResMut<
                 warn!("network: {why}");
                 net.trouble = why;
                 net.joined = false;
+                // The thread is gone, so the link is a handle to nothing. Dropping it is
+                // what puts the panel back to the list of games rather than leaving it
+                // saying "knocking..." at a socket nobody is holding.
+                net.link = None;
             }
         }
     }

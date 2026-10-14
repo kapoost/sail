@@ -337,11 +337,17 @@ pub fn rehearsal(time: Res<Time>, sim: Res<Sim>, mut fleet: ResMut<Fleet>) {
     };
     let t = time.elapsed_secs();
     let here = sim.sim.state.pos;
-    for id in 0..how_many {
+    // Numbered out of the way of the real ones. A server hands out ids from one, and a
+    // rehearsal ghost sharing a number with somebody who has just joined would be a boat
+    // teleporting between a circle and the sea every frame — the sort of thing that gets
+    // debugged as a network fault for an hour.
+    const REHEARSAL: u16 = 60_000;
+    for n in 0..how_many {
+        let id = REHEARSAL + n;
         // A long slow circle, each one a little further out and a third of a turn apart,
         // so they pass across each other and you can see one boat against another.
-        let phase = t * 0.05 + id as f32 * 2.1;
-        let radius = 120.0 + 60.0 * id as f32;
+        let phase = t * 0.05 + n as f32 * 2.1;
+        let radius = 120.0 + 60.0 * n as f32;
         let pos = [
             (here.x as f32) + radius * phase.cos(),
             (here.y as f32) + radius * phase.sin(),
