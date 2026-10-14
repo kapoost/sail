@@ -299,6 +299,44 @@ pub fn draw(
                         ) {
                             sim.controls.jib_sheet = jib_sheet;
                         }
+                        // The preventer, beside the mainsheet because that is whose line
+                        // it is: it goes on the end of the same spar. A light rather than
+                        // a slider — it is on or it is off — and it sat in the headsail
+                        // column at first, which is both the wrong place and, in a column
+                        // that narrow, invisible. Reported as not being in the console at
+                        // all, which from where anybody was looking it was not.
+                        ui.vertical(|ui| {
+                            ui.add_space(2.0);
+                            ui.label(
+                                egui::RichText::new("BOOM")
+                                    .color(paint::LABEL)
+                                    .monospace()
+                                    .size(9.0),
+                            );
+                            ui.add_space(4.0);
+                            let rigged = sim.controls.preventer;
+                            if ui
+                                .selectable_label(
+                                    rigged,
+                                    egui::RichText::new(if rigged {
+                                        "PREVENTED"
+                                    } else {
+                                        "free (F)"
+                                    })
+                                    .monospace()
+                                    .size(10.0)
+                                    .color(if rigged {
+                                        egui::Color32::from_rgb(20, 20, 20)
+                                    } else {
+                                        egui::Color32::from_rgb(150, 150, 130)
+                                    }),
+                                )
+                                .on_hover_text("a line forward from the boom end: she cannot gybe")
+                                .clicked()
+                            {
+                                sim.controls.preventer = !rigged;
+                            }
+                        });
                     });
 
                     ui.add_space(7.0);
@@ -383,29 +421,6 @@ pub fn draw(
                                 .size(9.0),
                         );
                         ui.add_space(4.0);
-                        // The preventer, which is a thing that is either on or off and
-                        // therefore a light rather than a slider. Beside the sail
-                        // buttons because it belongs to the same decision: what you are
-                        // carrying and how you have made it safe.
-                        let rigged = sim.controls.preventer;
-                        if ui
-                            .selectable_label(
-                                rigged,
-                                egui::RichText::new("PREVENTER (F)")
-                                    .monospace()
-                                    .size(10.0)
-                                    .color(if rigged {
-                                        egui::Color32::from_rgb(20, 20, 20)
-                                    } else {
-                                        egui::Color32::from_rgb(150, 150, 130)
-                                    }),
-                            )
-                            .on_hover_text("stops the boom crossing — rig it before a run")
-                            .clicked()
-                        {
-                            sim.controls.preventer = !rigged;
-                        }
-                        ui.add_space(3.0);
                         let rolled = sim.controls.furl > 0.9;
                         for sail in [
                             Headsail::Genoa,

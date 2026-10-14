@@ -2060,6 +2060,31 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         // on its own — no taper fudge required.
         let mut luff = g.tack.lerp(g.head, u);
         let mut leech = g.clew.lerp(g.head, u);
+        // A symmetric kite is not a triangle with a bulge on it, and that is why the last
+        // three attempts at it still looked like a Code 0: the plan shape was wrong
+        // before any camber was applied. Reported from the deck in one line — *the
+        // balloon was supposed to be from the top, this still looks like a code zero* —
+        // and the balloon is in the outline.
+        //
+        // Lerping both lower corners to the head makes the width close linearly: at
+        // three quarters of the hoist a triangle is a quarter as wide as its foot. A
+        // spinnaker is nearly as wide there as it is at the foot, because its leeches are
+        // cut with feet of round in them and the cloth is built to stand out; its widest
+        // point is well above half height and it comes in only in the last tenth, to a
+        // head that is a rounded corner rather than a point. That outline is the sail.
+        //
+        // So the row is pushed apart about its own centre by the ratio of the width it
+        // should have to the width a triangle would give it. The profile stays within a
+        // few per cent of the foot to two thirds of the hoist and then falls away.
+        if fullness > 1.2 {
+            let want = (1.0 - u.powf(3.0)).powf(0.45).max(0.07);
+            let triangle = (1.0 - u).max(1e-3);
+            let spread = (want / triangle).min(6.0);
+            let middle = (luff + leech) * 0.5;
+            let half = (leech - luff) * 0.5 * spread;
+            luff = middle - half;
+            leech = middle + half;
+        }
         // A sail set flying has no straight edges at all.
         //
         // Both of a genoa's edges are held: the luff is on a stay and the leech is
