@@ -15,14 +15,20 @@ no dependency on any game engine.
 `crates/sail-app` — the presentation layer, and the only crate that knows a game
 engine exists. Bevy 0.20, pinned.
 
-Keeping those two apart is the load-bearing structural decision. Two reasons:
+`crates/sail-net` — what two boats say to each other, and the relay that passes it on.
+Engine-free for a stronger reason than the core is: the server has to build and run on
+the smallest virtual machine anybody rents, so Bevy must never appear in its tree. The
+whole protocol is about seventy bytes per boat per snapshot; see `docs/online.md`.
+
+Keeping the first two apart is the load-bearing structural decision. Two reasons:
 
 1. **The engine stays a reversible decision.** Bevy, Fyrox and Godot-via-gdext are all
    still on the table; the presentation layer is a few days of work on top of this
    crate, not a rewrite.
-2. **The physics is testable without opening a window.** 35 tests assert against
-   figures a sailor knows from the water. When one fails, the physics is lying, and you
-   find out in a second instead of after twenty minutes of sailing.
+2. **The physics is testable without opening a window.** 98 tests in the core assert
+   against figures a sailor knows from the water — 127 across the workspace. When one
+   fails, the physics is lying, and you find out in a second instead of after twenty
+   minutes of sailing.
 
 ## The core loop
 
@@ -141,7 +147,26 @@ and the audio thread reads them lock-free. No loop seams, no transposition artef
 | water at the hull | speed through the water | bandpassed noise with a slow surge on it for the bow wave |
 | flogging canvas | how badly the sails are luffing | gated bursts with a hard attack, faster in more wind |
 
-`M` mutes it.
+The rigging note is gated on how *steady* the wind is, which is the difference between
+wire and a theremin: vortex shedding has to lock on and cannot lock on to a flow that is
+changing underneath it, so a shroud in a gust lets go, goes quiet, and finds a new note
+when the gust steadies. A four-knot puff drops it nine decibels.
+
+There is a band as well, and it is written by the boat rather than played at her. The
+tempo comes from the encounter period — the rate the hull actually meets the waves at —
+so the music is in the same rhythm as the sailing instead of across it. The point of
+sail chooses the metre and the idiom: beating is syncopated and square, reaching gets a
+walking bass, running is sparse. Each sail is a voice, and whether it is *set* decides
+whether that voice exists while how hard it is *working* decides how loud it is. Past
+what the boat can take — cloth over its rated wind, knocked down, a sea too big for her —
+it changes language entirely, into something with a flattened second in it.
+
+Three timbres out of the same six partials: struck for the tune, bowed for anything that
+has to arrive and hold, and a dark ground for the bass. One voice doing all three was why
+a change of language used to be inaudible.
+
+`K` mutes everything. `Esc` opens the mixer, which has the sea, the boat and the band on
+separate faders because they are three different things to want.
 
 ## Waves
 
@@ -200,6 +225,16 @@ flat-water test still measures what it did before.
 * **Bevy, used thin.** Chosen in week two, with working physics already in hand.
 * **Procedural audio.** No asset pipeline to build, nothing to license, and the sound
   tracks the simulation exactly rather than approximately.
+* **Native, not the browser.** Checked twice, most recently on 14 October: the whole
+  thing *compiles* for `wasm32-unknown-unknown` with no errors, so the old note about
+  three hard blockers was wrong — what breaks is at run time, and the one that matters is
+  that the ripple bake uses real threads. What settles it now is sailing together: a
+  browser has no UDP and cannot broadcast, so the relay, the list of games on the network
+  and joining by address all go, and the replacement is a certificate and a public host.
+  A single-player demo in a tab is still a reasonable shop window; the game is not.
+* **Nobody is authoritative over anybody's boat.** The server relays, keeps the weather
+  and runs the lobby. A sailor feels fifty milliseconds on the tiller, so the helm, the
+  rig and the hull stay on the machine the hands are on. See `docs/online.md`.
 
 ## Why Bevy
 
@@ -235,59 +270,72 @@ bottleneck rather than the sailing, Godot wins and we move. The move costs `sail
 and nothing else — which is exactly why the split is worth maintaining even when it
 feels like extra structure.
 
+## Sailing together
+
+Two to eight friends in one archipelago. Every boat is computed by the person sailing
+her and the server is a relay, a clock and a lobby — anything else would put a round trip
+between somebody's hand and their rudder, and a sailor feels fifty milliseconds on the
+tiller.
+
+```sh
+sail-server --seed 42          # on one machine
+```
+
+Everybody else presses `Esc` and opens the **TOGETHER** page: a game on the same network
+is in the list, because an address read out over a chat window is wrong about a third of
+the time. The world comes from whoever is hosting — join and you are in their
+archipelago, their weather and their time of day.
+
+Over the internet the same thing works with the host's address typed in, and the
+least-work answer is one Tailscale network between friends: no port forwarding and no
+code. `docs/online.md` is the whole design, including what it deliberately does not do.
+
 ## Controls
+
+**They live in the program.** Press `?` or `F1`, or click the mark in the bottom-right
+corner. This list used to be here as well, and three of the keys in it were wrong — a
+key list in a README is a list that rots the first time somebody rearranges the console,
+and nobody notices because the person who changed the key does not read the README.
 
 Gamepad is the intended input; keyboard works. The design rule is that you map
 *intentions*, not lines, and you match each control's nature to the gear it stands
 for — the helm and mainsheet are positions your hand holds, the genoa sheet is a winch
 you grind, and a reef is a job you do.
 
-| | gamepad | keyboard |
-|---|---|---|
-| helm (held where you leave it) | left stick X | A / D |
-| centre the helm | | Space |
-| mainsheet: haul in / ease | right stick Y | W / S |
-| genoa winch: grind / ease | triggers | E / Q |
-| outhaul: ease / haul out | | 1 / 2 |
-| roll the genoa away or out | X | G |
-| part furl | | [ ] |
-| reef | D-pad up/down | R / F |
-| engine | D-pad left/right | Z / X |
-| autopilot: standby / course / wind angle | Start | P |
-| nudge the pilot's target | | , / . |
-| fine, on helm and sheets | | Shift |
-| snap to good trim | Y | T |
-| camera | Select | C |
-| new lap | | L |
-| developer panel | | Tab |
-
 The cockpit camera heels with the boat. That is deliberate: heel is the primary
 feedback channel, and a view that stays level throws it away.
 
 ## Current polar
+
+Regenerate it with `cargo run -p sail-core --release --example polar`; this is that
+output, pasted.
 
 ```
 charter sloop 34 — LWL 9.20 m, disp 5500 kg, sail area 64 m2, hull speed 7.36 kn
 reefed to hold heel at or below 22 deg; * marks a point that did not converge
 
   TWA       6kn       8kn      12kn      16kn      20kn      25kn     <- boat speed, kn
-   30     2.72      3.44      4.70      5.36      5.67      6.04 
-   35     3.26      4.06      5.39      5.86      6.09      6.50 
-   40     3.64      4.48      5.87      6.26      6.56      6.77 
-   45     3.93      4.81      6.19      6.61      6.77      6.96 
-   50     4.16      5.06      6.40      6.77      6.92      7.10 
-   60     4.48      5.41      6.64      7.07      7.23      7.43 
-   70     4.66      5.60      6.77      7.35      7.53      7.66 
-   80     4.72      5.67      6.81      7.40      7.75      7.92 
-   90     4.68      5.62      6.79      7.39      7.83      8.19 
-  110     4.32      5.24      6.56      7.22      7.69      8.14 
-  120     4.03      4.93      6.34      7.07      7.56      8.02 
-  135     3.50      4.36      5.75      6.39      6.87      7.33 
-  150     2.65      3.41      4.75      5.89      6.69      7.31 
-  165     2.52      3.26      4.54      5.65      6.50      7.15 
-  180     2.40      3.11      4.36      5.45      6.35      7.04 
+   30     1.19*     1.77      3.41      3.12      2.86*     2.90*
+   35     2.64      3.63      5.03      4.98      4.73      5.00 
+   40     3.43      4.28      5.62      5.73      5.49      6.09 
+   45     3.81      4.56      5.76      6.20      6.33      6.50 
+   50     3.92      4.68      6.11      6.46      6.59      6.77 
+   60     4.17      5.13      6.48      6.90      6.91      7.12 
+   70     4.42      5.40      6.67      7.24      7.38      7.32 
+   80     4.53      5.51      6.75      7.37      7.59      7.62 
+   90     4.53      5.50      6.75      7.39      7.87      8.08 
+  110     4.27      5.22      6.60      7.29      7.79      8.26 
+  120     4.05      4.99      6.44      7.17      7.67      8.14 
+  135     3.62      4.51      5.98      6.82      7.35      7.83 
+  150     2.98      3.78      5.15      6.26      6.92      7.49 
+  165     2.63      3.39      4.72      5.86      6.67      7.31 
+  180     2.44      3.16      4.43      5.55      6.44      7.12
 ```
 
-Best upwind VMG in 12 knots lands at 40 degrees true: 5.9 knots through the water,
-20 degrees of heel, 3 degrees of leeway, apparent wind 26 degrees, carrying about
-three degrees of weather helm. Those are the numbers off a real boat.
+Best upwind VMG in 12 knots lands at 40 degrees true: 5.6 knots through the water, 4.1
+of velocity made good, 21 degrees of heel, 3.6 degrees of leeway, apparent wind at 20
+degrees. Those are the numbers off a real boat.
+
+The thirty-degree column is a boat being pinched, and it is slow or unconverged on
+purpose — no cruising sloop sails at thirty degrees true, and a polar that claimed she
+did would be the first thing a sailor disbelieved.

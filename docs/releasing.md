@@ -1,0 +1,61 @@
+# Cutting a release
+
+Four commands, and one of them is the one that is easy to forget.
+
+```sh
+# 1. The version, in both crates that carry one into a build.
+sed -i '' 's/^version = "0.1.7"/version = "0.1.8"/' \
+  crates/sail-app/Cargo.toml crates/sail-net/Cargo.toml
+cargo build --release -p sail-app        # so Cargo.lock moves with them
+
+# 2. Commit, tag, push.
+git commit -am "v0.1.8"
+git tag v0.1.8
+git push origin main --tags
+```
+
+The tag starts `.github/workflows/release.yml`, which builds a universal macOS bundle, a
+Windows executable and `sail-server` for both, and publishes them. **It takes about an
+hour**, nearly all of it the Windows job compiling Bevy from cold; the macOS job is done
+in half that. Watch it with `gh run list` or `gh run view --log`.
+
+## The part that is easy to get wrong
+
+**The release notes come from the workflow file in the tagged commit.** Editing
+`release.yml` after tagging does nothing for that release — the text was already read.
+If the notes need fixing on a release that is already building or already out:
+
+```sh
+gh release edit v0.1.8 --notes-file notes.md
+```
+
+This happened for real: the macOS instructions told people to right-click and Open, which
+Apple removed in macOS 15, and every release carrying that text had to be edited by hand
+afterwards.
+
+## Before the tag
+
+```sh
+cargo test --release          # 127 of them, about half a minute
+cargo clippy --release --all-targets    # has to be silent
+cargo fmt --all
+```
+
+Nothing in CI runs these — the only workflow is the release one. Until that changes, the
+tests passing is a thing a person did, not a thing the repository knows.
+
+## Getting at a build before the release is published
+
+The two jobs upload their artefacts as they finish, so the Mac build is available half an
+hour before the release page exists:
+
+```sh
+gh run download <run-id> -n macos -D /tmp/sail
+```
+
+## What a version number means here
+
+Nothing yet. It counts releases so that "the one with the bell in it" has a name, and so
+the installer can tell whether it already has the newest. There is no stability promise
+and no changelog file: the commit messages are the changelog, and they are written to be
+read.
