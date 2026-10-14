@@ -266,6 +266,17 @@ pub fn dress(
         // Leeward is the only side cloth can belly towards, and it is the side the wind
         // is not on.
         let lee = -(awa.signum() as f32);
+        // Which way the cloth bellies. For the mainsail that is the side the boom is on,
+        // which during her gybe is not the side her wind is on.
+        let belly = if surface.which == Sail::Main {
+            if boat.drawn.boom_angle >= 0.0 {
+                1.0
+            } else {
+                -1.0
+            }
+        } else {
+            lee
+        };
         let profile = match surface.which {
             Sail::Main => &cfg.main.profile,
             _ => &cfg.headsail(controls.headsail).profile,
@@ -274,7 +285,14 @@ pub fn dress(
             Sail::Main => controls.main_sheet,
             _ => controls.jib_sheet,
         };
-        let chord = profile.chord_angle(sheet) as f32;
+        let chord = match surface.which {
+            // The mainsail's chord is the boom, and the boom came over the wire in her
+            // own frame — so a ghost on the other tack has her boom on the right side of
+            // her own deck, and a ghost in the middle of a gybe has it where it really is
+            // rather than where her sheets say it should be.
+            Sail::Main => boat.drawn.boom_angle.abs(),
+            _ => profile.chord_angle(sheet) as f32,
+        };
         // The one piece of sailing in this file: a sail eased further out than the wind
         // is forward of her shakes, because the wind is then on the wrong side of it.
         // That is the same relation the simulation uses, and it is what makes a ghost
@@ -286,8 +304,11 @@ pub fn dress(
                 boat::SailGeometry {
                     tack: Vec3::new(0.0, crate::rig::BOOM_HEIGHT, boat::MAST_FOOT_Z),
                     head: boat::main_head(scale),
+                    // Swung by the boom itself rather than by the wind's side times the
+                    // chord: the spar is the thing holding the clew, and it is the one
+                    // part of her that is sent rather than guessed.
                     clew: Vec3::new(0.0, crate::rig::BOOM_HEIGHT, boat::MAST_FOOT_Z)
-                        + Quat::from_rotation_y(lee * chord)
+                        + Quat::from_rotation_y(boat.drawn.boom_angle)
                             * Vec3::new(0.0, 0.0, boat::main_foot(&cfg, &controls)),
                 }
             }
@@ -297,7 +318,7 @@ pub fn dress(
             boat::dress_sail(
                 &mut mesh,
                 &geometry,
-                lee,
+                belly,
                 luffing,
                 // How hard it is blowing, for the speed of the shaking.
                 (ms_to_kn(aws) as f32 / 25.0).clamp(0.0, 1.0),

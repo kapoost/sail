@@ -73,7 +73,11 @@ pub struct Drawn {
     pub surge: f32,
     pub sway: f32,
     pub yaw_rate: f32,
-    /// Where the boom is, which is the single most legible thing about another boat.
+    /// Where the boom is **in her own frame**, positive to starboard — the single most
+    /// legible thing about another boat, and the one number here that must not be a
+    /// convention the two ends have to agree about. `BoatState::boom_angle` is signed
+    /// towards leeward, so sending that would mean the receiver had to know which tack
+    /// she is on to know which side of her deck her boom is over.
     pub boom_angle: f32,
     pub main_sheet: f32,
     pub jib_sheet: f32,
@@ -91,7 +95,11 @@ pub struct Drawn {
 
 impl Drawn {
     /// Taken from a boat that is actually being sailed.
-    pub fn of(st: &sail_core::state::BoatState, c: &sail_core::state::Controls) -> Self {
+    pub fn of(
+        st: &sail_core::state::BoatState,
+        c: &sail_core::state::Controls,
+        t: &sail_core::state::Telemetry,
+    ) -> Self {
         Self {
             pos: [st.pos.x as f32, st.pos.y as f32],
             heading: st.heading as f32,
@@ -101,7 +109,7 @@ impl Drawn {
             surge: st.surge as f32,
             sway: st.sway as f32,
             yaw_rate: st.yaw_rate as f32,
-            boom_angle: st.boom_angle as f32,
+            boom_angle: t.boom as f32,
             main_sheet: c.main_sheet as f32,
             jib_sheet: c.jib_sheet as f32,
             reef: c.reef as f32,
@@ -326,7 +334,7 @@ mod tests {
             furl: 0.25,
             ..Default::default()
         };
-        let there = Drawn::of(&st, &c);
+        let there = Drawn::of(&st, &c, &sail_core::state::Telemetry::default());
         let bytes = encode(&ToServer::Here {
             id: 3,
             drawn: there,

@@ -283,7 +283,14 @@ pub fn update(
     // Which side the wind is on decides which sheet is working and which shroud is
     // going soft.
     let lee = -(t.awa.signum() as f32);
-    let boom = lee * t.main.chord_angle as f32;
+    // Where the spar actually is, which is not `lee * chord_angle` however reasonable
+    // that looks. The comment four lines down has said since this file was written that
+    // "a sheet drawn to a boom that is not where the boom is would be the same fault this
+    // rig keeps finding" — and then this line was the fault, twice over: the mainsheet
+    // and the vang were drawn to a boom reconstructed from the wind's side and the
+    // sheet's setting, so the moment the boom had a life of its own the ropes went to
+    // where it was supposed to be and the whole tackle swung round in front of the mast.
+    let boom = t.boom as f32;
     let heel = st.heel as f32;
 
     // Reference force for normalising sheet loads: the rig's own dynamic pressure at a

@@ -140,7 +140,7 @@ pub fn exchange(
     };
     // Ours, every frame. The thread sends fifteen a second out of whatever it has been
     // given most recently, so handing it a snapshot per frame costs a channel push.
-    link.send(Drawn::of(&sim.sim.state, &sim.controls));
+    link.send(Drawn::of(&sim.sim.state, &sim.controls, &sim.sim.telemetry));
 
     let events = link.drain();
     for event in events {
