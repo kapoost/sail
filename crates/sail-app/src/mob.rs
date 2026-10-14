@@ -115,9 +115,15 @@ const RING: (f32, f32) = (0.24, 0.37);
 /// breadth of strop, and the ring still ends up a foot off the water, which is why it
 /// dips when she puts her quarter down. Which is what was asked for.
 const STROP: f32 = 0.10;
-/// And the pendulum's own length, which is the distance to what is swinging rather than
-/// to the top of it: the strop plus the ring's radius is where its weight is.
-const LANYARD: f32 = STROP + RING.1;
+/// Half the tube's thickness, which is all of the ring there is *across* the boat: it
+/// hangs in its own plane, flat along her side.
+const TUBE: f32 = (RING.1 - RING.0) * 0.5;
+/// And the pendulum's own length, which is the distance to what is swinging: the strop
+/// plus the radius of the *tube's middle*, where the weight of a ring is. It read to the
+/// outer edge before, which is sixty-five millimetres of pendulum that is not there — a
+/// seven per cent error in the period, and the same number feeds the stop below, where it
+/// matters more than the period does.
+const LANYARD: f32 = STROP + (RING.0 + RING.1) * 0.5;
 
 /// What the lanyard is carrying, for the pendulum in `swing`.
 ///
@@ -131,10 +137,26 @@ fn on_the_lanyard() -> crate::swing::Hung {
         length: LANYARD,
         // From its middle to its bottom edge, which is the part that finds the water.
         reach: RING.1,
-        // How far it comes in before it is against her planking. The hull falls away
-        // below the gunwale, so there is room for most of a hand's breadth of swing and
-        // then it knocks.
-        inboard: 0.30,
+        // How far it comes in before it is against her planking — **and the answer is
+        // negative**, which is not a sign error to clamp away.
+        //
+        // A ring on a short strop from a cleat at the gunwale cannot hang plumb, because
+        // plumb is inside the boat: the deck back here is drawn a quarter of a metre
+        // inside the hull it carries, so the planking at the top of the ring is outboard
+        // of the cleat the ring hangs from. What it does instead is rest leaning
+        // outboard with its inboard side against her topsides, which is what a ring hung
+        // over a rail actually does, and it is why it knocks when she rolls.
+        //
+        // Guessed at a tenth of a radian the other way, it sat eighty-five millimetres
+        // inside her at rest and two hundred and twenty-four at the end of its swing —
+        // measured by the session next door, who had the same fault in their creel and
+        // wrote the arithmetic out rather than send a number.
+        inboard: crate::swing::against_the_planking(
+            crate::deck::HULL_ON_THE_QUARTER - 0.02,
+            TUBE,
+            LANYARD,
+            crate::deck::HULL_ON_THE_QUARTER,
+        ),
         outboard: 0.55,
         // Closed-cell foam in a canvas cover on planking: it knocks rather than thuds,
         // and it comes back.
@@ -766,12 +788,42 @@ mod tests {
             "the ring hangs with its bottom {bottom:.2} m over the water, which never \
              touches it or never leaves it"
         );
-        // It can swing in until it is against her planking and no further, and the hull
-        // falls away below the gunwale so there is room for some of a swing first.
+        // The inboard stop puts its inboard face exactly on the planking and never
+        // through it — and it is a lean rather than a swing, because plumb is inside the
+        // boat. Checked here as geometry rather than as a number anybody typed.
+        let gunwale = crate::deck::HULL_ON_THE_QUARTER - 0.02;
+        let face_at = |angle: f32| gunwale - LANYARD * angle.sin() - TUBE;
         assert!(
-            (0.15..0.45).contains(&hung.inboard),
-            "{:.2} rad of swing before it knocks is not a lanyard",
-            hung.inboard
+            (face_at(hung.inboard) - crate::deck::HULL_ON_THE_QUARTER).abs() < 1.0e-4,
+            "at its stop the ring's inboard face is at {:.3} and her planking is at \
+             {:.3}",
+            face_at(hung.inboard),
+            crate::deck::HULL_ON_THE_QUARTER
+        );
+        assert!(
+            hung.inboard < 0.0,
+            "a ring on a strop from the gunwale cannot hang plumb — plumb is inside her"
+        );
+
+        // And a sea worse than the model makes never gets it inside her, which is the
+        // test worth having: the stop is only right if the thing that uses it respects
+        // it under forcing.
+        let mut swinging = crate::swing::Swing::default();
+        let mut worst = f32::MIN;
+        for i in 0..2_000 {
+            let t = i as f32 * 0.01;
+            // Thirty degrees of roll at a second and a half, which is a knockdown rather
+            // than a sea.
+            let heel = 0.52 * (t * 4.2).sin();
+            let roll_rate = 0.52 * 4.2 * (t * 4.2).cos();
+            swinging.step(&hung, heel, roll_rate, 1.0, 0.01);
+            worst = worst.max(swinging.angle);
+        }
+        assert!(
+            face_at(worst) >= crate::deck::HULL_ON_THE_QUARTER - 1.0e-3,
+            "thrown about, it reached {:.3} and her planking is at {:.3}",
+            face_at(worst),
+            crate::deck::HULL_ON_THE_QUARTER
         );
         // And it floats. A ring of closed-cell foam is the one thing hung off this boat
         // whose weight the water takes completely.
