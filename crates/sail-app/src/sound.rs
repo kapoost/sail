@@ -1114,10 +1114,25 @@ impl Iterator for SeaStream {
 
         // Grouped as somebody would actually want them: the elements, the ship, and the
         // music over both.
+        // A fish running takes the floor, and the band gets out of its way.
+        //
+        // The reel is deliberately past unity gain when line is going out — it is the
+        // moment the fishing has, and a scream that is politely level with everything
+        // else is not a scream. Measured against the band: at a fast run it came out at
+        // -14.4 dBFS with the music at -14.4, which is nought decibels of separation, and
+        // the whole mix peaking at 0.92 with the soft clip leaning on it.
+        //
+        // The answer is not to make the reel quieter. This composer already knows what to
+        // do when something matters — in a squall the band drops to one low note and a
+        // pulse and lets the sea have the floor — so the same thing happens here: the
+        // music ducks under the run and comes back when the fish stops. Only past unity,
+        // which by the reel's own design is exactly "line is going out"; winching a sheet
+        // in does not duck anything.
+        let duck = 1.0 / (1.0 + 3.0 * (self.smooth.gear - 1.0).max(0.0));
         let mix = ((wind + water + rain) * t_sea + (rig + flog + gear + bell) * t_boat)
             * MASTER
             * t_master
-            + song * t_music * t_master
+            + song * t_music * t_master * duck
             + beep * MASTER * 2.0;
         let mix = mix * self.smooth.mute;
         // Soft clip. A gust plus a flogging genoa can stack up, and a hard clip is a
@@ -1814,6 +1829,93 @@ mod what_is_loud {
             over > 20.0,
             "the music is only {over:+.1} dB over a flogging sail, which is why it \
              disappeared"
+        );
+    }
+}
+
+#[cfg(test)]
+mod the_reel_and_the_band {
+    use super::*;
+    use std::sync::Arc;
+
+    /// A fish running takes the floor; winding one in does not.
+    ///
+    /// Measured for the session working the fishing, who asked rather than waiting for a
+    /// player to tell them. The reel is deliberately past unity gain when line is going
+    /// out and it should be — but it came out at exactly the level of the band, nought
+    /// decibels of separation, with the mix peaking at 0.92 and the soft clip leaning on
+    /// it. Two loud things in the same place is not drama, it is a fight.
+    ///
+    /// So the band ducks under a run, the way it already drops to one note under a
+    /// squall, and comes back when the fish stops. Winching a sheet in ducks nothing: the
+    /// threshold is unity gain, which by the reel's own design is exactly "line is going
+    /// out".
+    #[test]
+    fn a_fish_running_takes_the_floor_and_a_winch_does_not() {
+        let rate = SAMPLE_RATE as f32;
+        let measure = |level: f32, hz: f32, music: bool| {
+            let p = Arc::new(SeaParams::default());
+            p.set_master(crate::settings::Settings::default().volume);
+            p.set_sea(crate::settings::Settings::default().sea);
+            p.set_boat(crate::settings::Settings::default().boat);
+            p.set_music(crate::settings::Settings::default().music);
+            store(&p.wind_level, (18.0f32 / 20.0).powf(1.5));
+            store(&p.wind_cutoff, 320.0 + 95.0 * 18.0);
+            store(&p.water_level, (5.5f32 / 7.0).powf(1.4));
+            store(&p.water_cutoff, 260.0 + 150.0 * 5.5);
+            store(&p.rig_level, ((18.0 - 11.0) / 16.0f32).powf(1.6));
+            store(&p.rig_hz, 300.0);
+            store(&p.gear_level, level);
+            store(&p.gear_hz, hz);
+            let mut s = SeaStream::new(p.clone());
+            let (mut sum, mut n, mut peak) = (0.0f64, 0usize, 0.0f32);
+            let every = (rate * 0.35) as usize;
+            for i in 0..(rate as usize * 9) {
+                if music && i > (rate as usize * 4) && i % every == 0 {
+                    p.strike(147.0, 0.5);
+                    p.strike(220.0, 0.45);
+                    p.strike(262.0, 0.4);
+                    p.strike_damped(330.0, 0.55 * 0.85, 0.76);
+                }
+                let out = s.next().unwrap_or(0.0);
+                if i > (rate as usize * 4) {
+                    sum += (out * out) as f64;
+                    peak = peak.max(out.abs());
+                    n += 1;
+                }
+            }
+            ((sum / n as f64).sqrt() as f32, peak)
+        };
+        let band_under = |level: f32, hz: f32| {
+            let (quiet, _) = measure(level, hz, false);
+            let (both, peak) = measure(level, hz, true);
+            let band = (both * both - quiet * quiet).max(0.0).sqrt();
+            let db = |x: f32| 20.0 * x.max(1e-9).log10();
+            (db(quiet), db(band), peak)
+        };
+
+        // Line going out at a rate that has the reel past unity: the moment of the thing.
+        let (reel, band, peak) = band_under(1.9, 70.0);
+        println!("a fish running: reel {reel:.1} dBFS, band {band:.1}, peak {peak:.2}");
+        assert!(
+            reel - band > 8.0,
+            "the reel is only {:.1} dB over the band on a run, which is two loud things \
+             in the same place",
+            reel - band
+        );
+        assert!(
+            peak < 0.90,
+            "the soft clip is doing the mixing: peak {peak:.2}"
+        );
+
+        // And a winch is not a fish. Nothing ducks here — a sheet coming in is work, not
+        // an event, and the band plays through work.
+        let (_, winching, _) = band_under(0.95, 22.0);
+        let (_, nothing, _) = band_under(0.0, 0.0);
+        assert!(
+            (winching - nothing).abs() < 1.0,
+            "winding a winch ducked the band by {:.1} dB",
+            nothing - winching
         );
     }
 }
