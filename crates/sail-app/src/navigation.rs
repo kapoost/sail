@@ -223,7 +223,6 @@ pub fn enter_in_the_log(
     let Some(said) = chart.accepted.take() else {
         return;
     };
-    const GOOD_ENOUGH: f64 = 460.0;
     let truth = sim.sim.state.pos;
     let out_by = (said - truth).length();
     // Which marks it was taken on, kept so that the position can hold for as long as
@@ -239,6 +238,13 @@ pub fn enter_in_the_log(
                 .map(|m| (m.at, m.kind))
         })
         .collect();
+    // A quarter of a mile off two bearings, and a third more off three.
+    //
+    // Leaning the three-bearing case the player's way was asked for from the deck and it
+    // is defensible rather than charity: three lines are more work, they carry their own
+    // check in the cocked hat, and a navigator who has taken a third bearing *has* done
+    // the thing the pilot book asks for. The reward for method is a little more rope.
+    let good_enough = if on.len() >= 3 { 620.0 } else { 460.0 };
     nav.sights.clear();
     // The lines come off the chart the moment the fix is in the log, which is what a
     // navigator does with them: they were working, the fix is the answer, and leaving
@@ -247,7 +253,7 @@ pub fn enter_in_the_log(
     chart
         .plot
         .retain(|item| !matches!(item, crate::chart::Plotted::Line { .. }));
-    if out_by < GOOD_ENOUGH {
+    if out_by < good_enough {
         nav.last_fix = sim.sim.state.time;
         nav.fixed_at = Some(said);
         nav.fixed_on = on.clone();

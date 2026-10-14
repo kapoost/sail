@@ -59,10 +59,19 @@ pub struct Fix {
     /// the crossing points. Nought for two sights, which is why two sights can never
     /// tell you that you were careless.
     pub hat: f64,
-    /// The finest angle any pair of them crossed at, radians. The fix is only as good as
-    /// this: two position lines that nearly lie along each other cross *somewhere* along
-    /// a long way of both.
+    /// The angle the fix actually stands on, radians: the **best** crossing among the
+    /// pairs rather than the worst.
+    ///
+    /// Which is what a navigator does with three lines. Two of them may lie nearly along
+    /// each other — three marks on a coast are often roughly in a row — and that pair
+    /// tells you little; but if the third crosses them squarely, the fix is a good one
+    /// and the near-parallel pair is simply not what it rests on. Reporting the worst
+    /// pair called a perfectly sound three-line fix *a fine cut*, which is the arithmetic
+    /// being stricter than the practice.
     pub cut: f64,
+    /// And the worst of them, which is still worth knowing: it is why the cocked hat is
+    /// the shape it is.
+    pub worst_cut: f64,
 }
 
 /// Where the two position lines cross, if they do.
@@ -99,7 +108,8 @@ pub fn plot(sights: &[Sight]) -> Option<Fix> {
         return None;
     }
     let mut points: Vec<DVec2> = Vec::new();
-    let mut cut: f64 = std::f64::consts::FRAC_PI_2;
+    let mut cut: f64 = 0.0;
+    let mut worst: f64 = std::f64::consts::FRAC_PI_2;
     for (i, a) in sights.iter().enumerate() {
         for b in &sights[i + 1..] {
             let here = cut_of(a, b);
@@ -111,7 +121,8 @@ pub fn plot(sights: &[Sight]) -> Option<Fix> {
             }
             if let Some(p) = crossing(a, b) {
                 points.push(p);
-                cut = cut.min(here);
+                cut = cut.max(here);
+                worst = worst.min(here);
             }
         }
     }
@@ -123,7 +134,12 @@ pub fn plot(sights: &[Sight]) -> Option<Fix> {
         .iter()
         .map(|p| (*p - at).length())
         .fold(0.0_f64, f64::max);
-    Some(Fix { at, hat, cut })
+    Some(Fix {
+        at,
+        hat,
+        cut,
+        worst_cut: worst,
+    })
 }
 
 /// What a navigator would say about a fix of this shape.
@@ -185,6 +201,45 @@ mod tests {
             (fix.at - me).length()
         );
         assert!(fix.hat < 1.0, "and opened a {:.1} m cocked hat", fix.hat);
+    }
+
+    /// Three lines, two of them nearly in a row, is still a good fix — because it stands
+    /// on the pair that crosses squarely and the near-parallel pair is not what it rests
+    /// on.
+    ///
+    /// Reported from the deck with a screenshot: three honest bearings, a cocked hat of
+    /// two hundred and sixty metres, and the chart calling it *a fine cut* because two of
+    /// the three marks happened to lie in a line. That was the arithmetic being stricter
+    /// than the practice.
+    #[test]
+    fn three_lines_stand_on_the_pair_that_crosses() {
+        let me = DVec2::ZERO;
+        let marks = [
+            // Two nearly in a row from here...
+            DVec2::new(0.0, 6_000.0),
+            DVec2::new(900.0, 6_000.0),
+            // ...and one square on the beam, which is what the fix is built on.
+            DVec2::new(6_000.0, 0.0),
+        ];
+        let sights: Vec<Sight> = marks
+            .iter()
+            .map(|m| Sight {
+                mark: *m,
+                bearing: bearing_to(me, *m),
+            })
+            .collect();
+        let fix = plot(&sights).expect("three bearings");
+        assert!(
+            deg(fix.cut) > 70.0,
+            "the fix stands on a {:.0} degree cut and was called {:.0}",
+            deg(fix.cut),
+            deg(fix.worst_cut)
+        );
+        assert!(
+            deg(fix.worst_cut) < 15.0,
+            "and the two in a row should still be reported as the poor pair"
+        );
+        assert_ne!(verdict(&fix, 3), "a fine cut — the lines barely cross");
     }
 
     /// A degree of error on each bearing opens the hat rather than moving the fix, and

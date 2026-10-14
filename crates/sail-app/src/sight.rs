@@ -229,9 +229,17 @@ pub fn draw(
     mut contexts: bevy_egui::EguiContexts,
     sighting: Res<Sighting>,
     nav: Res<Navigation>,
+    chart: Res<crate::chart::Chart>,
 ) -> Result {
     use bevy_egui::egui;
     if !sighting.up && sighting.lens < 0.01 {
+        return Ok(());
+    }
+    // Not over the chart. With it spread on the table the compass card and the notch
+    // were being drawn across the paper — and you cannot sight a mark through a chart
+    // table anyway: one of them is what you are looking at and the other is where you
+    // write it down.
+    if chart.spread {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
