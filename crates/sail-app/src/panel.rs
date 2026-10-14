@@ -96,45 +96,54 @@ pub fn draw(
         .show(ctx, |ui| {
             frame.show(ui, |ui| {
                 ui.set_width(172.0);
-                ui.spacing_mut().item_spacing.y = 6.0;
+                // Four points between rows rather than six. Over a dozen rows that is a
+                // readout's worth of sea given back, and nothing in here is close enough
+                // to anything else to be misread for it.
+                ui.spacing_mut().item_spacing.y = 4.0;
 
                 ui.horizontal(|ui| {
                     wind_dial(ui, telemetry.awa, telemetry.twa);
-                    ui.add_space(4.0);
+                    ui.add_space(3.0);
                     ui.vertical(|ui| {
                         gauge(ui, "LOG", ms_to_kn(telemetry.stw), 0.0, 10.0, "kn");
                         gauge(ui, "WIND", ms_to_kn(telemetry.aws), 0.0, 30.0, "kn");
-                        // The sea as it *is*, not as it was drawn. Not an instrument a
-                        // boat carries, but the forecast is, and knowing whether the
-                        // slamming is a metre or two is the difference between carrying
-                        // on and bearing away. This read `weather.hs` until the sea
-                        // started following the wind, at which point it became a number
-                        // from the start of the passage with a label claiming otherwise.
-                        gauge(ui, "SEA", telemetry.significant_height, 0.0, 4.0, "m");
-                        // The sounder. The one instrument that turns a shoal from an
-                        // ambush into a decision, which is the whole difference
-                        // between land being a hazard and land being a wall.
-                        // Scaled to ten metres, not forty: a sounder reading thirty
-                        // is a sounder with nothing to say, and compressing the whole
-                        // useful range into the bottom quarter of the bar is how a
-                        // gauge gets ignored.
-                        gauge_alarmed(
-                            ui,
-                            "DEPTH",
-                            telemetry.depth,
-                            0.0,
-                            10.0,
-                            "m",
-                            telemetry.under_keel < 1.5,
-                        );
                     });
+                });
+                // The other two side by side, because the rose is square and a column of
+                // four gauges beside it leaves half the height of the rose as nothing at
+                // all. Two up there, two across under it, and the block is sixty points
+                // shorter with the same four instruments in it.
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    // The sea as it *is*, not as it was drawn. Not an instrument a boat
+                    // carries, but the forecast is, and knowing whether the slamming is a
+                    // metre or two is the difference between carrying on and bearing
+                    // away. This read `weather.hs` until the sea started following the
+                    // wind, at which point it became a number from the start of the
+                    // passage with a label claiming otherwise.
+                    gauge(ui, "SEA", telemetry.significant_height, 0.0, 4.0, "m");
+                    // The sounder. The one instrument that turns a shoal from an ambush
+                    // into a decision, which is the whole difference between land being a
+                    // hazard and land being a wall. Scaled to ten metres, not forty: a
+                    // sounder reading thirty is a sounder with nothing to say.
+                    gauge_alarmed(
+                        ui,
+                        "DEPTH",
+                        telemetry.depth,
+                        0.0,
+                        10.0,
+                        "m",
+                        telemetry.under_keel < 1.5,
+                    );
                 });
 
                 heel_scale(ui, telemetry.heel);
 
-                ui.add_space(2.0);
-                readout(ui, "HDG", &format!("{:03.0}", deg(heading)));
-                readout(ui, "TWA", &format!("{:+.0}", deg(telemetry.twa)));
+                readout_pair(
+                    ui,
+                    ("HDG", &format!("{:03.0}", deg(heading))),
+                    ("TWA", &format!("{:+.0}", deg(telemetry.twa))),
+                );
                 // The apparent, which is the wind the sails are actually in and the one
                 // a trimmer reads. It was in the diagnostic panel and on the windex and
                 // nowhere a person glances at — so the one number you set a sheet by was
@@ -149,7 +158,17 @@ pub fn draw(
                         ms_to_kn(telemetry.aws)
                     ),
                 );
-                readout(ui, "VMG", &format!("{:.2} kn", ms_to_kn(telemetry.vmg)));
+                // The true wind beside the speed made good, which is the pair a decision
+                // is made out of: how fast she is going where she is going, and how much
+                // wind there actually is to do it with. The console had the apparent in
+                // two places and the true wind's *strength* nowhere at all — it went in
+                // here because pairing the rows left exactly this much room, which is the
+                // nicest kind of saving.
+                readout_pair(
+                    ui,
+                    ("VMG", &format!("{:.1} kn", ms_to_kn(telemetry.vmg))),
+                    ("TWS", &format!("{:.0} kn", ms_to_kn(telemetry.tws))),
+                );
                 // The barometer. A skipper does not sail the wind that is blowing, he
                 // sails the one he thinks will be blowing in an hour: whether to reef
                 // now while it is easy, whether this shift is worth tacking on. The
@@ -205,14 +224,19 @@ pub fn draw(
                         .monospace()
                         .size(13.0),
                 );
-                readout(ui, "RANGE", &format!("{:.2} nm", distance / 1852.0));
-                readout(ui, "BRG", &format!("{:03.0}", deg(bearing)));
-                readout(
+                readout_pair(
                     ui,
-                    if overdue { "OVERDUE" } else { "LEFT" },
-                    &clock(course.remaining().abs()),
+                    ("RANGE", &format!("{:.2} nm", distance / 1852.0)),
+                    ("BRG", &format!("{:03.0}", deg(bearing))),
                 );
-                readout(ui, "DONE", &format!("{}", course.delivered));
+                readout_pair(
+                    ui,
+                    (
+                        if overdue { "OVERDUE" } else { "LEFT" },
+                        &clock(course.remaining().abs()),
+                    ),
+                    ("DONE", &format!("{}", course.delivered)),
+                );
             });
         });
 
@@ -707,6 +731,10 @@ pub fn draw(
 /// How wide the console is, in points, whatever is written in it.
 const CONSOLE_WIDTH: f32 = 1180.0;
 
+/// A gauge: wide enough for a label, a number and a unit, and no taller than it has to
+/// be. Two of them side by side are the width of the column.
+const GAUGE: egui::Vec2 = egui::vec2(82.0, 29.0);
+
 /// A line of monospace text of a fixed width, whatever it says.
 ///
 /// Because the console is anchored on its *middle*, so anything that changes its width
@@ -765,7 +793,7 @@ fn separator(ui: &mut egui::Ui) {
 
 /// The wind dial: the one instrument a sailor looks at more than the water.
 fn wind_dial(ui: &mut egui::Ui, awa: f64, twa: f64) {
-    let size = egui::vec2(90.0, 90.0);
+    let size = egui::vec2(84.0, 84.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let p = ui.painter();
     let c = rect.center();
@@ -836,13 +864,13 @@ fn gauge_alarmed(
     unit: &str,
     alarm: bool,
 ) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(80.0, 34.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(GAUGE, egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, 2.0, paint::TRACK);
     let f = ((value - lo) / (hi - lo)).clamp(0.0, 1.0) as f32;
     let bar = egui::Rect::from_min_size(
-        rect.left_bottom() + egui::vec2(3.0, -13.0),
-        egui::vec2((rect.width() - 6.0) * f.max(0.02), 10.0),
+        rect.left_bottom() + egui::vec2(3.0, -11.0),
+        egui::vec2((rect.width() - 6.0) * f.max(0.02), 8.0),
     );
     let colour = if alarm { paint::BAD } else { paint::LIVE };
     p.rect_filled(bar, 1.0, colour);
@@ -865,19 +893,19 @@ fn gauge_alarmed(
         rect.right_top() + egui::vec2(-4.0, 2.0),
         egui::Align2::RIGHT_TOP,
         format!("{value:.1}{unit}"),
-        egui::FontId::monospace(12.0),
+        egui::FontId::monospace(11.0),
         if alarm { paint::BAD } else { paint::FACE },
     );
 }
 
 fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &str) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(80.0, 34.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(GAUGE, egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, 2.0, paint::TRACK);
     let f = ((value - lo) / (hi - lo)).clamp(0.0, 1.0) as f32;
     let bar = egui::Rect::from_min_size(
-        rect.left_bottom() + egui::vec2(3.0, -13.0),
-        egui::vec2((rect.width() - 6.0) * f, 10.0),
+        rect.left_bottom() + egui::vec2(3.0, -11.0),
+        egui::vec2((rect.width() - 6.0) * f, 8.0),
     );
     p.rect_filled(bar, 1.0, paint::LIVE);
     p.text(
@@ -891,7 +919,7 @@ fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &st
         rect.right_top() + egui::vec2(-4.0, 2.0),
         egui::Align2::RIGHT_TOP,
         format!("{value:.1}{unit}"),
-        egui::FontId::monospace(12.0),
+        egui::FontId::monospace(11.0),
         paint::FACE,
     );
 }
@@ -899,7 +927,7 @@ fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &st
 /// Heel, drawn as a horizon that tilts. One to one, because it has to agree with what
 /// your inner ear is already telling you.
 fn heel_scale(ui: &mut egui::Ui, heel: f64) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(164.0, 34.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(168.0, 26.0), egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, 2.0, paint::TRACK);
     let c = rect.center();
@@ -966,10 +994,37 @@ fn tendency_words(three_hourly: f64) -> String {
     }
 }
 
+/// Two short readouts on one line.
+///
+/// Most of what this column says is three characters long — a heading, a wind angle, a
+/// count — and a full-width row for three characters is two thirds of that row thrown
+/// away. Asked for from the deck as wanting less of the picture spent on the
+/// instruments: the column is a third shorter for this and nothing has been taken out
+/// of it.
+///
+/// Only for the short ones. An apparent wind with its speed beside it, a barometer with
+/// its tendency, a destination — those are sentences and they keep their own line,
+/// because the saving from cramming them is a line and the cost is having to read twice.
+fn readout_pair(ui: &mut egui::Ui, left: (&str, &str), right: (&str, &str)) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let half = (ui.available_width() - 4.0) * 0.5;
+        ui.scope(|ui| {
+            ui.set_width(half);
+            readout(ui, left.0, left.1);
+        });
+        ui.scope(|ui| {
+            ui.set_width(half);
+            readout(ui, right.0, right.1);
+        });
+    });
+}
+
 fn readout(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
         ui.label(
-            egui::RichText::new(format!("{label:<6}"))
+            egui::RichText::new(format!("{label:<5}"))
                 .color(paint::LABEL)
                 .monospace()
                 .size(9.0),
