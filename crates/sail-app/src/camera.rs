@@ -126,6 +126,11 @@ impl HeadMotion {
 pub struct ViewAim {
     yaw: f32,
     pitch: f32,
+    /// What the hand cannot hold still, kept separately so that it can be taken out
+    /// again. The wobble is applied as the *change* in it rather than added to the aim,
+    /// or a boat rolling for a minute would walk the view round the horizon.
+    hand_yaw: f32,
+    hand_pitch: f32,
     /// Seconds since the hand last moved the view.
     ///
     /// Everything automatic in here is gated on it. A view that corrects itself the
@@ -239,8 +244,10 @@ const AIM_RECENTRE: f32 = 0.42;
 const ROLL_HOLDS_THE_EYE: f32 = 2.6;
 
 /// Swing the view with the right mouse button held.
+#[allow(clippy::too_many_arguments)]
 pub fn aim(
     sim: Res<crate::sim::Sim>,
+    sighting: Res<crate::sight::Sighting>,
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -264,6 +271,12 @@ pub fn aim(
     if home {
         aim.since_hand = DWELL;
         *attention = Attention::default();
+        // Asked for explicitly, so it goes home even with an instrument up — and the
+        // check below that holds the view for the instruments is written after this for
+        // exactly that reason.
+        aim.yaw -= aim.yaw * (1.0 - (-6.0 * time.delta_secs()).exp());
+        aim.pitch -= aim.pitch * (1.0 - (-6.0 * time.delta_secs()).exp());
+        return;
     }
     // The wait. Inside it the view simply stays where it was put.
     if aim.since_hand < DWELL {
@@ -272,6 +285,48 @@ pub fn aim(
     // And nothing drifts home while the eye is on something, or the drift and the
     // settle would pull against each other and land somewhere between the two.
     if attention.held().is_some() {
+        return;
+    }
+    // Nor while there is an instrument at the eye. A man with binoculars up does not
+    // swing his head back to look forward, and neither does one holding a hand bearing
+    // compass on a lighthouse — the whole gesture is *keeping it there* while you read
+    // the card. The view drifting home underneath that is the instrument fighting the
+    // hand that is using it, which is what was reported from the deck.
+    //
+    // **But it is not steady.** Nobody holds a glass still on a small boat, and the
+    // instrument makes it worse rather than better: three times nearer is three times
+    // the wobble, which is the real reason a pair of seven-by-fifties is almost unusable
+    // at sea and why people brace them against a shroud. So what is held is the
+    // *aim*, and on top of it goes what she is doing to the hand holding it — her roll,
+    // her pitch and her yaw, in proportion to the sea she is in.
+    //
+    // Added as the change in the wobble rather than to the aim itself, or a boat rolling
+    // for a minute would walk the view round the horizon.
+    let st = &sim.sim.state;
+    let sea = (sim.sim.telemetry.significant_height as f32 / 1.6).clamp(0.25, 1.8);
+    let holding = sighting.up || sighting.glasses;
+    // Her heel counts as much as her rolling. Standing on a deck canted twenty degrees
+    // you are holding on with one hand and holding the glass with the other, braced
+    // against a boat that is leaning away from you — and what that costs is steadiness.
+    // So the heel multiplies the wobble, and it leans the line of sight a little as well:
+    // a hand-held glass on a heeled boat drifts low to leeward, which is why you end up
+    // looking at the water rather than at the thing.
+    let heeled = (st.heel.abs() as f32 / 0.44).min(1.6);
+    let gain = if holding {
+        sea * (1.0 + heeled) * if sighting.glasses { 2.3 } else { 1.0 }
+    } else {
+        0.0
+    };
+    let want_yaw =
+        (st.roll_rate as f32 * 0.085 + st.yaw_rate as f32 * 0.22 + st.heel as f32 * 0.06) * gain;
+    let want_pitch = (st.pitch_rate as f32 * 0.20 + st.heave_rate as f32 * 0.010
+        - st.heel.abs() as f32 * 0.05)
+        * gain;
+    aim.yaw = (aim.yaw + want_yaw - aim.hand_yaw).clamp(-AIM_YAW, AIM_YAW);
+    aim.pitch = (aim.pitch + want_pitch - aim.hand_pitch).clamp(-AIM_PITCH_DOWN, AIM_PITCH_UP);
+    aim.hand_yaw = want_yaw;
+    aim.hand_pitch = want_pitch;
+    if holding {
         return;
     }
     let k = if home {
