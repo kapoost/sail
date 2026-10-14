@@ -91,6 +91,7 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
 /// and checks that the two lists are the same one. A key the program answers to and the
 /// help does not mention is a feature nobody will find; a key the help promises and
 /// nothing reads is a lie, and both have happened here.
+#[cfg_attr(not(test), allow(dead_code))]
 pub const DOCUMENTED: [KeyCode; 35] = [
     // At the helm.
     KeyCode::ArrowLeft,
