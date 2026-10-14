@@ -78,39 +78,67 @@ jobs:
           body: |
             A sailing simulator. One file each way, nothing to install.
 
-            **Windows** — download `Sail.exe` and run it. Windows will say *"Windows
-            protected your PC"* because the file is not signed: click **More info**, then
-            **Run anyway**.
+            ## macOS
 
-            **macOS** — download `Sail-macos.zip`, unzip it, and the first time,
-            **right-click `Sail.app` and choose Open** rather than double-clicking.
-            Downloaded applications are quarantined, and right-click-Open is the way past
-            it. Universal: Apple Silicon and Intel.
+            Paste this into Terminal:
 
-            If macOS says **"Sail is damaged and can't be opened"**, the file is not
-            damaged — that is what an Apple Silicon Mac says about an application whose
-            signature it cannot check, and builds before v0.1.3 went out without one.
-            Either take this release, or clear the quarantine flag on the one you have:
+            ```
+            curl -fsSL https://raw.githubusercontent.com/kapoost/sail/main/dist/install.sh | sh
+            ```
+
+            It puts the game in `~/Applications`, brings `sail-server` with it, and
+            opens by double-clicking from then on. Run the same line again for the
+            next version.
+
+            **Why a line in Terminal and not just the zip.** A Mac refuses to open an
+            application that nobody has paid Apple to vouch for, and the refusal says
+            *"Sail is damaged and can't be opened"* when the file is not damaged in
+            any way. The old way past it — right-click, Open — **Apple removed in
+            macOS 15**, so the instruction in every older copy of these notes no
+            longer works. The quarantine that causes all this is put on by the
+            program that *downloads* the file: a browser marks what it saves, `curl`
+            does not. So a copy that arrives through that line has nothing on it to
+            get past.
+
+            If you would rather do it by hand: download `Sail-macos.zip`, unzip it,
+            and then either
 
             ```
             xattr -dr com.apple.quarantine /path/to/Sail.app
             ```
 
-            **Sailing together.** One of you runs `sail-server` (it is in the macOS
-            zip and beside `Sail.exe` on Windows) and everybody starts the game
-            pointed at that machine:
+            or double-click it, let it be refused, and go to **System Settings →
+            Privacy & Security**, scroll to the bottom, and press **Open Anyway**.
+
+            Universal: Apple Silicon and Intel.
+
+            ## Windows
+
+            Download `Sail.exe` and run it. Windows will say *"Windows protected your
+            PC"* because the file is not signed: click **More info**, then **Run
+            anyway**.
+
+            ## Sailing together
+
+            One of you runs `sail-server` (it comes with the macOS install and sits
+            beside `Sail.exe` on Windows):
 
             ```
             sail-server --seed 42
-            SAIL_SEED=42 SAIL_JOIN=192.168.1.20:7714 Sail
             ```
 
-            Over the internet the same thing works if everybody is on one Tailscale
-            or ZeroTier network — use the address from there. The server needs no
-            graphics and runs on anything.
+            Everybody else presses **Esc** in the game and opens the **TOGETHER**
+            page: a game on the same network is in the list and joining is one click.
+            Over the internet, put the host's address in the box underneath — if
+            everybody is on one Tailscale or ZeroTier network, that address works
+            unchanged and nothing has to be forwarded.
 
-            The hull model and the font are inside the executable; `Sail.exe --licences`
-            or `Sail.app/Contents/MacOS/sail --licences` prints their terms.
+            The world comes from whoever is hosting: join and you are in their
+            archipelago, in their weather, at their time of day.
+
+            The hull model and the font are inside the executable; `Sail.exe
+            --licences` or `Sail.app/Contents/MacOS/sail --licences` prints their
+            terms.
 
             **The keys** are on the `?` in the bottom-right corner of the window, or
             press `?` or `F1`. They live in the program rather than here, because the

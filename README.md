@@ -46,7 +46,24 @@ vaguely.
 
 ## Try it
 
+On a Mac, without building anything:
+
 ```sh
+curl -fsSL https://raw.githubusercontent.com/kapoost/sail/main/dist/install.sh | sh
+```
+
+A line in a terminal rather than a download on purpose — macOS quarantines what a
+*browser* saves and not what `curl` fetches, and since macOS 15 removed right-click-Open
+there is otherwise no straightforward way past "Sail is damaged and can't be opened" on
+an application nobody has paid Apple to vouch for. See `dist/install.sh`, which explains
+itself at length.
+
+On Windows, `Sail.exe` from the releases page.
+
+From source:
+
+```sh
+cargo run -p sail-app --release      # the game
 cargo test -p sail-core              # the validation suite
 cargo run -p sail-core --release --example polar   # the speed polar
 ```
