@@ -28,6 +28,23 @@ jobs:
       - run: cargo build --profile dist -p sail-app --target x86_64-apple-darwin
       # The relay, for whoever is hosting a game. Tiny — no engine in its tree — so
       # building it for both architectures costs seconds.
+      # The Windows installer gets parsed by the only machine in this pipeline that can
+      # parse it. It is written on a Mac, and the fault it shipped with was an apostrophe
+      # inside a single-quoted string — "the game's own menu" — which PowerShell reads as
+      # the end of the string and then complains about a line forty rows further down.
+      # Nothing on a Mac was ever going to catch that; a Windows runner catches it in a
+      # second.
+      - name: the installer has to parse
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'dist/install.ps1'), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) {
+            $errors | ForEach-Object { Write-Host $_.Message }
+            throw 'dist/install.ps1 does not parse'
+          }
+          Write-Host 'dist/install.ps1 parses'
       - run: cargo build --profile dist -p sail-net --bin sail-server --target aarch64-apple-darwin
       - run: cargo build --profile dist -p sail-net --bin sail-server --target x86_64-apple-darwin
       - run: bash dist/make-app.sh

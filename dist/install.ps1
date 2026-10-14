@@ -79,7 +79,7 @@ if ($relay) {
     Say ''
     Say 'To host a game for your friends:'
     Say "    & '$(Join-Path $Dest 'sail-server.exe')' --seed 42"
-    Say 'and they join from the game's own menu: Esc, then TOGETHER.'
+    Say "and they join from the game's own menu: Esc, then TOGETHER."
 }
 Say ''
 Say 'Run this line again any time to get the newest version.'
