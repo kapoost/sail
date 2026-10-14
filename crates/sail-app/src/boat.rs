@@ -826,7 +826,19 @@ pub fn update_sails(
                 &mut mesh,
                 &geometry,
                 &SailTrim {
-                    lee: side,
+                    // The side the cloth bellies towards. For the mainsail that is the
+                    // side the *boom* is on, which during a gybe is not the side the wind
+                    // says: for a second or two the sail is aback, and a mainsail drawn
+                    // bellying away from its own spar is a sail turned inside out.
+                    lee: if surface.which == Sail::Main {
+                        if t_.boom >= 0.0 {
+                            1.0
+                        } else {
+                            -1.0
+                        }
+                    } else {
+                        side
+                    },
                     // The main's foot is hauled by the outhaul; a headsail's is pulled
                     // straight by its sheet, which is the same line that trims it, so
                     // there is nothing left over to let it hang.

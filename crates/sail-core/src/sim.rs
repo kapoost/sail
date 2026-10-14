@@ -1264,10 +1264,21 @@ impl Simulation {
 
         self.telemetry = Telemetry {
             mishap: self.mishap,
-            // Leeward is the side the wind is not on, so this is the boom's own place
-            // over the deck — continuous through a gybe, because when the wind changes
-            // sides the stored angle changes sign at the same moment.
-            boom: -lower_awa.signum() * self.state.boom_angle,
+            // From `wind_side` and not from the apparent wind's sign, and that is the
+            // whole of it.
+            //
+            // The stored angle changes sign when `wind_side` does — ten degrees *past*
+            // dead astern, with hysteresis, so that a boat squared off downwind does not
+            // flicker. Dividing by the raw `awa.signum()` instead meant the two
+            // disagreed for exactly as long as the apparent wind spent between 180 and
+            // 170 degrees: the drawn boom jumped to the new side the moment the wind
+            // touched dead astern, jumped back when the simulation flipped, and only
+            // then began its swing.
+            //
+            // Which is why it looked like a teleport when the helm was put over hard and
+            // looked right when the wind line was crossed slowly — reported from the deck
+            // exactly that way, and that observation is what found it.
+            boom: -self.wind_side * self.state.boom_angle,
             strain: self.strain_main.max(self.strain_head).max(self.strain_stay),
             bend_main,
             bend_jib,
