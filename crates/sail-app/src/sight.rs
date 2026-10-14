@@ -29,12 +29,30 @@ use crate::sim::Sim;
 #[derive(Resource, Default)]
 pub struct Sighting {
     pub up: bool,
+    /// Whether the glasses are at the eye, and how far the lens has got there: a pair of
+    /// binoculars comes up in about a third of a second and the picture does not jump.
+    pub glasses: bool,
+    pub lens: f32,
     /// What the notch is on at the moment, if anything: its name, what it is, and how
     /// far off. Worked out once a frame so the drawing and the taking agree.
     pub on: Option<(String, Mark, f64)>,
     /// The bearing the card is showing, radians true.
     pub bearing: f64,
 }
+
+/// What the glasses are worth.
+///
+/// Seven by fifty is what goes to sea — seven times, fifty millimetres of light — and
+/// seven times is a field of about seven degrees. Seven degrees on a screen you cannot
+/// brace against a shroud is unusable, so the picture here is nearer three times, which
+/// is honest about what it is: the *reach* of the instrument rather than its optics.
+///
+/// Reach is the part that matters. What binoculars do on a boat is not magnify, it is
+/// **identify**: a beacon is a stick at two miles and a beacon with a cone on it at two
+/// miles through the glasses. So they roughly double the range at which a mark can be
+/// named, which is the number the navigation actually uses.
+const MAGNIFIES: f32 = 3.1;
+pub const GLASSES_REACH: f64 = 2.2;
 
 /// How near the notch has to be before you can say you are on it, radians.
 ///
@@ -67,6 +85,13 @@ pub fn aim(
     // right-button drag and the deck is a trackpad; the click works too for anybody with
     // a mouse.
     let shifted = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    // The glasses, which are a different instrument from the compass and are used with
+    // the other hand: Shift and B puts them up. You can have both — you find the thing
+    // with the glasses and then shoot it with the compass, which is exactly the order a
+    // navigator does it in.
+    if keys.just_pressed(KeyCode::KeyB) && shifted {
+        sighting.glasses = !sighting.glasses;
+    }
     if keys.just_pressed(KeyCode::KeyN) && shifted {
         sighting.up = !sighting.up;
         if !sighting.up {
@@ -98,7 +123,10 @@ pub fn aim(
     for mark in &coast.marks {
         let off = mark.at - here;
         let range = off.length();
-        if range > mark.kind.identified_from().min(mark.visible_from(2.0)) {
+        // Through the glasses a mark can be named from about twice as far, which is what
+        // they are for.
+        let reach = if sighting.glasses { GLASSES_REACH } else { 1.0 };
+        if range > (mark.kind.identified_from() * reach).min(mark.visible_from(2.0)) {
             continue;
         }
         let to_it = wrap_tau(off.x.atan2(off.y));
@@ -170,6 +198,32 @@ pub fn aim(
     }
 }
 
+/// The glasses at the eye: the lens coming up, and the view narrowing with it.
+///
+/// Over a third of a second rather than instantly, because a cut from one field of view
+/// to another reads as a different camera rather than as a pair of binoculars — the eye
+/// needs the movement to understand what happened.
+pub fn glasses(
+    time: Res<Time>,
+    mut sighting: ResMut<Sighting>,
+    mut lens: Query<&mut Projection, With<crate::camera::MainCamera>>,
+) {
+    let want = if sighting.glasses { 1.0 } else { 0.0 };
+    let k = 1.0 - (-7.0 * time.delta_secs()).exp();
+    sighting.lens += (want - sighting.lens) * k;
+    if sighting.lens < 0.001 && want == 0.0 {
+        sighting.lens = 0.0;
+    }
+    let Ok(mut projection) = lens.single_mut() else {
+        return;
+    };
+    if let Projection::Perspective(perspective) = projection.as_mut() {
+        // The camera's own field, which is the one the rest of the game is framed for.
+        const NAKED: f32 = 0.72;
+        perspective.fov = NAKED / (1.0 + (MAGNIFIES - 1.0) * sighting.lens);
+    }
+}
+
 /// Draw it: a card across the bottom of the view with a notch down the middle.
 pub fn draw(
     mut contexts: bevy_egui::EguiContexts,
@@ -177,7 +231,7 @@ pub fn draw(
     nav: Res<Navigation>,
 ) -> Result {
     use bevy_egui::egui;
-    if !sighting.up {
+    if !sighting.up && sighting.lens < 0.01 {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
@@ -188,6 +242,37 @@ pub fn draw(
     ));
     let ink = egui::Color32::from_rgb(232, 228, 214);
     let card = egui::Color32::from_rgba_unmultiplied(12, 14, 18, 190);
+
+    // The glasses, drawn as what you see through them: one circle, because that is what
+    // a pair of binoculars actually looks like from behind. The two-circle picture is a
+    // convention from films and is not what your eyes do — they fuse the fields into one.
+    //
+    // Cut out of the dark with a stroke rather than a hole: a circle outlined with a
+    // line as wide as the screen fills everything outside it, which egui can do and
+    // cutting a hole in a rectangle cannot.
+    if sighting.lens > 0.01 {
+        let hole = screen.height() * 0.42;
+        let wide = screen.width() + screen.height();
+        painter.circle_stroke(
+            screen.center(),
+            hole + wide * 0.5,
+            egui::Stroke::new(
+                wide,
+                egui::Color32::from_rgba_unmultiplied(4, 5, 7, (235.0 * sighting.lens) as u8),
+            ),
+        );
+        painter.circle_stroke(
+            screen.center(),
+            hole,
+            egui::Stroke::new(
+                2.0,
+                egui::Color32::from_rgba_unmultiplied(18, 20, 24, (200.0 * sighting.lens) as u8),
+            ),
+        );
+    }
+    if !sighting.up {
+        return Ok(());
+    }
 
     // The notch, down the middle of the view, which is what you line up on the thing.
     let middle = screen.center().x;

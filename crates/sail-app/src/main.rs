@@ -360,6 +360,7 @@ fn main() {
                         navigation::enter_in_the_log,
                         navigation::the_fix_holds,
                         sight::aim,
+                        sight::glasses,
                     ),
                     chart::toggle,
                     retro::toggle,
