@@ -36,25 +36,40 @@ const VISIBLE: usize = 7;
 #[derive(Component)]
 pub struct Creel;
 
+/// The basket itself, as against the lanyard it hangs on. Marked because it is the part
+/// that gets wet, and a wet one is a darker one.
+#[derive(Component)]
+pub struct Basket;
+
 /// A fish in the creel, and which one of the catch it is.
 #[derive(Component)]
 pub struct InTheCreel(usize);
 
-/// Where the basket is in its swing.
-///
-/// Angle from plumb in the boat's own frame, so it is driven straight by the heel: the
-/// basket wants to hang vertically and the boat keeps moving the hanging point.
+/// Where the basket is in its swing. The arithmetic is in `swing.rs`, which is shared
+/// with everything else hung over her side.
 #[derive(Resource, Default)]
-pub struct Swing {
-    angle: f32,
-    rate: f32,
-}
+pub struct Swing(crate::swing::Swing);
 
-/// Restoring stiffness, per second squared: `g/l` for a pendulum of this length.
-const STIFF: f32 = 9.81 / LANYARD;
-/// And how quickly it dies away. A wicker basket half in the water is heavily damped —
-/// it does not ring like a bell, it takes two or three swings and settles.
-const DAMP: f32 = 1.9;
+/// What a creel of fish is, as a hanging thing.
+///
+/// Nearly weightless in the water and heavily damped there, because the sea goes
+/// straight through wicker — it is not a buoy and it does not try to float. Against the
+/// planking it is a wet basket: it arrives, makes a noise, and keeps almost none of its
+/// speed.
+fn as_hung() -> crate::swing::Hung {
+    crate::swing::Hung {
+        length: LANYARD,
+        reach: 0.26,
+        // Seven centimetres of clearance over a lanyard this long is about a tenth of a
+        // radian before the wicker is on her planking; outboard it can go where it likes.
+        inboard: 0.11,
+        outboard: 0.85,
+        bounce: 0.22,
+        buoyant: 0.25,
+        damp: 1.9,
+        damp_wet: 4.2,
+    }
+}
 
 /// What each fish looks like in the basket: how long for its weight, and its colour.
 ///
@@ -210,6 +225,7 @@ pub fn setup(
                 Visibility::default(),
             ));
             b.spawn((
+                Basket,
                 Mesh3d(basket),
                 MeshMaterial3d(wicker),
                 Transform::from_xyz(0.0, -LANYARD - 0.26, 0.0),
@@ -241,6 +257,7 @@ pub fn setup(
 }
 
 /// Swing the creel, and show what is in it.
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     sim: Res<Sim>,
     fishing: Res<Fishing>,
@@ -248,6 +265,7 @@ pub fn update(
     mut swing: ResMut<Swing>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut creel: Query<&mut Transform, With<Creel>>,
+    basket: Query<&MeshMaterial3d<StandardMaterial>, With<Basket>>,
     mut fish: Query<
         (
             &InTheCreel,
@@ -261,24 +279,40 @@ pub fn update(
     let st = sim.render_state();
     let dt = time.delta_secs().min(0.05);
 
-    // A pendulum, integrated rather than filtered. It wants to hang plumb, which in the
-    // boat's own frame means at minus the heel; gravity pulls it there and the damping
-    // of a basket half in the water takes the ring out of it.
-    let plumb = -st.heel as f32;
-    swing.rate += (STIFF * (plumb - swing.angle) - DAMP * swing.rate) * dt;
-    // And the roll itself throws it: a boat rolling under a hanging weight accelerates
-    // the hanging point sideways, which is the forcing term and is why gear swings hardest
-    // in the moment she comes back up rather than at the end of the roll.
-    swing.rate -= st.roll_rate as f32 * dt * 2.4;
-    swing.angle += swing.rate * dt;
-    // It can swing out as far as it likes and barely in at all, because inboard of it
-    // is the boat. A basket on a lanyard off the quarter fetches up against the topsides
-    // and stops, which is a limit with a reason rather than a pair of matched numbers:
-    // seven centimetres of clearance over a lanyard this long is about a tenth of a
-    // radian before the wicker is on the planking.
-    swing.angle = swing.angle.clamp(-0.85, 0.11);
+    // How far the cleat is above the water, which is what decides whether the basket is
+    // in it. The deck height is measured from the waterline, so what moves it is the
+    // boat's own heave against the wave under her — and the heel, which on a fitting
+    // this far outboard lifts it or buries it by most of a half-beam.
+    let wave = sim.sim.water.height(st.pos, st.time) as f32;
+    let heel = st.heel as f32;
+    let clearance = crate::deck::deck_height(CLEAT_Z) + st.heave as f32 - wave
+        + crate::deck::HULL_ON_THE_QUARTER * heel.sin();
+    swing
+        .0
+        .step(&as_hung(), -heel, st.roll_rate as f32, clearance, dt);
     for mut transform in &mut creel {
-        transform.rotation = Quat::from_rotation_z(swing.angle);
+        transform.rotation = Quat::from_rotation_z(swing.0.angle);
+    }
+    // Wet wicker is dark wicker, and it stays dark for a while after it comes up. That
+    // is the whole of what makes the water visible from the helm: the basket dips, goes
+    // the colour of a wet rope, and dries out again over the next minute.
+    let wet = swing.0.immersion(&as_hung(), -heel, clearance);
+    for skin in &basket {
+        if let Some(mut material) = materials.get_mut(&skin.0) {
+            let dry = Color::srgb(0.52, 0.40, 0.22).to_linear();
+            let soaked = Color::srgb(0.26, 0.19, 0.11).to_linear();
+            let was = material.base_color.to_linear();
+            // Towards wet at once and back towards dry slowly, because that is what
+            // drying is — a filter with two time constants rather than a lerp with one.
+            let want = if wet > 0.01 { soaked } else { dry };
+            let k = if wet > 0.01 { 6.0 } else { 0.25 } * dt;
+            material.base_color = Color::LinearRgba(LinearRgba {
+                red: was.red + (want.red - was.red) * k.min(1.0),
+                green: was.green + (want.green - was.green) * k.min(1.0),
+                blue: was.blue + (want.blue - was.blue) * k.min(1.0),
+                alpha: 1.0,
+            });
+        }
     }
 
     let caught = &fishing.caught;

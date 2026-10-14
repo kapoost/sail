@@ -42,6 +42,7 @@ mod sky;
 mod sound;
 mod spray;
 mod stowage;
+mod swing;
 mod tutorial;
 mod wake;
 mod weather;
@@ -325,7 +326,7 @@ fn main() {
                 ),
                 (
                     // The weather you can see, after everything that places it.
-                    fittings::update_vane,
+                    (fittings::update_vane, fittings::light_the_lamps),
                     horizon::follow,
                     sky::drift,
                     sky::light,
