@@ -25,6 +25,7 @@ mod hud;
 mod ink;
 mod input;
 mod islands;
+mod mob;
 mod music;
 mod net;
 mod panel;
@@ -40,6 +41,7 @@ mod sky;
 mod sound;
 mod spray;
 mod stowage;
+mod tutorial;
 mod wake;
 mod weather;
 mod windstreaks;
@@ -226,6 +228,11 @@ fn main() {
         // same places, and a passage can be repeated rather than merely re-rolled.
         .insert_resource(fishing::Fishing::new(weather.seed))
         .init_resource::<camera::ViewAim>()
+        // `SAIL_TUTORIAL=1` starts the drill on the first frame, which is how it gets
+        // looked at twenty times in an afternoon without clicking through a panel.
+        .insert_resource(tutorial::Tutorial::asked_for(
+            std::env::var("SAIL_TUTORIAL").is_ok(),
+        ))
         .add_systems(
             Startup,
             (
@@ -247,7 +254,7 @@ fn main() {
                 panel::setup,
                 stowage::setup,
                 rod::setup,
-                net::setup,
+                (mob::setup, net::setup),
                 windstreaks::setup,
             )
                 // Chained because several of these depend on each other's entities,
@@ -304,8 +311,8 @@ fn main() {
                     course::update,
                     world::update_sea,
                     course::float_marks,
-                    // The two things that live in the water she has just left.
-                    (wake::update, rod::update),
+                    // The things that live in the water she has just left.
+                    (wake::update, rod::update, mob::update),
                     rig::update,
                     camera::follow,
                     sound::update,
@@ -322,7 +329,7 @@ fn main() {
                     rain::update,
                     rain::shroud,
                     (settings::toggle, settings::apply),
-                    help::toggle,
+                    (help::toggle, mob::throw, tutorial::run),
                     camera::toggle,
                     camera::aim,
                     hud::toggle,
@@ -351,6 +358,7 @@ fn main() {
                 help::draw,
                 chart::draw,
                 hud::draw,
+                tutorial::draw,
             )
                 .chain(),
         )

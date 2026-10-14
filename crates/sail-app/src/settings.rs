@@ -41,6 +41,9 @@ pub enum Tab {
     Picture,
     Weather,
     Network,
+    /// Practice: the man-overboard drill, which is the one manoeuvre worth a page of its
+    /// own because it is the one nobody has practised.
+    Drill,
 }
 
 #[derive(Resource)]
@@ -142,6 +145,7 @@ pub fn draw(
     mut hud: ResMut<crate::hud::HudVisible>,
     mut net: ResMut<crate::net::Net>,
     fleet: Res<crate::fleet::Fleet>,
+    mut lesson: ResMut<crate::tutorial::Tutorial>,
 ) -> Result {
     if !settings.open {
         net.scan = None;
@@ -416,7 +420,9 @@ pub fn draw(
                     });
                 }
 
-                if settings.tab == Tab::Network {
+                if settings.tab == Tab::Drill {
+                    drill(ui, &mut lesson);
+                } else if settings.tab == Tab::Network {
                     together(ui, &mut net, &fleet, sim.sim.state.pos);
                 } else {
                     // Stop looking the moment the page is not showing. The comment on
@@ -435,7 +441,45 @@ pub fn draw(
     Ok(())
 }
 
-/// The four pages, as a row of labels.
+/// The drill page: start it, stop it, and what it is for.
+///
+/// A page rather than a key, because starting a man-overboard drill by accident in the
+/// middle of a delivery would be a poor joke, and because this is where somebody who has
+/// just opened the game looks for the thing that teaches them to sail it.
+fn drill(ui: &mut egui::Ui, lesson: &mut crate::tutorial::Tutorial) {
+    heading(ui, "MAN OVERBOARD DRILL");
+    ui.label(
+        egui::RichText::new(
+            "Getting her sailing is three keys. Getting her back to one spot and stopped \
+             there is the whole of boat handling, and nobody practises it until the \
+             afternoon they need it.\n\nThe drill talks you through making her go, and \
+             then the dan buoy goes over the side.",
+        )
+        .color(egui::Color32::from_rgb(176, 182, 190))
+        .monospace()
+        .size(11.0),
+    );
+    ui.add_space(8.0);
+    if lesson.running() {
+        if ui
+            .button(egui::RichText::new("STOP THE DRILL").monospace().size(12.0))
+            .clicked()
+        {
+            lesson.wants_stop = true;
+        }
+    } else if ui
+        .button(
+            egui::RichText::new("START — PUT HER ON A REACH")
+                .monospace()
+                .size(12.0),
+        )
+        .clicked()
+    {
+        lesson.wants_start = true;
+    }
+}
+
+/// The pages, as a row of labels.
 ///
 /// Its own function so that it can be looked at without a window. Everything else in
 /// this panel is a slider over a resource and would need half the game to test; this is
@@ -467,11 +511,12 @@ pub fn tabs(ui: &mut egui::Ui, current: &mut Tab) {
 
 /// In the order they are read, which is the order they were added in and also the order
 /// of how often anybody touches them.
-pub const PAGES: [(Tab, &str); 4] = [
+pub const PAGES: [(Tab, &str); 5] = [
     (Tab::Sound, "SOUND"),
     (Tab::Picture, "PICTURE"),
     (Tab::Weather, "WEATHER"),
     (Tab::Network, "TOGETHER"),
+    (Tab::Drill, "DRILL"),
 ];
 
 fn heading(ui: &mut egui::Ui, text: &str) {
