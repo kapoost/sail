@@ -37,6 +37,7 @@ mod sim;
 mod sky;
 mod sound;
 mod spray;
+mod stowage;
 mod wake;
 mod weather;
 mod windstreaks;
@@ -238,6 +239,7 @@ fn main() {
                 rain::setup,
                 rig::setup,
                 panel::setup,
+                stowage::setup,
                 net::setup,
                 windstreaks::setup,
             )
@@ -278,7 +280,11 @@ fn main() {
                     fittings::update_tiller,
                     fittings::update_compass,
                     boat::update_boom,
-                    (boat::update_staysail_boom, boat::update_pole),
+                    (
+                        boat::update_staysail_boom,
+                        boat::update_pole,
+                        stowage::update,
+                    ),
                     boat::update_windex,
                     boat::update_genoa_cars,
                     boat::update_telltales,
