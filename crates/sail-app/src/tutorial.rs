@@ -306,8 +306,16 @@ pub fn run(
                 let st = &sim.render_state();
                 // Over the side at the quarter, where it is racked: astern of her and a
                 // little to leeward, which is where a person goes in from the rail.
-                let at =
-                    st.pos - st.forward() * (loa * 0.45) + st.starboard() * tm.awa.signum() * -1.6;
+                // Off the rail and clear of her, not inside her. A point a metre and a
+                // half off the centreline is *inside* a boat three and a half metres in
+                // the beam, so `off_the_rail` read nought at the instant he went in — and
+                // nought at six knots is the run-down check firing on the accident
+                // itself, which opened every debrief by accusing the player of sailing
+                // over him. Found in review. How far clear is `CLEAR_OF_HER`, which lives
+                // beside the check it has to stay outside of.
+                let clear = sim.config().beam * 0.5 + crate::mob::CLEAR_OF_HER;
+                let at = st.pos - st.forward() * (loa * 0.45)
+                    + st.starboard() * tm.awa.signum() * -clear;
                 over.man_overboard(at, now);
                 // Three strikes. The bell is the one thing aboard whose whole purpose is
                 // telling people something, and this is the thing it is for.

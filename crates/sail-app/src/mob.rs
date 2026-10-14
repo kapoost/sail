@@ -75,7 +75,17 @@ const ALONGSIDE_SPEED: f64 = 1.5;
 /// Seconds he has to stay in reach before he is aboard.
 const HANDS_ON: f64 = 2.0;
 /// Running him down: this close to her side, this fast.
-const RUN_DOWN: f64 = 1.0;
+pub const RUN_DOWN: f64 = 1.0;
+
+/// How far off her rail a person goes in, metres.
+///
+/// Further out than `RUN_DOWN`, which is the whole point of naming it: somebody falling
+/// off the rail is not somebody being run down, and if he lands inside that distance the
+/// check fires on the accident itself. The first version put him a metre and a half off
+/// the *centreline* of a boat three and a half metres in the beam — which is to say
+/// inside her — so the range read nought at six knots and every debrief opened by
+/// accusing the player of sailing over him. Found in review.
+pub const CLEAR_OF_HER: f64 = 1.3;
 const RUN_DOWN_SPEED: f64 = 3.0;
 
 /// How long he lasts, seconds.
@@ -159,6 +169,15 @@ pub enum Drill {
         hands_on: f64,
         /// Times she has sailed over him at speed.
         run_downs: u32,
+        /// Whether she is alongside him *now*, so that one pass counts once.
+        ///
+        /// True the moment he goes in, because at that moment he is against her
+        /// topsides and she is doing six knots — which is a man falling off a boat and
+        /// not a boat running a man down. It was a `Local` on the system before, which
+        /// made it both wrong at the start of a drill and stale at the end of one: a
+        /// drill that finished while she was over him swallowed the first real run-down
+        /// of the next.
+        brushing: bool,
     },
     /// And he is gone, which is the other way this ends.
     ///
@@ -210,6 +229,7 @@ impl Overboard {
             thrown_at: None,
             hands_on: 0.0,
             run_downs: 0,
+            brushing: true,
         };
     }
 
@@ -316,6 +336,10 @@ pub fn setup(
         ..default()
     });
 
+    // Before anything that can return: a world with no boat in it still has a drill
+    // resource, or every system that reads one fails on every frame for ever instead of
+    // the deck merely being bare.
+    commands.init_resource::<Overboard>();
     let Ok(root) = boat.single() else {
         warn!("no boat to lash a lifebuoy to");
         return;
@@ -424,8 +448,6 @@ pub fn setup(
         Transform::from_translation(origin.to_bevy(sim.sim.state.pos, 0.0)),
         Visibility::Hidden,
     ));
-
-    commands.init_resource::<Overboard>();
 }
 
 /// Throw the lifebuoy: the key, and the whole of what the crew can do in the first two
@@ -496,7 +518,6 @@ pub fn update(
     mut oscar: OscarAfloat,
     mut ring: RingAfloat,
     mut stowed: InItsTube,
-    mut over_him: Local<bool>,
 ) {
     let now = sim.sim.state.time;
     let dt = time.delta_secs_f64();
@@ -537,6 +558,7 @@ pub fn update(
         thrown_at,
         hands_on: ref mut hands,
         run_downs: ref mut downs,
+        ref mut brushing,
         ..
     } = over.drill
     {
@@ -560,12 +582,12 @@ pub fn update(
         let range = off_the_rail(&sim, *him);
         let speed = ms_to_kn(sim.sim.telemetry.stw.abs());
         if range < RUN_DOWN && speed > RUN_DOWN_SPEED {
-            if !*over_him {
+            if !*brushing {
                 *downs += 1;
-                *over_him = true;
+                *brushing = true;
             }
         } else if range > RUN_DOWN * 2.0 {
-            *over_him = false;
+            *brushing = false;
         }
         if range < REACH && speed < ALONGSIDE_SPEED {
             *hands += dt;
@@ -729,6 +751,20 @@ mod tests {
         assert!(over.to_oscar(DVec2::ZERO).is_none());
         over.man_overboard(DVec2::new(10.0, 0.0), 12.0);
         assert!(over.live());
+    }
+
+    /// A man goes into the water clear of her side, not against it.
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn he_goes_in_outside_the_run_down_check() {
+        assert!(
+            CLEAR_OF_HER > RUN_DOWN,
+            "he lands {CLEAR_OF_HER:.1} m off her and the run-down check wants \
+             {RUN_DOWN:.1}, so going overboard counts as being run over"
+        );
+        // And within an arm of her, because he went off the rail rather than being
+        // thrown.
+        assert!(CLEAR_OF_HER < 2.5);
     }
 
     /// The verdict says the three things that matter and says them in sailor's units.

@@ -422,7 +422,8 @@ pub fn draw(
 
                 if settings.tab == Tab::Drill {
                     drill(ui, &mut lesson);
-                } else if settings.tab == Tab::Network {
+                }
+                if settings.tab == Tab::Network {
                     together(ui, &mut net, &fleet, sim.sim.state.pos);
                 } else {
                     // Stop looking the moment the page is not showing. The comment on
@@ -430,6 +431,11 @@ pub fn draw(
                     // true of the first version: nothing ever dropped it, so one visit to
                     // the page left the game broadcasting at everybody's switch once a
                     // second for the rest of the passage.
+                    //
+                    // And this is a separate `if` rather than the tail of a chain for the
+                    // same reason, learnt twice: hanging a third page off the front of it
+                    // put the clear behind *that* page's arm, so opening TOGETHER and then
+                    // stepping to DRILL left the scan running. Found in review.
                     net.scan = None;
                 }
                 footer(ui, &mut close);
