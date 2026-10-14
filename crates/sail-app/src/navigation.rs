@@ -206,9 +206,20 @@ pub fn enter_in_the_log(
     let truth = sim.sim.state.pos;
     let out_by = (said - truth).length();
     nav.sights.clear();
+    // The lines come off the chart the moment the fix is in the log, which is what a
+    // navigator does with them: they were working, the fix is the answer, and leaving
+    // them on is how a plot turns into a thicket nobody can read an hour later. What is
+    // left behind is the fix itself, which is the one thing worth keeping.
+    chart
+        .plot
+        .retain(|item| !matches!(item, crate::chart::Plotted::Line { .. }));
     if out_by < GOOD_ENOUGH {
         nav.last_fix = sim.sim.state.time;
         nav.fixed_at = Some(said);
+        // And it goes on the chart where it was worked out, which is where a fix goes:
+        // a cross, and the time beside it, so an hour later you can see what you were
+        // working from.
+        chart.plot.push(crate::chart::Plotted::Cross { at: said });
         info!(
             "fix entered: {:.0} m from where she is — the chart knows her again for six \
              minutes",

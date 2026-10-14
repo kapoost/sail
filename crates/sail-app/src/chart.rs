@@ -579,6 +579,10 @@ pub fn draw(
             let crossing_at = sail_core::fix::plot(&nav.sights).map(|f| f.at);
 
             // --- What is already on the chart --------------------------------
+            //
+            // On the table only. The folded chart is a glance — *where am I, what is
+            // ahead* — and a plot on it is a thicket of pencil over a picture two inches
+            // square. Working belongs where there is room to work.
             for item in &chart.plot {
                 match *item {
                     Plotted::Line { through, bearing } => {
