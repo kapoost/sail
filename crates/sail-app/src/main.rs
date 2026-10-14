@@ -27,6 +27,7 @@ mod hud;
 mod ink;
 mod input;
 mod islands;
+mod logbook;
 mod marks;
 mod mob;
 mod music;
@@ -40,6 +41,7 @@ mod rod;
 mod sail_texture;
 mod sea_texture;
 mod settings;
+mod sight;
 mod sim;
 mod sky;
 mod sound;
@@ -219,6 +221,7 @@ fn main() {
         .init_resource::<sky::Baking>()
         .init_resource::<settings::Settings>()
         .init_resource::<help::Help>()
+        .init_resource::<logbook::Logbook>()
         .insert_resource(retro::Retro::from_env())
         .insert_resource(world::Ink::from_env())
         .init_resource::<world::SeaFilm>()
@@ -234,6 +237,7 @@ fn main() {
         .insert_resource(fishing::Fishing::new(weather.seed))
         .init_resource::<camera::ViewAim>()
         .init_resource::<navigation::Navigation>()
+        .init_resource::<sight::Sighting>()
         // `SAIL_TUTORIAL=1` starts the drill on the first frame, which is how it gets
         // looked at twenty times in an afternoon without clicking through a panel.
         .insert_resource(tutorial::Tutorial::asked_for(
@@ -341,11 +345,16 @@ fn main() {
                     rain::update,
                     rain::shroud,
                     (settings::toggle, settings::apply),
-                    (help::toggle, mob::throw, tutorial::run),
+                    (help::toggle, logbook::toggle, mob::throw, tutorial::run),
                     (camera::toggle, camera::dress, glance::posts),
                     camera::aim,
                     hud::toggle,
-                    (course::restart, navigation::lost_at_sea),
+                    (
+                        course::restart,
+                        navigation::lost_at_sea,
+                        navigation::enter_in_the_log,
+                        sight::aim,
+                    ),
                     chart::toggle,
                     retro::toggle,
                     retro::stress.run_if(|| std::env::var("SAIL_RETRO_STRESS").is_ok()),
@@ -369,8 +378,10 @@ fn main() {
                 settings::draw,
                 help::draw,
                 chart::draw,
+                logbook::draw,
                 hud::draw,
                 tutorial::draw,
+                sight::draw,
             )
                 .chain(),
         )

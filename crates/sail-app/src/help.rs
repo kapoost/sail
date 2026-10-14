@@ -33,7 +33,7 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut help: ResMut<Help>) {
 /// Grouped the way a person needs them rather than the way the code is laid out: what
 /// your hands do first, then the sails, then what you are looking at. A list in
 /// alphabetical order of key would be easier to write and useless to read.
-const KEYS: [(&str, &[(&str, &str)]); 5] = [
+const KEYS: [(&str, &[(&str, &str)]); 6] = [
     (
         "AT THE HELM",
         &[
@@ -72,6 +72,24 @@ const KEYS: [(&str, &[(&str, &str)]); 5] = [
         ],
     ),
     (
+        "FINDING OUT WHERE YOU ARE",
+        &[
+            ("N", "the hand bearing compass: put the notch on a mark"),
+            (
+                " ",
+                "click to take the bearing — it goes on the chart as a line",
+            ),
+            (
+                "Shift M",
+                "the chart on the table: dividers, rule, pencil, rubber",
+            ),
+            (
+                "Shift L",
+                "and somewhere at sea with the sails set and no idea where",
+            ),
+        ],
+    ),
+    (
         "IF SOMEBODY GOES IN",
         &[
             (
@@ -102,6 +120,10 @@ const KEYS: [(&str, &[(&str, &str)]); 5] = [
                 "low gear: slower, and it winds when high gear will not",
             ),
             ("U", "pump: lift the rod, and wind as you let it down"),
+            (
+                "I",
+                "what swims here, how to troll for it, and what you have had",
+            ),
             (
                 " ",
                 "a fish on and the way still on her is a fish you will lose",
@@ -144,7 +166,7 @@ const KEYS: [(&str, &[(&str, &str)]); 5] = [
 /// help does not mention is a feature nobody will find; a key the help promises and
 /// nothing reads is a lie, and both have happened here.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const DOCUMENTED: [KeyCode; 43] = [
+pub const DOCUMENTED: [KeyCode; 45] = [
     // At the helm.
     KeyCode::ArrowLeft,
     KeyCode::ArrowRight,
@@ -177,6 +199,7 @@ pub const DOCUMENTED: [KeyCode; 43] = [
     KeyCode::Minus,
     KeyCode::Equal,
     KeyCode::KeyU,
+    KeyCode::KeyI,
     // Looking at it.
     KeyCode::KeyC,
     KeyCode::KeyV,
@@ -189,6 +212,8 @@ pub const DOCUMENTED: [KeyCode; 43] = [
     KeyCode::KeyK,
     KeyCode::KeyL,
     KeyCode::Escape,
+    // The hand bearing compass.
+    KeyCode::KeyN,
     // The lifebuoy, which is the one key on this boat that is an emergency.
     KeyCode::Enter,
     // And the help itself, which the list cannot very well leave out.

@@ -39,6 +39,9 @@ pub struct Navigation {
     /// And where it put her, which is what the chart draws rather than the truth: a fix
     /// is the navigator's answer and the chart carries the answer, right or wrong.
     pub fixed_at: Option<DVec2>,
+    /// The bearings taken and not yet thrown away. Three is a fix; four is a navigator
+    /// who has stopped sailing the boat.
+    pub sights: Vec<sail_core::fix::Sight>,
 }
 
 impl Navigation {
@@ -166,6 +169,7 @@ pub fn lost_at_sea(
     nav.lost = true;
     nav.last_fix = f64::NEG_INFINITY;
     nav.fixed_at = None;
+    nav.sights.clear();
     track.clear();
     pilot.disengage();
 
@@ -178,4 +182,42 @@ pub fn lost_at_sea(
             .count()
     );
     let _ = rad(0.0);
+}
+
+/// Writing the fix in the log, and finding out whether it was worth writing.
+///
+/// This is where the exercise is scored and the scoring is the honest one: a fix is good
+/// if it is *near where she actually is*. Not whether the triangle was small — a tight
+/// cocked hat on two misidentified marks is a confident lie, and it is the classic way to
+/// put a boat on a rock. The sea does not grade the method, it grades the answer.
+///
+/// A quarter of a mile. That is the error a careful fix off a small boat's hand bearing
+/// compass actually has, and it is close enough to pilot by in open water and nothing
+/// like close enough to go between two rocks on.
+pub fn enter_in_the_log(
+    sim: Res<Sim>,
+    mut nav: ResMut<Navigation>,
+    mut chart: ResMut<crate::chart::Chart>,
+) {
+    let Some(said) = chart.accepted.take() else {
+        return;
+    };
+    const GOOD_ENOUGH: f64 = 460.0;
+    let truth = sim.sim.state.pos;
+    let out_by = (said - truth).length();
+    nav.sights.clear();
+    if out_by < GOOD_ENOUGH {
+        nav.last_fix = sim.sim.state.time;
+        nav.fixed_at = Some(said);
+        info!(
+            "fix entered: {:.0} m from where she is — the chart knows her again for six \
+             minutes",
+            out_by
+        );
+    } else {
+        // Not good enough, and the chart says nothing more than it did: being wrong
+        // about where you are is not an error message, it is the condition.
+        nav.fixed_at = None;
+        info!("fix entered: {:.0} m out — she is still lost", out_by);
+    }
 }

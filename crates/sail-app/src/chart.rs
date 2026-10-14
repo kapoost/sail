@@ -41,6 +41,9 @@ pub struct Chart {
     pub tool: Tool,
     /// What has been drawn on the chart with it.
     pub plot: Vec<Plotted>,
+    /// A fix the navigator has just said he believes. Taken by `navigation` the same
+    /// frame, which is what decides whether it was worth believing.
+    pub accepted: Option<glam::DVec2>,
 }
 
 /// The instruments on the chart table.
@@ -106,6 +109,7 @@ impl Default for Chart {
             dividers: None,
             tool: Tool::Dividers,
             plot: Vec::new(),
+            accepted: None,
             // Two and a half miles each way: far enough to see the next island and the
             // one after it, close enough that a shoal is a shape rather than a dot.
             range: 4_600.0,
@@ -234,6 +238,7 @@ pub fn draw(
     let mut draw_on: Option<Plotted> = None;
     let mut rub_out: Option<glam::DVec2> = None;
     let mut pick: Option<Tool> = None;
+    let mut accept: Option<glam::DVec2> = None;
     let area = if spread {
         egui::Area::new("chart".into()).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
     } else {
@@ -439,6 +444,27 @@ pub fn draw(
 
         // What a chart with no fix on it says, which is nothing — and it says it where
         // the boat would have been, because that is where the eye goes first.
+        // How long the fix has left, when she is living on one. A position is a
+        // statement about a moment and this is the moment running out — drawn rather
+        // than counted, because a bar is read without being looked at.
+        if nav.lost && knows && spread {
+            let left = nav.fix_left(sim.sim.state.time);
+            let bar = egui::Rect::from_min_size(
+                egui::pos2(rect.left() + 24.0, rect.top() + 66.0),
+                egui::vec2(188.0, 7.0),
+            );
+            p.rect_filled(bar, 1.0, ink::PAPER);
+            let mut run = bar;
+            run.set_width(bar.width() * left);
+            p.rect_filled(run, 1.0, ink::MARK);
+            p.text(
+                egui::pos2(bar.right() + 8.0, bar.center().y),
+                egui::Align2::LEFT_CENTER,
+                "this fix",
+                egui::FontId::monospace(10.0),
+                ink::COAST,
+            );
+        }
         if !knows {
             p.text(
                 centre,
@@ -661,6 +687,64 @@ pub fn draw(
                 x += wide + 8.0;
             }
 
+            // --- The fix -----------------------------------------------------
+            //
+            // Two position lines cross at a point and three cross in a triangle, and the
+            // triangle is the navigator's own report on how carefully he just did it.
+            // Both are drawn: the crossing because it is the answer, the triangle because
+            // it is the confidence, and a fix with no cocked hat round it is a fix
+            // nobody has checked.
+            if let Some(got) = sail_core::fix::plot(&nav.sights) {
+                let at = to_screen(got.at);
+                p.circle(
+                    at,
+                    6.0,
+                    egui::Color32::TRANSPARENT,
+                    egui::Stroke::new(1.4, ink::BOAT),
+                );
+                p.circle_filled(at, 1.6, ink::BOAT);
+                p.text(
+                    at + egui::vec2(10.0, -4.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!(
+                        "FIX  hat {:.0} m, cut {:.0}  —  {}",
+                        got.hat,
+                        got.cut.to_degrees(),
+                        sail_core::fix::verdict(&got, nav.sights.len())
+                    ),
+                    egui::FontId::monospace(11.0),
+                    ink::BOAT,
+                );
+                // And the button that says you believe it. A fix is not a measurement
+                // until somebody writes it in the log, which is the moment it becomes the
+                // position the boat is working from — and the moment it can be wrong.
+                let slot = egui::Rect::from_min_size(
+                    egui::pos2(rect.left() + 24.0, rect.top() + 66.0),
+                    egui::vec2(188.0, 22.0),
+                );
+                p.rect_filled(slot, 2.0, ink::PAPER);
+                p.rect_stroke(
+                    slot,
+                    2.0,
+                    egui::Stroke::new(1.0, ink::COAST),
+                    egui::StrokeKind::Inside,
+                );
+                p.text(
+                    slot.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "ENTER IT IN THE LOG",
+                    egui::FontId::monospace(11.0),
+                    ink::COAST,
+                );
+                if response.clicked()
+                    && response
+                        .interact_pointer_pos()
+                        .is_some_and(|q| slot.contains(q))
+                {
+                    accept = Some(got.at);
+                }
+            }
+
             // --- The compass rose --------------------------------------------
             //
             // Printed on every chart ever made, and not as decoration: it is what a
@@ -848,6 +932,11 @@ pub fn draw(
     if let Some(tool) = pick {
         chart.tool = tool;
         chart.dividers = None;
+    }
+    if let Some(_at) = accept {
+        // Handled by `navigation::enter_in_the_log`, which owns the question of whether
+        // the fix was good enough to believe — the chart draws, it does not judge.
+        chart.accepted = accept;
     }
     Ok(())
 }
