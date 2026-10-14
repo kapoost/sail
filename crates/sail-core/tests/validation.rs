@@ -2598,6 +2598,100 @@ fn the_vane_does_not_gybe_itself_across_the_stern() {
     );
 }
 
+/// What a gybe costs, which until now was nothing at all.
+///
+/// The boom's angle in this model is signed *towards leeward*, and that one convention
+/// hid the whole manoeuvre: steer from TWA +165 round through dead astern to −151 and the
+/// boom sat at +68 degrees the entire time with its rate at zero, because "sixty-eight
+/// degrees to leeward" silently became the other side of the boat the instant leeward
+/// did. The spar teleported across with the wind — no swing, no lost drive, no danger —
+/// and the most consequential thing a small boat does was free.
+///
+/// Four things are asserted here and each of them is something a sailor would notice if
+/// it were missing: the boom goes across in a measurable amount of time, it is quicker in
+/// more wind, the mainsail stops driving while it is on its way, and the headsail dies in
+/// the shadow of the main.
+#[test]
+fn a_gybe_takes_the_boom_across_and_costs_her() {
+    let gybe = |tws_kn: f64| -> (f64, f64, f64, f64) {
+        let cfg = BoatConfig::archipelago_packet();
+        let tws = kn_to_ms(tws_kn);
+        let mut sim = Simulation::new(
+            cfg,
+            BoatState::at_rest(wrap_tau(0.0 - rad(165.0))),
+            Box::new(SteadyWind::new(0.0, tws)) as Box<dyn WindField>,
+        );
+        let mut controls = Controls {
+            main_sheet: 0.95,
+            jib_sheet: 0.85,
+            ..Default::default()
+        };
+        // Settled on the run, and steered to stay there: in twenty-two knots she rounds
+        // up if nobody holds her, which is true and not what this is about.
+        for _ in 0..(60.0 / SUBSTEP) as u64 {
+            let off = deg(sim.telemetry.twa) - 165.0;
+            controls.rudder = rad((off * 0.5).clamp(-25.0, 25.0));
+            sim.run(SUBSTEP, &controls);
+        }
+        let driving = sim.telemetry.main.drive;
+        // Helm over, and round through dead astern.
+        controls.rudder = rad(-18.0);
+        let (mut t, mut flipped, mut across) = (0.0, None, None);
+        let (mut was, mut least_drive, mut shaded) = (sim.state.boom_angle, f64::MAX, 0.0f64);
+        while t < 20.0 {
+            sim.run(SUBSTEP, &controls);
+            t += SUBSTEP;
+            let now = sim.state.boom_angle;
+            if flipped.is_none() && now * was < 0.0 {
+                flipped = Some(t);
+            }
+            if let (Some(began), None) = (flipped, across) {
+                least_drive = least_drive.min(sim.telemetry.main.drive);
+                shaded = shaded.max(sim.telemetry.jib.coeffs.luffing);
+                if sim.state.boom_rate < 0.0 && now > 0.0 {
+                    across = Some(t - began);
+                }
+            }
+            was = now;
+        }
+        (across.unwrap_or(f64::NAN), driving, least_drive, shaded)
+    };
+
+    let (light, light_driving, light_least, light_shade) = gybe(10.0);
+    let (blow, _, _, _) = gybe(22.0);
+
+    // It takes time, and a bounded amount of it. Below half a second nobody could react;
+    // above six the boom is drifting rather than gybing.
+    assert!(
+        (0.5..6.0).contains(&light),
+        "the boom should take a second or two to come across in ten knots, took {light:.2}"
+    );
+    assert!(
+        (0.4..3.0).contains(&blow),
+        "and less in twenty-two, took {blow:.2}"
+    );
+    // Quicker in more wind, which is the whole reason a gybe in a breeze is the thing
+    // that hurts people: the same spar, the same arc, twice the hurry.
+    assert!(
+        blow < light * 0.75,
+        "a gybe in twenty-two knots should be sharply quicker than in ten: {blow:.2} \
+         against {light:.2}"
+    );
+    // And it is not driving on the way over. A sail thrown across is a sail with the
+    // wind on the wrong side of it, and whatever its sheet says it makes nothing.
+    assert!(
+        light_least < light_driving * 0.2,
+        "the main should stop pulling while it crosses: {light_least:.0} N against \
+         {light_driving:.0} N before"
+    );
+    // The headsail is in the shadow of the main and the mast with nothing in front of it,
+    // and it hangs and slats until it is set on the new side.
+    assert!(
+        light_shade > 0.8,
+        "the headsail should be flogging in the main's shadow, not drawing: {light_shade:.2}"
+    );
+}
+
 #[test]
 fn in_a_seaway_with_nothing_set_she_still_goes_somewhere() {
     // The flat-water test above is the clean statement of the claim; this is the one

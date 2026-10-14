@@ -31,7 +31,7 @@ const SHEET_STIFFNESS: f64 = 140_000.0;
 /// Damping while the sheet is tight — the tackle's own friction, which is considerable.
 const SHEET_DAMPING: f64 = 5_000.0;
 /// And while it is slack, when only the air and the gooseneck are resisting.
-const BOOM_DAMPING: f64 = 260.0;
+const BOOM_DAMPING: f64 = 190.0;
 
 pub struct Simulation {
     pub config: BoatConfig,
@@ -42,6 +42,8 @@ pub struct Simulation {
     accumulator: f64,
     /// What ended the passage, and how close each sail is to being the thing that does.
     mishap: Option<crate::state::Mishap>,
+    /// Which side the apparent wind is on, with hysteresis. See the gybe.
+    wind_side: f64,
     strain_main: f64,
     strain_head: f64,
     strain_stay: f64,
@@ -81,6 +83,7 @@ impl Simulation {
             telemetry: Telemetry::default(),
             accumulator: 0.0,
             mishap: None,
+            wind_side: 0.0,
             strain_main: 0.0,
             strain_head: 0.0,
             strain_stay: 0.0,
@@ -345,15 +348,68 @@ impl Simulation {
         // Signed towards leeward: positive is where a drawing sail lives, negative is the
         // boom having come across to windward, where its angle of attack is the apparent
         // wind angle *plus* the swing and the sail does nothing but flog.
+        //
+        // Which means that when the *wind* changes sides, the sign has to be flipped by
+        // hand, and this is the gybe.
+        //
+        // Without it a gybe cost nothing whatever. Measured before: she was steered from
+        // TWA +165 round through dead astern to −151, and the boom sat at +68 degrees the
+        // entire time with its rate at zero — because "sixty-eight degrees to leeward"
+        // silently became the other side of the boat the instant leeward did. The boom
+        // teleported across with the wind, no swing, no noise, no lost drive, and the
+        // most dangerous manoeuvre on a small boat was free.
+        //
+        // The wind going across the stern does not move the boom. It makes the boom
+        // *wrong*: the same spar, in the same place over the deck, is now to windward,
+        // and the sail is aback until the thing comes across. One sign change says all of
+        // that, and everything downstream — the pendulum below, the backed sail's angle
+        // of attack, the shadow the main casts — then does what it already knew how to
+        // do.
+        // With hysteresis, and that is not a detail. The first version flipped whenever
+        // the apparent wind changed sign while it was abaft the beam, which near dead
+        // astern it does constantly — every wave rolls the boat, the apparent swings
+        // across the stern and back, and the boom was teleporting from side to side
+        // several times a second. Measured in twenty-two knots: the crossing "took" ten
+        // milliseconds, because what was being measured was a spar flickering rather than
+        // a spar moving.
+        //
+        // The wind has to get ten degrees *past* dead astern before the world changes,
+        // which is also how it feels from the helm: a boat squared off dead downwind is
+        // on neither gybe, and nothing happens until the wind is properly behind the
+        // sail.
+        if self.wind_side == 0.0 {
+            self.wind_side = if lower_awa == 0.0 {
+                1.0
+            } else {
+                lower_awa.signum()
+            };
+        } else if lower_awa.signum() != self.wind_side && lower_awa.abs() < crate::units::rad(170.0)
+        {
+            self.wind_side = lower_awa.signum();
+            self.state.boom_angle = -self.state.boom_angle;
+            self.state.boom_rate = -self.state.boom_rate;
+        }
         let boom_angle = if st.boom_angle == 0.0 && st.boom_rate == 0.0 {
             boom_set
         } else {
-            st.boom_angle
+            self.state.boom_angle
         };
-        let twist = twist_for_vang(controls.vang, boom_angle);
+        // Aback: the boom is on the windward side and the sail is being pressed from the
+        // front. A sail there makes no drive worth the name whatever its sheet says.
+        let boom_aback = boom_angle < 0.0;
+        let twist = twist_for_vang(controls.vang, boom_angle.abs());
         // The upper section is eased by the twist, expressed back through the sheet
         // mapping so both sections go through the same force model.
-        let upper_sheet = cfg.main.profile.sheet_for_chord_angle(boom_angle + twist);
+        let upper_sheet = cfg
+            .main
+            .profile
+            .sheet_for_chord_angle(boom_angle.abs() + twist);
+        // And the lower section is set by where the boom *is*, not by where the sheet
+        // would have it. In steady air those are the same number — the sheet is what put
+        // the boom there — and the whole difference is the second and a half of a gybe,
+        // when the spar is somewhere the sheet has not asked for and the sail has to be
+        // computed from the spar.
+        let lower_sheet = cfg.main.profile.sheet_for_chord_angle(boom_angle.abs());
 
         // What each sail does to the other's wind. Worked out from the lift each would
         // make on its own — two extra coefficient lookups — and then applied to the
@@ -394,17 +450,19 @@ impl Simulation {
         let jib_awa = bent(jib_awa, bend_jib);
         let jib_upper_awa = bent(jib_upper_awa, bend_jib);
 
-        let main = sail_forces(
+        let main = crate::sail::sail_forces_in_slot(
             &cfg.main.profile,
             lower_awa,
             lower_aws,
-            controls.main_sheet,
+            lower_sheet,
             lower_area,
             st.heel,
             0.0,
             main_camber,
+            1.0,
+            boom_aback,
         );
-        let main_upper = sail_forces(
+        let main_upper = crate::sail::sail_forces_in_slot(
             &cfg.main.profile,
             upper_awa,
             upper_aws,
@@ -413,6 +471,8 @@ impl Simulation {
             st.heel,
             0.0,
             main_camber,
+            1.0,
+            boom_aback,
         );
         // A headsail's depth and twist both come from its sheet lead car — the genoa's
         // outhaul and vang in one fitting, which is why it has neither separately.

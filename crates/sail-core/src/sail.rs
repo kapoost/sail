@@ -1013,6 +1013,14 @@ pub fn sail_forces_in_slot(
     // produces the self-limiting behaviour sailors rely on: heel costs you drive.
     let heel_factor = heel.cos().abs().max(0.0);
     let clear_air = (1.0 - blanketing.clamp(0.0, 1.0)).max(0.0);
+    // A sail with no air on it is flogging, whatever its sheet says. Blanketing already
+    // takes the *force* away; without this the cloth went on being drawn as a filled sail
+    // with nothing in it — and a sail hanging dead is the one state that is unmistakable
+    // from forty metres away, which is exactly the distance you watch another boat gybe
+    // from.
+    coeffs.luffing = coeffs
+        .luffing
+        .max(smoothstep(0.55, 0.95, blanketing.clamp(0.0, 1.0)));
     let q = q_air(aws) * area * heel_factor * clear_air;
 
     let lift = q * coeffs.cl;
@@ -1052,5 +1060,14 @@ pub fn headsail_blanketing(awa: f64, boom_angle: f64) -> f64 {
     // from behind the mainsail — which is the boom's angle plus the width of the sail's
     // own wake, and not before.
     let from = boom_angle.abs() + rad(40.0);
-    0.85 * smoothstep(from, from + rad(55.0), awa.abs())
+    let shaded = 0.85 * smoothstep(from, from + rad(55.0), awa.abs());
+    // And dead astern it is total, which the eighty-five per cent above never reaches.
+    //
+    // There the headsail is not in the *edge* of the main's wake, it is directly behind
+    // the main and the mast with nothing but dead air in front of it: it collapses, hangs
+    // and slats, and the only way to make it pull is to pole it out on the other side.
+    // Anybody who has gybed a sloop has watched the genoa die and then come back with a
+    // bang on the new side. Eighty-five per cent of nothing is still something, and the
+    // something was a headsail quietly drawing through a gybe.
+    shaded.max(smoothstep(rad(150.0), rad(172.0), awa.abs()))
 }
