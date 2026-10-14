@@ -74,11 +74,19 @@ pub fn aim(
     mut nav: ResMut<Navigation>,
     mut chart: ResMut<crate::chart::Chart>,
 ) {
-    if keys.just_pressed(KeyCode::KeyN) {
-        sighting.up = !sighting.up;
-        if !sighting.up {
-            sighting.on = None;
-        }
+    // **One key does the whole gesture**, because the gesture is one thing: you raise the
+    // compass, you put the notch on the mark, you shoot it, and it comes down. So `N`
+    // raises it, and `N` again takes whatever is in the notch and lowers it — and if
+    // there is nothing in the notch it just comes down, which is also what happens on a
+    // boat when you cannot find the thing you were looking for.
+    //
+    // Reported from the deck on a trackpad, and it was a fair complaint: aiming is a
+    // right-button drag and taking it was a left click, which on a trackpad is two
+    // fingers and a third hand. The click still works for anybody with a mouse.
+    let shoot_key = keys.just_pressed(KeyCode::KeyN) && sighting.up;
+    if keys.just_pressed(KeyCode::KeyN) && !sighting.up {
+        sighting.up = true;
+        return;
     }
     if !sighting.up {
         return;
@@ -125,7 +133,7 @@ pub fn aim(
     // And taking it. A click is the moment you read the card — the bearing is to what is
     // in the notch rather than to where the camera happens to point, because that is
     // what you did: you put the notch *on the lighthouse*.
-    if buttons.just_pressed(MouseButton::Left) {
+    if buttons.just_pressed(MouseButton::Left) || shoot_key {
         if let Some((name, _, _, _)) = best {
             if let Some(mark) = land.landmarks().into_iter().find(|m| m.name == name) {
                 let off = mark.at - here;
@@ -167,6 +175,16 @@ pub fn aim(
                 }
             }
         }
+        // Down again once it is shot, which is what you do with it: a hand bearing
+        // compass is not something you sail holding.
+        if shoot_key {
+            sighting.up = false;
+            sighting.on = None;
+        }
+    } else if shoot_key {
+        // Nothing in the notch, so it just comes down.
+        sighting.up = false;
+        sighting.on = None;
     }
 }
 
@@ -204,8 +222,12 @@ pub fn draw(
 
     // The card: a strip of degrees sliding past, which is what you see through the
     // prism. Only the arc either side of the notch, because that is all the bowl shows.
+    // Above the console rather than across it. The console is a hundred and thirty
+    // points of instruments along the bottom and the card was being drawn on top of
+    // them — reported from the deck with a screenshot, which is the only way a thing
+    // like that gets found.
     let strip = egui::Rect::from_center_size(
-        egui::pos2(middle, screen.bottom() - 96.0),
+        egui::pos2(middle, screen.bottom() - 232.0),
         egui::vec2(420.0, 46.0),
     );
     painter.rect_filled(strip, 4.0, card);
@@ -260,9 +282,11 @@ pub fn draw(
                 Mark::Lighthouse => format!("{name} Lt  {}", crate::marks::light_character(name)),
                 _ => format!("{name}  {}", kind.abbreviation()),
             };
-            format!("{what}   {:.1} M — click to take it", range / 1_852.0)
+            format!("{what}   {:.1} M — N or click to take it", range / 1_852.0)
         }
-        None => "nothing in the notch — put it on a mark you can name".to_string(),
+        None => "nothing in the notch — aim with the right button held, or N to put it \
+                 down"
+            .to_string(),
     };
     painter.text(
         egui::pos2(middle, strip.bottom() + 16.0),

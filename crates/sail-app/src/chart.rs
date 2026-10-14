@@ -397,7 +397,14 @@ pub fn draw(
             }
             // Named when the chart is big enough to have room for the name, which on
             // the folded one means the lights only.
-            if spread || mark.kind == Mark::Lighthouse {
+            // Labelled where there is room for the label. On the folded chart only the
+            // lights are named, and none of them within a label's width of the edge —
+            // names running off the corner of a chart are worse than no names, because
+            // the eye reads half of one and believes it.
+            let room = rect.contains(at + egui::vec2(120.0, 0.0))
+                && at.y > rect.top() + 14.0
+                && at.y < rect.bottom() - 14.0;
+            if room && (spread || mark.kind == Mark::Lighthouse) {
                 let label = if mark.kind.lit() {
                     format!(
                         "{}  {}",
