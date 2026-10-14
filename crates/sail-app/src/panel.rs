@@ -155,6 +155,16 @@ pub fn draw(
                 // now while it is easy, whether this shift is worth tacking on. The
                 // weather is going somewhere now, so the instrument that says where is
                 // worth more than any of the ones above it.
+                // The glass. Nobody acts on a pressure; everybody acts on a pressure and
+                // a tendency — *1008 and falling three* is a gale warning written on a
+                // dial, and 1008 steady is a Tuesday. So both are on one line, with the
+                // tendency over three hours, which is how it is read and logged.
+                let (glass, tendency) = sim.sim.wind.barometer();
+                readout(
+                    ui,
+                    "BARO",
+                    &format!("{glass:.0} {}", tendency_words(tendency)),
+                );
                 let (building, turning) = sim.sim.wind.outlook();
                 readout(ui, "OUTLOOK", &outlook_words(building, turning));
                 // And the one piece of weather that is not a trend but an object. A
@@ -478,28 +488,35 @@ pub fn draw(
                         // is the wrong place: the question "why did it switch off?" is
                         // asked by somebody who was not watching, and they are looking
                         // at the console because that is what is on the screen.
-                        if let Some(reason) = pilot.last_reason {
-                            if pilot.since_reason < 30.0 && !pilot.engaged() {
-                                ui.label(
-                                    egui::RichText::new(fit(reason, 30))
-                                        .color(paint::BAD)
-                                        .monospace()
-                                        .size(10.0),
-                                );
+                        // Why it last let go, for half a minute after it did — and the
+                        // vane saying it is beaten, which it has to do here because there
+                        // is no alarm to sound and no relay to click.
+                        //
+                        // **One line of space, always.** These two used to appear and
+                        // disappear, and a line appearing in the middle of a column of
+                        // buttons moves every button under it — including the one the
+                        // mouse is on its way to. Toggling the pilot did it twice in two
+                        // seconds, which is how this was found. The slot is reserved now
+                        // and the console cannot change height for a message.
+                        let note = if pilot.engaged() {
+                            if pilot.struggling() && !pilot.can_let_go() {
+                                Some("the vane is not coping")
+                            } else {
+                                None
                             }
-                        }
-                        // The vane cannot drop out, so when it is beaten it has to say so
-                        // some other way: there is no alarm to sound and no relay to
-                        // click. It says it here, and it says it on the transom, where
-                        // the blade is lying on its stop.
-                        if pilot.engaged() && pilot.struggling() && !pilot.can_let_go() {
-                            ui.label(
-                                egui::RichText::new("the vane is not coping")
-                                    .color(paint::BAD)
-                                    .monospace()
-                                    .size(10.0),
-                            );
-                        }
+                        } else {
+                            pilot.last_reason.filter(|_| pilot.since_reason < 30.0)
+                        };
+                        ui.label(
+                            egui::RichText::new(fit(note.unwrap_or(" "), 30))
+                                .color(if note.is_some() {
+                                    paint::BAD
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                })
+                                .monospace()
+                                .size(10.0),
+                        );
                         let engaged = pilot.engaged();
                         if lamp_button(ui, if engaged { "ENGAGED" } else { "STANDBY" }, engaged)
                             .clicked()
@@ -917,6 +934,36 @@ fn heel_scale(ui: &mut egui::Ui, heel: f64) {
         egui::FontId::monospace(14.0),
         paint::FACE,
     );
+}
+
+/// What the glass has done, in the words a forecast uses.
+///
+/// The thresholds are the Met Office's own barometric tendency bands, because they are
+/// the ones a sailor has already learnt: under half a hectopascal in three hours is
+/// steady, and three or more is the one that gets a name — a fall of three in three
+/// hours is the classic "gale warning on the glass" and is why it is worth a word of its
+/// own rather than a number nobody weighs.
+fn tendency_words(three_hourly: f64) -> String {
+    let rate = three_hourly.abs();
+    let how = if rate < 0.5 {
+        return "steady".into();
+    } else if rate < 1.6 {
+        "slowly"
+    } else if rate < 3.5 {
+        ""
+    } else {
+        "fast"
+    };
+    let way = if three_hourly < 0.0 {
+        "falling"
+    } else {
+        "rising"
+    };
+    if how.is_empty() {
+        format!("{way} {rate:.1}")
+    } else {
+        format!("{way} {how}")
+    }
 }
 
 fn readout(ui: &mut egui::Ui, label: &str, value: &str) {

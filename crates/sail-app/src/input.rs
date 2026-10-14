@@ -141,7 +141,14 @@ pub fn gather(
         || pad.is_some_and(|p| p.just_pressed(GamepadButton::Start));
     if toggle {
         if pilot.engaged() {
-            pilot.drop_out("you switched it off");
+            // Switched off, not dropped out. `drop_out` is for the gear giving up — it
+            // writes a reason that the console shows in the alarm colour for half a
+            // minute — and a person pressing the button is not a failure. It read "you
+            // switched it off" in red, which is a console crying wolf at the one moment
+            // nothing at all has gone wrong, and it is also what the panel's own
+            // ENGAGED lamp has always done: the key and the button behaved differently
+            // for the same action.
+            pilot.disengage();
         } else {
             pilot.hold_heading(&sim.sim.state);
             pilot.last_reason = None;

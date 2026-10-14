@@ -3604,3 +3604,33 @@ fn a_vane_has_nothing_to_let_go_with() {
     pilot.mode = PilotMode::Standby;
     assert!(pilot.can_let_go());
 }
+
+/// The glass falls when the wind builds, which is the one sign that must not be wrong.
+///
+/// A barometer that rises into a gale is worse than no barometer: it is an instrument
+/// telling a skipper to relax at the moment he should be reefing, and the error is
+/// invisible — the number moves, the dial looks alive, and only somebody who has watched
+/// real weather notices it is backwards.
+#[test]
+fn the_glass_falls_as_the_wind_builds() {
+    use sail_core::wind::WindField;
+    // A calm day under a ridge, a fresh breeze, and a gale: three winds, three readings.
+    let mut last = f64::MAX;
+    for knots in [2.0, 12.0, 22.0, 34.0, 45.0] {
+        let field = SyntheticWind::new(0.0, kn_to_ms(knots), 7);
+        let (glass, _) = field.barometer();
+        assert!(
+            glass < last,
+            "more wind should mean less pressure: {knots:.0} kn reads {glass:.0}"
+        );
+        last = glass;
+        // And the readings are the ones a pilot book would recognise rather than numbers
+        // off a scale nobody uses.
+        match knots {
+            k if k < 5.0 => assert!((1018.0..1032.0).contains(&glass), "calm {glass:.0}"),
+            k if k < 15.0 => assert!((1005.0..1022.0).contains(&glass), "breeze {glass:.0}"),
+            k if k > 40.0 => assert!((960.0..985.0).contains(&glass), "storm {glass:.0}"),
+            _ => {}
+        }
+    }
+}

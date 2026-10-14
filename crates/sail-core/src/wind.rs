@@ -47,6 +47,26 @@ pub trait WindField: Send + Sync {
         (0.0, 0.0)
     }
 
+    /// What the glass reads, as (hectopascals, change over the last three hours).
+    ///
+    /// There is no pressure field in this model and there does not need to be one: a
+    /// barometer on a boat is not an instrument for measuring air, it is an instrument
+    /// for inferring the system you are in, and the system here *is* the synoptic state —
+    /// the mean wind and which way it is going. So the reading is derived from those, by
+    /// the relation every pilot book states the other way round: deep low, strong wind;
+    /// high, calm.
+    ///
+    /// A flat calm under a ridge reads about 1030, a fresh breeze about 1010, a gale
+    /// about 985, a storm about 970. That is an empirical fit to mid-latitude weather and
+    /// it is stated as one — it is not claiming a pressure field, it is reading the
+    /// weather the game actually has in the units a sailor keeps his own log in.
+    ///
+    /// The tendency is the number that matters. Nobody acts on 1008; everybody acts on
+    /// *1008 and falling three in three hours*, which is a gale warning written on a dial.
+    fn barometer(&self) -> (f64, f64) {
+        (1013.0, 0.0)
+    }
+
     /// True wind flow vector in world ENU at the reference height, in m/s.
     /// `pos` is in metres, `t` in seconds since simulation start.
     fn sample(&self, pos: DVec2, t: f64) -> DVec2;
@@ -276,6 +296,28 @@ impl Synoptic {
         self.direction_trend = 0.0;
         self.cover_swing = 0.0;
         self.cover_trend = 0.0;
+    }
+
+    /// What a barometer in this weather would be reading, and what it has done over the
+    /// last three hours. See `WindField::barometer` for why a model with no pressure
+    /// field can still have an honest glass.
+    ///
+    /// Read off the *synoptic* wind rather than the gust: a barometer has an hour of lag
+    /// in it and no interest at all in the puff that has just come over the mast. The
+    /// tendency is the hourly outlook taken over three hours, with the sign the right way
+    /// round — building wind is falling glass, and getting that backwards would be a
+    /// barometer that tells you to relax as the gale arrives.
+    fn barometer(&self) -> (f64, f64) {
+        /// Hectopascals per knot of mean wind: a flat calm under a ridge at 1030, a
+        /// fresh breeze at 1010, a gale at 985, a storm at 970.
+        const PER_KNOT: f64 = 1.30;
+        const CALM: f64 = 1030.0;
+        let mean = crate::units::ms_to_kn(self.speed());
+        let (building, _) = self.outlook();
+        (
+            CALM - PER_KNOT * mean,
+            -PER_KNOT * crate::units::ms_to_kn(building) * 3.0,
+        )
     }
 
     /// Expected change over the next hour. For `dX = −X/tau dt + noise` the mean path
@@ -664,6 +706,10 @@ impl WindField for SyntheticWind {
 
     fn outlook(&self) -> (f64, f64) {
         self.synoptic.outlook()
+    }
+
+    fn barometer(&self) -> (f64, f64) {
+        self.synoptic.barometer()
     }
 
     fn cover(&self) -> f64 {
