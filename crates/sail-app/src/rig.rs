@@ -491,7 +491,17 @@ pub fn update(
             }
             Kind::JibSheet(starboard, part) => {
                 let side = if starboard { 1.0 } else { -1.0 };
-                let working = side * lee > 0.0;
+                // And nothing is drawn at all with the sail rolled away.
+                //
+                // The geometry of a sail that is not set collapses on to its own tack,
+                // and for a flying sail that tack is out at the end of the sprit — or,
+                // for a spinnaker, at the end of a pole which is itself stowed. The
+                // sheet was being drawn to that: a slack rope running from the quarter
+                // block to a point hanging in the air off the windward bow, which is
+                // what was reported from the deck. A sheet with no sail on the end of it
+                // is coiled on the winch, and the honest way to draw a coil is not to
+                // draw a rope.
+                let working = side * lee > 0.0 && sim.controls.furl < 0.9;
                 // Only the working sheet is drawn taut from the clew; a furled genoa
                 // has no clew to pull on at all.
                 // The same solve the sail uses, so the rope ends where the sail's

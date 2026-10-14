@@ -931,6 +931,13 @@ pub fn update_sails(
                     shake: (t_.aws as f32 / 15.4).clamp(0.0, 1.0),
                     flying: surface.which == Sail::Headsail
                         && sim.controls.headsail != sail_core::state::Headsail::Genoa,
+                    fullness: if surface.which == Sail::Headsail
+                        && sim.controls.headsail == sail_core::state::Headsail::Spinnaker
+                    {
+                        1.5
+                    } else {
+                        1.0
+                    },
                     chord: forces.chord_angle.abs() as f32,
                     // The staysail is club-footed: its foot is laced along a spar that
                     // swings on the tack fitting, so that edge is held straight and
@@ -1224,14 +1231,27 @@ pub fn headsail_shape(
     // sprit, on the centreline. That one difference is what takes the sail out of the
     // main's lee and lets her run deep.
     let tack = if spinnaker {
-        pole_end(cfg.loa as f32, -side, angle.abs())
+        // Forward as well as out: even squared right off, a pole is carried a little
+        // ahead of abeam, and the tack has to be clear of the forestay before the cloth
+        // can be.
+        pole_end(cfg.loa as f32, -side, angle.abs()) + Vec3::NEG_Z * 0.6
     } else {
         sprit_end(cfg.loa as f32)
     };
     // Both go to the masthead. A sail set flying is hoisted on its own halyard to the
     // very top of the spar — above the forestay, which is where its extra hoist comes
     // from and half the reason it is worth setting.
-    let head = Vec3::new(0.0, crate::rig::MAST_HEAD - 0.12, MAST_FOOT_Z);
+    let head = if spinnaker {
+        // Forward of the spar, which is where a kite's halyard block is and where the
+        // head of the sail flies. Hung from the masthead itself the cloth hangs *down the
+        // mast* and the whole sail wraps round it on a dead run — reported from the deck
+        // in exactly those words. A spinnaker halyard is led over a crane that stands out
+        // ahead of the mast for this reason, and the sail then flies in front of
+        // everything the way it is supposed to.
+        Vec3::new(0.0, crate::rig::MAST_HEAD - 0.25, MAST_FOOT_Z - 1.1)
+    } else {
+        Vec3::new(0.0, crate::rig::MAST_HEAD - 0.12, MAST_FOOT_Z)
+    };
     // How much more cloth there is in the sail than in the flat triangle it spans, which
     // is a question about how deeply it is cut and nothing else.
     //
@@ -1280,11 +1300,46 @@ pub fn headsail_shape(
     // sheet is drawn to, so the cloth and the rope agree about where they meet.
     let block = Vec3::new(side * 1.15, crate::deck::deck_height(3.9) + 0.07, 3.9);
     let want = 2.0 * (cfg.headsail(kind).area as f32 / fullness) / (hoisted - tack).length() * out;
+    if spinnaker {
+        // A symmetric is built from its two lower corners rather than solved against a
+        // sheet lead, and that is not a shortcut — it is what the sail is. The pole holds
+        // the tack out to windward and the sheet holds the clew out to leeward, and the
+        // cloth hangs between them in front of the boat. Everything above this line
+        // assumes the asymmetric's geometry, where the tack is pinned on the centreline
+        // and the clew is pulled aft to a block on the quarter; handed a tack three
+        // metres out to windward it put the clew ten metres further out *to windward
+        // again* and nine metres up, which is what was reported from the deck as the sail
+        // opening on the wrong side with its clew on the end of the pole.
+        //
+        // The foot runs from the pole end across the boat at the chord angle, which for
+        // this sail goes past abeam; the clew flies high, because nothing holds it down
+        // and a kite's leeward corner is always above its tack.
+        // The foot is cut to the pole, not solved from the area: a symmetric's maximum
+        // width is about one and four fifths of the fore-triangle base, which is the
+        // measurement every rule in the sport uses and the reason the pole is the length
+        // it is. Solved from the area against a triangle it does not have, it came out
+        // short and the sail hung in the plane of the mast with the forestay through it —
+        // reported from the deck as wanting a longer foot, with the stay in the way.
+        let wide = pole_length(cfg.loa as f32) * 1.8 * out;
+        let across = Vec3::new(angle.sin(), 0.0, angle.cos());
+        // And the whole sail is carried *ahead* of the rig. A kite on a run flies in
+        // front of the boat held up by its halyard, with both lower corners forward of
+        // the mast and the forestay behind the cloth rather than through it. A third of
+        // the foot forward puts the clew clear of the stay at the angles this sail is
+        // ever set at.
+        let ahead = Vec3::NEG_Z * (wide * 0.33);
+        let clew = tack + across * wide + ahead + Vec3::Y * (wide * 0.18);
+        return SailGeometry {
+            tack,
+            head: hoisted,
+            clew,
+        };
+    }
     let fitted = Cloth::flying(
         tack,
         hoisted,
         fitted_foot(tack, hoisted, &cloth, belly, angle, block, want),
-        if gennaker || spinnaker { 0.90 } else { 0.93 },
+        if gennaker { 0.90 } else { 0.93 },
     );
     SailGeometry {
         tack,
@@ -1889,6 +1944,14 @@ struct SailTrim<'a> {
     shake: f32,
     /// Set flying: three corners on ropes and nothing holding any edge.
     flying: bool,
+    /// How much deeper than a gennaker this one is cut, as a multiple.
+    ///
+    /// One for everything else. A symmetric spinnaker is cut as two halves of a sphere
+    /// and is the roundest thing on the boat by a long way — asked for from the deck in
+    /// those words, *it should be even more balloon-like than the gennaker*, which is
+    /// what a kite looks like from behind and is not a matter of taste: the sail has no
+    /// edges held at all and the air in it decides the shape.
+    fullness: f32,
     /// How far the sheet has let the chord swing off the centreline, radians. For a sail
     /// set flying this is the whole story of its depth.
     chord: f32,
@@ -1923,6 +1986,7 @@ pub fn dress_sail(mesh: &mut Mesh, g: &SailGeometry, lee: f32, luffing: f32, sha
             shake,
             flying: false,
             chord: 0.0,
+            fullness: 1.0,
             footed: true,
         },
     );
@@ -1941,6 +2005,7 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         clear_mast,
         shake,
         flying,
+        fullness,
         footed,
         chord,
     } = *trim;
@@ -2069,7 +2134,7 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
             //
             // The generic "an eased sail gets fuller" term does not apply here: this
             // *is* that term, written properly for a sail that has no edges held.
-            let depth = 0.12 + 0.30 * chord.sin();
+            let depth = (0.12 + 0.30 * chord.sin()) * fullness;
             // And the shoulders, which say where down the hoist that depth sits — high,
             // at two thirds, because the tack is pinned on the sprit and the head is
             // free. Normalised so the deepest point of the sail *is* the depth and the
@@ -2426,6 +2491,11 @@ mod cloth_stays_cloth {
         let shrouds = shroud_polyline(cfg.beam as f32, side > 0.0, 0.0, side);
         let trim = SailTrim {
             lee: side,
+            fullness: if kind == Headsail::Spinnaker {
+                1.5
+            } else {
+                1.0
+            },
             twist: 0.18,
             luffing: 0.0,
             draft: 0.11,
@@ -2620,6 +2690,44 @@ mod cloth_stays_cloth {
             worst.1,
             worst.3,
             worst.4
+        );
+    }
+}
+
+#[cfg(test)]
+mod kite_corners {
+    use super::*;
+    use sail_core::state::{Controls, Headsail};
+
+    /// Where the three corners of a symmetric kite actually are, with the wind on the
+    /// starboard side.
+    #[test]
+    fn the_pole_holds_the_tack_and_the_sheet_pulls_the_clew_to_leeward() {
+        let cfg = sail_core::boat::BoatConfig::archipelago_packet();
+        let controls = Controls {
+            headsail: Headsail::Spinnaker,
+            jib_sheet: 0.75,
+            furl: 0.0,
+            ..Default::default()
+        };
+        // Wind from starboard, so the sail flies to port and the pole goes out to
+        // starboard. `jib_side` is where the clew is: negative is port.
+        let g = headsail_shape(&cfg, &controls, -1.0, sail_core::units::rad(92.0) as f32);
+        println!(
+            "tack {:?}\nhead {:?}\nclew {:?}",
+            g.tack.to_array(),
+            g.head.to_array(),
+            g.clew.to_array()
+        );
+        assert!(
+            g.tack.x > 0.5,
+            "the pole holds the tack out to windward, which is starboard here: {:?}",
+            g.tack
+        );
+        assert!(
+            g.clew.x < -0.5,
+            "and the sheet pulls the clew to leeward, which is port: {:?}",
+            g.clew
         );
     }
 }
