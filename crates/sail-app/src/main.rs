@@ -257,7 +257,7 @@ fn main() {
                 // on the boat once she exists. Grouped because a startup tuple is
                 // twenty long at the most and this one is full.
                 (stowage::setup, rod::setup, creel::setup),
-                (mob::setup, net::setup),
+                (mob::setup, tutorial::setup, net::setup),
                 windstreaks::setup,
             )
                 // Chained because several of these depend on each other's entities,

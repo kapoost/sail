@@ -46,11 +46,20 @@ pub struct Oscar;
 #[derive(Component)]
 pub struct Horseshoe;
 
-/// How far from the boat Oscar has to be to get a hand or a boathook on him, metres.
+/// How far **off the rail** he can be and still be got hold of, metres.
 ///
-/// Three and a half: alongside, at the shoulder, where you can reach him over the rail.
-/// Anything more generous than that is recovering somebody by driving past them.
-const REACH: f64 = 3.5;
+/// Two: an arm and a boathook over the side. Off the rail rather than from the middle of
+/// the boat, which is the correction — reported from the deck as "I was touching him and
+/// it said four metres", and it did, because the range was measured to her own position,
+/// which is a point on the centreline amidships. A man at the bow of a ten-metre boat is
+/// five metres from that point while his head is against the hull.
+///
+/// So the measure is the distance from *her side*: the nearest point on her centreline
+/// between stem and transom, less her half-beam. The readout on screen is the same
+/// function, because a number that says four when he is touching the planking is worse
+/// than no number — and because the recovery test and the thing the player reads being
+/// two different measurements is this repository's oldest fault.
+const REACH: f64 = 2.0;
 /// And how slowly she has to be going, knots.
 ///
 /// Under one and a half. Faster than that and you cannot hold him — the water drags him
@@ -59,9 +68,15 @@ const REACH: f64 = 3.5;
 const ALONGSIDE_SPEED: f64 = 1.5;
 /// Seconds he has to stay in reach before he is aboard.
 const HANDS_ON: f64 = 2.0;
-/// Running him down: this close, this fast.
-const RUN_DOWN: f64 = 2.2;
+/// Running him down: this close to her side, this fast.
+const RUN_DOWN: f64 = 1.0;
 const RUN_DOWN_SPEED: f64 = 3.0;
+
+/// How long he lasts, seconds.
+///
+/// Ten minutes. See `Drill::Lost` — this is a cold-water incapacitation time and not a
+/// difficulty setting, which is why it is a constant with a reason rather than a knob.
+pub const ENDURANCE: f64 = 600.0;
 
 /// Where the tube is, along the boat. Abaft the cockpit, which ends at four metres.
 const TUBE_Z: f32 = 4.35;
@@ -108,6 +123,19 @@ pub enum Drill {
         /// Times she has sailed over him at speed.
         run_downs: u32,
     },
+    /// And he is gone, which is the other way this ends.
+    ///
+    /// There is a clock on this and it is not a game mechanic. In water at the
+    /// temperature of a northern summer a person has ten to twenty minutes before their
+    /// hands stop working and they cannot hold a line or a ladder, and not much longer
+    /// before they cannot hold their head up. Ten minutes is the number used here, which
+    /// is the hopeful end of that band: generous for a crew who sail straight back, and
+    /// not nearly enough for one who mill about looking for him.
+    Lost {
+        /// How far away he was when it stopped mattering.
+        range: f64,
+        ring_gap: Option<f64>,
+    },
     /// And back aboard, with the numbers.
     Recovered {
         took: f64,
@@ -153,6 +181,30 @@ impl Overboard {
         matches!(self.drill, Drill::Overboard { .. })
     }
 
+    /// Where he is, for anything that has to work out a course to him.
+    pub fn oscar(&self) -> Option<DVec2> {
+        match self.drill {
+            Drill::Overboard { oscar, .. } => Some(oscar),
+            _ => None,
+        }
+    }
+
+    /// How far he is off her rail, which is the number everything is decided on and the
+    /// number the player is shown. See `off_the_rail`.
+    pub fn off_the_rail(&self, sim: &Sim) -> Option<f64> {
+        self.oscar().map(|him| off_the_rail(sim, him))
+    }
+
+    /// Seconds he has left, 1 at the moment he goes in and 0 when he is past holding on.
+    pub fn endurance_left(&self, now: f64) -> f64 {
+        match self.drill {
+            Drill::Overboard { since, .. } => {
+                ((ENDURANCE - (now - since)) / ENDURANCE).clamp(0.0, 1.0)
+            }
+            _ => 1.0,
+        }
+    }
+
     /// Range and true bearing to him, for the readout and for the tutorial's prompts.
     pub fn to_oscar(&self, from: DVec2) -> Option<(f64, f64)> {
         let Drill::Overboard { oscar, .. } = self.drill else {
@@ -166,6 +218,21 @@ impl Overboard {
             off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU),
         ))
     }
+}
+
+/// How far a point in the water is from her side.
+///
+/// Her centreline is a segment from stem to transom; the nearest point on it is where
+/// she is closest to him, and her half-beam is how much hull there is between that point
+/// and the water. Nothing clever, and it is the one definition — the recovery, the
+/// run-down check and the range on screen all read it.
+pub fn off_the_rail(sim: &Sim, him: DVec2) -> f64 {
+    let st = &sim.render_state();
+    let cfg = sim.config();
+    let off = him - st.pos;
+    let along = off.dot(st.forward()).clamp(-cfg.loa * 0.45, cfg.loa * 0.45);
+    let nearest = st.pos + st.forward() * along;
+    ((him - nearest).length() - cfg.beam * 0.5).max(0.0)
 }
 
 /// The pole: two and a bit metres of it, ballasted at the bottom, with flag O at the top.
@@ -403,7 +470,6 @@ pub fn update(
 ) {
     let now = sim.sim.state.time;
     let dt = time.delta_secs_f64();
-    let st = &sim.render_state();
     let live = over.live();
 
     if let Ok(mut vis) = stowed.single_mut() {
@@ -448,8 +514,8 @@ pub fn update(
         }
 
         // And the recovery, which is two numbers and no cleverness: near enough to get
-        // a hand on him, slow enough to hold him when you do.
-        let range = (*him - st.pos).length();
+        // a hand on him over the rail, slow enough to hold him when you do.
+        let range = off_the_rail(&sim, *him);
         let speed = ms_to_kn(sim.sim.telemetry.stw.abs());
         if range < RUN_DOWN && speed > RUN_DOWN_SPEED {
             if !*over_him {
@@ -464,7 +530,14 @@ pub fn update(
         } else {
             *hands = 0.0;
         }
-        if *hands >= HANDS_ON {
+        // The clock. A drill that cannot be failed teaches nothing about hurrying, and
+        // hurrying is the whole of this manoeuvre.
+        if now - since > ENDURANCE {
+            done = Some(Drill::Lost {
+                range,
+                ring_gap: ring_at.map(|r| (r - *him).length()),
+            });
+        } else if *hands >= HANDS_ON {
             done = Some(Drill::Recovered {
                 took: now - since,
                 ring_gap: ring_at.map(|r| (r - *him).length()),
@@ -474,12 +547,17 @@ pub fn update(
         }
     }
     if let Some(end) = done {
+        let lost = matches!(end, Drill::Lost { .. });
         over.drill = end;
         if let Ok((_, mut vis)) = oscar.single_mut() {
             *vis = Visibility::Hidden;
         }
+        // The lifebuoy stays in the water when he does not. It is the one thing out there
+        // that was any use, and it is still floating.
         if let Ok((_, mut vis)) = ring.single_mut() {
-            *vis = Visibility::Hidden;
+            if !lost {
+                *vis = Visibility::Hidden;
+            }
         }
     }
 }

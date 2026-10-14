@@ -11,19 +11,43 @@
 //! the lesson is: sheet in, bear away, get her moving — and now your pole is a hundred
 //! metres astern and going downwind at a tenth of a knot while you are going at six.
 //!
-//! The coaching in the search is deliberately **advice and not a script**. The drill is
-//! over when Oscar is aboard, however that was managed, and the lines change with the
-//! situation rather than waiting for the player to perform the manoeuvre in the order the
-//! book gives it. A tutorial that refuses to advance until you do the approved thing is
-//! not teaching, it is a form to fill in.
+//! **The pattern it coaches is the figure of eight** — the reach, tack, reach that US
+//! Sailing and the RYA both teach for a yacht with the casualty in sight, and the one
+//! that works under sail because it never asks her to gybe and ends on a close reach,
+//! which is the only point of sail you can stop a boat on. Bear away onto a beam reach
+//! and sail four boat lengths; tack; work down to leeward of him; then come up at him on
+//! a close reach with everything eased, and arrive stopped. The Williamson turn in the
+//! IAMSAR manual is the right answer for a ship under power and the wrong one here: it
+//! is a two-stage turn through two hundred and forty degrees of rudder that puts you back
+//! in your own wake, which a sailing boat cannot do without going through the wind twice
+//! and stopping dead in the middle of it.
+//!
+//! Each leg is given a **target heading and an arrow**, and a mark is put in the water at
+//! the point she should be steering for. That is deliberate hand-holding: a beginner
+//! being told "work down to leeward of him" has no idea what that means, and a beginner
+//! steering at a lit mark learns what it means by doing it. The marks and the arrows are
+//! obviously artificial and are meant to be — they are a training aid, not scenery.
+//!
+//! And the shouting is deliberate too. When something has to be done in the next two
+//! seconds it is **four words across the middle of the screen**, because a sentence in a
+//! panel is not read by somebody who is looking at the water and trying to steer. The
+//! rest of the time the card is quiet and small. A game that shouts all the time is a
+//! game nobody reads; the whole value of big letters is that they are rare.
+//!
+//! The coaching inside each leg is **advice and not a gate**: the drill ends when Oscar
+//! is aboard, however that was managed. A tutorial that refuses to advance until you
+//! perform the approved manoeuvre in the approved order is not teaching, it is a form to
+//! fill in.
 
 use bevy::prelude::*;
 use bevy_egui::egui;
+use glam::DVec2;
 
+use crate::course::Floating;
 use crate::mob::{Drill, Overboard};
 use crate::sim::Sim;
 use crate::sound::SoundHandle;
-use sail_core::units::{deg, ms_to_kn};
+use sail_core::units::{deg, ms_to_kn, rad, wrap_pi};
 
 /// The keys the lesson tells the player to press.
 ///
@@ -54,6 +78,32 @@ const SAILING: f64 = 4.0;
 const HOLD: f64 = 5.0;
 /// How long the verdict stays up at the end.
 const VERDICT: f64 = 30.0;
+/// Boat lengths to sail on the first reach before tacking.
+///
+/// Four. Far enough that the tack and the run back down give her time to settle and to
+/// arrive at him slowly; near enough that he is never more than a hundred metres off.
+const CLEAR_LENGTHS: f64 = 4.0;
+/// How far off the wind the final approach is, degrees.
+///
+/// Fifty: a close reach. Any closer and she cannot be slowed without stalling and
+/// drifting sideways onto him; any broader and the sails cannot be spilled enough to
+/// stop her at all, which is the mistake that runs people down.
+const APPROACH_ANGLE: f64 = 50.0;
+/// And how far downwind of him the approach begins, in boat lengths.
+const GATE_LENGTHS: f64 = 3.5;
+
+/// Where in the figure of eight she is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Leg {
+    /// Away on a beam reach, getting clear and getting control.
+    Clear,
+    /// Round through the wind. Not round the stern.
+    Tack,
+    /// Down to leeward of him, so that the last of it can be done slowly.
+    Downwind,
+    /// And up at him on a close reach, with everything eased.
+    Approach,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Stage {
@@ -70,10 +120,35 @@ pub enum Stage {
     Steady,
     /// The pole is in the water and nobody has thrown anything yet.
     Alarm,
-    /// Looking for him, with whatever advice fits what she is doing.
-    Search,
+    /// Sailing the pattern back to him.
+    Search(Leg),
+    /// He is gone.
+    Lost,
     /// And the numbers.
     Done,
+}
+
+/// How loudly a thing is said.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Tone {
+    /// Something has happened. Red.
+    Alarm,
+    /// Do this, now. Amber.
+    Order,
+    /// It worked. Green.
+    Good,
+    /// It did not. The colour of dried blood, and it stays up.
+    Dead,
+}
+
+/// Four words across the middle of the screen, and how long they have been there.
+#[derive(Clone, Copy)]
+struct Shout {
+    words: &'static str,
+    under: &'static str,
+    since: f64,
+    hold: f64,
+    tone: Tone,
 }
 
 #[derive(Resource, Default)]
@@ -84,7 +159,17 @@ pub struct Tutorial {
     /// Set by the settings panel, cleared here the same frame.
     pub wants_start: bool,
     pub wants_stop: bool,
+    /// The big letters, if anything is being shouted.
+    shout: Option<Shout>,
+    /// Which side the wind was on when the tack began, so the tack can be detected.
+    tack_from: f64,
+    /// Where she should be steering, if there is a mark to put in the water for it.
+    gate: Option<DVec2>,
 }
+
+/// The mark the lesson puts in the water to steer at.
+#[derive(Component)]
+pub struct Guide;
 
 impl Tutorial {
     /// A lesson that starts itself on the first frame, which is what `SAIL_TUTORIAL=1`
@@ -100,28 +185,85 @@ impl Tutorial {
     pub fn running(&self) -> bool {
         self.stage != Stage::Off
     }
+
+    fn shout(&mut self, words: &'static str, under: &'static str, tone: Tone, now: f64) {
+        self.shout = Some(Shout {
+            words,
+            under,
+            since: now,
+            hold: match tone {
+                // Long enough to read while steering, short enough not to be in the way
+                // of the water. The dead one does not go away: it is the end of the
+                // drill and there is nothing to look at the sea for any more.
+                Tone::Alarm => 3.2,
+                Tone::Order => 2.2,
+                Tone::Good => 4.0,
+                Tone::Dead => f64::INFINITY,
+            },
+            tone,
+        });
+    }
+}
+
+/// The mark in the water, which is only there while a leg has somewhere to steer.
+pub fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    sim: Res<Sim>,
+) {
+    // A column of light rather than a buoy. It is a training aid and it should look like
+    // one: nothing in the archipelago glows, so nobody will mistake this for a mark that
+    // belongs to the sea.
+    commands.spawn((
+        Guide,
+        Floating {
+            at: sim.sim.state.pos,
+            lift: 2.6,
+        },
+        Mesh3d(meshes.add(Cylinder::new(0.30, 5.4))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgba(1.0, 0.72, 0.18, 0.30),
+            alpha_mode: AlphaMode::Add,
+            unlit: true,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        })),
+        Transform::default(),
+        Visibility::Hidden,
+    ));
 }
 
 /// Run the lesson.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     sim: Res<Sim>,
     sound: Res<SoundHandle>,
     mut lesson: ResMut<Tutorial>,
     mut over: ResMut<Overboard>,
+    mut guide: Query<(&mut Floating, &mut Visibility), With<Guide>>,
 ) {
     let now = sim.sim.state.time;
     if lesson.wants_start {
         lesson.wants_start = false;
         lesson.stage = Stage::Trim;
         lesson.since = now;
+        lesson.shout = None;
+        lesson.gate = None;
         over.drill = Drill::Secure;
     }
     if lesson.wants_stop {
         lesson.wants_stop = false;
         lesson.stage = Stage::Off;
+        lesson.shout = None;
+        lesson.gate = None;
         over.drill = Drill::Secure;
     }
     if !lesson.running() {
+        if let Ok((_, mut vis)) = guide.single_mut() {
+            *vis = Visibility::Hidden;
+        }
         return;
     }
 
@@ -129,62 +271,91 @@ pub fn run(
     let controls = &sim.controls;
     let knots = ms_to_kn(tm.stw);
     let held = now - lesson.since;
-    let step = |to: Stage, lesson: &mut Tutorial| {
-        lesson.stage = to;
-        lesson.since = now;
-    };
+    let loa = sim.config().loa;
 
     match lesson.stage {
         Stage::Off => {}
-        // Sheets in. Both of them, a little: a boat with her sheets eased sits there
-        // whatever you do with the helm, which is the first thing to find out.
         Stage::Trim => {
             if controls.main_sheet < 0.72 && controls.jib_sheet < 0.72 {
-                step(Stage::Steer, &mut lesson);
+                step(&mut lesson, Stage::Steer, now);
             }
         }
-        // Onto a reach. The easiest point of sail to get her going on, and the one a
-        // beginner can hold without pinching or running by the lee.
         Stage::Steer => {
-            let awa = deg(tm.awa.abs());
-            if (45.0..135.0).contains(&awa) {
-                step(Stage::Build, &mut lesson);
+            if (45.0..135.0).contains(&deg(tm.awa.abs())) {
+                step(&mut lesson, Stage::Build, now);
             }
         }
         Stage::Build => {
             if knots > SAILING {
-                step(Stage::Steady, &mut lesson);
+                step(&mut lesson, Stage::Steady, now);
             }
         }
-        // And now hold it, while the clock runs down to the thing this is all for.
         Stage::Steady => {
             if knots < SAILING - 0.8 {
-                step(Stage::Build, &mut lesson);
+                step(&mut lesson, Stage::Build, now);
             } else if held > HOLD {
                 let st = &sim.render_state();
                 // Over the side at the quarter, where it is racked: astern of her and a
                 // little to leeward, which is where a person goes in from the rail.
-                let at = st.pos - st.forward() * (sim.config().loa * 0.45)
-                    + st.starboard() * tm.awa.signum() * -1.6;
+                let at =
+                    st.pos - st.forward() * (loa * 0.45) + st.starboard() * tm.awa.signum() * -1.6;
                 over.man_overboard(at, now);
-                // Three strikes: the bell is the one thing aboard for telling people
-                // something, and this is the thing it is for.
+                // Three strikes. The bell is the one thing aboard whose whole purpose is
+                // telling people something, and this is the thing it is for.
                 sound.0.ring(3);
-                step(Stage::Alarm, &mut lesson);
+                step(&mut lesson, Stage::Alarm, now);
+                lesson.shout(
+                    "MAN OVERBOARD",
+                    "throw him something — now",
+                    Tone::Alarm,
+                    now,
+                );
             }
         }
         Stage::Alarm => {
             let thrown = matches!(over.drill, Drill::Overboard { ring: Some(_), .. });
-            // Twenty seconds and then the lesson moves on whether anybody threw anything
-            // or not — because that is what happens on the water, and the verdict at the
-            // end says so.
-            if thrown || held > 20.0 {
-                step(Stage::Search, &mut lesson);
+            if thrown || held > 14.0 {
+                lesson.tack_from = tm.awa.signum();
+                step(&mut lesson, Stage::Search(Leg::Clear), now);
+                lesson.shout(
+                    "BEAR AWAY",
+                    "onto a beam reach, and sail on four lengths",
+                    Tone::Order,
+                    now,
+                );
             }
         }
-        Stage::Search => {
-            if matches!(over.drill, Drill::Recovered { .. }) {
-                step(Stage::Done, &mut lesson);
+        Stage::Search(leg) => match over.drill {
+            Drill::Recovered { .. } => {
+                step(&mut lesson, Stage::Done, now);
+                lesson.shout("ABOARD", "and that is the one that counts", Tone::Good, now);
+            }
+            Drill::Lost { .. } => {
+                step(&mut lesson, Stage::Lost, now);
+                sound.0.ring(1);
+                lesson.shout("HE IS GONE", "", Tone::Dead, now);
+            }
+            Drill::Overboard { mark, .. } => {
+                let next = advance(leg, &sim, &over, lesson.tack_from, mark);
+                if next != leg {
+                    lesson.stage = Stage::Search(next);
+                    lesson.since = now;
+                    if let Some((words, under)) = order_for(next) {
+                        lesson.shout(words, under, Tone::Order, now);
+                    }
+                    if next == Leg::Tack {
+                        lesson.tack_from = tm.awa.signum();
+                    }
+                }
+            }
+            Drill::Secure => {}
+        },
+        Stage::Lost => {
+            // It stays up a good while — it is the end of the drill and there is nothing
+            // to look at the water for any more — and then it goes, because a screen a
+            // player cannot dismiss is a screen that has stopped being drama.
+            if held > VERDICT {
+                lesson.stage = Stage::Off;
             }
         }
         Stage::Done => {
@@ -193,12 +364,118 @@ pub fn run(
             }
         }
     }
+
+    // And the mark in the water, which is wherever this leg wants her to go.
+    lesson.gate = match lesson.stage {
+        Stage::Search(leg) => steer_for(leg, &sim, &over),
+        _ => None,
+    };
+    if let Ok((mut float, mut vis)) = guide.single_mut() {
+        match lesson.gate {
+            Some(at) => {
+                float.at = at;
+                *vis = Visibility::Inherited;
+            }
+            None => *vis = Visibility::Hidden,
+        }
+    }
+}
+
+fn step(lesson: &mut Tutorial, to: Stage, now: f64) {
+    lesson.stage = to;
+    lesson.since = now;
+}
+
+/// The course the final approach is sailed on: a close reach, on the tack she is on.
+///
+/// Fifty degrees off the true wind, on the side the wind is already on, so that the last
+/// hundred metres needs no tack and no gybe — which is the whole reason the pattern is
+/// shaped the way it is.
+fn approach_course(twd: f64, wind_side: f64) -> f64 {
+    (twd - rad(APPROACH_ANGLE) * wind_side).rem_euclid(std::f64::consts::TAU)
+}
+
+/// Where the approach begins: that many boat lengths back down the approach course from
+/// him, which is to leeward and off to one side.
+fn gate(oscar: DVec2, twd: f64, wind_side: f64, loa: f64) -> DVec2 {
+    let course = approach_course(twd, wind_side);
+    oscar - DVec2::new(course.sin(), course.cos()) * (GATE_LENGTHS * loa)
+}
+
+/// Where she should be steering on this leg, if there is a point for it.
+fn steer_for(leg: Leg, sim: &Sim, over: &Overboard) -> Option<DVec2> {
+    let oscar = over.oscar()?;
+    let tm = &sim.sim.telemetry;
+    let loa = sim.config().loa;
+    match leg {
+        // Nothing to steer at: the instruction is an angle to the wind and a distance,
+        // and an arrow says it better than a mark would.
+        Leg::Clear | Leg::Tack => None,
+        Leg::Downwind => Some(gate(oscar, tm.twd, tm.awa.signum(), loa)),
+        // Nothing on the last leg: a light standing on top of him is a light in the way
+        // of the one thing he is supposed to be looking at, which is the flag.
+        Leg::Approach => None,
+    }
+}
+
+/// Whether this leg is done, and what comes after it.
+///
+/// Every one of these is a fact about the boat rather than a key the player has to press,
+/// so somebody who sails the pattern without reading a word of it gets carried along by
+/// the same prompts as somebody following them exactly.
+fn advance(leg: Leg, sim: &Sim, over: &Overboard, tack_from: f64, mark: DVec2) -> Leg {
+    let tm = &sim.sim.telemetry;
+    let loa = sim.config().loa;
+    let pos = sim.sim.state.pos;
+    let Some(oscar) = over.oscar() else {
+        return leg;
+    };
+    match leg {
+        // Clear of him, with the boat going and under control.
+        Leg::Clear => {
+            if (pos - mark).length() > CLEAR_LENGTHS * loa {
+                Leg::Tack
+            } else {
+                leg
+            }
+        }
+        // Through the wind. Detected rather than asked for: the side the wind is on has
+        // changed, which is what a tack *is*.
+        Leg::Tack => {
+            if tm.awa.signum() != tack_from && tm.awa.abs() > rad(30.0) {
+                Leg::Downwind
+            } else {
+                leg
+            }
+        }
+        // Down to leeward of him, far enough out that the last of it is a close reach.
+        Leg::Downwind => {
+            let here = gate(oscar, tm.twd, tm.awa.signum(), loa);
+            if (pos - here).length() < loa * 1.3 {
+                Leg::Approach
+            } else {
+                leg
+            }
+        }
+        Leg::Approach => leg,
+    }
+}
+
+/// The four words for the start of a leg.
+fn order_for(leg: Leg) -> Option<(&'static str, &'static str)> {
+    match leg {
+        Leg::Clear => Some(("BEAR AWAY", "onto a beam reach, and sail on four lengths")),
+        Leg::Tack => Some(("TACK NOW", "through the wind — never round the stern")),
+        Leg::Downwind => Some(("DOWN TO LEEWARD", "steer for the light, below him")),
+        Leg::Approach => Some(("EASE EVERYTHING", "come up at him, and arrive stopped")),
+    }
 }
 
 /// What to say, which is one instruction at a time and nothing else.
 fn instruction(stage: Stage, sim: &Sim, over: &Overboard, held: f64) -> (String, String) {
     let tm = &sim.sim.telemetry;
     let knots = ms_to_kn(tm.stw);
+    let loa = sim.config().loa;
     match stage {
         Stage::Off => (String::new(), String::new()),
         Stage::Trim => (
@@ -231,37 +508,72 @@ fn instruction(stage: Stage, sim: &Sim, over: &Overboard, held: f64) -> (String,
             "HOLD THAT".into(),
             format!("{:.0}…", (HOLD - held).max(0.0).ceil()),
         ),
-        Stage::Alarm => (
-            "MAN OVERBOARD".into(),
-            format!(
-                "The dan buoy is in the water astern of you. Press {} to throw the \
-                 lifebuoy — now, not in a minute: it lands where *you* are, and you are \
-                 leaving him behind at six knots.",
-                key_name(THROW)
-            ),
-        ),
-        Stage::Search => {
-            let (range, bearing) = over.to_oscar(sim.sim.state.pos).unwrap_or((0.0, 0.0));
-            let lengths = range / sim.config().loa;
-            let advice = if range < 15.0 && knots > 2.5 {
-                "Too fast. Ease both sheets right off and let her stop — you cannot hold \
-                 a man against a hull doing three knots."
-            } else if range < 25.0 {
-                "Come at him on a close reach, as slowly as she will still steer, and aim \
-                 to arrive stopped with him at your shoulder — not under your bow."
-            } else if lengths > 6.0 && knots > 2.0 {
-                "Far enough. Tack — do not gybe with a man in the water — and work back \
-                 towards him."
-            } else if knots < 1.0 {
-                "You have stopped out of reach of him. Sheet in and sail back; a drifting \
-                 boat goes downwind faster than he does."
-            } else {
-                "Keep the flag in sight and sail back to it. He is going downwind at a \
-                 tenth of a knot; everything else out there is you."
+        Stage::Alarm => {
+            // The number that teaches, live: how far from him the lifebuoy would land if
+            // it left the boat now. It grows while you read this sentence.
+            let gap = over.off_the_rail(sim).unwrap_or(0.0);
+            (
+                format!("THROW IT — IT WOULD LAND {gap:.0} M FROM HIM"),
+                format!(
+                    "{} puts the lifebuoy over the stern. It lands where *you* are, and \
+                     you are leaving him behind at {knots:.1} knots.",
+                    key_name(THROW)
+                ),
+            )
+        }
+        Stage::Search(leg) => {
+            // Off her rail, not from her middle: the same number the recovery is decided
+            // on, so that "two metres" means you can reach him.
+            let (_, bearing) = over.to_oscar(sim.sim.state.pos).unwrap_or((0.0, 0.0));
+            let range = over.off_the_rail(sim).unwrap_or(0.0);
+            let left = over.endurance_left(sim.sim.state.time);
+            let minutes = left * crate::mob::ENDURANCE / 60.0;
+            let body = match leg {
+                Leg::Clear => format!(
+                    "Sail clear on a beam reach — wind square on the side of her, {:.0} \
+                     now. Four boat lengths is enough; you are {:.1} along.",
+                    deg(tm.awa.abs()),
+                    range / loa
+                ),
+                Leg::Tack => "Helm over and through the wind. Not round the stern: a gybe \
+                              with a man in the water puts the boom across the cockpit and \
+                              takes your eyes off him."
+                    .into(),
+                Leg::Downwind => "Work down to leeward of him — below him, downwind — so \
+                                  that the last of it can be sailed slowly uphill. Steer \
+                                  for the light."
+                    .into(),
+                Leg::Approach => format!(
+                    "Up at him on a close reach, sheets eased, as slowly as she will \
+                     still steer. {range:.0} m to go at {knots:.1} knots — he wants to \
+                     end up at your shoulder, never under your bow."
+                ),
             };
             (
-                format!("{range:.0} M, BEARING {:03.0}", deg(bearing)),
-                advice.into(),
+                format!(
+                    "{range:.0} M, BEARING {:03.0} — {minutes:.0} MIN",
+                    deg(bearing)
+                ),
+                body,
+            )
+        }
+        Stage::Lost => {
+            let Drill::Lost { range, ring_gap } = over.drill else {
+                return ("HE IS GONE".into(), String::new());
+            };
+            (
+                format!("LOST OVERBOARD — {range:.0} M AWAY"),
+                match ring_gap {
+                    Some(gap) => format!(
+                        "Ten minutes in the water is as long as a person's hands keep \
+                         working. The lifebuoy is still out there, {gap:.0} m from where \
+                         he was. Esc, then DRILL, and again."
+                    ),
+                    None => "Ten minutes in the water is as long as a person's hands keep \
+                             working, and nothing went in with him to hold on to. Esc, \
+                             then DRILL, and again."
+                        .into(),
+                },
             )
         }
         Stage::Done => {
@@ -277,11 +589,10 @@ fn instruction(stage: Stage, sim: &Sim, over: &Overboard, held: f64) -> (String,
             (
                 crate::mob::verdict(took, ring_gap, thrown_after, run_downs),
                 match ring_gap {
-                    Some(gap) if gap < 20.0 => {
-                        "That is a lifebuoy he could swim to. The throw is the part of \
-                         this that cannot be done late."
-                            .into()
-                    }
+                    Some(gap) if gap < 20.0 => "That is a lifebuoy he could swim to. The \
+                                                throw is the part of this that cannot be \
+                                                done late."
+                        .into(),
                     Some(_) => "Thrown late: by the time it left the boat you had sailed \
                                 on, and it landed where you were rather than where he \
                                 was."
@@ -295,10 +606,42 @@ fn instruction(stage: Stage, sim: &Sim, over: &Overboard, held: f64) -> (String,
     }
 }
 
-/// Draw the lesson: a card at the top of the screen and nothing else.
+/// Where she should be pointing on this leg, so the arrow has something to point at.
 ///
-/// At the top because the water is at the bottom, and the whole point of the drill is
-/// that you are looking at the water.
+/// Every one of these is a heading rather than a feeling, which is the hand-holding: the
+/// difference between "work down to leeward of him" and a number with an arrow beside it
+/// is the difference between a beginner guessing and a beginner steering.
+fn target_heading(stage: Stage, sim: &Sim, over: &Overboard, tack_from: f64) -> Option<f64> {
+    let tm = &sim.sim.telemetry;
+    let side = if tm.awa.abs() < rad(1.0) {
+        1.0
+    } else {
+        tm.awa.signum()
+    };
+    let beam = |on: f64| (tm.twd - rad(90.0) * on).rem_euclid(std::f64::consts::TAU);
+    let bearing_to = |at: DVec2| {
+        let off = at - sim.sim.state.pos;
+        off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU)
+    };
+    match stage {
+        // Getting her going in the first place: the wind on the beam is the easiest
+        // thing to hold and the fastest way to four knots.
+        Stage::Steer | Stage::Build | Stage::Steady => Some(beam(side)),
+        Stage::Search(Leg::Clear) => Some(beam(side)),
+        // Through the wind: the arrow points at the course on the new tack, which is
+        // where the helm has to take her.
+        Stage::Search(Leg::Tack) => Some(beam(-tack_from)),
+        Stage::Search(Leg::Downwind) => over
+            .oscar()
+            .map(|o| gate(o, tm.twd, side, sim.config().loa))
+            .map(bearing_to),
+        Stage::Search(Leg::Approach) => over.oscar().map(bearing_to),
+        _ => None,
+    }
+}
+
+/// Draw the lesson: a quiet card at the top, an arrow for the helm, and — when something
+/// has to happen in the next two seconds — four words across the middle.
 pub fn draw(
     mut contexts: bevy_egui::EguiContexts,
     lesson: Res<Tutorial>,
@@ -309,14 +652,15 @@ pub fn draw(
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    let held = sim.sim.state.time - lesson.since;
+    let now = sim.sim.state.time;
+    let held = now - lesson.since;
     let (heading, body) = instruction(lesson.stage, &sim, &over, held);
-    // The alarm is red and everything else is the panel's own cream, because a man in
-    // the water is the one thing in this game that is allowed to shout.
-    let (ink, loud) = match lesson.stage {
-        Stage::Alarm => (egui::Color32::from_rgb(236, 110, 86), true),
-        Stage::Search => (egui::Color32::from_rgb(232, 176, 58), false),
-        _ => (egui::Color32::from_rgb(200, 190, 150), false),
+    let ink = match lesson.stage {
+        Stage::Alarm => egui::Color32::from_rgb(236, 110, 86),
+        Stage::Lost => egui::Color32::from_rgb(168, 58, 46),
+        Stage::Search(_) => egui::Color32::from_rgb(232, 176, 58),
+        Stage::Done => egui::Color32::from_rgb(120, 190, 130),
+        _ => egui::Color32::from_rgb(200, 190, 150),
     };
     let frame = egui::Frame::new()
         .fill(egui::Color32::from_rgba_unmultiplied(14, 18, 24, 232))
@@ -326,12 +670,12 @@ pub fn draw(
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 18.0))
         .show(ctx, |ui| {
             frame.show(ui, |ui| {
-                ui.set_width(420.0);
+                ui.set_width(430.0);
                 ui.label(
                     egui::RichText::new(&heading)
                         .color(ink)
                         .monospace()
-                        .size(if loud { 20.0 } else { 14.0 }),
+                        .size(14.0),
                 );
                 if !body.is_empty() {
                     ui.add_space(4.0);
@@ -342,9 +686,152 @@ pub fn draw(
                             .size(11.5),
                     );
                 }
+                // The helm cue, under the words, because it is the thing you act on.
+                if let Some(want) = target_heading(lesson.stage, &sim, &over, lesson.tack_from) {
+                    ui.add_space(6.0);
+                    helm_cue(ui, wrap_pi(want - sim.sim.state.heading));
+                }
+                // And how long he has, drawn as something emptying rather than as a
+                // number, because a bar going down is read without being looked at.
+                if over.live() {
+                    ui.add_space(5.0);
+                    endurance_bar(ui, over.endurance_left(now) as f32);
+                }
             });
         });
+
+    if let Some(shout) = lesson.shout {
+        let age = now - shout.since;
+        // In quickly, out slowly, and the dead one never leaves.
+        let alpha = if shout.hold.is_infinite() {
+            crate::curve::smoothstep(0.0, 0.5, age as f32)
+        } else {
+            crate::curve::smoothstep(0.0, 0.22, age as f32)
+                * (1.0
+                    - crate::curve::smoothstep(
+                        shout.hold as f32,
+                        shout.hold as f32 + 0.7,
+                        age as f32,
+                    ))
+        };
+        if alpha > 0.01 {
+            big_letters(ctx, shout, alpha);
+        }
+    }
     Ok(())
+}
+
+/// Which way to push the helm, and how hard.
+///
+/// Chevrons rather than a number alone: the number tells you how far off you are and the
+/// chevrons tell you which way to move your hand, and a beginner needs the second one
+/// first. Green inside eight degrees, which is as close as anybody steers by hand.
+fn helm_cue(ui: &mut egui::Ui, error: f64) {
+    let off = deg(error);
+    let on_course = off.abs() < 8.0;
+    let colour = if on_course {
+        egui::Color32::from_rgb(120, 190, 130)
+    } else {
+        egui::Color32::from_rgb(230, 198, 120)
+    };
+    let chevrons = ((off.abs() / 15.0).ceil() as usize).clamp(1, 4);
+    let text = if on_course {
+        "— STEADY AS SHE GOES —".to_string()
+    } else if off > 0.0 {
+        format!(
+            "{} HELM TO STARBOARD {:.0}",
+            "▶".repeat(chevrons),
+            off.abs()
+        )
+    } else {
+        format!("HELM TO PORT {:.0} {}", off.abs(), "◀".repeat(chevrons))
+    };
+    ui.label(
+        egui::RichText::new(text)
+            .color(colour)
+            .monospace()
+            .size(13.0),
+    );
+}
+
+/// How long he has left, as a bar that empties.
+fn endurance_bar(ui: &mut egui::Ui, left: f32) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 7.0), egui::Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, 1.0, egui::Color32::from_rgb(26, 27, 29));
+    let mut filled = rect;
+    filled.set_width(rect.width() * left.clamp(0.0, 1.0));
+    // Amber while there is time, and red when there is not, because the colour is the
+    // part of this that gets read out of the corner of an eye.
+    let colour = if left > 0.35 {
+        egui::Color32::from_rgb(214, 160, 56)
+    } else {
+        egui::Color32::from_rgb(222, 74, 58)
+    };
+    p.rect_filled(filled, 1.0, colour);
+}
+
+/// Four words across the middle of the screen.
+///
+/// Spaced out by hand, which is the whole look: the letters of a thing shouted are far
+/// apart, and egui has no letter spacing. A dark band behind them so they are readable
+/// over a bright sea, and the sea still showing through it so the player can go on
+/// steering — which is the difference between this and a modal dialogue, and the reason
+/// it is allowed to be this big.
+fn big_letters(ctx: &egui::Context, shout: Shout, alpha: f32) {
+    let (ink, band) = match shout.tone {
+        Tone::Alarm => (egui::Color32::from_rgb(242, 96, 72), 170),
+        Tone::Order => (egui::Color32::from_rgb(240, 200, 110), 120),
+        Tone::Good => (egui::Color32::from_rgb(150, 214, 158), 140),
+        Tone::Dead => (egui::Color32::from_rgb(176, 42, 34), 210),
+    };
+    let fade = |c: egui::Color32, a: f32| {
+        egui::Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (a * 255.0) as u8)
+    };
+    let spaced: String = shout
+        .words
+        .chars()
+        .map(|c| {
+            if c == ' ' {
+                "   ".to_string()
+            } else {
+                format!("{c} ")
+            }
+        })
+        .collect();
+    egui::Area::new("shout".into())
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -40.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgba_unmultiplied(
+                    6,
+                    7,
+                    9,
+                    (band as f32 * alpha) as u8,
+                ))
+                .inner_margin(egui::Margin::symmetric(44, 18))
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            egui::RichText::new(spaced.trim_end())
+                                .color(fade(ink, alpha))
+                                .monospace()
+                                .size(46.0),
+                        );
+                        if !shout.under.is_empty() {
+                            ui.add_space(2.0);
+                            ui.label(
+                                egui::RichText::new(shout.under)
+                                    .color(fade(egui::Color32::from_rgb(214, 218, 222), alpha))
+                                    .monospace()
+                                    .size(15.0),
+                            );
+                        }
+                    });
+                });
+        });
 }
 
 #[cfg(test)]
@@ -352,12 +839,6 @@ mod tests {
     use super::*;
 
     /// Every key the lesson asks for is a key the program reads.
-    ///
-    /// The lesson names three and `help.rs` holds the list of everything the game
-    /// answers to, checked against the source by its own test. This is the join between
-    /// them: a tutorial that says "press ENTER" while nothing reads Enter is the one
-    /// failure a player cannot work around, and it is invisible in both files on their
-    /// own.
     #[test]
     fn the_lesson_only_asks_for_keys_the_game_reads() {
         for key in [MAINSHEET, WINCH, THROW] {
@@ -373,19 +854,88 @@ mod tests {
     #[test]
     // Constant assertions on purpose: these are the numbers somebody tuning the drill
     // will reach for, and what they must not do is drift out of the band the comment
-    // above them claims. A test that can only fail when an edit happens is the test for
-    // that.
+    // above them claims.
     #[allow(clippy::assertions_on_constants)]
     fn the_drill_waits_for_a_boat_that_is_actually_sailing() {
         assert_eq!(Stage::default(), Stage::Off);
-        // Below three knots she has no steerage worth the name and the pole would not be
-        // properly astern of her when it went in.
         assert!(SAILING > 3.0, "a boat doing {SAILING:.1} knots is drifting");
-        // And a countdown has to be long enough to read and short enough to be a
-        // countdown.
         assert!(
             (3.0..12.0).contains(&HOLD),
             "{HOLD:.0} seconds is not a countdown"
         );
+        // The pattern's own numbers: a close reach is a close reach, and the gate is far
+        // enough out that the approach along it is a leg and not a lurch.
+        assert!(
+            (40.0..60.0).contains(&APPROACH_ANGLE),
+            "{APPROACH_ANGLE:.0} degrees off the wind is not a close reach"
+        );
+        assert!(GATE_LENGTHS > 2.0 && CLEAR_LENGTHS > 2.0);
+    }
+
+    /// The approach is a close reach, on the tack she is already on, from below him.
+    ///
+    /// This is the geometry of the whole pattern and it is the part that would be wrong
+    /// silently: a sign slip puts the gate upwind of him, which coaches the player into
+    /// running down on a casualty from windward at six knots — the exact thing the
+    /// pattern exists to prevent.
+    #[test]
+    fn the_gate_is_downwind_of_him_and_the_approach_is_a_close_reach() {
+        let loa = 10.4;
+        for twd_deg in [0.0, 37.0, 180.0, 300.0] {
+            for side in [1.0_f64, -1.0] {
+                let twd = rad(twd_deg);
+                let oscar = DVec2::new(120.0, -40.0);
+                let here = gate(oscar, twd, side, loa);
+                let course = approach_course(twd, side);
+                // The approach runs from the gate to him.
+                let along = (oscar - here).normalize();
+                let want = DVec2::new(course.sin(), course.cos());
+                assert!(
+                    (along - want).length() < 1e-9,
+                    "the gate is not on the approach course"
+                );
+                // That course is a close reach: fifty degrees off the true wind.
+                let off = wrap_pi(twd - course).abs();
+                assert!(
+                    (off - rad(APPROACH_ANGLE)).abs() < 1e-9,
+                    "the approach is {:.1} degrees off the wind",
+                    deg(off)
+                );
+                // With the wind on the side she is already on, so the last leg needs
+                // neither a tack nor a gybe.
+                assert_eq!(
+                    wrap_pi(twd - course).signum(),
+                    side,
+                    "the approach puts the wind on the other side"
+                );
+                // And the gate is downwind of him: further along the way the wind is
+                // blowing than he is.
+                let downwind = DVec2::new(-twd.sin(), -twd.cos());
+                assert!(
+                    (here - oscar).dot(downwind) > 0.0,
+                    "the gate is upwind of him, which coaches running him down"
+                );
+                // A sensible distance off, not a mile.
+                assert!(((2.0 * loa)..(5.0 * loa)).contains(&(here - oscar).length()));
+            }
+        }
+    }
+
+    /// A leg only ends when the boat has actually done the thing.
+    #[test]
+    fn the_legs_are_in_the_order_of_the_pattern() {
+        assert_eq!(order_for(Leg::Clear).unwrap().0, "BEAR AWAY");
+        assert_eq!(order_for(Leg::Tack).unwrap().0, "TACK NOW");
+        // And the tack is never described as a gybe, because that is the one thing this
+        // pattern exists to avoid.
+        for leg in [Leg::Clear, Leg::Tack, Leg::Downwind, Leg::Approach] {
+            let (words, under) = order_for(leg).unwrap();
+            assert!(!words.to_lowercase().contains("gybe"));
+            assert!(
+                words.len() <= 16,
+                "{words} is not four words across a screen"
+            );
+            assert!(!under.is_empty());
+        }
     }
 }
