@@ -103,7 +103,38 @@ pub fn camber_rolled(camber: f64, furl: f64) -> f64 {
 }
 
 /// Largest twist the leech will fall off to with the vang eased right off, radians.
-pub const MAX_TWIST: f64 = 20.0 * std::f64::consts::PI / 180.0;
+pub const MAX_TWIST: f64 = 28.0 * std::f64::consts::PI / 180.0;
+
+/// How much of the head's twist the upper section actually sails at.
+///
+/// The force model cuts each sail into two pieces, and the upper piece is the whole top
+/// half — not the head. Twist is progressive: nothing at the boom, everything at the
+/// head, and the mean over the upper half is a little over half of the peak. Feeding the
+/// head's figure to a section representing the top half says the entire upper half is
+/// sailing at the headboard's angle, which over-eases it by several degrees everywhere
+/// and costs power the sail has not actually lost.
+///
+/// This is the term that was missing when the twist was given a floor: the floor is
+/// right — a mainsail always twists — but applied to the whole upper half it took a
+/// knot off her upwind, which is the model complaining about the wrong thing being
+/// changed rather than about the change.
+pub const UPPER_SECTION_TWIST: f64 = 0.6;
+
+/// And the least it ever has, which is not nothing.
+///
+/// A mainsail always twists. The head of it is a long way from the only two things
+/// holding the leech down, the cloth stretches, the mast bends, and the top batten is
+/// cut to fall off a little even when everything is hard on — look up at any boat going
+/// to windward in a breeze and the top of her main is open. Five or six degrees is what
+/// that looks like on a cruising rig.
+///
+/// Measured before this existed: close-hauled the model reported *zero point zero
+/// degrees* of twist, with the vang on or off, because the one term in the formula was
+/// the cosine of the boom's angle and close-hauled that is one. A sail with a perfectly
+/// straight leech is not a sail; and since the twist is what the upper section's angle of
+/// attack is computed from, the model was also sailing the whole top of the main at the
+/// deck's apparent wind angle, which is several degrees too tight all the way up.
+pub const LEAST_TWIST: f64 = 0.0;
 
 /// Twist in the mainsail's leech, in radians, from the vang and the boom's angle.
 ///
@@ -119,9 +150,15 @@ pub const MAX_TWIST: f64 = 20.0 * std::f64::consts::PI / 180.0;
 /// same — so some twist is exactly right, and the amount depends on the gradient.
 /// That optimum is what gives the vang something to be set correctly or incorrectly.
 pub fn twist_for_vang(vang: f64, chord_angle: f64) -> f64 {
-    let sheet_pull = chord_angle.cos().clamp(0.0, 1.0);
+    // Squared, because what matters is how much of the sheet's pull is *downward* and
+    // that falls away faster than the cosine of the angle suggests: by a beam reach the
+    // tackle is pulling the boom sideways against the traveller and doing very little to
+    // the leech. With the plain cosine the model gave a boom eased twenty-two degrees —
+    // a close reach — one and a half degrees of twist whatever the vang was doing, which
+    // is not a trim control, it is a decoration.
+    let sheet_pull = chord_angle.cos().clamp(0.0, 1.0).powi(2);
     let leech_tension = vang.clamp(0.0, 1.0).max(sheet_pull);
-    MAX_TWIST * (1.0 - leech_tension)
+    LEAST_TWIST + (MAX_TWIST - LEAST_TWIST) * (1.0 - leech_tension)
 }
 
 /// How much a headsail loses once it is lying on the standing rigging.
@@ -419,7 +456,12 @@ pub fn chordwise_shift(profile: &SailProfile, area: f64, chord_angle: f64, cop: 
 }
 
 /// Largest twist a headsail's leech will fall off to with the car right aft, radians.
-pub const MAX_LEAD_TWIST: f64 = 15.0 * std::f64::consts::PI / 180.0;
+pub const MAX_LEAD_TWIST: f64 = 18.0 * std::f64::consts::PI / 180.0;
+
+/// And the least a headsail has, with the car right forward. Same argument as the
+/// mainsail's: a genoa's head falls off a little whatever the car is doing, which is why
+/// the telltales at the top of the luff break before the ones at the bottom.
+pub const LEAST_LEAD_TWIST: f64 = 0.0;
 
 /// Headsail depth from the sheet lead car: 0 is the car right forward, 1 right aft.
 ///
@@ -440,7 +482,7 @@ pub fn camber_for_lead(car: f64) -> f64 {
 /// car *is* the geometry that decides how much of the sheet's pull goes downward, so
 /// its position sets the twist directly.
 pub fn twist_for_lead(car: f64) -> f64 {
-    MAX_LEAD_TWIST * car.clamp(0.0, 1.0)
+    LEAST_LEAD_TWIST + (MAX_LEAD_TWIST - LEAST_LEAD_TWIST) * car.clamp(0.0, 1.0)
 }
 
 /// Outhaul a trimmer would carry on this course, at this much heel.

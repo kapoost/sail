@@ -457,10 +457,11 @@ impl Simulation {
         let twist = twist_for_vang(controls.vang, boom_angle.abs());
         // The upper section is eased by the twist, expressed back through the sheet
         // mapping so both sections go through the same force model.
+        // The *section's* twist, not the head's: see `UPPER_SECTION_TWIST`.
         let upper_sheet = cfg
             .main
             .profile
-            .sheet_for_chord_angle(boom_angle.abs() + twist);
+            .sheet_for_chord_angle(boom_angle.abs() + twist * crate::sail::UPPER_SECTION_TWIST);
         // And the lower section is set by where the boom *is*, not by where the sheet
         // would have it. In steady air those are the same number — the sheet is what put
         // the boom there — and the whole difference is the second and a half of a gybe,
@@ -555,7 +556,9 @@ impl Simulation {
             twist_for_lead(controls.genoa_car)
         };
         let jib_chord = head.profile.chord_angle(controls.jib_sheet);
-        let jib_upper_sheet = head.profile.sheet_for_chord_angle(jib_chord + jib_twist);
+        let jib_upper_sheet = head
+            .profile
+            .sheet_for_chord_angle(jib_chord + jib_twist * crate::sail::UPPER_SECTION_TWIST);
 
         // What the headsail loses from lying on the shrouds and the spreader. Only
         // the headsail: the mainsail's own contact with the rigging is the boom
