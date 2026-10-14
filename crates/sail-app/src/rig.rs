@@ -500,21 +500,37 @@ pub fn update(
                 // so the rope ends at the clew rather than near it. It used to solve the
                 // clew a second time here with its own typed-in foot length, and when
                 // the sail's was replaced by the measured one this copy stayed behind.
+                // Both sheets are bent to the *same* corner, because on a boat they
+                // are: one rope through the clew with an end led down each side deck.
+                // Drawing each of them to a clew of its own — the sail as it would be if
+                // it were hard on that side — put the two ends in different places, and
+                // the moment the sail began crossing the foretriangle instead of
+                // teleporting, the ropes went on teleporting without it. Reported from
+                // the deck as the headsail's sheet jumping on a tack, with everything
+                // else right, which is exactly what that would look like.
                 let shape = crate::boat::headsail_shape(
                     &cfg,
                     &sim.controls,
-                    if starboard { 1.0 } else { -1.0 },
+                    t.jib_side as f32,
                     t.jib.chord_angle as f32,
                 );
                 // And where the *cloth* ends, not where the geometry says: the corner is
                 // pushed off the mast, the shrouds and the deck like every other point
                 // on the sail, so a rope drawn to the unpushed corner misses it by
                 // exactly the push.
-                let shrouds =
-                    crate::boat::shroud_polyline(cfg.beam as f32, lee > 0.0, st.heel as f32, lee);
+                // The wire the cloth is pressed against is the one on the side the sail
+                // is actually lying on, which mid-tack is neither of them in particular —
+                // `jib_side` goes through nought and the sail is clear of both.
+                let cloth_side = if t.jib_side >= 0.0 { 1.0 } else { -1.0 };
+                let shrouds = crate::boat::shroud_polyline(
+                    cfg.beam as f32,
+                    cloth_side > 0.0,
+                    st.heel as f32,
+                    cloth_side,
+                );
                 let chord = (shape.clew - shape.tack).normalize_or_zero();
                 let mut normal = Vec3::Y.cross(chord).normalize_or_zero();
-                if normal.x * lee < 0.0 {
+                if normal.x * cloth_side < 0.0 {
                     normal = -normal;
                 }
                 let clew = crate::boat::constrained(

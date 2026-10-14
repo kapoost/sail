@@ -386,12 +386,20 @@ pub fn gather(
         let over = ((heel - sail_core::autopilot::OVERPOWERED_HEEL)
             / sail_core::autopilot::OVERPOWERED_HEEL)
             .clamp(0.0, 1.0) as f32;
-        if over > 0.0 {
+        {
             // A second and a half of travel when she is right over, and still four
             // seconds when she is barely past the mark — because a hand on a clutch
             // does not meter the rope out in proportion to anything, it opens it. The
             // proportional part is there so the last of it comes off gently instead of
             // the sheet running out and the boom slamming against the shrouds.
+            //
+            // And it runs at *any* heel, which it did not. This was gated on being past
+            // the angle a cruising crew reefs at, so holding it down at fifteen degrees
+            // did nothing whatever and the key read as broken — reported from the deck
+            // exactly that way. A release that refuses to release until things are
+            // already bad is the one control you cannot afford to have a condition on:
+            // the moment you want it is the moment before it is needed, when you have
+            // seen the gust coming across the water and she is still on her feet.
             let run = (0.7 * (0.35 + 0.65 * over) * dt as f32).min(1.0);
             let main_room = 1.0 - sim.controls.main_sheet as f32;
             if main_room > 0.01 {

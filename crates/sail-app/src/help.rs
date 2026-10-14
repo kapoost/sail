@@ -84,6 +84,55 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
     ),
 ];
 
+/// Every key the program answers to, as the type the input layer uses.
+///
+/// Beside the prose above rather than inside it, because the prose is for a person and
+/// this is for the test at the bottom of this file: it reads the source of every module
+/// and checks that the two lists are the same one. A key the program answers to and the
+/// help does not mention is a feature nobody will find; a key the help promises and
+/// nothing reads is a lie, and both have happened here.
+pub const DOCUMENTED: [KeyCode; 35] = [
+    // At the helm.
+    KeyCode::ArrowLeft,
+    KeyCode::ArrowRight,
+    KeyCode::Space,
+    KeyCode::ShiftLeft,
+    KeyCode::ShiftRight,
+    KeyCode::KeyP,
+    KeyCode::KeyO,
+    KeyCode::Comma,
+    KeyCode::Period,
+    // The sails.
+    KeyCode::KeyW,
+    KeyCode::KeyS,
+    KeyCode::KeyQ,
+    KeyCode::KeyE,
+    KeyCode::Digit1,
+    KeyCode::Digit2,
+    KeyCode::KeyA,
+    KeyCode::KeyD,
+    KeyCode::KeyX,
+    KeyCode::KeyZ,
+    KeyCode::KeyT,
+    KeyCode::KeyR,
+    KeyCode::KeyG,
+    // Looking at it.
+    KeyCode::KeyC,
+    KeyCode::KeyV,
+    KeyCode::KeyB,
+    KeyCode::KeyM,
+    KeyCode::BracketLeft,
+    KeyCode::BracketRight,
+    KeyCode::Tab,
+    KeyCode::KeyH,
+    KeyCode::KeyK,
+    KeyCode::KeyL,
+    KeyCode::Escape,
+    // And the help itself, which the list cannot very well leave out.
+    KeyCode::F1,
+    KeyCode::Slash,
+];
+
 pub fn draw(mut contexts: bevy_egui::EguiContexts, mut help: ResMut<Help>) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -175,4 +224,65 @@ pub fn draw(mut contexts: bevy_egui::EguiContexts, mut help: ResMut<Help>) -> Re
         help.open = false;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The keys the program answers to and the keys this file promises are the same set.
+    ///
+    /// Reported from the deck as "R was not catching", which turned out to be a real
+    /// fault in `input.rs` rather than a wrong line here — but nothing in this repository
+    /// could have told the two apart, and the header of this very file is about a key
+    /// list that was wrong three ways. So the list is checked against the program.
+    ///
+    /// It reads the source. That is unusual and it is the only way to ask this question
+    /// without a key-binding layer the game does not need: twelve modules read the
+    /// keyboard directly, which is the right design for a game this size, and the cost of
+    /// it is exactly this test.
+    #[test]
+    fn every_key_the_game_answers_to_is_in_the_list() {
+        let mut found: Vec<String> = Vec::new();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        for entry in std::fs::read_dir(&dir).expect("the crate's own source") {
+            let path = entry.expect("a readable directory").path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("a readable module");
+            // This file's own list is not a use of the key.
+            let source = match path.file_name().and_then(|n| n.to_str()) {
+                Some("help.rs") => source
+                    .split("pub const DOCUMENTED")
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
+                _ => source,
+            };
+            for (i, _) in source.match_indices("KeyCode::") {
+                let rest = &source[i + "KeyCode::".len()..];
+                let name: String = rest.chars().take_while(|c| c.is_alphanumeric()).collect();
+                if !name.is_empty() && !found.contains(&name) {
+                    found.push(name);
+                }
+            }
+        }
+        found.sort();
+
+        let documented: Vec<String> = DOCUMENTED.iter().map(|k| format!("{k:?}")).collect();
+        for key in &found {
+            assert!(
+                documented.contains(key),
+                "the game answers to {key} and the help does not mention it"
+            );
+        }
+        for key in &documented {
+            assert!(
+                found.contains(key),
+                "the help promises {key} and nothing in the game reads it"
+            );
+        }
+        assert_eq!(found.len(), DOCUMENTED.len(), "found {found:?}");
+    }
 }
