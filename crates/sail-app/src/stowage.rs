@@ -19,6 +19,20 @@ use sail_core::state::Headsail;
 #[derive(Component)]
 pub struct SailBag(pub Headsail);
 
+/// The cloth of one bag as it was built, and how loose each bit of it is.
+///
+/// Kept so the flutter has something to be a departure *from*. A surface that is nudged
+/// from wherever it got to last frame is a random walk: it drifts, and after a minute the
+/// bag is a different shape. This is the shape, and every frame is an offset from it.
+#[derive(Component)]
+pub struct Slack {
+    /// The mesh the flutter writes into.
+    mesh: Handle<Mesh>,
+    /// Where each vertex belongs, and how much of the flutter it gets.
+    at_rest: Vec<Vec3>,
+    loose: Vec<f32>,
+}
+
 /// The pole in its chocks, which is a different thing from the pole on the mast.
 #[derive(Component)]
 pub struct StowedPole;
@@ -441,6 +455,17 @@ fn chocks(loa: f32) -> (f32, f32) {
     (aft, aft - crate::boat::pole_length(loa))
 }
 
+/// How far the loose cloth moves at the top of the band, metres.
+///
+/// Two centimetres. Asked for from the deck as a *gentle* flutter and not the whole
+/// surface — which is also what the thing actually does: a stuffed bag is a solid lump
+/// of sailcloth with a hand's breadth of empty cloth at the mouth, and the empty part is
+/// the only part the wind can move. Anything more than this is a bag with nothing in it,
+/// and a bag with nothing in it should not be lashed to a deck.
+const FLUTTER: f32 = 0.020;
+/// And how fast, in beats a second at a fresh breeze.
+const FLUTTER_HZ: f32 = 5.5;
+
 pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -461,9 +486,17 @@ pub fn setup(
     ] {
         let spec = bagged(which);
         commands.entity(root).with_children(|b| {
+            let cloth = bag_mesh(which);
+            let (at_rest, loose) = slack_of(&cloth);
+            let handle = meshes.add(cloth);
             b.spawn((
                 SailBag(which),
-                Mesh3d(meshes.add(bag_mesh(which))),
+                Slack {
+                    mesh: handle.clone(),
+                    at_rest,
+                    loose,
+                },
+                Mesh3d(handle),
                 MeshMaterial3d(materials.add(StandardMaterial {
                     base_color: Color::srgb(
                         CANVAS[0] * spec.tint,
@@ -523,6 +556,86 @@ pub fn setup(
             Visibility::default(),
         ));
     });
+}
+
+/// Which parts of a bag are loose cloth, and where it all belongs at rest.
+///
+/// The mouth end only. A sail bag is tied shut round a fistful of cloth and the fistful
+/// is what flaps — the rest has thirty kilos of dacron inside it and does not move for
+/// anything under a gale. So the weight runs from nothing over most of the bag to one at
+/// the very end of it, by the fourth power, which keeps it off the body entirely.
+fn slack_of(mesh: &Mesh) -> (Vec<Vec3>, Vec<f32>) {
+    let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(p)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    else {
+        return (Vec::new(), Vec::new());
+    };
+    let along: Vec<f32> = p.iter().map(|v| v[1]).collect();
+    let (lo, hi) = along
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
+    let span = (hi - lo).max(1e-3);
+    let at_rest: Vec<Vec3> = p.iter().map(|v| Vec3::from_array(*v)).collect();
+    let loose = along
+        .iter()
+        .map(|v| {
+            let t = ((v - lo) / span).clamp(0.0, 1.0);
+            // Nothing until four fifths of the way along, then up quickly.
+            crate::curve::smoothstep(0.78, 1.0, t).powi(2)
+        })
+        .collect();
+    (at_rest, loose)
+}
+
+/// The loose cloth at the mouth of each bag, moving in the wind.
+///
+/// Written into the mesh rather than done with a shader because there is one of these per
+/// bag and four bags, and because the mask is a property of the cloth rather than of the
+/// frame: the same vertices are loose every time. Only the bags that can be seen are
+/// written, which is three of the four.
+pub fn flutter(
+    sim: Res<Sim>,
+    time: Res<Time>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    bags: Query<(&SailBag, &Slack, &Visibility)>,
+) {
+    let breeze = (sail_core::units::ms_to_kn(sim.sim.telemetry.aws) as f32 / 16.0).clamp(0.0, 1.4);
+    if breeze < 0.05 {
+        return;
+    }
+    let t = time.elapsed_secs();
+    for (bag, slack, vis) in &bags {
+        if *vis == Visibility::Hidden || slack.at_rest.is_empty() {
+            continue;
+        }
+        let Some(mut mesh) = meshes.get_mut(&slack.mesh) else {
+            continue;
+        };
+        // Its own phase per bag, so four bags on one deck do not breathe together — which
+        // is the single thing that would give away that this is arithmetic.
+        let phase = bag.0 as u32 as f32 * 1.7;
+        let mut positions = slack.at_rest.clone();
+        for (i, p) in positions.iter_mut().enumerate() {
+            let w = slack.loose[i] * breeze;
+            if w < 1e-3 {
+                continue;
+            }
+            // Two beats that do not divide into each other, and a bit of the vertex's own
+            // position in the phase so the cloth ripples across itself instead of pumping
+            // in and out like a bellows.
+            let a = (t * FLUTTER_HZ * breeze + phase + p.x * 7.0 + p.z * 5.0).sin();
+            let b = (t * FLUTTER_HZ * 1.63 * breeze + phase * 2.1 + p.z * 9.0).sin();
+            let lift = (a * 0.7 + b * 0.3) * FLUTTER * w;
+            // Outwards from the bag's own axis, which for a capsule laid along Y is the
+            // XZ plane: cloth lifts off the lump it is wrapped round rather than sliding
+            // along it.
+            let r = (p.x * p.x + p.z * p.z).sqrt().max(1e-4);
+            p.x += p.x / r * lift;
+            p.z += p.z / r * lift;
+            p.y += lift * 0.35;
+        }
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    }
 }
 
 /// A bag is on deck when its sail is not up, and the pole is in its chocks when the kite

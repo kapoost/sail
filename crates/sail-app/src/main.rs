@@ -306,7 +306,7 @@ fn main() {
                     (
                         boat::update_staysail_boom,
                         boat::update_pole,
-                        stowage::update,
+                        (stowage::update, stowage::flutter),
                     ),
                     boat::update_windex,
                     boat::update_genoa_cars,

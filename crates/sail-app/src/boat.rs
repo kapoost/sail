@@ -391,6 +391,7 @@ pub fn setup(
                     varnish: varnish.clone(),
                     metal: metal.clone(),
                     loa: cfg.loa as f32,
+                    beam: cfg.beam as f32,
                 },
             );
 

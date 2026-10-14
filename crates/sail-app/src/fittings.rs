@@ -43,6 +43,7 @@ pub struct Workshop<'a> {
     pub varnish: Handle<StandardMaterial>,
     pub metal: Handle<StandardMaterial>,
     pub loa: f32,
+    pub beam: f32,
 }
 
 pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
@@ -182,6 +183,73 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
             Transform::from_xyz(0.0, 0.0, 0.0),
         ));
     });
+
+    // --- Oil navigation lamps ------------------------------------------------
+    //
+    // Paraffin, in copper, in wooden brackets on the shrouds — which is what a boat like
+    // this carries and is also the only place to put them: she has no pulpit and no
+    // pushpit, and the shrouds are where side lights have been hung since before anybody
+    // had a battery. Red to port, green to starboard, white over the stern, and the rule
+    // behind the arrangement is older than the lamps: a red light means you are looking
+    // at somebody's port side, so she is crossing right to left, so she has the right of
+    // way and you give way. Three colours and a whole language.
+    //
+    // They light at dusk and go out at dawn — `light_the_lamps` — and that is the only
+    // thing on this boat that happens because of the clock.
+    for starboard in [false, true] {
+        let side = if starboard { 1.0 } else { -1.0 };
+        let (_, foot) = crate::boat::shroud(w.beam, starboard);
+        // A metre up the wire, where the hand that lights it can reach and where the
+        // light is clear of the rail. The shroud leans in as it goes up, so the lamp
+        // follows it rather than hanging off into the air beside it.
+        let up = 0.95;
+        let lean = 1.0 - up / 12.0;
+        navigation_lamp(
+            w,
+            b,
+            Vec3::new(foot.x * lean - side * 0.02, foot.y + up, foot.z),
+            if starboard {
+                Color::srgb(0.08, 0.62, 0.20)
+            } else {
+                Color::srgb(0.72, 0.09, 0.10)
+            },
+            side,
+        );
+    }
+    // And the stern lamp, white, on the counter to port of the vane — the side the
+    // lifebuoy is not on.
+    navigation_lamp(
+        w,
+        b,
+        Vec3::new(-0.26, deck::deck_height(4.55) + 0.20, 4.55),
+        Color::srgb(0.95, 0.93, 0.86),
+        0.0,
+    );
+
+    // --- The anchor on the foredeck ------------------------------------------
+    //
+    // A fisherman, stock and all, lashed down on the foredeck abaft the stem, which on a
+    // boat with a bowsprit is the only place it can live: a plough on a bow roller would
+    // be under the spar, and the spar is what the gennaker is tacked to.
+    //
+    // It is the one piece of gear aboard whose shape is pure argument — the stock turns
+    // it so that one fluke digs, the flukes are at right angles to it for the same
+    // reason, and the crown is where the weight goes so that it falls the right way up.
+    // None of which is drawn because it is pretty; it is drawn because an anchor on a
+    // foredeck is how a boat says she goes somewhere and stops.
+    anchor(w, b, metal, loa);
+
+    // --- The geranium --------------------------------------------------------
+    //
+    // In the one gap on this deck nobody walks in: the hand's breadth between the
+    // companionway rail and the genoa bag, which is eighteen centimetres wide and
+    // therefore good for a small pot and nothing else.
+    //
+    // It is not decoration and it is not a joke. A boat that somebody lives on has
+    // something growing on her, and it is the single cheapest way to say that this is a
+    // home as well as a machine — the same way a mug in a holder says it. It is also the
+    // first thing to go over the side in a gale, which is its own kind of instrument.
+    geranium(w, b);
 
     // --- Wind vane -----------------------------------------------------------
     wind_vane(w, b, varnish);
@@ -406,6 +474,209 @@ pub fn update_tiller(sim: Res<Sim>, mut q: Query<&mut Transform, With<Tiller>>) 
     }
 }
 
+/// A pot of geraniums, lashed in the gap beside the hatch.
+fn geranium(w: &mut Workshop, b: &mut ChildSpawnerCommands) {
+    // The gap: outboard of the companionway rail, inboard of the genoa bag. Narrow
+    // enough that the pot's size is decided by the boat rather than by taste.
+    let z = -0.15;
+    let x = 0.545;
+    let deck = deck::deck_height(z);
+    let clay = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.62, 0.31, 0.20),
+        perceptual_roughness: 0.92,
+        ..default()
+    });
+    let leaf = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.18, 0.42, 0.16),
+        perceptual_roughness: 0.78,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    });
+    let flower = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.78, 0.16, 0.22),
+        perceptual_roughness: 0.7,
+        ..default()
+    });
+    let pot = w.meshes.add(Cylinder::new(0.075, 0.13));
+    let rim = w.meshes.add(Torus::new(0.010, 0.080));
+    let bush = w.meshes.add(Sphere::new(0.10));
+    let bloom = w.meshes.add(Sphere::new(0.025));
+    b.spawn((
+        Transform::from_xyz(x, deck + 0.065, z),
+        Visibility::default(),
+    ))
+    .with_children(|g| {
+        g.spawn((
+            Mesh3d(pot),
+            MeshMaterial3d(clay.clone()),
+            // A pot is wider at the top than at the bottom, which is the one thing that
+            // makes a cylinder read as a flowerpot.
+            Transform::default().with_scale(Vec3::new(1.0, 1.0, 1.0)),
+        ));
+        g.spawn((
+            Mesh3d(rim),
+            MeshMaterial3d(clay),
+            Transform::from_xyz(0.0, 0.064, 0.0),
+        ));
+        // The plant: a squashed ball of leaf, which at this size is what a geranium is
+        // from two metres away, and three flowers in it.
+        g.spawn((
+            Mesh3d(bush),
+            MeshMaterial3d(leaf),
+            Transform::from_xyz(0.0, 0.135, 0.0).with_scale(Vec3::new(1.0, 0.75, 1.0)),
+        ));
+        for (i, at) in [
+            Vec3::new(0.045, 0.19, 0.02),
+            Vec3::new(-0.03, 0.175, -0.05),
+            Vec3::new(0.0, 0.205, 0.05),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            g.spawn((
+                Mesh3d(bloom.clone()),
+                MeshMaterial3d(flower.clone()),
+                Transform::from_translation(at).with_scale(Vec3::splat(1.0 - 0.12 * i as f32)),
+            ));
+        }
+    });
+}
+
+/// A lamp that burns after dark, and the colour it burns.
+#[derive(Component)]
+pub struct Lamp {
+    lens: Color,
+}
+
+/// An oil navigation lamp: a copper body, a chimney, and a lens looking outboard.
+///
+/// `facing` is which way the lens looks — +1 starboard, -1 port, 0 straight astern — and
+/// it is the whole of what makes a side light legal: a sector, not a glow. Nobody is
+/// supposed to see a green light from your port bow, and the reason it is a box with a
+/// lens in one face rather than a bulb is that the box is the sector.
+fn navigation_lamp(
+    w: &mut Workshop,
+    b: &mut ChildSpawnerCommands,
+    at: Vec3,
+    lens: Color,
+    facing: f32,
+) {
+    let copper = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.55, 0.36, 0.18),
+        perceptual_roughness: 0.42,
+        metallic: 0.75,
+        ..default()
+    });
+    let glass = w.materials.add(StandardMaterial {
+        base_color: lens,
+        perceptual_roughness: 0.18,
+        metallic: 0.0,
+        ..default()
+    });
+    let body = w.meshes.add(Cylinder::new(0.062, 0.21));
+    let chimney = w.meshes.add(Cylinder::new(0.028, 0.07));
+    let cap = w.meshes.add(Sphere::new(0.042));
+    let pane = w.meshes.add(Cylinder::new(0.050, 0.012));
+    let look = if facing == 0.0 {
+        Vec3::Z
+    } else {
+        Vec3::X * facing
+    };
+    b.spawn((Transform::from_translation(at), Visibility::default()))
+        .with_children(|l| {
+            l.spawn((
+                Mesh3d(body),
+                MeshMaterial3d(copper.clone()),
+                Transform::default(),
+            ));
+            l.spawn((
+                Mesh3d(chimney),
+                MeshMaterial3d(copper.clone()),
+                Transform::from_xyz(0.0, 0.14, 0.0),
+            ));
+            l.spawn((
+                Mesh3d(cap),
+                MeshMaterial3d(copper),
+                Transform::from_xyz(0.0, 0.185, 0.0).with_scale(Vec3::new(1.0, 0.55, 1.0)),
+            ));
+            // The lens, in the face that looks out. Laid flat against the body, which is
+            // why a torus-less cylinder on its side is the right shape for it.
+            l.spawn((
+                Lamp { lens },
+                Mesh3d(pane),
+                MeshMaterial3d(glass),
+                Transform::from_translation(look * 0.056)
+                    .with_rotation(Quat::from_rotation_arc(Vec3::Y, look)),
+            ));
+        });
+}
+
+/// A fisherman anchor lashed on the foredeck, with its chain made up beside it.
+fn anchor(
+    w: &mut Workshop,
+    b: &mut ChildSpawnerCommands,
+    metal: &Handle<StandardMaterial>,
+    loa: f32,
+) {
+    // Far enough forward to be out of the way of everything and far enough aft that the
+    // deck is still wide enough to lash it down: a third of her length from the stem.
+    let z = -loa * 0.28;
+    let deck = deck::deck_height(z);
+    let galv = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.46, 0.47, 0.49),
+        perceptual_roughness: 0.68,
+        metallic: 0.55,
+        ..default()
+    });
+    let shank = w.meshes.add(Cylinder::new(0.028, 1.10));
+    let stock = w.meshes.add(Cylinder::new(0.020, 0.78));
+    let fluke = w.meshes.add(Cuboid::new(0.015, 0.20, 0.30));
+    let ring = w.meshes.add(Torus::new(0.018, 0.055));
+    b.spawn((
+        Transform::from_xyz(0.0, deck + 0.07, z)
+            // Lying on its side on the deck, head forward, which is how one is stowed so
+            // that it can be walked to the stemhead and dropped without being turned.
+            .with_rotation(
+                Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)
+                    * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            ),
+        Visibility::default(),
+    ))
+    .with_children(|a| {
+        a.spawn((
+            Mesh3d(shank),
+            MeshMaterial3d(galv.clone()),
+            Transform::default(),
+        ));
+        // The stock across the head, which is the piece that makes it work: it turns the
+        // anchor on the bottom until one fluke is digging, and an anchor without one lies
+        // on its back and drags.
+        a.spawn((
+            Mesh3d(stock),
+            MeshMaterial3d(galv.clone()),
+            Transform::from_xyz(0.0, 0.46, 0.0)
+                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+        ));
+        a.spawn((
+            Mesh3d(ring),
+            MeshMaterial3d(metal.clone()),
+            Transform::from_xyz(0.0, 0.60, 0.0)
+                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+        ));
+        // Two flukes at the crown, at right angles to the stock for the same reason the
+        // stock exists at all.
+        for side in [-1.0_f32, 1.0] {
+            a.spawn((
+                Mesh3d(fluke.clone()),
+                MeshMaterial3d(galv.clone()),
+                Transform::from_xyz(0.0, -0.52, side * 0.13)
+                    .with_rotation(Quat::from_rotation_x(side * 0.55)),
+            ));
+        }
+    });
+}
+
 /// Marks the wind vane's turret, which turns to the angle it is set to.
 #[derive(Component)]
 pub struct VaneTurret;
@@ -598,6 +869,39 @@ fn vane_turret(set: f32) -> Quat {
     // laid along the same wind, so if one is correct the other cannot be ninety degrees
     // out. They were, until this was one function instead of two signs.
     into_the_wind(set)
+}
+
+/// The lamps are lit at dusk and put out at dawn.
+///
+/// The one thing on this boat that happens because of the clock. A sailor does not look
+/// at a watch to decide: the light goes, and the lamps go on — so the trigger is the
+/// sun's own elevation, fading them up through the half hour the sun spends crossing the
+/// horizon rather than switching them at a time.
+///
+/// They are drawn as glass that lights rather than as lights: a lamp that cast real
+/// light would be a point light per lamp in a scene lit by one sun, which is expensive
+/// and, at this distance, invisible. What you see from another boat is the lens.
+pub fn light_the_lamps(
+    sky: Res<crate::sky::Sky>,
+    lamps: Query<(&Lamp, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // Full brightness once the sun is a few degrees under, out by the time it is a few
+    // degrees up. Nautical twilight is a long business this far north and the lamps
+    // belong to the dark half of it.
+    let dark = 1.0
+        - crate::curve::smoothstep(
+            (-3.0_f32).to_radians(),
+            (2.0_f32).to_radians(),
+            sky.elevation(),
+        );
+    for (lamp, handle) in &lamps {
+        if let Some(mut material) = materials.get_mut(&handle.0) {
+            let lit = lamp.lens.to_linear();
+            material.emissive =
+                bevy::color::LinearRgba::rgb(lit.red, lit.green, lit.blue) * (3.4 * dark);
+        }
+    }
 }
 
 /// Set the vane to what the pilot is holding, and lean it by how far she is off.
