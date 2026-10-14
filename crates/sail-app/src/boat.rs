@@ -611,8 +611,14 @@ pub fn update_pole(
     // To windward, swung aft with the trim — the same two numbers the sail's tack is
     // computed from, through the same function, so the spar and the corner of the cloth
     // cannot end up in different places.
-    let windward = t_.awa.signum() as f32;
-    let end = pole_end(cfg.loa as f32, windward, t_.jib.chord_angle.abs() as f32);
+    // From the one place that knows where the pole is. Re-deriving it from the sheet
+    // meant the spar and the sail's tack could disagree — and that the preventer, which
+    // stops the pole dead, had nothing to stop.
+    let end = pole_end(
+        cfg.loa as f32,
+        t_.pole.signum() as f32,
+        t_.pole.abs() as f32,
+    );
     let root = Vec3::new(0.0, crate::rig::BOOM_HEIGHT + 0.35, MAST_FOOT_Z);
     for (mut tr, mut vis) in &mut q {
         tr.translation = root;
@@ -887,6 +893,7 @@ pub fn update_sails(
                     t_.jib_side as f32,
                     t_.jib.chord_angle as f32,
                     1.0 - t_.jib.coeffs.luffing as f32,
+                    t_.pole as f32,
                 ),
             ),
         };
@@ -1141,6 +1148,7 @@ pub fn report(sim: Res<Sim>) {
             -1.0,
             sail_core::units::rad(14.0) as f32,
             1.0,
+            1.4,
         );
         // LP is the *perpendicular* from the clew to the luff — the measurement a
         // sailmaker quotes a headsail by — and the base it is quoted against is J, the
@@ -1179,6 +1187,7 @@ pub fn headsail_shape(
     side: f32,
     chord: f32,
     drawing: f32,
+    pole: f32,
 ) -> SailGeometry {
     let angle = side * chord;
     let kind = controls.headsail;
@@ -1246,8 +1255,9 @@ pub fn headsail_shape(
     let tack = if spinnaker {
         // Forward as well as out: even squared right off, a pole is carried a little
         // ahead of abeam, and the tack has to be clear of the forestay before the cloth
-        // can be.
-        pole_end(cfg.loa as f32, -side, angle.abs()) + Vec3::NEG_Z * 0.6
+        // can be. The pole's own angle comes in as `pole`, because the spar is a thing
+        // with a position rather than a function of the sheet.
+        pole_end(cfg.loa as f32, -side, pole.abs()) + Vec3::NEG_Z * 0.6
     } else {
         sprit_end(cfg.loa as f32)
     };
@@ -2510,6 +2520,7 @@ mod sails_and_rigging {
                 -1.0,
                 sail_core::units::rad(14.0) as f32,
                 1.0,
+                1.4,
             );
             assert!(
                 (g.head - fitting).length() < AT_THE_FITTING,
@@ -2544,6 +2555,7 @@ mod sails_and_rigging {
             -1.0,
             sail_core::units::rad(90.0) as f32,
             1.0,
+            1.4,
         );
         let sprit = sprit_end(cfg.loa as f32);
         assert!(
@@ -2575,7 +2587,7 @@ mod cloth_stays_cloth {
         };
         let side = -(awa_deg.signum());
         let chord = cfg.headsail(kind).profile.chord_angle(sheet as f64) as f32;
-        let g = headsail_shape(&cfg, &controls, side, chord, 1.0);
+        let g = headsail_shape(&cfg, &controls, side, chord, 1.0, 1.4);
         // The *leeward* one, exactly as `update_sails` picks it. Handing the sail the
         // windward wire is the fault the constraint's own comment warns about, and it
         // showed here as a single vertex thrown a metre and nine across the boat —
@@ -2810,6 +2822,7 @@ mod kite_corners {
             -1.0,
             sail_core::units::rad(92.0) as f32,
             1.0,
+            1.4,
         );
         println!(
             "tack {:?}\nhead {:?}\nclew {:?}",

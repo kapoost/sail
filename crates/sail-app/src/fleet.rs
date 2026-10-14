@@ -312,7 +312,7 @@ pub fn dress(
                             * Vec3::new(0.0, 0.0, boat::main_foot(&cfg, &controls)),
                 }
             }
-            _ => boat::headsail_shape(&cfg, &controls, lee, chord, 1.0 - luffing),
+            _ => boat::headsail_shape(&cfg, &controls, lee, chord, 1.0 - luffing, chord),
         };
         if let Some(mut mesh) = meshes.get_mut(&mesh.0) {
             boat::dress_sail(

@@ -521,6 +521,30 @@ pub fn draw(
                                 pilot.hold_wind(&telemetry);
                             }
                         }
+                        // What it is actually holding, which the console did not say.
+                        //
+                        // Two lamps told you *which* instrument was steering and the
+                        // arrows moved its target, and nowhere was the target itself — so
+                        // the one question a person has about an autopilot, "what is it
+                        // trying to do", had to be answered by watching the compass and
+                        // guessing. A course in degrees, or an apparent wind angle with
+                        // the tack in its sign, which is how a vane is set and read.
+                        ui.label(
+                            egui::RichText::new(match pilot.mode {
+                                PilotMode::Standby => "   —".to_string(),
+                                PilotMode::Heading(h) => format!("{:03.0}", deg(h)),
+                                PilotMode::ApparentWind(a) => {
+                                    format!("{:+.0} awa", deg(a))
+                                }
+                            })
+                            .monospace()
+                            .size(13.0)
+                            .color(if pilot.engaged() {
+                                paint::LIVE
+                            } else {
+                                egui::Color32::from_rgb(110, 115, 120)
+                            }),
+                        );
                         // The same two steps the keys use, from the same constants, and
                         // the doubled arrow is the coarse one in every piece of marine
                         // electronics ever built.

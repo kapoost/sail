@@ -1148,6 +1148,30 @@ impl Simulation {
         s.heave_rate += dw * dt;
         s.pitch_rate += dq * dt;
 
+        // --- The pole ------------------------------------------------------------------
+        //
+        // Squared with the sheet while it is free, and *stopped where it is* the moment
+        // the preventer goes on. One button, both spars, and after it neither of them
+        // moves — which is the whole of what a foredeck does before a long run and what
+        // was asked for from the deck when the button only held the boom.
+        {
+            let want = cfg
+                .headsail(controls.headsail)
+                .profile
+                .chord_angle(controls.jib_sheet)
+                .abs();
+            let kite = controls.headsail == crate::state::Headsail::Spinnaker;
+            if s.pole_angle == 0.0 {
+                s.pole_angle = want;
+            } else if !(controls.preventer && kite) {
+                // A pole is handled rather than trimmed: it comes round at the speed
+                // somebody can move it, which is nothing like the speed a sheet moves.
+                let step = crate::units::rad(25.0) * dt;
+                let off = want - s.pole_angle;
+                s.pole_angle += off.clamp(-step, step);
+            }
+        }
+
         // --- The headsail changing sides ---------------------------------------------
         //
         // A tack is not the wind crossing the bow. It is the next five seconds: the jib
@@ -1171,6 +1195,13 @@ impl Simulation {
         // the first is the only one that is ever large: the sail's own force, which
         // holds it out against the sheet and is why the boom sits still in steady air.
         {
+            // Where it is at the top of this step, which is what a preventer holds it
+            // at. Taken here rather than from the step's opening snapshot because the
+            // boom may have been put on to its side a few lines ago, on the very first
+            // step, and freezing it to the snapshot pinned it amidships for the rest of
+            // the passage — which is what the test caught the moment the freeze became a
+            // real freeze.
+            let held = s.boom_angle;
             let inertia = (cfg.boom_mass * cfg.boom_cg * cfg.boom_cg).max(1.0);
             // The sail pressing the boom to leeward, taken at the sail's own lever.
             // Signed in the boat's frame: the sail pushes the boom away from the wind,
@@ -1268,19 +1299,14 @@ impl Simulation {
             // rounds up, which is unpleasant and survivable, and the boom stays exactly
             // where it was put.
             if controls.preventer {
-                // It cannot come back across the centreline. Which side it is held on is
-                // simply which side it is on: a preventer is tied to whatever the spar is
-                // doing when somebody rigs it.
-                let held = st.boom_angle.signum();
-                if s.boom_angle * held < 0.0 {
-                    s.boom_angle = 0.0;
-                }
-                if s.boom_rate * held < 0.0 && s.boom_angle.abs() < 1e-3 {
-                    s.boom_rate = 0.0;
-                }
-                // And it is a rope rather than a bar, so it holds the boom out against
-                // the sheet's slack as well: no working about in a seaway.
-                s.boom_rate *= 0.3;
+                // Held where it is, which is what the button says and what a preventer
+                // does: the line forward and the sheet aft between them have the spar
+                // from both ends and it stops moving. It was only stopping the boom
+                // crossing the centreline, so it still worked about in a seaway and still
+                // swung when the sail backed — reported as the button no longer doing its
+                // job, and it was not doing the job as described.
+                s.boom_angle = held;
+                s.boom_rate = 0.0;
             }
             s.boom_angle += s.boom_rate * dt;
             // The cap shroud stops it on either side — the same limit the force model
@@ -1408,12 +1434,22 @@ impl Simulation {
             // Already in the boat's own frame, which is the whole point of the change:
             // nothing has to agree with anything about which side leeward is.
             boom: self.state.boom_angle,
+            // Out on the opposite side from the boom, because that is where windward is:
+            // the pole and the main are never on the same side of the boat.
+            pole: -self.state.boom_angle.signum() * self.state.pole_angle,
             // Where the clew has got to: on the old side at the start of the crossing,
             // streaming down the middle halfway through, hard on the new one at the end.
             // And held to windward for as long as somebody is holding it there, which is
             // a different thing from being caught there by a tack.
             jib_side: if controls.headsail_aback {
                 self.wind_side
+            } else if controls.headsail == crate::state::Headsail::Spinnaker {
+                // A symmetric kite's clew is on the same side as the boom, because both
+                // of them are to leeward and the pole is to windward. Which side that is
+                // changes when she gybes and at no other time — so it comes off the spar
+                // rather than off the apparent wind, and the sail stops jumping across
+                // the foredeck every time the wind wanders over the stern.
+                self.state.boom_angle.signum()
             } else {
                 self.wind_side * (1.0 - 2.0 * self.state.jib_across.clamp(0.0, 1.0))
             },

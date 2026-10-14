@@ -53,6 +53,13 @@ pub struct BoatState {
     /// making nothing — and that crossing is most of what a tack *looks* like from the
     /// cockpit.
     pub jib_across: f64,
+    /// Where the spinnaker pole is squared to, radians from the centreline, as a
+    /// magnitude: which side it is on is the opposite of the boom's.
+    ///
+    /// It follows the trim while it is free, and stops dead where it is when the
+    /// preventer goes on — because that is what the button does. One line forward from
+    /// each spar, and after that neither of them moves.
+    pub pole_angle: f64,
     /// How fast it is swinging, rad/s.
     pub boom_rate: f64,
     /// Seconds since start.
@@ -87,6 +94,7 @@ impl BoatState {
             pitch_rate: f(a.pitch_rate, b.pitch_rate),
             boom_angle: f(a.boom_angle, b.boom_angle),
             jib_across: f(a.jib_across, b.jib_across),
+            pole_angle: f(a.pole_angle, b.pole_angle),
             boom_rate: f(a.boom_rate, b.boom_rate),
             time: f(a.time, b.time),
         }
@@ -110,6 +118,7 @@ impl BoatState {
             boom_rate: 0.0,
             // Set and drawing, because a boat at rest is not in the middle of a tack.
             jib_across: 1.0,
+            pole_angle: 0.0,
             time: 0.0,
         }
     }
@@ -454,6 +463,10 @@ pub struct Telemetry {
     /// otherwise has to pick a side from the wind and therefore flicks the sail across
     /// the foretriangle in a single frame.
     pub jib_side: f64,
+
+    /// Where the spinnaker pole is squared to, radians from the centreline. Positive to
+    /// starboard, like the boom, and always the opposite side from it.
+    pub pole: f64,
 
     /// Where the boom actually is, radians, **positive to starboard**.
     ///
