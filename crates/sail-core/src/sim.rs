@@ -1184,11 +1184,25 @@ impl Simulation {
         // moves — which is the whole of what a foredeck does before a long run and what
         // was asked for from the deck when the button only held the boom.
         {
-            let want = cfg
-                .headsail(controls.headsail)
-                .profile
-                .chord_angle(controls.jib_sheet)
-                .abs();
+            // **Signed**, and that is the fix the sea trial found in its first minute.
+            //
+            // The pole used to be a magnitude with its side taken from the boom's at the
+            // moment of drawing — so when the boom went over, the pole changed sides in
+            // one substep. Measured: twenty-four degrees in five milliseconds, which on a
+            // gybe under the kite is a three-metre spar teleporting across the foretriangle.
+            //
+            // It is a *dip-pole gybe* that is being drawn here and it takes as long as it
+            // takes: the pole comes off the mast, swings down and through the
+            // foretriangle, and is set on the other side while the sail flies on its
+            // sheets. At the handling speed already in here that is about five seconds
+            // through the whole arc, which is what it is on a foredeck with one person
+            // doing it.
+            let want = -self.wind_side.signum()
+                * cfg
+                    .headsail(controls.headsail)
+                    .profile
+                    .chord_angle(controls.jib_sheet)
+                    .abs();
             let kite = controls.headsail == crate::state::Headsail::Spinnaker;
             if s.pole_angle == 0.0 {
                 s.pole_angle = want;
@@ -1464,8 +1478,11 @@ impl Simulation {
             // nothing has to agree with anything about which side leeward is.
             boom: self.state.boom_angle,
             // Out on the opposite side from the boom, because that is where windward is:
-            // the pole and the main are never on the same side of the boat.
-            pole: -self.state.boom_angle.signum() * self.state.pole_angle,
+            // the pole and the main are never on the same side of the boat. The sign
+            // lives in the state and travels at a foredeck's own speed — see the pole
+            // block above — rather than being stamped on here from the boom, which is
+            // what made it jump.
+            pole: self.state.pole_angle,
             // Where the clew has got to: on the old side at the start of the crossing,
             // streaming down the middle halfway through, hard on the new one at the end.
             // And held to windward for as long as somebody is holding it there, which is

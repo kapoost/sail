@@ -80,8 +80,17 @@ pub enum HelmSource {
     Keyboard,
     Stick,
 }
-/// How fast a sheet runs, in sheet fraction per second.
+/// How fast a sheet runs, in sheet fraction per second. Still the winch's rate — the
+/// mainsheet asks for degrees instead, see `BOOM_RATE`.
 const SHEET_RATE: f64 = 0.45;
+
+/// How fast the mainsheet swings the boom, degrees a second.
+///
+/// Eighteen, which is the whole travel in about five seconds and is what a hand on a
+/// four-part tackle actually does. Dumping it is a different action with its own key.
+const BOOM_RATE: f64 = 18.0;
+/// And the fine rate, for placing the boom to a degree, which is most of the game.
+const BOOM_FINE: f64 = 5.0;
 /// Fine sheet rate while Shift is held. Upwind the whole useful trim band is about a
 /// third of the travel, and placing it to a degree is the entire point of the game.
 const SHEET_FINE: f64 = 0.11;
@@ -269,15 +278,39 @@ pub fn gather(
         }
     }
     if !main_set {
-        let mut rate = 0.0;
+        let mut way = 0.0;
         if keys.pressed(KeyCode::KeyW) {
-            rate -= sheet_rate; // haul in
+            way -= 1.0; // haul in
         }
         if keys.pressed(KeyCode::KeyS) {
-            rate += sheet_rate; // ease
+            way += 1.0; // ease
         }
-        if rate != 0.0 {
-            sim.controls.main_sheet = (sim.controls.main_sheet + rate * dt).clamp(0.0, 1.0);
+        if way != 0.0 {
+            // At a rate in **boom degrees**, not in sheet travel.
+            //
+            // Reported from the deck as the boom reacting too strongly when trimming by
+            // hand, and the reason is in the sheet's own curve: the chord angle goes with
+            // the square of the sheet, so a fixed fraction of travel a second swings the
+            // boom at about twenty degrees a second when it is hauled in and seventy when
+            // it is eased — the same key doing three different things depending on where
+            // you already are, and the fast end is exactly where a reach is trimmed.
+            //
+            // A hand on a tackle does not work like that. The tail comes in at the speed
+            // an arm pulls, which at a fixed purchase is a roughly constant angular rate
+            // at the boom. So the key asks for degrees and the sheet step is worked back
+            // through the profile's own slope — numerically, so that this stays right if
+            // anybody changes the curve.
+            let profile = &sim.config().main.profile;
+            let here = sim.controls.main_sheet;
+            let h = 1.0e-3;
+            let slope = ((profile.chord_angle((here + h).min(1.0))
+                - profile.chord_angle((here - h).max(0.0)))
+                / (2.0 * h))
+                .abs()
+                .max(rad(8.0));
+            let wanted = rad(if fine { BOOM_FINE } else { BOOM_RATE });
+            let step = way * (wanted / slope) * dt;
+            sim.controls.main_sheet = (sim.controls.main_sheet + step).clamp(0.0, 1.0);
         }
     }
 
@@ -500,5 +533,64 @@ pub fn gather(
                 }
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod trimming {
+    use sail_core::boat::BoatConfig;
+    use sail_core::units::{deg, rad};
+
+    /// The mainsheet moves the boom at the same rate wherever it already is.
+    ///
+    /// Reported from the deck as the boom reacting too strongly when trimmed by hand, and
+    /// the fault is in the sheet's own curve rather than in the key: the chord angle goes
+    /// with the *square* of the sheet, so a fixed fraction of travel a second swung the
+    /// boom at twenty degrees a second hauled in and seventy eased — three times as fast
+    /// at exactly the end where a reach is trimmed.
+    #[test]
+    // The last two assertions are on constants on purpose: they are the pair somebody
+    // adjusting the feel will reach for, and what they must not do is cross.
+    #[allow(clippy::assertions_on_constants)]
+    fn the_mainsheet_swings_the_boom_at_one_rate_wherever_it_is() {
+        let cfg = BoatConfig::charter_sloop_34();
+        let profile = &cfg.main.profile;
+        let wanted = rad(super::BOOM_RATE);
+        let h = 1.0e-3;
+        let mut slowest = f64::MAX;
+        let mut fastest = 0.0_f64;
+        // A second of the key from each starting point, integrated a frame at a time the
+        // way the game does it: the slope is re-read every frame, so measuring the second
+        // as one step measures the integration error rather than the trim — which is what
+        // the first version of this test did, and it reported nine degrees against ninety.
+        let dt = 1.0 / 60.0;
+        for i in 2..18 {
+            let start = i as f64 / 20.0;
+            let mut here = start;
+            for _ in 0..60 {
+                let slope = ((profile.chord_angle((here + h).min(1.0))
+                    - profile.chord_angle((here - h).max(0.0)))
+                    / (2.0 * h))
+                    .abs()
+                    .max(rad(8.0));
+                here = (here + (wanted / slope) * dt).clamp(0.0, 1.0);
+            }
+            let moved = deg((profile.chord_angle(here) - profile.chord_angle(start)).abs());
+            slowest = slowest.min(moved);
+            fastest = fastest.max(moved);
+        }
+        assert!(
+            fastest / slowest < 1.6,
+            "a second on the key moves the boom between {slowest:.0} and {fastest:.0} \
+             degrees depending on where it already is"
+        );
+        // And the rate is a hand on a tackle rather than a dump: the whole travel in
+        // about five seconds, not in two.
+        assert!(
+            (10.0..26.0).contains(&super::BOOM_RATE),
+            "{:.0} degrees a second is not somebody trimming",
+            super::BOOM_RATE
+        );
+        assert!(super::BOOM_FINE < super::BOOM_RATE * 0.4);
     }
 }
