@@ -153,6 +153,23 @@ pub struct Ratchet {
     pub tip: Vec3,
     /// What was on the line, so a take can be told from a fish that is merely still on.
     playing: bool,
+    /// Seconds left of the glance a take earns.
+    ///
+    /// A *timer* and not a long hold, and the difference is the whole of a real fault.
+    /// The take used to post one claim for five seconds and leave it: the point is in
+    /// rendered space, the boat sails out from under it at two and a half metres a
+    /// second, and nothing could refresh it — `Attention::look` only takes a claim of
+    /// equal or higher priority, so the per-frame call at priority two was discarded by
+    /// the take's own priority four. Within a second the eye was abeam of where the rod
+    /// *had* been and within two it was clamped against the limit of a neck, staring at
+    /// open water. Which is the exact failure the glance was written to remove, arrived
+    /// at from the other side.
+    ///
+    /// Held as a countdown and re-posted every frame with the point as it now is, so the
+    /// claim keeps its rank and loses its staleness. It also fixes a second thing for
+    /// free: a render-origin rebase moves every rendered position by a kilometre, and a
+    /// point refreshed each frame cannot be left behind by one.
+    taking: f32,
     /// Where the drag star was, and how much line was out.
     drag: f64,
     line_out: f64,
@@ -415,6 +432,38 @@ fn unloaded_direction_at(lift: f32) -> Vec3 {
 /// neither of which move.
 fn unloaded_direction() -> Vec3 {
     unloaded_direction_at(0.0)
+}
+
+/// How long the eye stays with a take, seconds. The one moment you might genuinely be
+/// looking somewhere else.
+const TAKE_GLANCE: f32 = 5.0;
+/// The rank a hand on the drag star claims, named because the point it looks at is the
+/// only one that is not the rod.
+const DRAG_RANK: u8 = 3;
+
+/// Which claim the gear has on the eye this frame, as how long to hold it and what rank.
+///
+/// Pulled out as a function with no world in it so the choice can be tested, which is the
+/// other half of the fault this file has already had: the take's branch was wrong for
+/// five seconds of every fight and a person had to find it by reading. A table of four
+/// booleans is a thing a test can walk.
+///
+/// **Every hold here is short.** That is a rule and not a tuning: a claim is re-posted
+/// every frame for as long as the thing it describes is true, so the hold only has to
+/// outlast a frame. A long hold is how a claim goes stale, because nothing of lower rank
+/// can replace it and the point it carries is where the world *was*.
+fn claim(taking: bool, drag_moved: bool, playing: bool, line_moved: bool) -> Option<(f32, u8)> {
+    if taking {
+        Some((0.3, 4))
+    } else if drag_moved {
+        Some((0.4, DRAG_RANK))
+    } else if playing {
+        Some((0.4, 2))
+    } else if line_moved {
+        Some((1.2, 1))
+    } else {
+        None
+    }
 }
 
 /// What the eye should be on while a fish is on, given where everything is.
@@ -823,19 +872,22 @@ pub fn update(
         let playing = fishing.fish().is_some();
         let reel_world = hull + attitude * seat;
         let watch = watching(tip_world, reel_world, far, fishing.line_out as f32);
+        // A take starts the clock; everything after that is a state rather than an edge,
+        // which is what lets every claim be re-posted with a fresh point.
         if playing && !ratchet.playing {
-            // A take. The longest claim of the three, because it is the one moment you
-            // might genuinely be looking elsewhere — and what it shows you is the rod
-            // going over, which is how you find out before any instrument tells you.
-            attention.look(watch, 5.0, 4);
-        } else if (fishing.drag - ratchet.drag).abs() > 1e-5 {
-            attention.look(reel_world, 2.0, 3);
-        } else if playing {
-            // Refreshed every frame, so the eye stays on the tip for as long as there is
-            // something on the end of it.
-            attention.look(watch, 0.4, 2);
-        } else if moved.abs() > 1e-4 {
-            attention.look(watch, 1.2, 1);
+            ratchet.taking = TAKE_GLANCE;
+        }
+        ratchet.taking = (ratchet.taking - time.delta_secs()).max(0.0);
+        if let Some((hold, rank)) = claim(
+            ratchet.taking > 0.0,
+            (fishing.drag - ratchet.drag).abs() > 1e-5,
+            playing,
+            moved.abs() > 1e-4,
+        ) {
+            // The drag is the one thing you want to see *itself* rather than see the
+            // effect of; everything else is read off the rod.
+            let at = if rank == DRAG_RANK { reel_world } else { watch };
+            attention.look(at, hold, rank);
         }
         ratchet.playing = playing;
         ratchet.drag = fishing.drag;
@@ -1123,6 +1175,46 @@ pub fn gauge(ui: &mut bevy_egui::egui::Ui, fishing: &mut Fishing, sim: &Sim) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **No claim may outlive the frame that posts it**, and that is the rule this file
+    /// broke. `Attention::look` only accepts a claim of equal or higher rank, so a long
+    /// hold at a high rank cannot be refreshed by the lower-ranked branch that follows it
+    /// — the point freezes in rendered space while the boat sails out from under it. The
+    /// take held five seconds at rank four and the per-frame call at rank two could not
+    /// replace it, which put the eye on open water for the whole of it.
+    ///
+    /// So every hold is short and every branch is a *state* rather than an edge. Asserted
+    /// rather than remembered.
+    #[test]
+    fn no_claim_is_held_longer_than_it_is_reposted() {
+        for taking in [false, true] {
+            for drag in [false, true] {
+                for playing in [false, true] {
+                    for line in [false, true] {
+                        if let Some((hold, _)) = claim(taking, drag, playing, line) {
+                            assert!(
+                                hold <= 1.5,
+                                "a claim held {hold}s cannot be refreshed by anything                                  under it"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// And the order they outrank each other in, which is the order a person's attention
+    /// goes rather than the order of importance: a take wins outright, but a hand on the
+    /// drag star beats watching a fish you already know about, because you moved that
+    /// hand on purpose.
+    #[test]
+    fn the_ranks_are_the_order_attention_goes_in() {
+        assert_eq!(claim(true, true, true, true).map(|c| c.1), Some(4));
+        assert_eq!(claim(false, true, true, true).map(|c| c.1), Some(DRAG_RANK));
+        assert_eq!(claim(false, false, true, true).map(|c| c.1), Some(2));
+        assert_eq!(claim(false, false, false, true).map(|c| c.1), Some(1));
+        assert_eq!(claim(false, false, false, false), None);
+    }
 
     /// The frame holds the gear while the fish is out there and goes over to the fish
     /// when it is close. Far off, what is in shot has to be the rod: the fish is two

@@ -504,6 +504,13 @@ pub struct Eye<'w> {
     time: Res<'w, Time>,
 }
 
+/// How far the outside camera's look point may move from the boat, metres.
+///
+/// Nine, which at the chase camera's distance swings the frame about twenty degrees — far
+/// enough to say plainly which way to look and not so far that the boat leaves the
+/// picture. She is the subject; the thing being looked at is something happening on her.
+const CHASE_SWING: f32 = 9.0;
+
 /// How far the underwater camera stands off the lure, metres, and how far below it.
 ///
 /// Beyond it rather than inside the boat's side of it, so the composition is lure first
@@ -660,8 +667,24 @@ pub fn follow(
                 // By default the filtered height, or a sharp heave swings the whole
                 // frame about a boat that has barely moved.
                 let boat = Vec3::new(hull.x, head.heave + 4.5, hull.z);
+                // How far the look point may travel from her, rather than a fraction of
+                // the way to the thing. A fraction was tuned when the thing being looked
+                // at was a fish tens of metres astern, and it quietly stopped working
+                // when the claims moved to the rod: at five metres from her, four tenths
+                // of the way is two metres, which at a camera twenty-three metres off is
+                // six degrees — so a take, a run and a fish being played all resolved to
+                // the same barely visible nudge and the ranks made no difference out
+                // here at all.
+                //
+                // Capping the *distance* instead means anything near her is looked at
+                // squarely, which is most of what the gear is, and anything far off is
+                // leaned towards far enough to say where it is. She stays in frame
+                // either way, which is the only thing the cap is for.
                 let wanted = match focus {
-                    Some(target) => boat.lerp(target, 0.42),
+                    Some(target) => {
+                        let away = target - boat;
+                        boat + away.normalize_or_zero() * away.length().min(CHASE_SWING)
+                    }
                     None => boat,
                 };
                 if !chase.looking_set {
