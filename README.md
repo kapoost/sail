@@ -300,6 +300,34 @@ fish with infinite patience and lets go only when the way is off her.
 A mackerel does not, a pollack does not, and a cod has never left the water under its own
 power in its life.
 
+**Every take rips line off the spool**, including the smallest fish in the table. That
+took two goes. The first put a shock *load* on the line and was wrong by measurement —
+thirty newtons of drag against half a kilogramme of mackerel hauls the fish bodily in, so
+the spring dumped in a twentieth of a second and the whole event came to five centimetres
+of line. The model was telling the truth and the mechanism was wrong. What actually
+happens is that the drum is standing still and has to be got turning: the spool's inertia,
+the fish turning away with the lure in its mouth, and the boat sailing on from where the
+fish now is, none of them worth modelling alone and together about a third of a metre of
+line and ten teeth of ratchet. A drag screwed down past the load a take generates holds it
+dead, which is the same lesson the dial teaches everywhere else rather than an exception
+to it.
+
+**Not everything that hits a lure stays on it.** A knock you feel and nothing more is half
+of trolling, and it is information rather than a near miss: it says you are in the right
+water, which is the whole reason anybody keeps towing the same patch. A cod's mouth closes
+over the lot and a mackerel often just slashes at it, so the rate is per species.
+
+**The glass drives the bite.** Rising weather shuts them down and a front coming on wakes
+them up — the oldest belief in angling and one of the few that holds up. It costs nothing
+here because the boat already carries the reading: OUTLOOK on the console, which until now
+only told you when to reef. The two now read the same instrument in opposite directions,
+and the hour you ought to be shortening down is the hour they are feeding.
+
+**Lean on it and it goes.** A fish with something left does not hang there and take heavy
+pressure; it runs. That is the one place the fight answers the *player* rather than a
+table, and it is why a heavy hand is not simply a faster way to win — pull harder and you
+get a longer fight, which is the first thing anybody is told on a boat.
+
 **Nothing comes quietly, and the last move is timed.** Every fish, however beaten, finds
 one more run at the sight of the hull — that is where most fish are actually lost, and a
 model in which a tired one simply arrived was missing the most famous ten seconds in

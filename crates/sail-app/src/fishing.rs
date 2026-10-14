@@ -192,6 +192,46 @@ const HAUL: f64 = 20.0;
 /// other. It is still the largest force in the file at any speed worth sailing at.
 const TOW: f64 = 3.3;
 
+/// How much line the spool gives up in the first instant of a take, metres a second,
+/// and how quickly that dies away.
+///
+/// **Every fish big enough to take this lure rips line off the spool when it does.** The
+/// first attempt at this put a shock *load* on the line, and it was wrong by measurement:
+/// thirty newtons of drag against half a kilogramme of mackerel hauls the fish bodily in,
+/// so the spring dumped in a twentieth of a second and the whole event came to five
+/// centimetres of line. The model was telling the truth and the mechanism was wrong.
+///
+/// The right one is that the drum is **standing still** and has to be got turning. Three
+/// small real things arrive in the same tenth of a second — the spool's own inertia, the
+/// fish turning away with the lure in its mouth, and the boat sailing on from where the
+/// fish now is — and not one of them alone would be worth modelling. Together they are
+/// about a third of a metre of line and ten teeth of ratchet, which is what a take
+/// sounds like.
+///
+/// It is line *released*, not load applied, so it cannot part anything. The one thing
+/// that must not happen at a take is losing the fish before you have touched a control.
+const TAKE_SURGE: f64 = 0.8;
+const TAKE_SURGE_SPEED: f64 = 0.35;
+const TAKE_SURGE_DIES: f64 = 0.35;
+
+/// What a take puts on the line over and above the drag setting, newtons.
+///
+/// **Every fish big enough to take this lure rips line off the spool when it does**, and
+/// that is not a courtesy to the player — it is what the event physically is. A take
+/// while trolling is a collision: the fish turns on a lure going the other way at three
+/// knots, and the whole of that closing speed has to be absorbed by a spool that is
+/// standing still. The drag cannot spin up inside the few milliseconds it takes, so the
+/// line goes over the setting whatever the setting is, and the ratchet squawks.
+///
+/// Without it a mackerel at eleven newtons against a thirty newton drag simply arrived,
+/// and the most exciting moment in the activity was a line in the log.
+///
+/// It is bounded well under the breaking strain, because a take that broke you off
+/// before you had touched anything would be an event with no decision in it. The one
+/// setting where nothing is ripped off at all is a drag screwed down past what the fish
+/// can pull — which is correct, and is the same lesson the dial teaches everywhere else.
+const TAKE_SHOCK: f64 = 7.0;
+
 /// Line left when the fish is at the rod tip and the fight is over, metres.
 const LEADER: f64 = 1.6;
 
@@ -314,6 +354,15 @@ struct Nature {
     ground: (f64, f64),
     /// How many there are, relative to each other.
     plenty: f64,
+    /// How often a fish that hits the lure ends up on it.
+    ///
+    /// The miss is half of trolling and it was missing. A fish slashes at a moving lure
+    /// and takes it properly about three times in four — a cod's mouth is a bucket and
+    /// closes over the whole thing, a mackerel is small and fast and often just knocks
+    /// it. What the knock gives the player is the thing a bite alarm gives an angler:
+    /// *you are in the right place*. Nothing happened, and that is information, and it
+    /// is the reason anybody keeps trolling the same patch of water.
+    sticks: f64,
     /// What it does when it feels the hook, and what it does after that.
     opening: Doing,
     repertoire: &'static [Doing],
@@ -330,6 +379,7 @@ const MACKEREL: Nature = Nature {
     speed: (5.0, 1.6),
     ground: (25.0, 40.0),
     plenty: 1.0,
+    sticks: 0.70,
     opening: Doing::Circle,
     repertoire: &[Doing::Circle, Doing::Circle, Doing::Shake],
 };
@@ -345,6 +395,7 @@ const SAITHE: Nature = Nature {
     speed: (3.6, 1.4),
     ground: (18.0, 25.0),
     plenty: 0.9,
+    sticks: 0.80,
     opening: Doing::Run,
     repertoire: &[Doing::Run, Doing::Run, Doing::Circle, Doing::Shake],
 };
@@ -360,6 +411,7 @@ const POLLACK: Nature = Nature {
     speed: (2.8, 1.2),
     ground: (22.0, 25.0),
     plenty: 0.7,
+    sticks: 0.72,
     opening: Doing::Sound,
     repertoire: &[Doing::Sound, Doing::Shake, Doing::Hang, Doing::Sound],
 };
@@ -375,6 +427,7 @@ const COD: Nature = Nature {
     speed: (2.2, 1.0),
     ground: (35.0, 25.0),
     plenty: 0.55,
+    sticks: 0.86,
     opening: Doing::Hang,
     repertoire: &[Doing::Shake, Doing::Hang, Doing::Hang, Doing::Run],
 };
@@ -390,6 +443,7 @@ const LING: Nature = Nature {
     speed: (1.8, 0.8),
     ground: (60.0, 30.0),
     plenty: 0.15,
+    sticks: 0.80,
     opening: Doing::Sound,
     repertoire: &[Doing::Hang, Doing::Sound, Doing::Run, Doing::Hang],
 };
@@ -410,6 +464,7 @@ const GROUND: Nature = Nature {
     speed: (0.0, 1.0),
     ground: (0.0, 1.0),
     plenty: 0.0,
+    sticks: 1.0,
     opening: Doing::Hang,
     repertoire: &[Doing::Hang],
 };
@@ -484,6 +539,21 @@ pub fn lure_depth(line_out: f64, stw: f64) -> f64 {
     (down / k) * (asinh((lure + k * line_out) / down) - asinh(lure / down))
 }
 
+/// What the weather is doing to the bite, as a multiplier.
+///
+/// Rising weather shuts them down and a front coming on wakes them up. It is the oldest
+/// belief in angling and one of the few that holds up, and here it costs nothing because
+/// the boat already carries the reading — the OUTLOOK line on the console, which until
+/// now only told you when to reef. Half again as many takes with a gale on the way, a
+/// third fewer once it is settling.
+///
+/// The useful consequence is that the fishing and the sailing now read the same
+/// instrument, and read it in opposite directions: the hour you ought to be shortening
+/// down is the hour they are feeding.
+pub fn bite_weather(glass: f64) -> f64 {
+    (1.0 + 0.5 * (glass / 2.5).clamp(-0.7, 1.0)).max(0.25)
+}
+
 /// Whether the sea is lifting her hard enough to swing a fish aboard on.
 ///
 /// A free function with the two numbers that decide it, because it is asked twice — once
@@ -521,6 +591,15 @@ pub struct Sea {
     /// The sea running, metres. In flat water there is nothing to time and you simply
     /// lift the thing aboard, which is also true.
     pub swell: f64,
+    /// How much more wind is expected within the hour, m/s. Positive is building.
+    ///
+    /// Standing in for the barometer, and the substitution is honest rather than
+    /// convenient. Every angler alive believes a falling glass turns the fish on, and
+    /// there is no pressure in this simulation to fall — but what a falling glass
+    /// *means* is a front on its way, and a building wind is the same front seen through
+    /// a different instrument. The boat already carries the reading: it is the OUTLOOK
+    /// line on the console, which until now only told you when to reef.
+    pub glass: f64,
 }
 
 /// What the hands are doing this frame.
@@ -568,6 +647,8 @@ pub struct Hooked {
     pub alongside: f64,
     /// Whether it has made its run at the sight of the hull yet.
     bolted: bool,
+    /// Line still coming off the spool from the shock of the take, metres a second.
+    surge: f64,
 }
 
 impl Hooked {
@@ -656,6 +737,13 @@ pub struct Fishing {
     rng: Pcg32,
     /// Seconds since the last take, so one fish does not arrive on top of another.
     quiet: f64,
+    /// A knock on the rod that has not died away yet, newtons.
+    ///
+    /// Something hit the lure and did not stay on. It is a real force for a real reason —
+    /// a fish's whole weight arriving on a tight line and leaving again — so it belongs
+    /// in the tension rather than in a message, and what the player gets is the rod
+    /// nodding and the ratchet giving half a turn.
+    knock: f64,
     /// A shoal does not contain one fish. For a while after a mackerel there are more.
     shoal: f64,
     /// How much more fish there are in the sea than there are, for looking at the
@@ -700,6 +788,7 @@ impl Fishing {
             lost: 0,
             rng: Pcg32::new(seed ^ 0xF15E),
             quiet: 0.0,
+            knock: 0.0,
             shoal: 0.0,
             plenty,
             accumulator: 0.0,
@@ -850,8 +939,13 @@ impl Fishing {
             self.depth = depth.min((sea.sounding - 0.2).max(0.0));
             // Towing the lure and the line: the bend in the rod while you are simply
             // sailing along, which is most of what tells you the gear is fishing.
-            let tow =
-                LINE_DRAG * self.line_out * sea.stw * sea.stw + TOW * 0.25 * sea.stw * sea.stw;
+            let tow = LINE_DRAG * self.line_out * sea.stw * sea.stw
+                + TOW * 0.25 * sea.stw * sea.stw
+                + self.knock;
+            // A knock is a thing that happened, not a thing that is happening: it decays
+            // in about a quarter of a second, which is how long a fish is on a lure it
+            // did not take properly.
+            self.knock *= (-dt / 0.25).exp();
             self.tension += (tow - self.tension) * (1.0 - (-dt / 0.35).exp());
             self.paying = ((self.tension - cap) / SLIP).max(0.0);
             self.line_out = (self.line_out + (self.paying - reel) * dt).clamp(0.0, SPOOL);
@@ -940,6 +1034,8 @@ impl Fishing {
         // actually is rather than where the geometry put it.
         let swimming = depth.min(sea.sounding.max(0.5));
 
+        let glass = bite_weather(sea.glass);
+
         for species in SPECIES {
             let n = species.nature();
             // One take in seventy seconds with everything right, which over a two-hour
@@ -948,7 +1044,8 @@ impl Fishing {
                 * liking(swimming, n.depth)
                 * liking(knots, n.speed)
                 * liking(sea.sounding, n.ground)
-                * light;
+                * light
+                * glass;
             if species == Quarry::Mackerel {
                 // A shoal is not one fish. Having had one, the next few minutes are the
                 // best fishing of the day, and that is the whole reason anybody keeps
@@ -956,7 +1053,18 @@ impl Fishing {
                 rate *= 1.0 + 5.0 * (self.shoal / 180.0).min(1.0);
             }
             if self.rng.next_f64() < rate * dt {
-                return Some(self.hook(species, sea));
+                // It hit the lure. Whether it is *on* the lure is another question, and
+                // three times in four is the answer.
+                if self.rng.next_f64() < n.sticks {
+                    return Some(self.hook(species, sea));
+                }
+                let n = species.nature();
+                // What you feel is the fish's own weight arriving and leaving.
+                self.knock = (n.mass.0 * G * n.power * 0.45).min(0.4 * BREAKING);
+                // A shorter wait than a take earns, because a fish that missed is a fish
+                // still there — which is the whole value of knowing it happened.
+                self.quiet = 3.0;
+                return Some("something knocked it and missed".into());
             }
         }
         None
@@ -967,6 +1075,11 @@ impl Fishing {
         let n = what.nature();
         let mass = (n.mass.0 + n.mass.1 * self.rng.next_normal()).max(n.mass.0 * 0.35);
         let depth = lure_depth(self.line_out, sea.stw).min((sea.sounding - 0.5).max(1.0));
+        // What the take puts on the line, worked out before the fish exists because the
+        // spool's answer to it decides what the fish is born holding.
+        let v2 = sea.stw * sea.stw;
+        let tow = LINE_DRAG * self.line_out * v2 + TOW * mass.powf(2.0 / 3.0) * v2;
+        let want = (self.drag * BREAKING * STICTION + TAKE_SHOCK).min(0.72 * BREAKING);
         self.rod = Rod::Playing(Hooked {
             what,
             mass,
@@ -984,8 +1097,18 @@ impl Fishing {
             fought: 0.0,
             alongside: 0.0,
             bolted: false,
+            // Nothing comes off a drum the take cannot start turning. A drag screwed
+            // down past the load a take generates holds it dead, which is the same
+            // lesson the dial teaches everywhere else rather than an exception to it.
+            surge: if want > self.drag * BREAKING {
+                TAKE_SURGE + TAKE_SURGE_SPEED * sea.stw
+            } else {
+                0.0
+            },
         });
         self.quiet = 0.0;
+        self.knock = 0.0;
+        self.stretch = ((want - tow) / ROD).max(0.0);
         if what == Quarry::Mackerel {
             self.shoal = 180.0;
         }
@@ -1019,6 +1142,8 @@ impl Fishing {
         fish.until -= dt;
         if fish.until <= 0.0 {
             let beaten = fish.beaten();
+            // How hard you are leaning on it, as a fraction of what it has left.
+            let pressed = self.tension > 0.6 * fish.strength();
             fish.doing = if beaten > 0.85 {
                 Doing::Done
             } else {
@@ -1029,6 +1154,17 @@ impl Fishing {
                 let want = n.repertoire[pick.min(n.repertoire.len() - 1)];
                 if beaten > 0.6 && matches!(want, Doing::Sound | Doing::Run) {
                     Doing::Hang
+                } else if pressed && beaten < 0.55 && matches!(want, Doing::Hang | Doing::Circle) {
+                    // Leaned on hard, a fish that still has something left does not hang
+                    // there and take it — it goes. This is the one place the fight
+                    // answers the *player* rather than a table, and it is why a heavy
+                    // hand is not simply a faster way to win: pull harder and you get a
+                    // longer fight, which is the first thing anybody is told on a boat.
+                    if matches!(n.opening, Doing::Sound) {
+                        Doing::Sound
+                    } else {
+                        Doing::Run
+                    }
                 } else {
                     want
                 }
@@ -1085,6 +1221,9 @@ impl Fishing {
         } else {
             0.0
         };
+        // And whatever is still coming off the drum from the take itself.
+        self.paying += fish.surge;
+        fish.surge *= (-dt / TAKE_SURGE_DIES).exp();
         let supplied = self.paying - reel;
         self.line_out = (self.line_out + supplied * dt).max(0.0);
         // The spring takes up whatever the fish's movement and the line supply disagree
@@ -1277,6 +1416,8 @@ pub fn work(
         // a frame late on exactly the frames that matter.
         lift: sim.sim.state.heave_rate,
         swell: sim.sim.telemetry.significant_height,
+        // The same reading the OUTLOOK line on the console is drawn from.
+        glass: sim.sim.wind.outlook().0,
     };
 
     // One key, and what it does depends on what is on the end — which is not a trick,
@@ -1367,6 +1508,7 @@ mod tests {
             sun: 0.1,
             lift: 0.0,
             swell: 0.0,
+            glass: 0.0,
         }
     }
 
@@ -1378,6 +1520,7 @@ mod tests {
             sun: 0.1,
             lift,
             swell: 1.0,
+            glass: 0.0,
         }
     }
 
@@ -1400,7 +1543,15 @@ mod tests {
         let mut said = Vec::new();
         let mut t = 0.0;
         while t < seconds {
-            if let Some(word) = f.step(1.0 / 60.0, sea, hands) {
+            // Wind when there is something to wind against, and not otherwise — reeling
+            // your own lure in while nothing is on it is how a long run of this ended
+            // with the rod stowed after the first fish and the next two hours spent not
+            // fishing.
+            let working = Hands {
+                reel: if f.fish().is_some() { hands.reel } else { 0.0 },
+                ..hands
+            };
+            if let Some(word) = f.step(1.0 / 60.0, sea, working) {
                 said.push(word);
             }
             if f.ready_to_lift(sea) == Some(true) {
@@ -1432,6 +1583,7 @@ mod tests {
             fought: 0.0,
             alongside: 0.0,
             bolted: false,
+            surge: 0.0,
         });
         f
     }
@@ -1833,6 +1985,90 @@ mod tests {
         );
         assert!(f.out(), "the gear should still be fishing");
         assert!(f.line_out > 1.0);
+    }
+
+    /// **The headline claim.** Every fish big enough to take this lure rips line off the
+    /// spool when it does — including the smallest one in the table, which pulls eleven
+    /// newtons against a thirty newton drag and, before the shock of the take was
+    /// modelled, simply arrived.
+    #[test]
+    fn every_take_rips_line_off_the_spool() {
+        for what in SPECIES {
+            let mut f = rig(3);
+            f.rod = Rod::Trolling;
+            f.line_out = 20.0;
+            f.drag = 1.0 / 3.0;
+            let water = sea(3.5, 30.0);
+            f.hook(what, water);
+            let before = f.line_out;
+            // A second is enough: the drag breaks away in the first few milliseconds.
+            sail(&mut f, 1.0, water, hands(0.0, 1.0 / 3.0));
+            assert!(
+                f.line_out > before + 0.08,
+                "{what:?} took only {:.3} m",
+                f.line_out - before
+            );
+        }
+    }
+
+    /// And a drag screwed down past what the fish can pull gives nothing, which is the
+    /// same lesson the dial teaches everywhere else rather than an exception to it.
+    #[test]
+    fn a_locked_drag_gives_no_line_even_at_the_take() {
+        let mut f = rig(3);
+        f.rod = Rod::Trolling;
+        f.line_out = 20.0;
+        f.drag = 1.0;
+        let water = sea(2.0, 30.0);
+        f.hook(Quarry::Mackerel, water);
+        let before = f.line_out;
+        sail(&mut f, 1.0, water, hands(0.0, 1.0));
+        assert!(f.line_out <= before + 0.01);
+    }
+
+    /// Not everything that hits a lure stays on it, and the miss is information: it says
+    /// you are in the right water. Without it the only two states were nothing and a
+    /// fish, and an hour of nothing looked exactly like an hour of fishing badly.
+    #[test]
+    fn some_of_them_knock_it_and_miss() {
+        // Fished properly, so each fish is landed and the lure goes back to work —
+        // otherwise the first take stays on for the rest of the hour and the roll that
+        // this test is about is never made again.
+        let mut f = rig(21);
+        f.stow_or_set();
+        f.line_out = 14.0;
+        let said = fish_it(&mut f, 7200.0, sea(3.6, 20.0), hands(1.0, 1.0 / 3.0));
+        assert!(said.iter().any(|s| s.contains("knocked")), "{said:?}");
+        // And a knock is felt, not merely announced.
+        let mut g = rig(21);
+        g.rod = Rod::Trolling;
+        g.line_out = 14.0;
+        g.knock = 20.0;
+        let quiet = sea(2.0, 30.0);
+        g.step(0.1, quiet, hands(0.0, 1.0 / 3.0));
+        let knocked = g.tension;
+        let mut h = rig(21);
+        h.rod = Rod::Trolling;
+        h.line_out = 14.0;
+        h.step(0.1, quiet, hands(0.0, 1.0 / 3.0));
+        assert!(knocked > h.tension + 2.0, "{knocked} against {}", h.tension);
+    }
+
+    /// A front on the way turns them on, which is the oldest belief in angling and one
+    /// of the few that holds up — and it puts the fishing and the sailing on the same
+    /// instrument, since the hour you ought to be reefing is the hour they are feeding.
+    #[test]
+    fn a_falling_glass_fishes_better_than_a_rising_one() {
+        // Asserted on the factor rather than on a count of takes in a simulation. The
+        // count is a sample of a Poisson process with a handful of events in it, and the
+        // difference this makes — half again against a third fewer — is smaller than the
+        // noise in a sample that size. A test that passes or fails on the seed is worse
+        // than no test, and the first version of this one did exactly that.
+        assert!(bite_weather(2.5) > bite_weather(0.0) * 1.3);
+        assert!(bite_weather(-2.5) < bite_weather(0.0) * 0.8);
+        assert!(bite_weather(0.0) == 1.0);
+        // And it never shuts them off altogether, because they do still feed.
+        assert!(bite_weather(-100.0) > 0.2);
     }
 
     /// The gear cannot be stowed with a fish on it, and saying so is better than doing
