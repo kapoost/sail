@@ -171,8 +171,6 @@ pub enum Deck {
     Helm,
     /// The seven control lines, on one winch.
     Lines,
-    /// Who is steering, and on what.
-    Pilot,
     /// What is set and what is stowed — the wardrobe, the staysail, the ground
     /// tackle when she has any, and the hook.
     Gear,
@@ -181,10 +179,9 @@ pub enum Deck {
 }
 
 impl Deck {
-    pub const ALL: [(Deck, &'static str); 5] = [
+    pub const ALL: [(Deck, &'static str); 4] = [
         (Deck::Helm, "SAILS"),
         (Deck::Lines, "LINES"),
-        (Deck::Pilot, "PILOT"),
         (Deck::Gear, "GEAR"),
         (Deck::Ship, "SHIP"),
     ];
@@ -203,14 +200,145 @@ impl Deck {
 /// being worked out from three numbers, and the angle comes off her own polar rather
 /// than out of a book, so it narrows when she is reefed down and opens when she is
 /// footing.
-fn binnacle(ui: &mut egui::Ui, heading: f64, heel: f64, twd: f64, beat: f64, mark: Option<f64>) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(246.0, 246.0), egui::Sense::hover());
+/// The autopilot, beside the glass.
+///
+/// **Where the hand already is.** It had a page of its own, which meant the one control
+/// you reach for while something is going wrong was behind a tab you were not on — and
+/// an autopilot is reached for in exactly those moments. It is four buttons and two
+/// lines of type; it fits beside the card, where the course it is holding can be read
+/// against the course she is making.
+fn the_pilot(ui: &mut egui::Ui, pilot: &mut Pilot, sim: &Sim) {
+    let telemetry = sim.sim.telemetry;
+
+    ui.vertical(|ui| {
+        plate(ui, "PILOT");
+        // Why it last let go, for half a minute after it did. The
+        // diagnostic panel has carried this since it was written, which
+        // is the wrong place: the question "why did it switch off?" is
+        // asked by somebody who was not watching, and they are looking
+        // at the console because that is what is on the screen.
+        // Why it last let go, for half a minute after it did — and the
+        // vane saying it is beaten, which it has to do here because there
+        // is no alarm to sound and no relay to click.
+        //
+        // **One line of space, always.** These two used to appear and
+        // disappear, and a line appearing in the middle of a column of
+        // buttons moves every button under it — including the one the
+        // mouse is on its way to. Toggling the pilot did it twice in two
+        // seconds, which is how this was found. The slot is reserved now
+        // and the console cannot change height for a message.
+        let note = if pilot.engaged() {
+            if pilot.struggling() && !pilot.can_let_go() {
+                Some("the vane is not coping")
+            } else {
+                None
+            }
+        } else {
+            pilot.last_reason.filter(|_| pilot.since_reason < 30.0)
+        };
+        ui.label(
+            egui::RichText::new(fit(note.unwrap_or(" "), 30))
+                .color(if note.is_some() {
+                    paint::BAD
+                } else {
+                    egui::Color32::TRANSPARENT
+                })
+                .monospace()
+                .size(10.0),
+        );
+        let engaged = pilot.engaged();
+        if lamp_button(ui, if engaged { "ENGAGED" } else { "STANDBY" }, engaged).clicked() {
+            if engaged {
+                pilot.disengage();
+            } else {
+                let state = sim.sim.state;
+                pilot.hold_heading(&state);
+            }
+        }
+        let wind_mode = matches!(pilot.mode, PilotMode::ApparentWind { .. });
+        if lamp_button(
+            ui,
+            if wind_mode { "WIND VANE" } else { "COMPASS" },
+            wind_mode,
+        )
+        .clicked()
+            && pilot.engaged()
+        {
+            if wind_mode {
+                let state = sim.sim.state;
+                pilot.hold_heading(&state);
+            } else {
+                pilot.hold_wind(&telemetry);
+            }
+        }
+        // What it is actually holding, which the console did not say.
+        //
+        // Two lamps told you *which* instrument was steering and the
+        // arrows moved its target, and nowhere was the target itself — so
+        // the one question a person has about an autopilot, "what is it
+        // trying to do", had to be answered by watching the compass and
+        // guessing. A course in degrees, or an apparent wind angle with
+        // the tack in its sign, which is how a vane is set and read.
+        ui.label(
+            egui::RichText::new(match pilot.mode {
+                PilotMode::Standby => "   —".to_string(),
+                PilotMode::Heading(h) => format!("{:03.0}", deg(h)),
+                PilotMode::ApparentWind { awa: a, .. } => {
+                    format!("{:+.0} awa", deg(a))
+                }
+            })
+            .monospace()
+            .size(13.0)
+            .color(if pilot.engaged() {
+                paint::LIVE
+            } else {
+                egui::Color32::from_rgb(110, 115, 120)
+            }),
+        );
+        // The same two steps the keys use, from the same constants, and
+        // the doubled arrow is the coarse one in every piece of marine
+        // electronics ever built.
+        ui.horizontal(|ui| {
+            for (label, delta) in [
+                ("<<", -crate::input::PILOT_STEP),
+                ("<", -crate::input::PILOT_FINE),
+                (">", crate::input::PILOT_FINE),
+                (">>", crate::input::PILOT_STEP),
+            ] {
+                if nudge_button(ui, label).clicked() {
+                    pilot.adjust(delta);
+                }
+            }
+        });
+    });
+}
+
+/// Everything the glass shows, in one parcel.
+pub struct Glass {
+    pub heading: f64,
+    pub heel: f64,
+    /// Where the wind is from, and how close she can lie to it.
+    pub twd: f64,
+    pub beat: f64,
+    /// Where she is bound, if she is bound anywhere.
+    pub mark: Option<f64>,
+    /// The wind she is in: apparent on the needle, true behind it.
+    pub awa: f64,
+    pub aws: f64,
+    pub twa: f64,
+}
+
+fn binnacle(ui: &mut egui::Ui, g: &Glass) {
+    // Taller than it is wide, because the lubber window sits above the bowl and a
+    // square box put it outside the case altogether — over whatever happened to be
+    // behind the bar.
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(246.0, 284.0), egui::Sense::hover());
     let p = ui.painter();
-    let c = rect.center();
+    let c = rect.center() + egui::vec2(0.0, 18.0);
     let r = 104.0_f32;
     // Where a bearing sits on the glass: her head is at the top, so everything else is
     // relative to it — which is what a card does when the boat turns under it.
-    let screen = |bearing: f64| -> f32 { (bearing - heading) as f32 };
+    let screen = |bearing: f64| -> f32 { (bearing - g.heading) as f32 };
     let towards = |a: f32, len: f32| c + egui::vec2(a.sin(), -a.cos()) * len;
 
     p.circle_filled(c, r + 13.0, paint::BEZEL);
@@ -221,23 +349,25 @@ fn binnacle(ui: &mut egui::Ui, heading: f64, heel: f64, twd: f64, beat: f64, mar
     //
     // The shaded arc is the water she cannot sail into. Its edges are the two tacks,
     // and they carry the headings in figures, because *that* is the number you steer.
-    let wind = screen(twd);
+    let wind = screen(g.twd);
     let steps = 48;
     for i in 0..steps {
-        let a0 = wind - beat as f32 + (i as f32 / steps as f32) * 2.0 * beat as f32;
-        let a1 = wind - beat as f32 + ((i + 1) as f32 / steps as f32) * 2.0 * beat as f32;
+        let a0 = wind - g.beat as f32 + (i as f32 / steps as f32) * 2.0 * g.beat as f32;
+        let a1 = wind - g.beat as f32 + ((i + 1) as f32 / steps as f32) * 2.0 * g.beat as f32;
         p.line_segment(
             [towards(a0, r + 6.0), towards(a1, r + 6.0)],
             egui::Stroke::new(9.0, paint::TRACK),
         );
     }
     for side in [-1.0_f32, 1.0] {
-        let a = wind + side * beat as f32;
+        let a = wind + side * g.beat as f32;
         p.line_segment(
             [towards(a, r - 10.0), towards(a, r + 12.0)],
             egui::Stroke::new(2.0, paint::LIVE),
         );
-        let lay = (twd + side as f64 * beat).to_degrees().rem_euclid(360.0);
+        let lay = (g.twd + side as f64 * g.beat)
+            .to_degrees()
+            .rem_euclid(360.0);
         p.text(
             towards(a, r + 26.0),
             egui::Align2::CENTER_CENTER,
@@ -279,7 +409,7 @@ fn binnacle(ui: &mut egui::Ui, heading: f64, heel: f64, twd: f64, beat: f64, mar
         );
         if long {
             card.text(
-                towards(a, r - 26.0),
+                towards(a, r - 34.0),
                 egui::Align2::CENTER_CENTER,
                 match ten {
                     0 => "N".to_string(),
@@ -294,7 +424,7 @@ fn binnacle(ui: &mut egui::Ui, heading: f64, heel: f64, twd: f64, beat: f64, mar
         }
     }
     // Where she is bound, when she is bound anywhere.
-    if let Some(mark) = mark {
+    if let Some(mark) = g.mark {
         let a = screen(mark);
         card.add(egui::Shape::convex_polygon(
             vec![
@@ -311,11 +441,23 @@ fn binnacle(ui: &mut egui::Ui, heading: f64, heel: f64, twd: f64, beat: f64, mar
         [towards(0.0, r - 22.0), towards(0.0, r + 11.0)],
         egui::Stroke::new(2.4, paint::NEEDLE),
     );
+    // **In a window at the lubber line**, which is where a repeater puts it and the
+    // only place on this glass that cannot collide with anything: the card's own
+    // figures turn under it, and twice now the heading has landed on top of one.
+    let window =
+        egui::Rect::from_center_size(c + egui::vec2(0.0, -(r + 24.0)), egui::vec2(66.0, 26.0));
+    p.rect_filled(window, 2.0, paint::FACE);
+    p.rect_stroke(
+        window,
+        2.0,
+        egui::Stroke::new(1.0, paint::BEZEL),
+        egui::StrokeKind::Inside,
+    );
     p.text(
-        c + egui::vec2(0.0, -34.0),
+        window.center(),
         egui::Align2::CENTER_CENTER,
-        format!("{:03.0}", heading.to_degrees().rem_euclid(360.0)),
-        egui::FontId::monospace(letter::PRIMARY * 0.8),
+        format!("{:03.0}", g.heading.to_degrees().rem_euclid(360.0)),
+        egui::FontId::monospace(letter::VALUE + 3.0),
         paint::INK,
     );
 
@@ -324,7 +466,7 @@ fn binnacle(ui: &mut egui::Ui, heading: f64, heel: f64, twd: f64, beat: f64, mar
         egui::pos2(rect.left(), c.y),
         egui::pos2(rect.right(), rect.bottom()),
     ));
-    let tilt = -(heel as f32);
+    let tilt = -(g.heel as f32);
     let along = egui::vec2(tilt.cos(), tilt.sin());
     // The sea is a *segment of the glass*, not a rectangle laid over it: cut as the
     // chord through the middle and the arc under it, so that however far she lies over,
@@ -368,12 +510,73 @@ fn binnacle(ui: &mut egui::Ui, heading: f64, heel: f64, twd: f64, beat: f64, mar
         }
     }
     p.text(
-        c + egui::vec2(0.0, 52.0),
+        c + egui::vec2(0.0, r * 0.74),
         egui::Align2::CENTER_CENTER,
-        format!("{:.0}°", heel.to_degrees().abs()),
+        format!("{:.0}°", g.heel.to_degrees().abs()),
         egui::FontId::monospace(letter::VALUE),
         paint::FACE,
     );
+
+    // --- The boss in the middle: the wind she is actually in ----------------------
+    //
+    // A binnacle has a pillar through the middle of it, and the instrument that belongs
+    // on top of it is the one you trim by. The big card is where she is *going*; this is
+    // the wind arriving, apparent, with the true wind behind it — the two angles a
+    // trimmer holds in his head, in the middle of the glass he is already looking at.
+    let boss = 44.0_f32;
+    p.circle_filled(c, boss + 3.0, paint::BEZEL);
+    p.circle_filled(c, boss, paint::FACE);
+    for ten in 0..12 {
+        let a = ten as f32 * std::f32::consts::TAU / 12.0;
+        let dir = egui::vec2(a.sin(), -a.cos());
+        p.line_segment(
+            [c + dir * (boss - 6.0), c + dir * (boss - 1.0)],
+            egui::Stroke::new(if ten == 0 { 1.8 } else { 1.0 }, paint::INK),
+        );
+    }
+    // The true wind first and thinner, because it is the one you plan with; the
+    // apparent over it, because it is the one the sails are in.
+    for (angle, width, colour) in [
+        (g.twa as f32, 1.6, paint::INK.gamma_multiply(0.55)),
+        (g.awa as f32, 2.6, paint::NEEDLE),
+    ] {
+        let dir = egui::vec2(angle.sin(), -angle.cos());
+        p.line_segment(
+            [c - dir * 6.0, c + dir * (boss - 9.0)],
+            egui::Stroke::new(width, colour),
+        );
+    }
+    p.circle_filled(c, 3.0, paint::BEZEL);
+    p.text(
+        c + egui::vec2(0.0, boss * 0.45),
+        egui::Align2::CENTER_CENTER,
+        format!("{:+.0}°", deg(g.awa)),
+        egui::FontId::monospace(letter::VALUE),
+        paint::INK,
+    );
+    p.text(
+        c + egui::vec2(0.0, boss * 0.45 + 14.0),
+        egui::Align2::CENTER_CENTER,
+        format!("{:.0} kn", ms_to_kn(g.aws)),
+        egui::FontId::monospace(letter::UNIT),
+        paint::INK.gamma_multiply(0.75),
+    );
+
+    // --- And a word at each thing on the rim, small enough to ignore ----------------
+    //
+    // An instrument that needs a legend is badly drawn, and one that *has* no legend
+    // anywhere is one you learn by being told. These are at the size of an engraver's
+    // afterthought: there when you look for them, invisible when you are sailing.
+    let hint = |a: f32, what: &str| {
+        p.text(
+            towards(a, r + 26.0),
+            egui::Align2::CENTER_CENTER,
+            what,
+            egui::FontId::monospace(letter::UNIT - 2.0),
+            paint::LABEL.gamma_multiply(0.7),
+        );
+    };
+    hint(wind, "wind");
 }
 
 /// A page tab: the same engraved plate as every other name on the case, raised when it
@@ -682,34 +885,11 @@ pub fn draw(
                     ui.horizontal_top(|ui| {
                         // Half the case less the glass, so the glass sits on the middle line of the
                         // bar whichever page is open and whatever is on it.
-                        ui.set_width((CONSOLE_WIDTH - 246.0) * 0.5);
+                        // Half the case, less the glass and the pilot's column, so the
+                        // glass still falls on the middle line of the bar.
+                        ui.set_width((CONSOLE_WIDTH - 246.0) * 0.5 - 196.0);
                         match deck {
                             Deck::Helm => {
-                                // The blade, under the glass that carries the card: one
-                                // card on the console and not two, which is what the
-                                // repeater here had become the moment the binnacle took
-                                // the middle of the bar.
-                                ui.vertical(|ui| {
-                                    plate(ui, "HELM");
-                                    let max = cfg.max_rudder_angle;
-                                    let mut rudder = sim.controls.rudder;
-                                    if tiller(ui, &mut rudder, max) {
-                                        sim.controls.rudder = rudder;
-                                        pilot.disengage();
-                                    }
-                                    // What the blade has left, and why. A rudder on the centreline
-                                    // is a metre under the transom and the water is not glass, so
-                                    // none of the three things that take its grip away can be seen
-                                    // from on deck.
-                                    readout(ui, "BITE", &bite_words(&telemetry));
-                                    if small_button(ui, "AMIDSHIPS").clicked() {
-                                        sim.controls.rudder = 0.0;
-                                        pilot.disengage();
-                                    }
-                                });
-
-                                ui.add_space(18.0);
-
                                 // Sheets, on their own winches, continuously trimmed.
                                 let want_main = cfg
                                     .main
@@ -736,6 +916,10 @@ pub fn draw(
                                             &telemetry.main,
                                             1.0 - sim.controls.reef * cfg.max_reef,
                                         ),
+                                        (
+                                            telemetry.main.drive + telemetry.main_upper.drive,
+                                            telemetry.main.side + telemetry.main_upper.side,
+                                        ),
                                     ) {
                                         sim.controls.main_sheet = main_sheet;
                                     }
@@ -745,6 +929,10 @@ pub fn draw(
                                         &mut jib_sheet,
                                         Some(want_jib),
                                         sail_state(&telemetry.jib, 1.0 - sim.controls.furl),
+                                        (
+                                            telemetry.jib.drive + telemetry.jib_upper.drive,
+                                            telemetry.jib.side + telemetry.jib_upper.side,
+                                        ),
                                     ) {
                                         sim.controls.jib_sheet = jib_sheet;
                                     }
@@ -862,118 +1050,6 @@ pub fn draw(
                                     );
                                 });
                             }
-                            Deck::Pilot => {
-                                ui.vertical(|ui| {
-                                    plate(ui, "PILOT");
-                                    // Why it last let go, for half a minute after it did. The
-                                    // diagnostic panel has carried this since it was written, which
-                                    // is the wrong place: the question "why did it switch off?" is
-                                    // asked by somebody who was not watching, and they are looking
-                                    // at the console because that is what is on the screen.
-                                    // Why it last let go, for half a minute after it did — and the
-                                    // vane saying it is beaten, which it has to do here because there
-                                    // is no alarm to sound and no relay to click.
-                                    //
-                                    // **One line of space, always.** These two used to appear and
-                                    // disappear, and a line appearing in the middle of a column of
-                                    // buttons moves every button under it — including the one the
-                                    // mouse is on its way to. Toggling the pilot did it twice in two
-                                    // seconds, which is how this was found. The slot is reserved now
-                                    // and the console cannot change height for a message.
-                                    let note = if pilot.engaged() {
-                                        if pilot.struggling() && !pilot.can_let_go() {
-                                            Some("the vane is not coping")
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        pilot.last_reason.filter(|_| pilot.since_reason < 30.0)
-                                    };
-                                    ui.label(
-                                        egui::RichText::new(fit(note.unwrap_or(" "), 30))
-                                            .color(if note.is_some() {
-                                                paint::BAD
-                                            } else {
-                                                egui::Color32::TRANSPARENT
-                                            })
-                                            .monospace()
-                                            .size(10.0),
-                                    );
-                                    let engaged = pilot.engaged();
-                                    if lamp_button(
-                                        ui,
-                                        if engaged { "ENGAGED" } else { "STANDBY" },
-                                        engaged,
-                                    )
-                                    .clicked()
-                                    {
-                                        if engaged {
-                                            pilot.disengage();
-                                        } else {
-                                            let state = sim.sim.state;
-                                            pilot.hold_heading(&state);
-                                        }
-                                    }
-                                    let wind_mode =
-                                        matches!(pilot.mode, PilotMode::ApparentWind { .. });
-                                    if lamp_button(
-                                        ui,
-                                        if wind_mode { "WIND VANE" } else { "COMPASS" },
-                                        wind_mode,
-                                    )
-                                    .clicked()
-                                        && pilot.engaged()
-                                    {
-                                        if wind_mode {
-                                            let state = sim.sim.state;
-                                            pilot.hold_heading(&state);
-                                        } else {
-                                            pilot.hold_wind(&telemetry);
-                                        }
-                                    }
-                                    // What it is actually holding, which the console did not say.
-                                    //
-                                    // Two lamps told you *which* instrument was steering and the
-                                    // arrows moved its target, and nowhere was the target itself — so
-                                    // the one question a person has about an autopilot, "what is it
-                                    // trying to do", had to be answered by watching the compass and
-                                    // guessing. A course in degrees, or an apparent wind angle with
-                                    // the tack in its sign, which is how a vane is set and read.
-                                    ui.label(
-                                        egui::RichText::new(match pilot.mode {
-                                            PilotMode::Standby => "   —".to_string(),
-                                            PilotMode::Heading(h) => format!("{:03.0}", deg(h)),
-                                            PilotMode::ApparentWind { awa: a, .. } => {
-                                                format!("{:+.0} awa", deg(a))
-                                            }
-                                        })
-                                        .monospace()
-                                        .size(13.0)
-                                        .color(
-                                            if pilot.engaged() {
-                                                paint::LIVE
-                                            } else {
-                                                egui::Color32::from_rgb(110, 115, 120)
-                                            },
-                                        ),
-                                    );
-                                    // The same two steps the keys use, from the same constants, and
-                                    // the doubled arrow is the coarse one in every piece of marine
-                                    // electronics ever built.
-                                    ui.horizontal(|ui| {
-                                        for (label, delta) in [
-                                            ("<<", -crate::input::PILOT_STEP),
-                                            ("<", -crate::input::PILOT_FINE),
-                                            (">", crate::input::PILOT_FINE),
-                                            (">>", crate::input::PILOT_STEP),
-                                        ] {
-                                            if nudge_button(ui, label).clicked() {
-                                                pilot.adjust(delta);
-                                            }
-                                        }
-                                    });
-                                });
-                            }
                             Deck::Gear => {
                                 // The sail wardrobe, and the pilot.
                                 ui.vertical(|ui| {
@@ -1059,17 +1135,41 @@ pub fn draw(
                     // are not a page you turn to: they are what you are doing, and the
                     // bezel round them is the only piece of navigation that belongs on
                     // the bar rather than on the chart.
-                    binnacle(
-                        ui,
-                        heading,
-                        telemetry.heel,
-                        telemetry.twd,
-                        polar.beat(),
-                        match course.leg {
-                            Leg::Carrying => Some(course.to_target(sim.sim.state.pos).1),
-                            Leg::Idle => None,
-                        },
-                    );
+                    // The pilot where the hand is already looking: beside the glass,
+                    // not on a page you are not on exactly when you want it.
+                    ui.vertical(|ui| {
+                        ui.set_width(196.0);
+                        the_pilot(ui, &mut pilot, &sim);
+                    });
+                    ui.vertical(|ui| {
+                        binnacle(
+                            ui,
+                            &Glass {
+                                heading,
+                                heel: telemetry.heel,
+                                twd: telemetry.twd,
+                                beat: polar.beat(),
+                                mark: match course.leg {
+                                    Leg::Carrying => Some(course.to_target(sim.sim.state.pos).1),
+                                    Leg::Idle => None,
+                                },
+                                awa: telemetry.awa,
+                                aws: telemetry.aws,
+                                twa: telemetry.twa,
+                            },
+                        );
+                        // The blade and what it has left, under the glass: it lost its
+                        // own dial when the wind took the middle, and it is two figures
+                        // — not an instrument, but not nothing either.
+                        ui.horizontal(|ui| {
+                            ui.add_space(52.0);
+                            readout(ui, "HELM", &format!("{:+.0}°", deg(sim.controls.rudder)));
+                            // The words come back when there is something to say: a helm
+                            // that has gone soft for want of way wants the opposite
+                            // response to one whose blade has stalled.
+                            readout(ui, "BITE", &bite_words(&telemetry));
+                        });
+                    });
                     // And the pages themselves, down the right-hand side where a thumb
                     // on the coaming lands.
                     ui.vertical(|ui| {
@@ -1623,94 +1723,6 @@ fn outlook_words(building: f64, turning: f64) -> String {
 ///
 /// Drawn the way the indicator over a wheelhouse door is drawn: the blade swinging about
 /// its stock, port to the left, starboard to the right, with the degrees engraved on the
-/// face. Dragging it puts the helm over.
-fn tiller(ui: &mut egui::Ui, rudder: &mut f64, max: f64) -> bool {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(128.0, 96.0), egui::Sense::click_and_drag());
-    // Clipped to its own rectangle, so the card cannot escape the instrument: the same
-    // fault the clinometer had, which is worth only ever learning once.
-    let p = ui.painter().with_clip_rect(rect);
-    // The face: a half-round card sunk into the case, pivot at the top where the stock
-    // is, so the blade hangs down into the dial the way it hangs under the boat.
-    let pivot = egui::pos2(rect.center().x, rect.top() + 4.0);
-    let reach = 58.0_f32;
-    p.circle_filled(pivot, reach, paint::FACE);
-    p.circle_stroke(pivot, reach, egui::Stroke::new(1.2, paint::BEZEL));
-
-    let changed = if response.dragged() {
-        let f = ((response
-            .interact_pointer_pos()
-            .map(|q| q.x)
-            .unwrap_or(pivot.x)
-            - pivot.x)
-            / (rect.width() * 0.42))
-            .clamp(-1.0, 1.0);
-        *rudder = f as f64 * max;
-        true
-    } else {
-        false
-    };
-
-    // Engraved degrees, every five, numbered every fifteen: the marks a helmsman counts
-    // rather than reads.
-    let steps = (deg(max) / 5.0).round() as i32;
-    for tick in -steps..=steps {
-        let at = tick as f32 * 5.0;
-        let a = (at / deg(max) as f32) * std::f32::consts::FRAC_PI_2 * 0.78;
-        let dir = egui::vec2(a.sin(), a.cos());
-        let long = tick % 3 == 0;
-        p.line_segment(
-            [
-                pivot + dir * (reach - if long { 10.0 } else { 6.0 }),
-                pivot + dir * (reach - 1.0),
-            ],
-            egui::Stroke::new(if tick == 0 { 1.8 } else { 1.0 }, paint::INK),
-        );
-        if long && tick != 0 {
-            p.text(
-                pivot + dir * (reach - 18.0),
-                egui::Align2::CENTER_CENTER,
-                format!("{:.0}", at.abs()),
-                egui::FontId::monospace(letter::UNIT),
-                paint::INK,
-            );
-        }
-    }
-    // The blade.
-    let angle = (*rudder / max).clamp(-1.0, 1.0) as f32 * std::f32::consts::FRAC_PI_2 * 0.78;
-    let dir = egui::vec2(angle.sin(), angle.cos());
-    let across = egui::vec2(-dir.y, dir.x);
-    p.add(egui::Shape::convex_polygon(
-        vec![
-            pivot + across * 3.0,
-            pivot - across * 3.0,
-            pivot + dir * (reach - 10.0) - across * 5.0,
-            pivot + dir * (reach - 10.0) + across * 5.0,
-        ],
-        paint::NEEDLE,
-        egui::Stroke::NONE,
-    ));
-    p.circle_filled(pivot, 4.0, paint::BEZEL);
-    // Which way is which, in the words a helm order is given in.
-    for (side, name) in [(-1.0_f32, "PORT"), (1.0, "STBD")] {
-        p.text(
-            egui::pos2(pivot.x + side * (reach - 6.0), rect.bottom() - 8.0),
-            egui::Align2::CENTER_CENTER,
-            name,
-            egui::FontId::monospace(letter::UNIT),
-            paint::LABEL,
-        );
-    }
-    p.text(
-        egui::pos2(pivot.x, rect.bottom() - 24.0),
-        egui::Align2::CENTER_CENTER,
-        format!("{:+.0}°", deg(*rudder)),
-        egui::FontId::monospace(letter::VALUE),
-        paint::INK,
-    );
-    changed
-}
-
 /// The working parts of a lever, drawn once for the two things that are levers.
 ///
 /// **A slot milled in the case, a brass lever in it, and the stops engraved beside it.**
@@ -1825,13 +1837,14 @@ fn lever(
     value: &mut f64,
     want: Option<f64>,
     state: (&'static str, egui::Color32),
+    load: (f64, f64),
 ) -> bool {
     ui.vertical(|ui| {
         // **Long, because a sheet is long.** The travel is the thing your hand is
         // setting, and an inch of it was asking for a trim to be judged in sixths of a
         // millimetre. There is a page to itself now, so it can have the room.
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(66.0, 208.0), egui::Sense::click_and_drag());
+            ui.allocate_exact_size(egui::vec2(84.0, 246.0), egui::Sense::click_and_drag());
         let p = ui.painter();
         p.rect_filled(rect, 3.0, paint::CASE);
         p.rect_stroke(
@@ -1840,9 +1853,11 @@ fn lever(
             egui::Stroke::new(1.0, paint::BEZEL),
             egui::StrokeKind::Inside,
         );
+        // The rope's own column, with the gauges in the strip beside it rather than
+        // over it: a lever and a reading are two things and they were sharing a slot.
         let face = egui::Rect::from_min_max(
             rect.left_top() + egui::vec2(0.0, 17.0),
-            rect.right_bottom() - egui::vec2(0.0, 28.0),
+            rect.right_bottom() - egui::vec2(20.0, 28.0),
         );
         // A click *is* a trim: put the rope where you touched. Dragging is the same
         // act continued, which is how a winch handle behaves and not how a scrollbar
@@ -1860,6 +1875,32 @@ fn lever(
         // Drawn with the sheet the other way up from its number: hauled in is at the
         // top, because that is where the hand takes the rope to.
         lever_face(p, face, 1.0 - *value, want.map(|w| 1.0 - w), None, false);
+        // **What the sail is making of it**, beside the rope that is setting it: two
+        // columns, forward and sideways, on one scale so they can be compared by eye.
+        // Trimming is the business of turning the second into the first, and until now
+        // the only way to see whether it was working was to watch the speed and the
+        // angle of the deck.
+        for (i, (force, colour)) in [(load.0, paint::GOOD), (load.1.abs(), paint::NEEDLE)]
+            .into_iter()
+            .enumerate()
+        {
+            let full = 4_000.0;
+            let h = (face.height() - 16.0) * (force / full).clamp(0.0, 1.0) as f32;
+            let x = face.right() + 6.0 + i as f32 * 8.0;
+            let bar = egui::Rect::from_min_max(
+                egui::pos2(x - 2.5, face.bottom() - 8.0 - h),
+                egui::pos2(x + 2.5, face.bottom() - 8.0),
+            );
+            p.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(x - 2.5, face.top() + 8.0),
+                    egui::pos2(x + 2.5, face.bottom() - 8.0),
+                ),
+                1.0,
+                paint::TRACK,
+            );
+            p.rect_filled(bar, 1.0, colour);
+        }
         tag(
             p,
             egui::Rect::from_min_size(
@@ -1899,7 +1940,7 @@ fn clutch(
 ) -> (bool, bool) {
     ui.vertical(|ui| {
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(72.0, 208.0), egui::Sense::click_and_drag());
+            ui.allocate_exact_size(egui::vec2(72.0, 246.0), egui::Sense::click_and_drag());
         let p = ui.painter();
         p.rect_filled(rect, 3.0, paint::CASE);
         p.rect_stroke(
