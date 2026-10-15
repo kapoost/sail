@@ -31,19 +31,128 @@ use crate::sim::Sim;
 
 /// Painted metal, cream dial faces, red needles. A deliberately small palette: the
 /// old panels were cheap to print and that is exactly why they read so well.
+/// The instrument case, and what is painted on it.
+///
+/// **One palette, and it is a workshop's rather than a screen's.** A japanned case in
+/// warm black, brass for the bezels and for whatever is live, ivory for the dial faces
+/// and the engraved nameplates, vermilion for a pointer, and one red that means *now*.
+/// Nothing here is a grey: every surface on a boat of this age is a material, and
+/// materials have a temperature.
 pub mod paint {
     use bevy_egui::egui::Color32;
-    pub const CASE: Color32 = Color32::from_rgb(38, 40, 43);
-    pub const BEZEL: Color32 = Color32::from_rgb(62, 65, 69);
-    pub const FACE: Color32 = Color32::from_rgb(222, 220, 208);
-    pub const INK: Color32 = Color32::from_rgb(38, 38, 40);
-    pub const NEEDLE: Color32 = Color32::from_rgb(186, 44, 34);
-    pub const LIVE: Color32 = Color32::from_rgb(232, 176, 58);
-    pub const GOOD: Color32 = Color32::from_rgb(120, 190, 130);
+    /// Japanned steel: the case everything is screwed to.
+    pub const CASE: Color32 = Color32::from_rgb(30, 29, 27);
+    /// A recess milled into it, for anything sunk below the surface.
+    pub const TRACK: Color32 = Color32::from_rgb(20, 19, 18);
+    /// Dulled brass, for rims and frames.
+    pub const BEZEL: Color32 = Color32::from_rgb(78, 68, 50);
+    /// Bright brass: what is selected, engaged, or working.
+    pub const LIVE: Color32 = Color32::from_rgb(198, 158, 82);
+    /// Ivory, for a dial face and for the figures on it.
+    pub const FACE: Color32 = Color32::from_rgb(228, 222, 205);
+    /// The nameplate a label is engraved into.
+    pub const PLATE: Color32 = Color32::from_rgb(198, 190, 172);
+    /// And the engraving itself.
+    pub const INK: Color32 = Color32::from_rgb(28, 27, 25);
+    /// A pointer, in the red every instrument maker used because it is the one colour
+    /// the eye finds against ivory without being told to look.
+    pub const NEEDLE: Color32 = Color32::from_rgb(174, 46, 34);
+    /// A label stencilled straight onto the case rather than engraved on a plate.
+    pub const LABEL: Color32 = Color32::from_rgb(148, 142, 128);
+    pub const GOOD: Color32 = Color32::from_rgb(126, 178, 128);
     /// For the things you want seen across a cockpit in a hurry: overdue, aground.
-    pub const BAD: Color32 = Color32::from_rgb(224, 104, 84);
-    pub const TRACK: Color32 = Color32::from_rgb(26, 27, 29);
-    pub const LABEL: Color32 = Color32::from_rgb(176, 178, 182);
+    pub const BAD: Color32 = Color32::from_rgb(214, 96, 74);
+}
+
+/// The type scale, with the roles named.
+///
+/// **Four sizes and each one means something.** An instrument panel drawn in nine point
+/// everywhere is a wall of text with the important numbers hidden in it — which is
+/// exactly what this one was, and what it was reported as. The sizes here are a
+/// hierarchy you can read from across a cockpit: the three figures you steer by, the
+/// ones you check, the names of things, and the units, which should never be the size of
+/// the number they belong to.
+pub mod letter {
+    /// The three you steer by.
+    pub const PRIMARY: f32 = 23.0;
+    /// Anything you look at on purpose.
+    pub const VALUE: f32 = 13.0;
+    /// What it is called.
+    pub const LABEL: f32 = 9.0;
+    /// And what it is in. Always smaller than the figure, always dimmer.
+    pub const UNIT: f32 = 8.0;
+}
+
+/// A name engraved on an ivory plate and screwed to the case.
+///
+/// The signature of every instrument panel of the period and worth having for more than
+/// the look: a dark label on a light plate is read as a *heading* without anybody having
+/// to be told, which is how a dozen controls become four groups. Letter-spaced, because
+/// engraving is.
+pub fn plate(ui: &mut egui::Ui, name: &str) {
+    let spaced: String = name
+        .chars()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let galley = ui.painter().layout_no_wrap(
+        spaced.clone(),
+        egui::FontId::monospace(letter::LABEL),
+        paint::INK,
+    );
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(galley.size().x + 10.0, galley.size().y + 4.0),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 1.0, paint::PLATE);
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        spaced,
+        egui::FontId::monospace(letter::LABEL),
+        paint::INK,
+    );
+}
+
+/// The figures she is steered by, in the size they deserve.
+///
+/// **Aviation's one good idea about instruments**: the handful of numbers a pilot acts
+/// on are large, in a fixed place, and in a fixed order, so that reading them is not
+/// *finding* them. On a yacht that is her speed, her head and the wind she is in —
+/// everything else on this panel is a thing you look up, and these three are things you
+/// glance at a hundred times an hour.
+pub fn primary(ui: &mut egui::Ui, figures: [(String, &str, &str); 3]) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let each = ui.available_width() / 3.0;
+        for (value, name, unit) in figures {
+            ui.vertical(|ui| {
+                ui.set_width(each);
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.label(
+                    egui::RichText::new(value)
+                        .color(paint::FACE)
+                        .monospace()
+                        .size(letter::PRIMARY),
+                );
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    ui.label(
+                        egui::RichText::new(name)
+                            .color(paint::LABEL)
+                            .monospace()
+                            .size(letter::LABEL),
+                    );
+                    ui.label(
+                        egui::RichText::new(unit)
+                            .color(paint::LABEL.gamma_multiply(0.75))
+                            .monospace()
+                            .size(letter::UNIT),
+                    );
+                });
+            });
+        }
+    });
 }
 
 #[derive(Resource, Default)]
@@ -107,31 +216,44 @@ pub fn draw(
                 // to anything else to be misread for it.
                 ui.spacing_mut().item_spacing.y = 4.0;
 
+                // **The three she is steered by**, in the size they deserve, in a
+                // fixed order, in a fixed place. Everything under them is a thing you
+                // look up; these are things you glance at a hundred times an hour.
+                primary(
+                    ui,
+                    [
+                        (format!("{:.1}", ms_to_kn(telemetry.stw)), "LOG", "kn"),
+                        (format!("{:03.0}", deg(heading)), "HDG", "°"),
+                        (format!("{:+.0}", deg(telemetry.awa)), "AWA", "°"),
+                    ],
+                );
+                ui.add_space(2.0);
+                // The dial, which is the one piece of this panel that is *shape* rather
+                // than figures: the apparent wind where it actually is, with the true
+                // wind behind it. A number tells you the angle; a needle tells you the
+                // angle without being read.
                 ui.horizontal(|ui| {
                     wind_dial(ui, telemetry.awa, telemetry.twa);
-                    ui.add_space(3.0);
+                    ui.add_space(5.0);
                     ui.vertical(|ui| {
-                        gauge(ui, "LOG", ms_to_kn(telemetry.stw), 0.0, 10.0, "kn");
-                        gauge(ui, "WIND", ms_to_kn(telemetry.aws), 0.0, 30.0, "kn");
+                        ui.spacing_mut().item_spacing.y = 3.0;
+                        readout(ui, "AWS", &format!("{:.1} kn", ms_to_kn(telemetry.aws)));
+                        readout(ui, "TWS", &format!("{:.0} kn", ms_to_kn(telemetry.tws)));
+                        readout(ui, "TWA", &format!("{:+.0}°", deg(telemetry.twa)));
+                        readout(ui, "VMG", &format!("{:.1} kn", ms_to_kn(telemetry.vmg)));
                     });
                 });
-                // The other two side by side, because the rose is square and a column of
-                // four gauges beside it leaves half the height of the rose as nothing at
-                // all. Two up there, two across under it, and the block is sixty points
-                // shorter with the same four instruments in it.
+                ui.add_space(3.0);
+                // The water: what is under her and what it is doing to her.
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 3.0;
-                    // The sea as it *is*, not as it was drawn. Not an instrument a boat
-                    // carries, but the forecast is, and knowing whether the slamming is a
-                    // metre or two is the difference between carrying on and bearing
-                    // away. This read `weather.hs` until the sea started following the
-                    // wind, at which point it became a number from the start of the
-                    // passage with a label claiming otherwise.
+                    // The sea as it *is*, not as it was drawn: knowing whether the
+                    // slamming is a metre or two is the difference between carrying on
+                    // and bearing away.
                     gauge(ui, "SEA", telemetry.significant_height, 0.0, 4.0, "m");
-                    // The sounder. The one instrument that turns a shoal from an ambush
-                    // into a decision, which is the whole difference between land being a
-                    // hazard and land being a wall. Scaled to ten metres, not forty: a
-                    // sounder reading thirty is a sounder with nothing to say.
+                    // The sounder, which turns a shoal from an ambush into a decision.
+                    // Scaled to ten metres, not forty: a sounder reading thirty is a
+                    // sounder with nothing to say.
                     gauge_alarmed(
                         ui,
                         "DEPTH",
@@ -145,45 +267,9 @@ pub fn draw(
 
                 heel_scale(ui, telemetry.heel);
 
-                readout_pair(
-                    ui,
-                    ("HDG", &format!("{:03.0}", deg(heading))),
-                    ("TWA", &format!("{:+.0}", deg(telemetry.twa))),
-                );
-                // The apparent, which is the wind the sails are actually in and the one
-                // a trimmer reads. It was in the diagnostic panel and on the windex and
-                // nowhere a person glances at — so the one number you set a sheet by was
-                // the one number the instruments did not have, and the true wind beside
-                // it was quietly doing duty for it.
-                readout(
-                    ui,
-                    "AWA",
-                    &format!(
-                        "{:+.0}  {:.1} kn",
-                        deg(telemetry.awa),
-                        ms_to_kn(telemetry.aws)
-                    ),
-                );
-                // The true wind beside the speed made good, which is the pair a decision
-                // is made out of: how fast she is going where she is going, and how much
-                // wind there actually is to do it with. The console had the apparent in
-                // two places and the true wind's *strength* nowhere at all — it went in
-                // here because pairing the rows left exactly this much room, which is the
-                // nicest kind of saving.
-                readout_pair(
-                    ui,
-                    ("VMG", &format!("{:.1} kn", ms_to_kn(telemetry.vmg))),
-                    ("TWS", &format!("{:.0} kn", ms_to_kn(telemetry.tws))),
-                );
-                // The barometer. A skipper does not sail the wind that is blowing, he
-                // sails the one he thinks will be blowing in an hour: whether to reef
-                // now while it is easy, whether this shift is worth tacking on. The
-                // weather is going somewhere now, so the instrument that says where is
-                // worth more than any of the ones above it.
                 // The glass. Nobody acts on a pressure; everybody acts on a pressure and
                 // a tendency — *1008 and falling three* is a gale warning written on a
-                // dial, and 1008 steady is a Tuesday. So both are on one line, with the
-                // tendency over three hours, which is how it is read and logged.
+                // dial, and 1008 steady is a Tuesday.
                 let (glass, tendency) = sim.sim.wind.barometer();
                 readout(
                     ui,
@@ -423,12 +509,7 @@ pub fn draw(
                         // all, which from where anybody was looking it was not.
                         ui.vertical(|ui| {
                             ui.add_space(2.0);
-                            ui.label(
-                                egui::RichText::new("BOOM")
-                                    .color(paint::LABEL)
-                                    .monospace()
-                                    .size(9.0),
-                            );
+                            plate(ui, "BOOM");
                             ui.add_space(4.0);
                             let rigged = sim.controls.preventer;
                             if ui
@@ -461,12 +542,7 @@ pub fn draw(
 
                     // The clutch bank: one winch, one line at a time.
                     ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new("CLUTCHES")
-                                .color(paint::LABEL)
-                                .monospace()
-                                .size(9.0),
-                        );
+                        plate(ui, "CLUTCHES");
                         ui.horizontal(|ui| {
                             for (i, line) in BANK.iter().enumerate() {
                                 let mut value = line.get(&sim.controls);
@@ -476,10 +552,12 @@ pub fn draw(
                                 // still on the coachroof, it just has nothing on the
                                 // other end of it at the moment.
                                 let rigged = line.rigged_for(&sim.controls);
+                                // The short name on the plate; the long one is said
+                                // under the rack where there is a line for it.
                                 let name = if rigged {
-                                    line.name_now(&sim.controls).to_string()
+                                    line.tag(&sim.controls).to_string()
                                 } else {
-                                    format!("({})", line.name_now(&sim.controls))
+                                    format!("({})", line.tag(&sim.controls))
                                 };
                                 let stops = line.detents(&sim.controls);
                                 let position = line.position(&sim.controls);
@@ -514,8 +592,15 @@ pub fn draw(
                         });
                         ui.label(
                             egui::RichText::new(fit(
+                                // The long name belongs on this line and not on the
+                                // plate: a nameplate is a label, and the sentence that
+                                // explains it is a different object.
                                 &if bank.line().rigged_for(&sim.controls) {
-                                    format!("hauling in {}", bank.line().hauled_now(&sim.controls))
+                                    format!(
+                                        "{} — hauling in {}",
+                                        bank.line().name_now(&sim.controls),
+                                        bank.line().hauled_now(&sim.controls)
+                                    )
                                 } else {
                                     format!("{} is not led to this sail", bank.line().name())
                                 },
@@ -533,12 +618,7 @@ pub fn draw(
 
                     // The sail wardrobe, and the pilot.
                     ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new("HEADSAIL")
-                                .color(paint::LABEL)
-                                .monospace()
-                                .size(9.0),
-                        );
+                        plate(ui, "HEADSAIL");
                         ui.add_space(4.0);
                         let rolled = sim.controls.furl > 0.9;
                         for sail in [
@@ -580,12 +660,7 @@ pub fn draw(
 
                     ui.add_space(8.0);
                     ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new("PILOT")
-                                .color(paint::LABEL)
-                                .monospace()
-                                .size(9.0),
-                        );
+                        plate(ui, "PILOT");
                         // Why it last let go, for half a minute after it did. The
                         // diagnostic panel has carried this since it was written, which
                         // is the wrong place: the question "why did it switch off?" is
@@ -705,12 +780,7 @@ pub fn draw(
                     // and nothing else, so the rule was being broken in the direction
                     // that matters — can now be reached with a mouse at all.
                     ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new("SHIP")
-                                .color(paint::LABEL)
-                                .monospace()
-                                .size(9.0),
-                        );
+                        plate(ui, "SHIP");
                         if small_button(ui, "SETTINGS  ESC").clicked() {
                             settings.open = !settings.open;
                         }
@@ -1004,41 +1074,69 @@ fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &st
 }
 
 /// Heel, drawn as a horizon that tilts. One to one, because it has to agree with what
-/// your inner ear is already telling you.
+/// The clinometer: a pendulum hanging in an engraved arc.
+///
+/// **It was a horizon line in a box, and the line was not clipped.** At twenty degrees
+/// of heel it ran out of its own strip and straight across the rest of the console — a
+/// green diagonal through the gauges that looked like a fault in the screen, which is
+/// what it was. Found by photographing her and looking, which is the first thing the
+/// camera paid for.
+///
+/// Rebuilt as the instrument a boat of this age actually carries: a brass pendulum
+/// swinging in a degree arc, with the figures engraved on ivory. It cannot leave the
+/// face because the face is a circle and the pendulum is a radius of it.
 fn heel_scale(ui: &mut egui::Ui, heel: f64) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(168.0, 26.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(168.0, 40.0), egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, 2.0, paint::TRACK);
-    let c = rect.center();
-    let a = (heel as f32).clamp(-1.0, 1.0);
-    let dir = egui::vec2(a.cos(), a.sin());
-    p.line_segment(
-        [c - dir * 70.0, c + dir * 70.0],
-        egui::Stroke::new(2.0, paint::GOOD),
-    );
-    for mark in [-30.0_f32, -20.0, -10.0, 0.0, 10.0, 20.0, 30.0] {
-        let x = c.x + mark / 30.0 * 70.0;
-        let h = if mark == 0.0 { 9.0 } else { 5.0 };
-        p.line_segment(
+    // The arc is drawn from a pivot above the strip, so only the bottom of the swing
+    // shows: which is exactly what you see of a real one through its window.
+    let pivot = egui::pos2(rect.center().x, rect.top() - 26.0);
+    let reach = 58.0_f32;
+    p.with_clip_rect(rect)
+        .circle_filled(pivot, reach, paint::FACE);
+    let face = p.with_clip_rect(rect);
+    for mark in [-40.0_f32, -30.0, -20.0, -10.0, 0.0, 10.0, 20.0, 30.0, 40.0] {
+        let a = mark.to_radians();
+        let dir = egui::vec2(a.sin(), a.cos());
+        let long = mark as i32 % 20 == 0;
+        face.line_segment(
             [
-                egui::pos2(x, rect.top() + 3.0),
-                egui::pos2(x, rect.top() + 3.0 + h),
+                pivot + dir * (reach - if long { 12.0 } else { 7.0 }),
+                pivot + dir * (reach - 2.0),
             ],
-            egui::Stroke::new(1.0, paint::LABEL),
+            egui::Stroke::new(if mark == 0.0 { 1.8 } else { 1.0 }, paint::INK),
         );
+        if long && mark != 0.0 {
+            face.text(
+                pivot + dir * (reach - 20.0),
+                egui::Align2::CENTER_CENTER,
+                format!("{:.0}", mark.abs()),
+                egui::FontId::monospace(letter::UNIT),
+                paint::INK,
+            );
+        }
     }
+    // The pendulum hangs *down*, so she leans and it stays with gravity: the face moves
+    // under the pointer, which is why a clinometer reads the way round it does.
+    let a = (deg(heel) as f32).clamp(-45.0, 45.0).to_radians();
+    let dir = egui::vec2(a.sin(), a.cos());
+    face.line_segment(
+        [pivot + dir * 18.0, pivot + dir * (reach - 3.0)],
+        egui::Stroke::new(2.4, paint::NEEDLE),
+    );
     p.text(
-        rect.left_bottom() + egui::vec2(4.0, -3.0),
+        rect.left_bottom() + egui::vec2(5.0, -3.0),
         egui::Align2::LEFT_BOTTOM,
         "HEEL",
-        egui::FontId::monospace(9.0),
+        egui::FontId::monospace(letter::LABEL),
         paint::LABEL,
     );
     p.text(
-        rect.right_bottom() + egui::vec2(-4.0, -3.0),
+        rect.right_bottom() + egui::vec2(-5.0, -2.0),
         egui::Align2::RIGHT_BOTTOM,
-        format!("{:.0}", deg(heel).abs()),
-        egui::FontId::monospace(14.0),
+        format!("{:.0}°", deg(heel).abs()),
+        egui::FontId::monospace(letter::VALUE),
         paint::FACE,
     );
 }
@@ -1112,7 +1210,7 @@ fn readout(ui: &mut egui::Ui, label: &str, value: &str) {
             egui::RichText::new(value)
                 .color(paint::FACE)
                 .monospace()
-                .size(12.0),
+                .size(letter::VALUE),
         );
     });
 }
@@ -1240,12 +1338,7 @@ fn outlook_words(building: f64, turning: f64) -> String {
 /// steering to a number and steering to a card are different skills, and the second one
 /// is the one that works when she is being thrown about.
 fn compass_repeater(ui: &mut egui::Ui, heading: f64, mark: Option<f64>) {
-    ui.label(
-        egui::RichText::new("COMPASS")
-            .color(paint::LABEL)
-            .monospace()
-            .size(9.0),
-    );
+    plate(ui, "COMPASS");
     let (rect, _) = ui.allocate_exact_size(egui::vec2(74.0, 74.0), egui::Sense::hover());
     let p = ui.painter();
     let c = rect.center();
@@ -1323,28 +1416,44 @@ fn compass_repeater(ui: &mut egui::Ui, heading: f64, mark: Option<f64>) {
     );
 }
 
+/// The rudder angle indicator: a sector dial with a needle on it.
+///
+/// **The same instrument as the compass beside it, and that is the argument.** The helm
+/// was a dark strip with a dot sliding along it — a slider, which is a thing from a
+/// settings dialog and not a thing from a boat — and it sat next to an engraved ivory
+/// card that reads at a glance from a yard away. A panel whose parts come from two
+/// different centuries is a panel the eye has to be told how to read twice.
+///
+/// Drawn the way the indicator over a wheelhouse door is drawn: the blade swinging about
+/// its stock, port to the left, starboard to the right, with the degrees engraved on the
+/// face. Dragging it puts the helm over.
 fn tiller(ui: &mut egui::Ui, rudder: &mut f64, max: f64) -> bool {
-    ui.label(
-        egui::RichText::new("HELM")
-            .color(paint::LABEL)
-            .monospace()
-            .size(9.0),
-    );
-    // A strip rather than a box. A tiller has one number in it — where it is — and the
-    // old panel gave that one number a hundred and eighty by ninety pixels of console,
-    // which is more room than the compass gets and more than the thing deserves.
+    plate(ui, "HELM");
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(138.0, 30.0), egui::Sense::click_and_drag());
+        ui.allocate_exact_size(egui::vec2(108.0, 74.0), egui::Sense::click_and_drag());
     let p = ui.painter();
-    p.rect_filled(rect, 3.0, paint::TRACK);
+    // The face: a half-round card sunk into the case, pivot at the top where the stock
+    // is, so the blade hangs down into the dial the way it hangs under the boat.
+    let pivot = egui::pos2(rect.center().x, rect.top() + 8.0);
+    let reach = 52.0_f32;
+    p.circle_filled(pivot, reach, paint::FACE);
+    p.rect_filled(
+        egui::Rect::from_min_max(
+            egui::pos2(rect.left(), pivot.y - reach - 2.0),
+            egui::pos2(rect.right(), pivot.y),
+        ),
+        0.0,
+        paint::CASE,
+    );
+    p.circle_stroke(pivot, reach, egui::Stroke::new(1.2, paint::BEZEL));
 
     let changed = if response.dragged() {
         let f = ((response
             .interact_pointer_pos()
             .map(|q| q.x)
-            .unwrap_or(rect.center().x)
-            - rect.center().x)
-            / (rect.width() * 0.45))
+            .unwrap_or(pivot.x)
+            - pivot.x)
+            / (rect.width() * 0.42))
             .clamp(-1.0, 1.0);
         *rudder = f as f64 * max;
         true
@@ -1352,35 +1461,174 @@ fn tiller(ui: &mut egui::Ui, rudder: &mut f64, max: f64) -> bool {
         false
     };
 
-    let c = egui::pos2(rect.center().x, rect.bottom() - 6.0);
-    for mark in [-1.0_f32, -0.5, 0.0, 0.5, 1.0] {
-        let x = c.x + mark * rect.width() * 0.45;
+    // Engraved degrees, every five, numbered every fifteen: the marks a helmsman counts
+    // rather than reads.
+    let steps = (deg(max) / 5.0).round() as i32;
+    for tick in -steps..=steps {
+        let at = tick as f32 * 5.0;
+        let a = (at / deg(max) as f32) * std::f32::consts::FRAC_PI_2 * 0.78;
+        let dir = egui::vec2(a.sin(), a.cos());
+        let long = tick % 3 == 0;
         p.line_segment(
             [
-                egui::pos2(x, rect.top() + 6.0),
-                egui::pos2(x, rect.top() + 14.0),
+                pivot + dir * (reach - if long { 10.0 } else { 6.0 }),
+                pivot + dir * (reach - 1.0),
             ],
-            egui::Stroke::new(if mark == 0.0 { 2.0 } else { 1.0 }, paint::LABEL),
+            egui::Stroke::new(if tick == 0 { 1.8 } else { 1.0 }, paint::INK),
+        );
+        if long && tick != 0 {
+            p.text(
+                pivot + dir * (reach - 18.0),
+                egui::Align2::CENTER_CENTER,
+                format!("{:.0}", at.abs()),
+                egui::FontId::monospace(letter::UNIT),
+                paint::INK,
+            );
+        }
+    }
+    // The blade.
+    let angle = (*rudder / max).clamp(-1.0, 1.0) as f32 * std::f32::consts::FRAC_PI_2 * 0.78;
+    let dir = egui::vec2(angle.sin(), angle.cos());
+    let across = egui::vec2(-dir.y, dir.x);
+    p.add(egui::Shape::convex_polygon(
+        vec![
+            pivot + across * 3.0,
+            pivot - across * 3.0,
+            pivot + dir * (reach - 10.0) - across * 5.0,
+            pivot + dir * (reach - 10.0) + across * 5.0,
+        ],
+        paint::NEEDLE,
+        egui::Stroke::NONE,
+    ));
+    p.circle_filled(pivot, 4.0, paint::BEZEL);
+    // Which way is which, in the words a helm order is given in.
+    for (side, name) in [(-1.0_f32, "PORT"), (1.0, "STBD")] {
+        p.text(
+            egui::pos2(pivot.x + side * (reach - 12.0), rect.bottom() - 6.0),
+            egui::Align2::CENTER_CENTER,
+            name,
+            egui::FontId::monospace(letter::UNIT),
+            paint::LABEL,
         );
     }
-    // Drawn as a tiller swinging about its pivot, so which way it moves the boat is
-    // obvious rather than learned.
-    let angle = (*rudder / max).clamp(-1.0, 1.0) as f32;
-    let tip = c + egui::vec2(angle * rect.width() * 0.45, -(rect.height() - 26.0));
-    p.line_segment([c, tip], egui::Stroke::new(5.0, paint::NEEDLE));
-    p.circle_filled(c, 5.0, paint::BEZEL);
     p.text(
-        rect.left_top() + egui::vec2(5.0, 3.0),
-        egui::Align2::LEFT_TOP,
-        format!("{:+.0}", deg(*rudder)),
-        egui::FontId::monospace(13.0),
-        paint::FACE,
+        egui::pos2(pivot.x, rect.bottom() - 20.0),
+        egui::Align2::CENTER_CENTER,
+        format!("{:+.0}°", deg(*rudder)),
+        egui::FontId::monospace(letter::VALUE),
+        paint::INK,
     );
     changed
 }
 
-/// A sheet lever: drag up to haul in, down to ease. The wanted position is marked, so
-/// the gap between where it is and where it should be is a distance rather than a sum.
+/// The working parts of a lever, drawn once for the two things that are levers.
+///
+/// **A slot milled in the case, a brass lever in it, and the stops engraved beside it.**
+/// Everything on this panel that sets a rope is the same object: there is no reason for
+/// a sheet and a clutch to look like two different inventions, and a rack of identical
+/// levers is read as a rack, which is the point of a rack.
+///
+/// `want` is where the trimmer would have it; `stops` are the places it rests, if it
+/// rests anywhere.
+fn lever_face(
+    p: &egui::Painter,
+    rect: egui::Rect,
+    value: f64,
+    want: Option<f64>,
+    stops: Option<&[f64]>,
+    live: bool,
+) {
+    let slot = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x, rect.center().y),
+        egui::vec2(7.0, rect.height() - 16.0),
+    );
+    p.rect_filled(slot, 3.0, paint::TRACK);
+    let y_of = |v: f64| slot.bottom() - v as f32 * slot.height();
+    // The stops, engraved either side of the slot. A lever between two of them is a job
+    // half done, and it shows as being between rather than as a number.
+    if let Some(stops) = stops {
+        for stop in stops {
+            let y = y_of(*stop);
+            let near = (stop - value).abs() < 0.02;
+            for side in [-1.0, 1.0] {
+                p.line_segment(
+                    [
+                        egui::pos2(slot.center().x + side * 5.0, y),
+                        egui::pos2(slot.center().x + side * (if near { 13.0 } else { 9.0 }), y),
+                    ],
+                    egui::Stroke::new(
+                        if near { 2.0 } else { 1.0 },
+                        if near { paint::FACE } else { paint::LABEL },
+                    ),
+                );
+            }
+        }
+    } else {
+        // A line that stops wherever you stop it gets a scale instead: quarters, which
+        // is as fine as anybody sets a vang by eye.
+        for mark in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let y = y_of(mark);
+            p.line_segment(
+                [
+                    egui::pos2(slot.right() + 2.0, y),
+                    egui::pos2(slot.right() + if mark % 0.5 == 0.0 { 8.0 } else { 5.0 }, y),
+                ],
+                egui::Stroke::new(1.0, paint::LABEL.gamma_multiply(0.8)),
+            );
+        }
+    }
+    // Where the trimmer would have it, in a green that is not the lever's own colour.
+    if let Some(want) = want {
+        let y = y_of(want);
+        p.line_segment(
+            [
+                egui::pos2(rect.left() + 4.0, y),
+                egui::pos2(rect.right() - 4.0, y),
+            ],
+            egui::Stroke::new(1.5, paint::GOOD),
+        );
+    }
+    // And the lever itself: a brass knob on the slot, with a milled edge.
+    let y = y_of(value);
+    let knob = egui::Rect::from_center_size(
+        egui::pos2(slot.center().x, y),
+        egui::vec2(rect.width() - 14.0, 13.0),
+    );
+    p.rect_filled(knob, 2.0, if live { paint::LIVE } else { paint::BEZEL });
+    p.rect_stroke(
+        knob,
+        2.0,
+        egui::Stroke::new(1.0, paint::INK.gamma_multiply(0.7)),
+        egui::StrokeKind::Inside,
+    );
+    for cut in [-0.3_f32, 0.0, 0.3] {
+        let x = knob.center().x + cut * knob.width();
+        p.line_segment(
+            [
+                egui::pos2(x, knob.top() + 3.0),
+                egui::pos2(x, knob.bottom() - 3.0),
+            ],
+            egui::Stroke::new(1.0, paint::INK.gamma_multiply(0.45)),
+        );
+    }
+}
+
+/// A small engraved nameplate, for under a lever.
+fn tag(p: &egui::Painter, at: egui::Rect, name: &str, lit: bool) {
+    p.rect_filled(at, 1.0, if lit { paint::LIVE } else { paint::PLATE });
+    p.text(
+        at.center(),
+        egui::Align2::CENTER_CENTER,
+        name,
+        egui::FontId::monospace(letter::UNIT),
+        paint::INK,
+    );
+}
+
+/// A sheet lever: drag up to haul in, down to ease.
+///
+/// The wanted position is marked, so the gap between where it is and where it should be
+/// is a distance rather than a sum.
 fn lever(
     ui: &mut egui::Ui,
     label: &str,
@@ -1389,28 +1637,23 @@ fn lever(
     state: (&'static str, egui::Color32),
 ) -> bool {
     ui.vertical(|ui| {
-        ui.label(
-            egui::RichText::new(label)
-                .color(paint::LABEL)
-                .monospace()
-                .size(9.0),
-        );
-        // Forty-two by seventy-four, down from forty-six by a hundred and eight. It was
-        // the tallest thing in the console by a wide margin and therefore the thing
-        // setting the height of the whole bar, while the clutches, the headsail, the
-        // pilot and the ship columns all sat in sixty-odd with air above them.
-        //
-        // Still *vertical*, which is the part worth keeping: up is hauled in, so the
-        // lever reads the way the rope moves. Turning these on their side would have
-        // saved more and thrown that away.
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(42.0, 74.0), egui::Sense::click_and_drag());
+            ui.allocate_exact_size(egui::vec2(52.0, 104.0), egui::Sense::click_and_drag());
         let p = ui.painter();
-        p.rect_filled(rect, 3.0, paint::TRACK);
-
+        p.rect_filled(rect, 3.0, paint::CASE);
+        p.rect_stroke(
+            rect,
+            3.0,
+            egui::Stroke::new(1.0, paint::BEZEL),
+            egui::StrokeKind::Inside,
+        );
+        let face = egui::Rect::from_min_max(
+            rect.left_top() + egui::vec2(0.0, 13.0),
+            rect.right_bottom() - egui::vec2(0.0, 24.0),
+        );
         let changed = if response.dragged() {
             if let Some(pos) = response.interact_pointer_pos() {
-                let f = ((rect.bottom() - 8.0 - pos.y) / (rect.height() - 16.0)).clamp(0.0, 1.0);
+                let f = ((face.bottom() - 8.0 - pos.y) / (face.height() - 16.0)).clamp(0.0, 1.0);
                 // Up is hauled in, so the lever reads the way the rope moves.
                 *value = 1.0 - f as f64;
             }
@@ -1418,51 +1661,38 @@ fn lever(
         } else {
             false
         };
-
-        let y_of = |v: f64| rect.bottom() - 8.0 - (1.0 - v as f32) * (rect.height() - 16.0);
-        if let Some(want) = want {
-            let y = y_of(want);
-            p.line_segment(
-                [
-                    egui::pos2(rect.left() + 3.0, y),
-                    egui::pos2(rect.right() - 3.0, y),
-                ],
-                egui::Stroke::new(1.5, paint::GOOD),
-            );
-        }
-        let y = y_of(*value);
-        let knob = egui::Rect::from_center_size(
-            egui::pos2(rect.center().x, y),
-            egui::vec2(rect.width() - 8.0, 13.0),
+        // Drawn with the sheet the other way up from its number: hauled in is at the
+        // top, because that is where the hand takes the rope to.
+        lever_face(p, face, 1.0 - *value, want.map(|w| 1.0 - w), None, false);
+        tag(
+            p,
+            egui::Rect::from_min_size(
+                rect.left_top() + egui::vec2(3.0, 2.0),
+                egui::vec2(rect.width() - 6.0, 11.0),
+            ),
+            label,
+            false,
         );
-        p.rect_filled(knob, 2.0, paint::BEZEL);
-        p.rect_stroke(
-            knob,
-            2.0,
-            egui::Stroke::new(1.0, paint::FACE),
-            egui::StrokeKind::Inside,
-        );
-        ui.label(
-            egui::RichText::new(state.0)
-                .color(state.1)
-                .monospace()
-                .size(9.0),
+        p.text(
+            egui::pos2(rect.center().x, rect.bottom() - 11.0),
+            egui::Align2::CENTER_CENTER,
+            state.0,
+            egui::FontId::monospace(letter::UNIT),
+            state.1,
         );
         changed
     })
     .inner
 }
 
-/// One clutch: click to put it on the winch, drag to work it.
-/// One clutch on the coachroof.
+/// One clutch on the coachroof: click to put it on the winch, drag to work it.
 ///
 /// **A line with stops is drawn as a line with stops.** A reef is not seventy-five per
 /// cent of anything — it is the third reef, a place the sail rests at and a job that was
-/// done — so a detented line gets notches across its travel and the name of the position
-/// it is at, while a line that stops wherever you stop it keeps its column and its
-/// figure. Asked for from the deck as showing positional switching differently from
-/// linear, and the difference is worth drawing because it is the difference between
-/// *how much* and *which*.
+/// done — so a detented line gets notches engraved beside its slot and the name of the
+/// position it is at, while a line that stops wherever you stop it gets a scale and a
+/// figure. The difference between *how much* and *which*, which an instrument can say
+/// without a word of explanation.
 fn clutch(
     ui: &mut egui::Ui,
     label: &str,
@@ -1473,86 +1703,47 @@ fn clutch(
 ) -> (bool, bool) {
     ui.vertical(|ui| {
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(50.0, 70.0), egui::Sense::click_and_drag());
+            ui.allocate_exact_size(egui::vec2(58.0, 104.0), egui::Sense::click_and_drag());
         let p = ui.painter();
-        p.rect_filled(
+        p.rect_filled(rect, 3.0, paint::CASE);
+        p.rect_stroke(
             rect,
             3.0,
-            if selected { paint::BEZEL } else { paint::TRACK },
+            egui::Stroke::new(
+                if selected { 1.6 } else { 1.0 },
+                if selected { paint::LIVE } else { paint::BEZEL },
+            ),
+            egui::StrokeKind::Inside,
         );
-        if selected {
-            p.rect_stroke(
-                rect,
-                3.0,
-                egui::Stroke::new(1.5, paint::LIVE),
-                egui::StrokeKind::Inside,
-            );
-        }
+        let face = egui::Rect::from_min_max(
+            rect.left_top() + egui::vec2(0.0, 13.0),
+            rect.right_bottom() - egui::vec2(0.0, 13.0),
+        );
         let dragged = response.dragged();
         if dragged {
             if let Some(pos) = response.interact_pointer_pos() {
-                let f = ((rect.bottom() - 10.0 - pos.y) / (rect.height() - 30.0)).clamp(0.0, 1.0);
+                let f = ((face.bottom() - 8.0 - pos.y) / (face.height() - 16.0)).clamp(0.0, 1.0);
                 *value = f as f64;
             }
         }
-        let travel = rect.height() - 30.0;
-        let at = |v: f64| rect.bottom() - 10.0 - travel * v as f32;
-        if let Some(stops) = stops {
-            // The stops themselves, across the whole width, and the one she is resting
-            // at drawn solid. A lever between two notches is a sail half pulled down,
-            // which is a state and not a setting — so it shows as being *between*
-            // rather than as a column of some height.
-            for stop in stops {
-                let y = at(*stop);
-                let near = (stop - *value).abs() < 0.02;
-                p.line_segment(
-                    [
-                        egui::pos2(rect.left() + 6.0, y),
-                        egui::pos2(rect.right() - 6.0, y),
-                    ],
-                    egui::Stroke::new(
-                        if near { 2.4 } else { 1.0 },
-                        if near && selected {
-                            paint::LIVE
-                        } else if near {
-                            paint::FACE
-                        } else {
-                            paint::LABEL
-                        },
-                    ),
-                );
-            }
-            let y = at(*value);
-            p.circle_filled(
-                egui::pos2(rect.center().x, y),
-                3.0,
-                if selected { paint::LIVE } else { paint::FACE },
-            );
-        } else {
-            // Travel drawn as a filled column, because a clutch either has rope through
-            // it or it does not and the amount is what matters.
-            let h = travel * *value as f32;
-            let bar = egui::Rect::from_min_size(
-                egui::pos2(rect.left() + 6.0, rect.bottom() - 10.0 - h),
-                egui::vec2(rect.width() - 12.0, h),
-            );
-            p.rect_filled(bar, 1.0, if selected { paint::LIVE } else { paint::LABEL });
-        }
-        p.text(
-            rect.center_top() + egui::vec2(0.0, 4.0),
-            egui::Align2::CENTER_TOP,
+        lever_face(p, face, *value, None, stops, selected);
+        tag(
+            p,
+            egui::Rect::from_min_size(
+                rect.left_top() + egui::vec2(3.0, 2.0),
+                egui::vec2(rect.width() - 6.0, 11.0),
+            ),
             label,
-            egui::FontId::monospace(9.0),
-            if selected { paint::LIVE } else { paint::LABEL },
+            selected,
         );
         p.text(
-            rect.center_bottom() + egui::vec2(0.0, -1.0),
-            egui::Align2::CENTER_BOTTOM,
+            egui::pos2(rect.center().x, rect.bottom() - 6.0),
+            egui::Align2::CENTER_CENTER,
             match position {
                 Some(said) => said.to_string(),
                 None => format!("{:.2}", *value),
             },
-            egui::FontId::monospace(if position.is_some() { 8.0 } else { 10.0 }),
+            egui::FontId::monospace(letter::UNIT),
             paint::FACE,
         );
         (response.clicked(), dragged)
@@ -1560,51 +1751,63 @@ fn clutch(
     .inner
 }
 
+/// A pressed-steel button with the legend engraved on it.
+///
+/// **Twenty-six points high, not twenty.** A control you press at sea on a moving deck
+/// is pressed with a thumb, and the thumb is the same size whatever the screen is; the
+/// old ones were the size they were because they were made out of text. Nothing here
+/// loses anything by being bigger — this bar had a hand's breadth of empty case either
+/// side of it.
 fn small_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add(
         egui::Button::new(
             egui::RichText::new(text)
                 .monospace()
-                .size(10.0)
+                .size(letter::LABEL)
                 .color(paint::FACE),
         )
         .fill(paint::TRACK)
         .stroke(egui::Stroke::new(1.0, paint::BEZEL))
-        .min_size(egui::vec2(96.0, 20.0)),
+        .corner_radius(2.0)
+        .min_size(egui::vec2(104.0, 26.0)),
     )
 }
 
-/// A button with nothing in it but an arrow, sized to the arrow.
-///
-/// `small_button` carries a 96 pixel floor so that a column of labelled switches lines
-/// up, which is right for a switch and badly wrong for four chevrons in a row: it put
-/// three hundred and eighty pixels of pilot across a console and opened a gap you could
-/// park the chart in.
+/// The little ones that step a number: still a thumb, still bigger than they were.
 fn nudge_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add(
         egui::Button::new(
             egui::RichText::new(text)
                 .monospace()
-                .size(10.0)
+                .size(letter::LABEL)
                 .color(paint::FACE),
         )
         .fill(paint::TRACK)
         .stroke(egui::Stroke::new(1.0, paint::BEZEL))
-        .min_size(egui::vec2(22.0, 20.0)),
+        .corner_radius(2.0)
+        .min_size(egui::vec2(28.0, 26.0)),
     )
 }
 
-/// A switch with a lamp in it, which is how you read state on a panel at a glance.
+/// A button that lights: brass and engraved when it is on, dark steel when it is not.
+///
+/// The one state change on this panel that has to be legible from the other end of the
+/// cockpit — *is the pilot steering her* — so it is a change of material rather than a
+/// change of tint.
 fn lamp_button(ui: &mut egui::Ui, text: &str, lit: bool) -> egui::Response {
     ui.add(
         egui::Button::new(
             egui::RichText::new(text)
                 .monospace()
-                .size(10.0)
+                .size(letter::LABEL)
                 .color(if lit { paint::INK } else { paint::FACE }),
         )
         .fill(if lit { paint::LIVE } else { paint::TRACK })
-        .stroke(egui::Stroke::new(1.0, paint::BEZEL))
-        .min_size(egui::vec2(96.0, 20.0)),
+        .stroke(egui::Stroke::new(
+            if lit { 1.4 } else { 1.0 },
+            if lit { paint::FACE } else { paint::BEZEL },
+        ))
+        .corner_radius(2.0)
+        .min_size(egui::vec2(104.0, 26.0)),
     )
 }

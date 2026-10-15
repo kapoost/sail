@@ -114,6 +114,24 @@ impl Line {
         })
     }
 
+    /// The name as it is engraved on the plate under the lever, which has room for
+    /// eight letters and not fourteen.
+    ///
+    /// The long name is still said under the rack, where there is a line for it: *a
+    /// nameplate is a label, and the sentence explaining it is a different object.*
+    pub fn tag(self, c: &Controls) -> &'static str {
+        match self {
+            Line::Outhaul if c.reef > 0.02 => "pennant",
+            Line::Outhaul => "outhaul",
+            Line::Vang => "vang",
+            Line::GenoaCar => "car",
+            Line::Reef => "reef",
+            Line::Furl => "furler",
+            Line::Staysail => "stays'l",
+            Line::StaysailSheet => "st sheet",
+        }
+    }
+
     pub fn name_now(self, c: &Controls) -> &'static str {
         match self {
             Line::Outhaul if c.reef > 0.02 => "reef pennant",
