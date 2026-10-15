@@ -134,6 +134,13 @@ pub fn aim(
         if away > NOTCH {
             continue;
         }
+        // And when she does not know where she is, a mark is only nameable once it has
+        // been *recognised* through the glasses: the chart has a symbol there and you
+        // have a tower in front of you, and nothing joins them until you have read the
+        // shape of the coast.
+        if nav.lost && !nav.recognised.contains(&mark.name) {
+            continue;
+        }
         if best.as_ref().is_none_or(|(_, _, _, b)| away < *b) {
             best = Some((mark.name.clone(), mark.kind, range, away));
         }
@@ -278,6 +285,23 @@ pub fn draw(
             ),
         );
     }
+    // What the glasses make of the shape in front of them, which is the other half of
+    // pilotage: before you take a bearing on a lighthouse you have to know it is *that*
+    // lighthouse.
+    if sighting.lens > 0.5 {
+        if let Some(reading) = &nav.reading {
+            painter.text(
+                egui::pos2(
+                    screen.center().x,
+                    screen.center().y + screen.height() * 0.30,
+                ),
+                egui::Align2::CENTER_CENTER,
+                reading,
+                egui::FontId::monospace(13.0),
+                egui::Color32::from_rgb(232, 176, 58),
+            );
+        }
+    }
     if !sighting.up {
         return Ok(());
     }
@@ -392,5 +416,136 @@ fn line_mark(item: &crate::chart::Plotted) -> glam::DVec2 {
     match item {
         crate::chart::Plotted::Line { through, .. } => *through,
         crate::chart::Plotted::Cross { at } => *at,
+    }
+}
+
+/// How wide a group has to be before it is a *shape* rather than a row of dots, radians.
+///
+/// Eight degrees. Three marks within a few degrees of each other are all the same
+/// bearing as far as recognition goes: the angles between them are smaller than the
+/// error in reading them, and the pattern is not distinctive enough to be anywhere in
+/// particular. A coast you can recognise is one that is spread out.
+const WORTH_RECOGNISING: f64 = 0.14;
+
+/// How near the three-point solution has to land to the water she is actually in before
+/// she may believe she has recognised the place, metres.
+///
+/// Half a mile. This is not a test of the player's eye — the angles the glasses report
+/// are honest — it is a test of whether the *pattern is unambiguous*: if a group of
+/// marks could be another group somewhere else on this coast, the solution lands
+/// somewhere else and the recognition fails, which is exactly what happens to a sailor
+/// who decides a headland is the one he wants.
+const RECOGNISED_WITHIN: f64 = 900.0;
+
+/// Recognising where you are from the shape of what you can see.
+///
+/// This is the other half of pilotage and the half nobody writes down: before you take a
+/// bearing on a lighthouse you have to know it is *that* lighthouse. What a sailor
+/// actually does is look at the group — this tower, that island behind it, the gap —
+/// and match the arrangement against the chart. Two marks is never enough; three in a
+/// row is a pattern that belongs somewhere.
+///
+/// Done here the way a station pointer does it: the two horizontal angles between three
+/// marks put you at one point on the chart and nowhere else, so if the solution lands
+/// where she is, the group has been read correctly. If it lands somewhere else, the
+/// arrangement she is looking at matches a *different* place on this coast — which is
+/// precisely the mistake the exercise is about, and the glasses say so rather than
+/// correcting her.
+pub fn recognise(
+    sim: Res<Sim>,
+    coast: Res<crate::marks::Coast>,
+    sighting: Res<Sighting>,
+    mut nav: ResMut<Navigation>,
+) {
+    if !sighting.glasses || !nav.lost {
+        if nav.reading.is_some() && !sighting.glasses {
+            nav.reading = None;
+        }
+        return;
+    }
+    let here = sim.sim.state.pos;
+    // What is in the field of the glasses: anything that can be *seen* from here, which
+    // is a different and longer range than anything that can be named.
+    let mut in_view: Vec<(f64, &sail_core::land::Landmark)> = coast
+        .marks
+        .iter()
+        .filter_map(|m| {
+            let off = m.at - here;
+            let range = off.length();
+            if range > m.visible_from(2.0) {
+                return None;
+            }
+            let bearing = wrap_tau(off.x.atan2(off.y));
+            let away = sail_core::units::wrap_pi(bearing - sighting.bearing).abs();
+            // The field of a pair of glasses, give or take: everything the circle holds.
+            if away > 0.42 {
+                return None;
+            }
+            Some((bearing, m))
+        })
+        .collect();
+    if in_view.len() < 3 {
+        nav.reading = Some(format!(
+            "{} in the glasses — a group of three is what tells you where you are",
+            in_view.len()
+        ));
+        return;
+    }
+    // Left to right, which is how a shape is read and how the angles below are taken.
+    in_view.sort_by(|a, b| {
+        sail_core::units::wrap_pi(a.0 - sighting.bearing)
+            .total_cmp(&sail_core::units::wrap_pi(b.0 - sighting.bearing))
+    });
+
+    // Every three of them, nearest the middle of the field first.
+    let mut best: Option<(f64, [&sail_core::land::Landmark; 3])> = None;
+    for i in 0..in_view.len() - 2 {
+        for j in i + 1..in_view.len() - 1 {
+            for k in j + 1..in_view.len() {
+                let (a, b, c) = (in_view[i], in_view[j], in_view[k]);
+                let left = sail_core::units::wrap_pi(b.0 - a.0);
+                let right = sail_core::units::wrap_pi(c.0 - b.0);
+                if left.abs() < WORTH_RECOGNISING || right.abs() < WORTH_RECOGNISING {
+                    continue;
+                }
+                let Some(stands) = sail_core::fix::three_point(a.1.at, b.1.at, c.1.at, left, right)
+                else {
+                    continue;
+                };
+                let out_by = (stands - here).length();
+                if best.as_ref().is_none_or(|(had, _)| out_by < *had) {
+                    best = Some((out_by, [a.1, b.1, c.1]));
+                }
+            }
+        }
+    }
+
+    match best {
+        Some((out_by, group)) if out_by < RECOGNISED_WITHIN => {
+            let named: Vec<String> = group.iter().map(|m| m.name.clone()).collect();
+            for name in &named {
+                if !nav.recognised.contains(name) {
+                    nav.recognised.push(name.clone());
+                }
+            }
+            nav.reading = Some(format!(
+                "that is {} — {} and {} beyond it. Named on the chart.",
+                named[0], named[1], named[2]
+            ));
+        }
+        Some(_) => {
+            nav.reading = Some(
+                "a tower, an island and a gap — and that arrangement is somewhere else \
+                 on this coast. Try a group further apart."
+                    .to_string(),
+            );
+        }
+        None => {
+            nav.reading = Some(
+                "all much the same bearing — a shape you can recognise is one that is \
+                 spread out"
+                    .to_string(),
+            );
+        }
     }
 }

@@ -52,6 +52,12 @@ pub struct Navigation {
     pub fixed_on: Vec<(glam::DVec2, sail_core::land::Mark)>,
     /// How many of them are in sight now, for the chart to say so.
     pub still_in_sight: usize,
+    /// The marks she has *recognised* — worked out through the glasses by the shape of
+    /// the coast rather than told to her. Until a mark is on this list it is a symbol on
+    /// the chart with no name, which is what an unidentified mark is.
+    pub recognised: Vec<String>,
+    /// What the glasses last made of what they are looking at, for the player to read.
+    pub reading: Option<String>,
 }
 
 impl Navigation {
@@ -190,6 +196,8 @@ pub fn lost_at_sea(
     nav.sights.clear();
     nav.fixed_on.clear();
     nav.still_in_sight = 0;
+    nav.recognised.clear();
+    nav.reading = None;
     track.clear();
     pilot.disengage();
 

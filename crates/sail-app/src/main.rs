@@ -361,6 +361,7 @@ fn main() {
                         navigation::the_fix_holds,
                         sight::aim,
                         sight::glasses,
+                        sight::recognise,
                     ),
                     chart::toggle,
                     retro::stress.run_if(|| std::env::var("SAIL_RETRO_STRESS").is_ok()),

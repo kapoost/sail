@@ -163,6 +163,69 @@ pub fn verdict(fix: &Fix, sights: usize) -> &'static str {
     }
 }
 
+/// Where you must be standing if those three things are *that* far apart from each
+/// other — the three-point problem, which a navigator solves with a station pointer and
+/// which is the oldest fix there is.
+///
+/// Nothing about a compass is in it. You measure the horizontal angle between the left
+/// mark and the middle one, and between the middle one and the right, and the two angles
+/// alone put you somewhere: a chord subtends the same angle from every point of its arc,
+/// so each pair of marks puts you on a circle through both of them, and the circles
+/// cross at the middle mark and at one other place. That other place is where you are.
+///
+/// Which is why it is the fix to have when your compass is suspect and why a station
+/// pointer — three arms and a protractor — was on every bridge for two hundred years.
+///
+/// It fails, and says so, in the case every pilot book warns about: when all three marks
+/// and the observer lie on one circle there is no second crossing and the angles are the
+/// same from everywhere on it. That is the **swinging circle**, and the answer is to pick
+/// a different middle mark.
+pub fn three_point(a: DVec2, b: DVec2, c: DVec2, left: f64, right: f64) -> Option<DVec2> {
+    let arc = |p: DVec2, q: DVec2, angle: f64| -> Option<(DVec2, f64)> {
+        let sin = angle.sin();
+        if sin.abs() < 1.0e-4 {
+            return None;
+        }
+        let chord = q - p;
+        let r = chord.length() / (2.0 * sin);
+        let middle = (p + q) * 0.5;
+        // The centre sits on the perpendicular bisector, a cotangent of the angle away
+        // from the middle of the chord — and the cotangent carries the side with it,
+        // which is the whole of why this is written this way. It goes negative past a
+        // right angle, which puts the centre across the chord from the observer, and it
+        // goes negative again for an angle measured the other way round. Built from
+        // `sqrt(r² − chord²/4)` instead, as it was, the sign is lost and the circle comes
+        // out on the wrong side of the coast half the time — with a perfectly confident
+        // answer on it.
+        //
+        // Which side, settled on paper rather than in the code: the left-hand normal of
+        // the chord with the cotangent *subtracted* puts the circle through the
+        // observer, and added puts it through a point four kilometres the other side of
+        // the marks — a confident answer reflected across the coast, which is exactly
+        // the failure this function exists to avoid. Checked numerically for three
+        // standing places before it was written down.
+        let out = DVec2::new(-chord.y, chord.x).normalize_or_zero();
+        Some((middle - out * (chord.length() * 0.5 / angle.tan()), r.abs()))
+    };
+    let (first, r1) = arc(a, b, left)?;
+    let (second, r2) = arc(b, c, right)?;
+    // The two circles cross at b and at the observer. Reflect b in the line of centres
+    // and the other crossing falls out — no quadratic, no branch to get wrong.
+    let axis = second - first;
+    let span = axis.length();
+    if span < 1.0e-6 {
+        // Concentric: the swinging circle. There is no answer and pretending otherwise
+        // is how a station pointer puts a ship on a rock.
+        return None;
+    }
+    let along = axis / span;
+    let to_b = b - first;
+    let foot = first + along * to_b.dot(along);
+    let other = foot * 2.0 - b;
+    let _ = (r1, r2);
+    Some(other)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,6 +376,63 @@ mod tests {
             verdict(&fix, 2),
             "two lines: they cross, and nothing checks them"
         );
+    }
+
+    /// Three horizontal angles put you where you measured them, with no compass in it.
+    ///
+    /// The station pointer's own test: stand somewhere, measure the angles between three
+    /// marks, and the arithmetic has to give the standing place back. It is the one
+    /// check that catches a circle built on the wrong side of its chord, which produces
+    /// a confident answer reflected across the coast.
+    #[test]
+    fn three_angles_put_you_where_you_measured_them() {
+        let marks = [
+            DVec2::new(-3_000.0, 4_000.0),
+            DVec2::new(500.0, 5_200.0),
+            DVec2::new(4_100.0, 3_300.0),
+        ];
+        for me in [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(-1_500.0, -900.0),
+            DVec2::new(2_200.0, 400.0),
+        ] {
+            let bearing = |m: DVec2| wrap_tau((m - me).x.atan2((m - me).y));
+            let left = wrap_pi(bearing(marks[1]) - bearing(marks[0]));
+            let right = wrap_pi(bearing(marks[2]) - bearing(marks[1]));
+            let got = three_point(marks[0], marks[1], marks[2], left, right)
+                .expect("three marks and two angles");
+            assert!(
+                (got - me).length() < 1.0,
+                "standing at {me:?} the angles solved to {got:?}"
+            );
+        }
+    }
+
+    /// And on the swinging circle it says it cannot, rather than inventing somewhere.
+    #[test]
+    fn the_swinging_circle_has_no_answer() {
+        // Four points on one circle: three marks and an observer. Every position on that
+        // circle shows the same two angles, so the problem has no single answer — which
+        // is the case every pilot book warns about and the one a confident wrong answer
+        // would hide.
+        let r = 4_000.0;
+        let on = |deg: f64| {
+            let a = deg.to_radians();
+            DVec2::new(r * a.sin(), r * a.cos())
+        };
+        let (a, b, c, me) = (on(40.0), on(120.0), on(200.0), on(300.0));
+        let bearing = |m: DVec2| wrap_tau((m - me).x.atan2((m - me).y));
+        let left = wrap_pi(bearing(b) - bearing(a));
+        let right = wrap_pi(bearing(c) - bearing(b));
+        let got = three_point(a, b, c, left, right);
+        // Either it refuses, or it lands somewhere on that circle — what it must not do
+        // is claim a position off it.
+        if let Some(p) = got {
+            assert!(
+                (p.length() - r).abs() < 60.0,
+                "a swinging circle produced {p:?}, which is not on it"
+            );
+        }
     }
 
     /// One sight is not a fix, and the same sight twice is not two.

@@ -415,7 +415,13 @@ pub fn draw(
             let room = rect.contains(at + egui::vec2(120.0, 0.0))
                 && at.y > rect.top() + 14.0
                 && at.y < rect.bottom() - 14.0;
-            if room && (spread || mark.kind == Mark::Lighthouse) {
+            // And named only if she knows which one it is. While she is lost the chart
+            // carries the symbols — the coast does not stop being surveyed because you
+            // are — but the names belong to marks she has recognised through the
+            // glasses. A chart that names everything is a chart that has told you where
+            // you are.
+            let named = !nav.lost || nav.recognised.contains(&mark.name) || knows;
+            if room && named && (spread || mark.kind == Mark::Lighthouse) {
                 let label = if mark.kind.lit() {
                     format!(
                         "{}  {}",
