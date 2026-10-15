@@ -254,6 +254,7 @@ const ROLL_HOLDS_THE_EYE: f32 = 2.6;
 #[allow(clippy::too_many_arguments)]
 pub fn aim(
     sim: Res<crate::sim::Sim>,
+    chart: Res<crate::chart::Chart>,
     sighting: Res<crate::sight::Sighting>,
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
@@ -263,6 +264,16 @@ pub fn aim(
     mut attention: ResMut<Attention>,
 ) {
     aim.since_hand += time.delta_secs();
+    // **The paper has the right button while it is on the table.**
+    //
+    // Right-drag moves the chart about under the instruments, and it was moving the
+    // view at the same time: you shift the paper half an inch and the boat swings round
+    // behind it. Reported from the deck. With the chart spread there is nothing of the
+    // water to look at anyway — it covers the screen — so the rule is simply that the
+    // two never share the button.
+    if chart.spread {
+        return;
+    }
     if buttons.pressed(MouseButton::Right) {
         let reach = if sighting.up || sighting.glasses {
             AIM_AROUND
