@@ -404,6 +404,7 @@ pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     origin: Res<frame::RenderOrigin>,
     sim: Res<Sim>,
     boat: Query<Entity, With<crate::boat::BoatRoot>>,
@@ -431,22 +432,6 @@ pub fn setup(
         perceptual_roughness: 0.92,
         ..default()
     });
-    // And the bag: tan duck canvas, which is what a sailmaker's holdall is made of and
-    // the one cloth a boat always has aboard. Not high-visibility orange — that is a
-    // liferaft's grab bag, and this one lives on deck, where orange plastic looks like
-    // a toy and canvas looks like gear.
-    let canvas = w.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.70, 0.62, 0.47),
-        perceptual_roughness: 0.95,
-        ..default()
-    });
-    // The webbing on it, a shade darker and a good deal tougher.
-    let webbing = w.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.42, 0.38, 0.30),
-        perceptual_roughness: 0.9,
-        ..default()
-    });
-
     // Before anything that can return: a world with no boat in it still has a drill
     // resource, or every system that reads one fails on every frame for ever instead of
     // the deck merely being bare.
@@ -532,16 +517,21 @@ pub fn setup(
                 .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2))
                 .with_scale(Vec3::new(1.0, 1.0, 0.88)),
         ));
-        // The two turns that hold the hank together.
-        for at in [-0.5, 0.5] {
+        // The two turns that hold the hank together — rope round rope, which is what a
+        // seizing is. They were blocks before, and a block on a coil reads as a cube of
+        // something, which is what came back from the deck: *the line is a cube*.
+        //
+        // At the top and the bottom of the hank, where the bundle runs fore and aft, so
+        // the collar round it is a small ring lying athwart the turns.
+        for at in [-1.0, 1.0] {
             b.spawn((
-                Mesh3d(w.meshes.add(Cuboid::new(0.055, 0.016, 0.016))),
-                MeshMaterial3d(line.clone()),
-                Transform::from_xyz(
-                    gunwale - 0.015,
-                    coil_y + COIL_BIGHT * at * 1.9,
-                    coil_z + COIL_BIGHT * 0.1,
+                Mesh3d(
+                    w.meshes
+                        .add(Torus::new(coil_tube() + 0.002, coil_tube() + 0.009)),
                 ),
+                MeshMaterial3d(line.clone()),
+                Transform::from_xyz(gunwale - 0.015, coil_y + COIL_BIGHT * at, coil_z)
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
             ));
         }
         // And the standing part: up from the coil to the cleat, in two lengths so it
@@ -576,63 +566,78 @@ pub fn setup(
         // lifebuoy is exactly that place, and it keeps the two things you leave with
         // together.
         //
-        // **Lying, and canvas**, which is the whole of what was asked for after the
-        // first attempt stood a hard orange crate on her quarter: a grab bag on a yacht
-        // is a soft holdall, it lies down because nothing on a deck stands up for long,
-        // and it is tan duck canvas because that is what sailmakers' bags are made of
-        // and what a boat has aboard. A dry bag would be right in a liferaft and wrong
-        // here, where it has to be sat on and stuffed under a winch.
+        // It is made by `stowage::holdall`, which is the same machinery the sail bags
+        // are made by, because the first one here was a box with a lid and came back
+        // from the deck as *it looks plastic*. It did. A primitive with a flat colour
+        // on it is plastic whatever the colour is; what makes the sail bags read as
+        // cloth is that they are creased, spread, flattened and marked with webbing and
+        // a stencil. One way of making a bag on this boat, used twice.
         //
-        // The station is the ring's own, so it lies *over* it: the hull stands outboard
-        // of the deck back here, so a bag on the deck edge is directly above a ring
-        // hanging on the planking, and the cockpit opening has closed by this station so
-        // there is solid deck to put it on, clear of the tiller.
+        // **And it lies along the deck edge rather than fore and aft.** She narrows
+        // sharply back here — a third of a metre of half-beam in the length of this bag
+        // — so one laid parallel to the centreline put its after end through her
+        // bulwark, which is what came back from the deck. The angle is read off the
+        // same table the deck is drawn from rather than guessed: half-beam a little
+        // forward, half-beam a little aft, and the line between them is where anything
+        // lying on the side deck has to lie.
         let bag_z = RACK_Z;
         let bag_deck = crate::deck::deck_height(bag_z);
-        let bag_x = crate::deck::deck_half_beam(bag_z) - 0.13;
-        // Eighty-five litres of sailcloth with soft ends: a cylinder lying fore and aft
-        // with a ball at each end, which is a holdall from any angle anybody sees one.
-        let girth = 0.115;
-        let barrel = 0.26;
+        let bag_radius = 0.125;
+        let bag_length = 0.24;
+        // The run of the deck edge at this station, pointing forward — forward because
+        // the bag's own axis maps that way round, which is the thing that decides which
+        // way up a laid capsule ends up.
+        let reach = bag_length * 0.5 + bag_radius;
+        let along = Vec3::new(
+            crate::deck::deck_half_beam(bag_z - reach) - crate::deck::deck_half_beam(bag_z + reach),
+            0.0,
+            -2.0 * reach,
+        )
+        .normalize();
+        // And how far in from the edge: its own spread, and a hand's breadth more for
+        // the toerail, which is what it was sitting in.
+        let inset = bag_radius * 1.24 + 0.07;
+        let (bag, stencil) = crate::stowage::holdall(
+            bag_radius,
+            bag_length,
+            19.7,
+            Vec3::new(0.0, bag_deck, bag_z),
+        );
+        let cloth = w.materials.add(StandardMaterial {
+            base_color: Color::srgb(
+                crate::stowage::BAG_CANVAS[0],
+                crate::stowage::BAG_CANVAS[1],
+                crate::stowage::BAG_CANVAS[2],
+            ),
+            base_color_texture: Some(images.add(stencil)),
+            perceptual_roughness: 0.95,
+            ..default()
+        });
         b.spawn((
-            Mesh3d(w.meshes.add(Cylinder::new(girth, barrel))),
-            MeshMaterial3d(canvas.clone()),
-            Transform::from_xyz(bag_x, bag_deck + girth * 0.82, bag_z)
-                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
-                // Squashed where it sits, because a soft bag with gear in it is not a
-                // cylinder: it spreads on the deck and takes the shape of what is in it.
-                .with_scale(Vec3::new(1.0, 1.0, 0.82)),
+            Mesh3d(w.meshes.add(bag)),
+            MeshMaterial3d(cloth),
+            Transform::from_xyz(
+                crate::deck::deck_half_beam(bag_z) - inset,
+                bag_deck + bag_radius * 0.68 + 0.01,
+                bag_z,
+            )
+            .with_rotation(Quat::from_rotation_arc(Vec3::Y, along)),
         ));
-        for end in [-0.5, 0.5] {
-            b.spawn((
-                Mesh3d(w.meshes.add(Sphere::new(girth * 0.96))),
-                MeshMaterial3d(canvas.clone()),
-                Transform::from_xyz(bag_x, bag_deck + girth * 0.82, bag_z + barrel * end)
-                    .with_scale(Vec3::new(1.0, 0.82, 0.9)),
-            ));
-        }
-        // The webbing: a handle across the top and a strap round each end, which is
-        // every bag of this kind there has ever been.
+        // The lashing over it, because anything on deck that is not tied down is over
+        // the side by the second gybe. A line round the bag rather than a bar across it.
         b.spawn((
-            Mesh3d(w.meshes.add(Cuboid::new(0.035, 0.05, 0.13))),
-            MeshMaterial3d(webbing.clone()),
-            Transform::from_xyz(bag_x, bag_deck + girth * 1.6, bag_z),
-        ));
-        for end in [-0.3, 0.3] {
-            b.spawn((
-                Mesh3d(w.meshes.add(Cylinder::new(girth * 1.02, 0.025))),
-                MeshMaterial3d(webbing.clone()),
-                Transform::from_xyz(bag_x, bag_deck + girth * 0.82, bag_z + barrel * end)
-                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
-                    .with_scale(Vec3::new(1.0, 1.0, 0.84)),
-            ));
-        }
-        // And the lashing that holds it there, because anything on deck that is not
-        // tied down is over the side by the second gybe.
-        b.spawn((
-            Mesh3d(w.meshes.add(Cuboid::new(0.30, 0.012, 0.022))),
+            Mesh3d(
+                w.meshes
+                    .add(Torus::new(bag_radius * 1.1, bag_radius * 1.1 + 0.008)),
+            ),
             MeshMaterial3d(line.clone()),
-            Transform::from_xyz(bag_x, bag_deck + girth * 0.5, bag_z + 0.06),
+            Transform::from_xyz(
+                crate::deck::deck_half_beam(bag_z) - inset,
+                bag_deck + bag_radius * 0.6,
+                bag_z,
+            )
+            .with_rotation(Quat::from_rotation_arc(Vec3::Y, along))
+            .with_scale(Vec3::new(1.0, 1.0, 0.72)),
         ));
     });
 

@@ -952,3 +952,42 @@ mod spars {
         );
     }
 }
+
+/// A small canvas holdall, built out of the same cloth as the sail bags.
+///
+/// The grab bag by the lifebuoy is the same object as these and was first modelled next
+/// door as a box with a lid, which came back from the deck as *it looks plastic* — and
+/// it did, because a primitive with a flat colour on it is plastic no matter what the
+/// colour is. What makes these bags read as cloth is not the shade, it is that they are
+/// creased, spread, flattened and marked: webbing up both sides, a binding round each
+/// end, and a stencil at the mouth.
+///
+/// So there is one way of making a bag on this boat and it is used twice. The holdall is
+/// a short, soft, well-creased one — a grab bag is stuffed by hand with flares and a
+/// radio and a bottle of water, which is nearer a spinnaker turtle than a rolled genoa —
+/// with a drawcord mouth, because that is how one is closed.
+///
+/// `on_deck` is the point it is lying at, with the deck's own height in `y` and the
+/// station in `z`: the conforming inside wants two ends to work between, and a bag this
+/// short lies on one station rather than across the rise of the deck.
+pub fn holdall(radius: f32, length: f32, seed: f32, on_deck: Vec3) -> (Mesh, Image) {
+    let spec = Bagged {
+        radius,
+        length,
+        // Soft: it spreads where it sits and flattens under what is in it.
+        spread: 1.24,
+        flat: 0.68,
+        // And it is all creases. Nothing in a grab bag is folded.
+        crease: 1.15,
+        tint: 0.97,
+        seed,
+        feature: Feature::Collar,
+    };
+    (
+        duffle(&spec, 0.0, on_deck, on_deck),
+        markings(&spec, [148, 62, 26]),
+    )
+}
+
+/// The cloth, for anything that has to match these bags without being one.
+pub const BAG_CANVAS: [f32; 3] = CANVAS;
