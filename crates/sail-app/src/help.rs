@@ -76,8 +76,12 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
         &[
             (
                 "Shift B",
-                "the glasses: they name the place, not the thing — three marks spread \
-                 out and it tells you which coast you are on",
+                "the glasses, which name the place rather than the thing",
+            ),
+            (
+                "B",
+                "and ask whether what is in them is enough: a mark near enough to read \
+                 names itself, and three well spread name the coast",
             ),
             (
                 "Shift N",

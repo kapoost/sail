@@ -112,35 +112,53 @@ pub fn aim(
     //
     // Where she was looking is given back when the instrument goes down, so a glance
     // through the glasses does not cost you the view you had set up.
+    //
+    // Held *every frame* rather than once on the way in, because the view key is still
+    // live and one press of it put the glasses fifteen metres astern of the boat — which
+    // is what came back from the deck. An instrument in your hand is a place you are
+    // standing, not a camera angle you chose.
     let holding = sighting.up || sighting.glasses;
-    if holding && sighting.was_viewing.is_none() {
-        sighting.was_viewing = Some(*view);
-        *view = crate::camera::View::Cockpit;
+    if holding {
+        if sighting.was_viewing.is_none() {
+            sighting.was_viewing = Some(*view);
+        }
+        if *view != crate::camera::View::Cockpit {
+            *view = crate::camera::View::Cockpit;
+        }
+    } else if let Some(back) = sighting.was_viewing.take() {
+        *view = back;
     }
     if !holding {
-        if let Some(back) = sighting.was_viewing.take() {
-            *view = back;
-        }
-    }
-    if keys.just_pressed(KeyCode::KeyN) && shifted {
         return;
     }
-    if !sighting.up {
-        return;
-    }
-    let shoot_key = keys.just_pressed(KeyCode::KeyN);
     let Ok(eye) = camera.single() else {
         return;
     };
 
-    // Where the notch is pointing, as a true bearing. The camera looks down its own
-    // negative z, and the world's north is the simulation's +y — which in Bevy's frame is
-    // −z. One conversion, in one place, because a bearing taken through a sight that is
-    // ninety degrees out is a fix on the wrong side of the archipelago and looks
-    // perfectly reasonable.
+    // Where she is looking, as a true bearing. The camera looks down its own negative
+    // z, and the world's north is the simulation's +y — which in Bevy's frame is −z. One
+    // conversion, in one place, because a bearing taken through a sight that is ninety
+    // degrees out is a fix on the wrong side of the archipelago and looks perfectly
+    // reasonable.
+    //
+    // Worked out whenever *either* instrument is up rather than only for the compass. The glasses need it as much: what is in
+    // the circle is decided by this number, and with it left behind at whatever the
+    // compass last read, a coast full of beacons came back as nothing in the glasses at
+    // all. Reported from the deck as "0 in the glasses" with two towers plainly in it.
     let look = eye.forward();
     let bearing = wrap_tau((look.x as f64).atan2(-look.z as f64));
     sighting.bearing = bearing;
+
+    if keys.just_pressed(KeyCode::KeyN) && shifted {
+        return;
+    }
+    if !sighting.up {
+        // Nothing is in the notch when there is no notch; the glasses on their own name
+        // places rather than taking bearings.
+        sighting.on = None;
+        return;
+    }
+    let shoot_key = keys.just_pressed(KeyCode::KeyN);
 
     // What is in the notch: the nearest thing you could actually name, within the width
     // of the notch of the line you are looking down.
@@ -478,21 +496,43 @@ const RECOGNISED_WITHIN: f64 = 900.0;
 /// precisely the mistake the exercise is about, and the glasses say so rather than
 /// correcting her.
 pub fn recognise(
+    keys: Res<ButtonInput<KeyCode>>,
     sim: Res<Sim>,
     coast: Res<crate::marks::Coast>,
     sighting: Res<Sighting>,
     mut nav: ResMut<Navigation>,
 ) {
-    if !sighting.glasses || !nav.lost {
-        if nav.reading.is_some() && !sighting.glasses {
+    // Nothing happens until you ask. **B, with the glasses up, is the question *is this
+    // enough to name where I am*** — and asking it is the act, rather than the game
+    // quietly scanning the horizon for you.
+    //
+    // Which is the difference between an instrument and an oracle. A pair of glasses
+    // held on a stretch of coast tells you nothing by itself; what tells you something
+    // is a person looking at a group, deciding it is distinctive enough to be worth
+    // working on, and doing the work. So the player composes the view — three marks,
+    // well spread — and then asks.
+    if !sighting.glasses {
+        if nav.reading.is_some() {
             nav.reading = None;
         }
+        return;
+    }
+    let shifted = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    if !(keys.just_pressed(KeyCode::KeyB) && !shifted) {
+        if nav.reading.is_none() {
+            nav.reading =
+                Some("B — see whether what is in the glasses is enough to name".to_string());
+        }
+        return;
+    }
+    if !nav.lost {
+        nav.reading = Some("you know where you are — every mark on the chart is named".to_string());
         return;
     }
     let here = sim.sim.state.pos;
     // What is in the field of the glasses: anything that can be *seen* from here, which
     // is a different and longer range than anything that can be named.
-    let mut in_view: Vec<(f64, &sail_core::land::Landmark)> = coast
+    let mut in_view: Vec<(f64, &sail_core::land::Landmark, f64)> = coast
         .marks
         .iter()
         .filter_map(|m| {
@@ -507,9 +547,63 @@ pub fn recognise(
             if away > 0.42 {
                 return None;
             }
-            Some((bearing, m))
+            Some((bearing, m, range))
         })
         .collect();
+
+    // **A mark whose symbol you can read names itself**, and needs no group at all.
+    //
+    // Asked for from the deck, and it is the first half of pilotage rather than an
+    // easing of it: a beacon near enough for its topmark to be made out is not "a
+    // stick", it is *that* beacon, because the topmark is the whole reason somebody put
+    // a shape on top of a pole. The same goes for a lighthouse close enough to read its
+    // bands and a spire with its village under it. What that does and does not give you
+    // is the point — it tells you *which mark this is*, so you may take a bearing on it
+    // and write its name on the chart; it does not tell you where you are. That still
+    // takes three lines, or the three-point work below.
+    //
+    // The ranges are `Mark::identified_from`, the same numbers the notch uses, through
+    // the glasses' reach. One fact, one place: an instrument that names a thing you
+    // could not then take a bearing on would be a lie told twice.
+    let readable: Vec<&sail_core::land::Landmark> = in_view
+        .iter()
+        .filter(|(_, m, range)| {
+            *range <= (m.kind.identified_from() * GLASSES_REACH).min(m.visible_from(2.0))
+        })
+        .map(|(_, m, _)| *m)
+        .collect();
+    if !readable.is_empty() {
+        let mut fresh: Vec<String> = Vec::new();
+        for m in &readable {
+            if !nav.recognised.contains(&m.name) {
+                nav.recognised.push(m.name.clone());
+                fresh.push(format!("{} {}", m.name, m.kind.abbreviation()));
+            }
+        }
+        nav.reading = Some(if fresh.is_empty() {
+            format!(
+                "{} — already on the chart. A bearing on it is one line.",
+                readable
+                    .iter()
+                    .map(|m| m.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else if fresh.len() == 1 {
+            format!(
+                "the mark is clear enough to read: {}. Named on the chart — now take a \
+                 bearing on it.",
+                fresh[0]
+            )
+        } else {
+            format!(
+                "clear enough to read: {}. Named on the chart.",
+                fresh.join(", ")
+            )
+        });
+        return;
+    }
+
     if in_view.len() < 3 {
         nav.reading = Some(format!(
             "{} in the glasses — a group of three is what tells you where you are",
