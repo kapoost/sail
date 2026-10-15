@@ -431,11 +431,19 @@ pub fn setup(
         perceptual_roughness: 0.92,
         ..default()
     });
-    // And the bag: heavy orange PVC, because a grab bag that cannot be seen in the
-    // water is a grab bag you dropped.
+    // And the bag: tan duck canvas, which is what a sailmaker's holdall is made of and
+    // the one cloth a boat always has aboard. Not high-visibility orange — that is a
+    // liferaft's grab bag, and this one lives on deck, where orange plastic looks like
+    // a toy and canvas looks like gear.
     let canvas = w.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.86, 0.33, 0.10),
-        perceptual_roughness: 0.88,
+        base_color: Color::srgb(0.70, 0.62, 0.47),
+        perceptual_roughness: 0.95,
+        ..default()
+    });
+    // The webbing on it, a shade darker and a good deal tougher.
+    let webbing = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.42, 0.38, 0.30),
+        perceptual_roughness: 0.9,
         ..default()
     });
 
@@ -560,38 +568,71 @@ pub fn setup(
         tie(b, on_the_cleat, sag, w.meshes);
         tie(b, sag, top_of_coil, w.meshes);
 
-        // **The grab bag**, beside it on the quarter deck.
+        // **The grab bag**: a canvas holdall lying on the deck over the ring.
         //
         // The one piece of gear on a small boat that is packed for the day nobody plans
-        // for: flares, a hand-held VHF, water, a torch, the ship's papers, and whatever
-        // else you would want in a liferaft or on a rock. It lives where a hand can take
-        // it without going below, which on a boat this size means lashed on deck aft, and
-        // next to the lifebuoy is exactly where it belongs — the two things you take with
-        // you are kept together.
+        // for — flares, a hand-held VHF, water, a torch, the ship's papers — and it
+        // lives where a hand falls on it from the helm without going below. Over the
+        // lifebuoy is exactly that place, and it keeps the two things you leave with
+        // together.
         //
-        // On deck rather than over the side: the cockpit opening has closed by this
-        // station, so the quarter here is solid deck a foot and a half wide inboard of
-        // the rail, and that is clear of the tiller, which sweeps forward of its stock.
-        let bag_z = RACK_Z + 0.18;
+        // **Lying, and canvas**, which is the whole of what was asked for after the
+        // first attempt stood a hard orange crate on her quarter: a grab bag on a yacht
+        // is a soft holdall, it lies down because nothing on a deck stands up for long,
+        // and it is tan duck canvas because that is what sailmakers' bags are made of
+        // and what a boat has aboard. A dry bag would be right in a liferaft and wrong
+        // here, where it has to be sat on and stuffed under a winch.
+        //
+        // The station is the ring's own, so it lies *over* it: the hull stands outboard
+        // of the deck back here, so a bag on the deck edge is directly above a ring
+        // hanging on the planking, and the cockpit opening has closed by this station so
+        // there is solid deck to put it on, clear of the tiller.
+        let bag_z = RACK_Z;
         let bag_deck = crate::deck::deck_height(bag_z);
+        let bag_x = crate::deck::deck_half_beam(bag_z) - 0.13;
+        // Eighty-five litres of sailcloth with soft ends: a cylinder lying fore and aft
+        // with a ball at each end, which is a holdall from any angle anybody sees one.
+        let girth = 0.115;
+        let barrel = 0.26;
         b.spawn((
-            Mesh3d(w.meshes.add(Cuboid::new(0.24, 0.30, 0.20))),
+            Mesh3d(w.meshes.add(Cylinder::new(girth, barrel))),
             MeshMaterial3d(canvas.clone()),
-            Transform::from_xyz(0.33, bag_deck + 0.15, bag_z),
+            Transform::from_xyz(bag_x, bag_deck + girth * 0.82, bag_z)
+                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
+                // Squashed where it sits, because a soft bag with gear in it is not a
+                // cylinder: it spreads on the deck and takes the shape of what is in it.
+                .with_scale(Vec3::new(1.0, 1.0, 0.82)),
         ));
-        // The rolled top of a dry bag, which is how one is closed and is the only part
-        // of it anybody would recognise.
+        for end in [-0.5, 0.5] {
+            b.spawn((
+                Mesh3d(w.meshes.add(Sphere::new(girth * 0.96))),
+                MeshMaterial3d(canvas.clone()),
+                Transform::from_xyz(bag_x, bag_deck + girth * 0.82, bag_z + barrel * end)
+                    .with_scale(Vec3::new(1.0, 0.82, 0.9)),
+            ));
+        }
+        // The webbing: a handle across the top and a strap round each end, which is
+        // every bag of this kind there has ever been.
         b.spawn((
-            Mesh3d(w.meshes.add(Cuboid::new(0.24, 0.07, 0.09))),
-            MeshMaterial3d(canvas.clone()),
-            Transform::from_xyz(0.33, bag_deck + 0.33, bag_z),
+            Mesh3d(w.meshes.add(Cuboid::new(0.035, 0.05, 0.13))),
+            MeshMaterial3d(webbing.clone()),
+            Transform::from_xyz(bag_x, bag_deck + girth * 1.6, bag_z),
         ));
-        // And the lashing across it, because anything on deck that is not tied down is
-        // over the side by the second gybe.
+        for end in [-0.3, 0.3] {
+            b.spawn((
+                Mesh3d(w.meshes.add(Cylinder::new(girth * 1.02, 0.025))),
+                MeshMaterial3d(webbing.clone()),
+                Transform::from_xyz(bag_x, bag_deck + girth * 0.82, bag_z + barrel * end)
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::new(1.0, 1.0, 0.84)),
+            ));
+        }
+        // And the lashing that holds it there, because anything on deck that is not
+        // tied down is over the side by the second gybe.
         b.spawn((
-            Mesh3d(w.meshes.add(Cuboid::new(0.27, 0.02, 0.03))),
+            Mesh3d(w.meshes.add(Cuboid::new(0.30, 0.012, 0.022))),
             MeshMaterial3d(line.clone()),
-            Transform::from_xyz(0.33, bag_deck + 0.17, bag_z),
+            Transform::from_xyz(bag_x, bag_deck + girth * 0.5, bag_z + 0.06),
         ));
     });
 
