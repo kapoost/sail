@@ -83,6 +83,38 @@ impl Navigation {
     }
 }
 
+/// She no longer knows where she is.
+///
+/// The state half of being lost, with no teleporting in it: what the exercise does to
+/// the *chart* rather than to the boat. Its own function because two things do it now —
+/// `Shift L`, and arriving in somebody else's archipelago when the game is reset under
+/// you, which is the same condition arrived at from the other end. A boat whose world
+/// has just been replaced is a boat that has never seen this coast before, and a chart
+/// that went on drawing her position through that would be the one piece of the
+/// exercise that cannot be given away by accident.
+pub fn cast_adrift(
+    nav: &mut Navigation,
+    chart: &mut crate::chart::Chart,
+    track: &mut crate::chart::Track,
+) {
+    // The log starts here: a track drawn from before the exercise is a line pointing
+    // straight at the answer.
+    nav.lost = true;
+    nav.last_fix = f64::NEG_INFINITY;
+    nav.fixed_at = None;
+    nav.sights.clear();
+    nav.fixed_on.clear();
+    nav.still_in_sight = 0;
+    nav.recognised.clear();
+    nav.reading = None;
+    // And the paper stops following her. Laid down over the middle of the archipelago,
+    // which tells her nothing she did not already have: it is where the chart is *of*
+    // rather than where she is.
+    chart.laid_at = Some(DVec2::ZERO);
+    chart.plot.clear();
+    track.clear();
+}
+
 /// Somewhere at sea, sails set, position unknown.
 ///
 /// What this is *not* is a teleport with a scrambled chart. She arrives sailing: the
@@ -189,22 +221,7 @@ pub fn lost_at_sea(
     sim.controls.main_sheet = main;
     sim.controls.jib_sheet = jib;
 
-    // And she does not know where she is. The log starts here: a track drawn from before
-    // the exercise is a line pointing straight at the answer.
-    nav.lost = true;
-    nav.last_fix = f64::NEG_INFINITY;
-    nav.fixed_at = None;
-    nav.sights.clear();
-    nav.fixed_on.clear();
-    nav.still_in_sight = 0;
-    nav.recognised.clear();
-    nav.reading = None;
-    // And the paper stops following her. Laid down over the middle of the archipelago,
-    // which tells her nothing she did not already have: it is where the chart is *of*
-    // rather than where she is.
-    chart.laid_at = Some(DVec2::ZERO);
-    chart.plot.clear();
-    track.clear();
+    cast_adrift(&mut nav, &mut chart, &mut track);
     pilot.disengage();
 
     info!(

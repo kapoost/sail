@@ -55,6 +55,7 @@ enum Kind {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Act {
+    NewWorld,
     RelayStart,
     RelayRestart,
     RelayStop,
@@ -226,6 +227,12 @@ fn main() -> std::io::Result<()> {
                 "stop the relay",
                 "and leave nothing running",
                 Act::RelayStop,
+            ),
+            Row::act(
+                "new world for everybody",
+                "a fresh sea and a fresh position for every boat on the game, and \
+                 nobody knows where they are",
+                Act::NewWorld,
             ),
             Row::rule("THE RELAY ON THE SERVER"),
             Row::act(
@@ -588,6 +595,43 @@ fn do_act(bios: &mut Bios, what: Act) -> std::io::Result<()> {
                     bios.relay = Some(child);
                 }
                 Err(e) => bios.said = format!("no relay: {e} — build it first"),
+            }
+        }
+        // **A new world for a whole fleet, without a line of protocol.**
+        //
+        // The relay hands every boat its world at the handshake and the client now
+        // knocks again after six seconds of silence — so a relay that comes back up with
+        // a different seed *is* the reset: everybody rejoins, everybody is handed the
+        // new archipelago and the new weather, everybody's boat is placed in it by the
+        // simulation that replaces theirs, and nobody knows where they are, because a
+        // coast you have never seen is a coast you have to work out. The whole feature
+        // is two lines here and `navigation::cast_adrift` at the far end.
+        //
+        // Which is why it is a launcher button and not a key on the boat. Resetting the
+        // sea under four other people is not something to have under a thumb.
+        Act::NewWorld => {
+            let fresh = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() % 1_000_000)
+                .unwrap_or(7);
+            if let Some(seed) = bios.rows.iter_mut().find(|r| r.label == "seed") {
+                seed.value = fresh.to_string();
+            }
+            if bios.remote.is_some() {
+                // The server keeps its seed in its environment file, so the new world
+                // has to survive the restart that follows — and any restart after it.
+                remote(
+                    bios,
+                    &format!(
+                        "sed -i 's/^SAIL_SEED=.*/SAIL_SEED={fresh}/' /etc/sail-server.env \
+                         && systemctl restart sail-server && sleep 1 \
+                         && systemctl is-active sail-server"
+                    ),
+                )?;
+                bios.said = format!("the server is on sea {fresh}");
+            } else {
+                do_act(bios, Act::RelayRestart)?;
+                bios.said = format!("sea {fresh} — everybody rejoins into it");
             }
         }
         Act::RelayStop => {

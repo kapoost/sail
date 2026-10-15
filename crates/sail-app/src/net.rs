@@ -114,12 +114,15 @@ type OfTheOldWorld = Or<(
 /// not the weather she cast off in. That is the honest presentation of what joining a
 /// game actually is, and the alternative — quietly sailing on in a different sea from
 /// everybody else — was what this replaced.
+#[allow(clippy::too_many_arguments)]
 pub fn rebuild(
     mut commands: Commands,
     mut net: ResMut<Net>,
     mut sim: ResMut<Sim>,
     mut sky: ResMut<crate::sky::Sky>,
     mut track: ResMut<crate::chart::Track>,
+    mut nav_state: ResMut<crate::navigation::Navigation>,
+    mut chart: ResMut<crate::chart::Chart>,
     old: Query<Entity, OfTheOldWorld>,
 ) {
     let Some(world) = net.rebuild.take() else {
@@ -152,7 +155,18 @@ pub fn rebuild(
     // and the solo one cannot drift apart.
     commands.run_system_cached(crate::islands::setup);
     commands.run_system_cached(crate::course::setup);
-    info!("sailing in seed {} now", world.seed);
+    // **And nobody knows where they are.**
+    //
+    // A world replaced under you is a coast you have never seen, so the chart stops
+    // saying where she is until somebody works it out — which is what makes resetting
+    // the game from the launcher a thing worth doing to a fleet rather than an
+    // inconvenience. The boat has already been put somewhere by the new simulation
+    // above; this is the half that happens to the paper. See `navigation::cast_adrift`.
+    crate::navigation::cast_adrift(&mut nav_state, &mut chart, &mut track);
+    info!(
+        "sailing in seed {} now — and nobody knows where they are",
+        world.seed
+    );
 }
 
 /// A name over the boat, taken from whatever the machine already knows about its owner
