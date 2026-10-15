@@ -109,7 +109,13 @@ jobs:
             out/sail-server
             out/sail-server-arm64
 
+  # Only a tag is a release. Dispatching this by hand is how you get the three binaries
+  # without cutting one — for a server that has to be updated between releases, which
+  # happened twice on the day this line was written — and without the guard that run ends
+  # red every time, on "GitHub Releases requires a tag". A workflow that is always a
+  # little bit failed is a workflow nobody reads.
   publish:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: [macos, windows, linux]
     runs-on: ubuntu-latest
     steps:
