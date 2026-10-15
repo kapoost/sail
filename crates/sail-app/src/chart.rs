@@ -440,7 +440,19 @@ impl Track {
 }
 
 /// One fix every few seconds, which is what a log book gets anyway.
-pub fn record(sim: Res<Sim>, time: Res<Time>, mut track: ResMut<Track>) {
+pub fn record(
+    sim: Res<Sim>,
+    nav: Res<crate::navigation::Navigation>,
+    time: Res<Time>,
+    mut track: ResMut<Track>,
+) {
+    // Nothing is written down while she does not know where she is: a track kept
+    // through the exercise is the answer, written in advance, waiting for the moment the
+    // chart is allowed to draw it.
+    if !nav.shows_position(sim.sim.state.time) {
+        track.since = 0.0;
+        return;
+    }
     track.since += time.delta_secs_f64();
     if track.since < 6.0 {
         return;
@@ -606,8 +618,19 @@ pub fn draw(
             ));
         }
 
-        // Where she has been.
-        if track.points.len() > 1 {
+        // Where she has been — **and only while the chart may say where she is.**
+        //
+        // The track is her true path, recorded off the simulation, and it was drawn
+        // unconditionally: six seconds after being cast adrift there was a short line on
+        // the paper with one end at the boat, which is the position handed over in the
+        // one colour nobody looks at twice. Reported from the deck as the log's line
+        // still showing, which it was not — it was this, and it had been there all
+        // along.
+        //
+        // It is not recorded while she is lost either (see `record`), so the plot starts
+        // again at the fix: which is what a navigator's chart actually looks like, a
+        // line beginning where he last knew.
+        if knows && track.points.len() > 1 {
             let pts: Vec<egui::Pos2> = track.points.iter().map(|q| to_screen(*q)).collect();
             p.add(egui::Shape::line(pts, egui::Stroke::new(1.2, ink::TRACK)));
         }
