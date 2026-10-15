@@ -184,7 +184,7 @@ fn main() -> std::io::Result<()> {
     let remote = std::env::var("SAIL_REMOTE").ok().filter(|s| !s.is_empty());
     // What the game remembered about where it sails, so the launcher opens with the
     // address already in it rather than making somebody type it twice over.
-    let (name, address, word) = remembered();
+    let (name, address, word) = sail_net::remembered::read();
     let mut bios = Bios {
         rows: vec![
             Row::rule("RELAY"),
@@ -683,35 +683,6 @@ fn binary(name: &str, debug: bool) -> std::path::PathBuf {
     root.join("target")
         .join(if debug { "debug" } else { "release" })
         .join(name)
-}
-
-/// What the game remembered about where it sails, read rather than duplicated: the
-/// launcher and the game disagreeing about the address would be worse than the launcher
-/// not knowing it.
-fn remembered() -> (String, String, String) {
-    let path = if cfg!(target_os = "windows") {
-        std::env::var("APPDATA")
-            .ok()
-            .map(|a| std::path::PathBuf::from(a).join("sail").join("together"))
-    } else {
-        std::env::var("HOME").ok().map(|h| {
-            std::path::PathBuf::from(h)
-                .join(".config")
-                .join("sail")
-                .join("together")
-        })
-    };
-    let Some(text) = path.and_then(|p| std::fs::read_to_string(p).ok()) else {
-        return (String::new(), String::new(), String::new());
-    };
-    let get = |key: &str| {
-        text.lines()
-            .filter_map(|l| l.split_once('='))
-            .find(|(k, _)| k.trim() == key)
-            .map(|(_, v)| v.trim().to_string())
-            .unwrap_or_default()
-    };
-    (get("name"), get("address"), get("word"))
 }
 
 /// Whether anything at all is on the default port, which is not the same question as

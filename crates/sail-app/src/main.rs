@@ -35,7 +35,6 @@ mod navigation;
 mod net;
 mod panel;
 mod rain;
-mod remembered;
 mod retro;
 mod rig;
 mod rod;

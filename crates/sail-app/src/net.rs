@@ -34,6 +34,9 @@ pub struct Net {
     /// Where the panel will knock, and what to call yourself when it does.
     pub address: String,
     pub name: String,
+    /// Whether the address in the box came from the environment rather than from the
+    /// person. A borrowed address is not written back to the file.
+    pub borrowed: bool,
     /// The word the far end wants, if it wants one. A doorbell rather than a password —
     /// it travels in the clear — so it is kept with the address rather than treated as
     /// a credential, and it is never written to the log.
@@ -54,7 +57,7 @@ pub struct Net {
 pub fn setup(mut commands: Commands) {
     // What the last session was sailing on. An address and a word retyped every time is
     // the kind of friction that quietly ends a thing like this.
-    let (remembered_name, address, word) = crate::remembered::read();
+    let (remembered_name, address, word) = sail_net::remembered::read();
     let mut net = Net {
         name: std::env::var("SAIL_NAME").unwrap_or_else(|_| {
             if remembered_name.is_empty() {
@@ -70,6 +73,12 @@ pub fn setup(mut commands: Commands) {
     if let Ok(server) = std::env::var("SAIL_JOIN") {
         let name = net.name.clone();
         net.address = server.clone();
+        // Told where to go by the environment — by the setup screen, or by a line in a
+        // terminal — which is somebody trying something rather than somebody changing
+        // where they sail. It goes in the box so it can be seen, and it does not go in
+        // the file: one experiment from the launcher should not quietly replace the
+        // address a person has been using all week.
+        net.borrowed = true;
         if let Ok(word) = std::env::var("SAIL_WORD") {
             net.word = word;
         }

@@ -24,6 +24,7 @@
 
 pub mod discovery;
 pub mod link;
+pub mod remembered;
 
 use serde::{Deserialize, Serialize};
 

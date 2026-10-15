@@ -11,3 +11,7 @@ license.workspace = true
 # library for that would be more code than the thing it drew.
 [dependencies]
 crossterm = "0.29"
+# For the one thing the launcher and the game must agree about: the file the game
+# remembers an address and a word in. A second parser for it would be a small thing to
+# get wrong and a silent one.
+sail-net = { path = "../sail-net" }

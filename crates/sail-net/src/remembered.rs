@@ -12,6 +12,12 @@
 //! lines of `key=value`, because this is three strings and a parser for three strings
 //! should be shorter than the data.
 //!
+//! Here rather than in the game because two programs read it: the game writes it, and
+//! the setup screen opens with the address already in the box. A second parser for a
+//! three-line file would be a small thing to get wrong and a silent one — the launcher
+//! would simply find nothing — and this project has spent enough of its time on one fact
+//! written down twice.
+//!
 //! **The word is in it**, which is a decision rather than an oversight. It is a doorbell
 //! and not a credential — it crosses the network in the clear and the server treats it
 //! as the price of entry rather than as proof of anything — so it belongs with the
@@ -19,8 +25,6 @@
 //! file is written 0600 on anything that has permissions. What it must never become is a
 //! thing that travels: it is in the user's own config directory, not in the repository,
 //! not in a save file, and not on a screenshot.
-
-use bevy::prelude::*;
 
 /// Where the file goes: the usual place for the platform, and nowhere clever.
 fn path() -> Option<std::path::PathBuf> {
@@ -71,8 +75,8 @@ pub fn write(name: &str, address: &str, word: &str) {
         address.trim(),
         word.trim()
     );
-    if std::fs::write(&path, text).is_err() {
-        warn!("could not remember the game at {}", path.display());
+    if let Err(e) = std::fs::write(&path, text) {
+        eprintln!("could not remember the game at {}: {e}", path.display());
         return;
     }
     #[cfg(unix)]

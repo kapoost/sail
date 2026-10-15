@@ -131,8 +131,8 @@ pub fn toggle(
         // keystroke in the box: closing the panel is the moment somebody has finished
         // changing their mind, and a file written sixty times a second while a person
         // types an address is a file waiting to be found half-written.
-        if !settings.open {
-            crate::remembered::write(&net.name, &net.address, &net.word);
+        if !settings.open && !net.borrowed {
+            sail_net::remembered::write(&net.name, &net.address, &net.word);
         }
     }
 }
@@ -677,12 +677,24 @@ fn together(
                         .monospace()
                         .size(11.0),
                 );
-                ui.add(
-                    egui::TextEdit::singleline(&mut net.address)
-                        .desired_width(150.0)
-                        .hint_text("address:7714")
-                        .font(egui::TextStyle::Monospace),
-                );
+                // A knock describes the address it was asked of. Change the address and
+                // the answer on the screen is about somewhere else — which is a small
+                // lie and the kind that costs an evening, because it is the one piece of
+                // evidence a person has that they typed the right thing.
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut net.address)
+                            .desired_width(150.0)
+                            .hint_text("address:7714")
+                            .font(egui::TextStyle::Monospace),
+                    )
+                    .changed()
+                {
+                    net.knocked = None;
+                    // And typing in the box makes it yours, whatever put it there: an
+                    // address edited by hand is a decision and gets remembered.
+                    net.borrowed = false;
+                }
                 // Nothing to join when the box is empty, so the button says so by being
                 // grey rather than by failing. Pressed empty it used to build ":7714",
                 // hand that to the resolver and put "nodename nor servname provided" on
@@ -729,13 +741,18 @@ fn together(
                         .monospace()
                         .size(11.0),
                 );
-                ui.add(
+                let box_ = ui.add(
                     egui::TextEdit::singleline(&mut net.word)
                         .desired_width(150.0)
                         .hint_text("only if the game has one")
                         .font(egui::TextStyle::Monospace),
-                )
-                .on_hover_text(
+                );
+                if box_.changed() {
+                    // The same again: a knock that got in with the old word says nothing
+                    // about this one.
+                    net.knocked = None;
+                }
+                box_.on_hover_text(
                     "whoever is hosting will tell you this; a game on your own network \
                      will not have one",
                 );
