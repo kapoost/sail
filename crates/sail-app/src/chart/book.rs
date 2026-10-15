@@ -7,10 +7,12 @@
 //! book and not plotted is still a bearing you have; a line drawn on the chart you
 //! cannot account for is a line nobody can check.
 //!
-//! So this page fills by itself and the paper does not. Click a line and it goes on the
-//! chart: a bearing becomes a position line, an identification puts a name beside the
-//! symbol. Click it again and it comes off, which is the pencil and the rubber the way
-//! round that a navigator actually uses them.
+//! A bearing goes on the paper as it is taken — on the water, three clicks of
+//! bookkeeping between shooting a mark and seeing the line it makes is three too many —
+//! and the book is the record of it. What the page is for is the *rubber*: one press
+//! takes a line off the chart, and another puts it back where it now belongs. That is
+//! the thing a navigator really does with a doubtful bearing, because the usual reason a
+//! fix will not close is a line he should not have believed.
 
 use bevy::prelude::Resource;
 use bevy_egui::egui;
@@ -252,7 +254,7 @@ pub(crate) fn the_book(
             t.p.text(
                 page.left_top() + egui::vec2(8.0, 26.0),
                 egui::Align2::LEFT_TOP,
-                "+  click a line to lay it on the chart",
+                "click a line to take it off the chart, or to put it back",
                 egui::FontId::monospace(9.0),
                 ink::BOAT,
             );
@@ -274,9 +276,9 @@ pub(crate) fn the_book(
                 let drawn = on_the_chart(&line.wrote, nav);
                 let waiting = can_be_plotted(&line.wrote) && !drawn;
                 if waiting {
-                    // A mark in the margin against the lines that are not on the chart
-                    // yet, which is what a navigator's own page looks like: the ones he
-                    // has plotted are ticked and the rest are waiting for him.
+                    // A mark in the margin against anything that is *not* on the paper:
+                    // a line rubbed off, or a name taken back. The ones that are on it
+                    // carry a dot, which is how a navigator ticks his own page.
                     t.p.text(
                         egui::pos2(page.left() + 8.0, y),
                         egui::Align2::LEFT_TOP,

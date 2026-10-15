@@ -137,7 +137,7 @@ pub fn aim(
     sim: Res<Sim>,
     camera: Query<&GlobalTransform, With<crate::camera::MainCamera>>,
     mut sighting: ResMut<Sighting>,
-    nav: Res<Navigation>,
+    mut nav: ResMut<Navigation>,
     chart: Res<crate::chart::Chart>,
     coast: Res<crate::marks::Coast>,
     sound: Res<crate::sound::SoundHandle>,
@@ -349,19 +349,30 @@ pub fn aim(
                 let mut rng = sail_core::rng::Pcg32::new(seed);
                 let slip = (rng.next_f64() * 2.0 - 1.0) * sail_core::units::rad(swing);
                 let took = wrap_tau(off.x.atan2(off.y) + slip);
-                // **Into the book, and onto the chart when he says so.**
+                // **Onto the chart at once, and into the book with it.**
                 //
-                // Taking a bearing and plotting it are two acts and a navigator does
-                // them minutes apart: you shoot three marks from the cockpit with the
-                // boat moving, and you go below and lay them off. Writing the second
-                // half for him made the chart fill with lines nobody had decided
-                // anything about — and made rubbing out a bad one a thing he could not
-                // do, because the pencil was not in his hand at any point.
+                // Plotting by hand went in first and came straight back out: on the
+                // water it is three clicks of bookkeeping between taking a bearing and
+                // seeing the one thing the bearing is for. What the book is actually
+                // worth is the *record* and the rubber — every line with its time, and
+                // one press to take a line off the paper when a fix will not close,
+                // which is the thing a navigator really does with a doubtful bearing.
                 //
-                // What makes plotting late *work* is the run stamped on the line: the
-                // page remembers how far she had gone through the water when the
-                // bearing was shot, so laying it off twenty minutes later transfers it
-                // by exactly the right distance.
+                // The run stamped on it is what lets it come back on later and land
+                // where it now belongs: the page remembers how far she had gone through
+                // the water when the shot was taken, so a line put back twenty minutes
+                // on is transferred by exactly that distance.
+                nav.sights.push(sail_core::fix::Sight {
+                    mark: mark.at,
+                    bearing: took,
+                    ran: glam::DVec2::ZERO,
+                });
+                // Three is a fix and four is a navigator who has stopped sailing. The
+                // oldest goes: a bearing taken five minutes ago is a bearing on water
+                // she has left.
+                if nav.sights.len() > 3 {
+                    nav.sights.remove(0);
+                }
                 log.write(
                     hour,
                     crate::chart::Wrote::Bearing {
@@ -381,7 +392,7 @@ pub fn aim(
                 // to the chart table.
                 sighting.said = Some((
                     format!(
-                        "{name} {:03.0}° — in the log; lay it on the chart from the table",
+                        "{name} {:03.0}° — on the chart and in the log",
                         sail_core::units::deg(took).rem_euclid(360.0)
                     ),
                     true,
@@ -752,6 +763,7 @@ pub fn recognise(
                 // bearing compass can be put on it this minute. Writing the name on the
                 // chart is the other half, and it happens at the table.
                 nav.recognised.push(m.name.clone());
+                nav.on_the_paper.push(m.name.clone());
                 made_out.push(m.name.clone());
                 fresh.push(format!("{} {}", m.name, m.kind.abbreviation()));
             }
@@ -826,6 +838,7 @@ pub fn recognise(
             for name in &named {
                 if !nav.recognised.contains(name) {
                     nav.recognised.push(name.clone());
+                    nav.on_the_paper.push(name.clone());
                     made_out.push(name.clone());
                 }
             }
@@ -833,8 +846,7 @@ pub fn recognise(
                 log.write(hour, crate::chart::Wrote::Sighted { names: made_out });
             }
             nav.reading = Some(format!(
-                "that is {} — {} and {} beyond it. You can shoot them now; the names \
-                 go on the chart from the table.",
+                "that is {} — {} and {} beyond it. They are on the chart now.",
                 named[0], named[1], named[2]
             ));
         }
