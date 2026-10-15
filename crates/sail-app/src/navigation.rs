@@ -34,7 +34,7 @@ use crate::sim::Sim;
 /// four miles since. Twenty minutes, after which you take another one.
 pub const FIX_HOLDS: f64 = 1_200.0;
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct Navigation {
     /// Whether she is on her own wits. False on a delivery, true after the exercise is
     /// started and until a fix is good enough to clear it.
@@ -182,6 +182,27 @@ const CARDS: [(&str, &str); 6] = [
 /// nobody has to dismiss it — a drill that opens with a key press is a drill with a
 /// doorstep.
 const READ_IT: f64 = 7.0;
+
+impl Default for Navigation {
+    fn default() -> Self {
+        Self {
+            lost: false,
+            last_fix: 0.0,
+            fixed_at: None,
+            sights: Vec::new(),
+            fixed_on: Vec::new(),
+            still_in_sight: 0,
+            recognised: Vec::new(),
+            reading: None,
+            reckoning: None,
+            fixes: Vec::new(),
+            adrift: None,
+            // Not nought. A circle of uncertainty that starts at nothing tells a
+            // beginner that dead reckoning is exact, which is the one thing it is not.
+            unexplained: ASSUMED_SET,
+        }
+    }
+}
 
 impl Navigation {
     /// Whether the chart may show where she is.
