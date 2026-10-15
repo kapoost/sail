@@ -119,6 +119,11 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
                 "throw the lifebuoy, while somebody is in the water — and the throw is \
                  the part that cannot be late",
             ),
+            (
+                " ",
+                "and the same key again alongside: the boathook reaches by itself, and \
+                 the catch is timed to the sea — take it as she comes level",
+            ),
             (" ", "Esc, then DRILL, practises the whole thing on Oscar"),
         ],
     ),

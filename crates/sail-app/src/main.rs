@@ -7,6 +7,7 @@
 //! revisited for the cost of rewriting this one crate.
 
 mod boat;
+mod boathook;
 mod camera;
 mod chart;
 mod clouds;
@@ -236,6 +237,7 @@ fn main() {
         // same places, and a passage can be repeated rather than merely re-rolled.
         .insert_resource(fishing::Fishing::new(weather.seed))
         .init_resource::<camera::ViewAim>()
+        .init_resource::<boathook::Boathook>()
         .init_resource::<navigation::Navigation>()
         .init_resource::<sight::Sighting>()
         .init_resource::<marks::Coast>()
@@ -267,7 +269,13 @@ fn main() {
                 // on the boat once she exists. Grouped because a startup tuple is
                 // twenty long at the most and this one is full.
                 (stowage::setup, rod::setup, creel::setup),
-                (mob::setup, tutorial::setup, marks::setup, net::setup),
+                (
+                    mob::setup,
+                    boathook::setup,
+                    tutorial::setup,
+                    marks::setup,
+                    net::setup,
+                ),
                 windstreaks::setup,
             )
                 // Chained because several of these depend on each other's entities,
@@ -359,6 +367,8 @@ fn main() {
                         navigation::lost_at_sea,
                         navigation::enter_in_the_log,
                         navigation::the_fix_holds,
+                        boathook::reach,
+                        boathook::dress,
                         sight::aim,
                         sight::glasses,
                         sight::recognise,
@@ -390,6 +400,7 @@ fn main() {
                 hud::draw,
                 tutorial::draw,
                 sight::draw,
+                boathook::draw,
             )
                 .chain(),
         )

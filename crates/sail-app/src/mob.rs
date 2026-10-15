@@ -65,13 +65,13 @@ pub struct Horseshoe;
 /// function, because a number that says four when he is touching the planking is worse
 /// than no number — and because the recovery test and the thing the player reads being
 /// two different measurements is this repository's oldest fault.
-const REACH: f64 = 2.0;
+pub(crate) const REACH: f64 = 2.0;
 /// And how slowly she has to be going, knots.
 ///
 /// Under one and a half. Faster than that and you cannot hold him — the water drags him
 /// aft along the hull and out of your hands, which is what happens to crews who approach
 /// at speed and is why the whole manoeuvre is about arriving stopped.
-const ALONGSIDE_SPEED: f64 = 1.5;
+pub(crate) const ALONGSIDE_SPEED: f64 = 1.5;
 /// Seconds he has to stay in reach before he is aboard.
 const HANDS_ON: f64 = 2.0;
 /// Running him down: this close to her side, this fast.
@@ -332,6 +332,25 @@ impl Overboard {
         match self.drill {
             Drill::Overboard { mark, .. } => Some(mark),
             _ => None,
+        }
+    }
+
+    /// Where the lifebuoy is, if it has been thrown and is still out there.
+    ///
+    /// Worth asking because it is the one thing in the water that can be *fetched* as
+    /// well as thrown: a ring left floating is a ring somebody has to go back for, and
+    /// the boathook is how it comes home.
+    pub fn ring_afloat(&self) -> Option<DVec2> {
+        match self.drill {
+            Drill::Overboard { ring, .. } => ring,
+            _ => None,
+        }
+    }
+
+    /// Back on its cleat. The hook got it.
+    pub fn ring_recovered(&mut self) {
+        if let Drill::Overboard { ring, .. } = &mut self.drill {
+            *ring = None;
         }
     }
 
@@ -769,9 +788,11 @@ type InItsTube<'w, 's> = Query<
 /// Everything in the water goes downwind at its own small fraction of the breeze, the
 /// boat is told nothing about any of it, and the recovery is decided by the two things
 /// that decide it on the water: how close she is, and how slowly she is going.
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     sim: Res<Sim>,
     time: Res<Time>,
+    mut hook: ResMut<crate::boathook::Boathook>,
     mut over: ResMut<Overboard>,
     mut hanging: ResMut<Hanging>,
     mut oscar: OscarAfloat,
@@ -781,6 +802,8 @@ pub fn update(
     let now = sim.sim.state.time;
     let dt = time.delta_secs_f64();
     let live = over.live();
+    // Taken rather than read, so a catch cannot be acted on twice.
+    let hooked = hook.caught.take();
 
     // The lashings are empty once the ring has gone over the side, and not before: it is
     // the gear leaving the boat that takes it out of them, not the man leaving the boat.
@@ -864,6 +887,12 @@ pub fn update(
 
         // And the recovery, which is two numbers and no cleverness: near enough to get
         // a hand on him over the rail, slow enough to hold him when you do.
+        //
+        // The boathook is the third way and the quick one: a catch that holds ends it
+        // there and then, where a pair of hands over the rail wants two seconds of
+        // being alongside. Both are real — you can get a man who is against the
+        // planking without a hook, and a hook is how you get one who is not — so both
+        // are here, and the hook is the one that reaches.
         let range = off_the_rail(&sim, *him);
         let speed = ms_to_kn(sim.sim.telemetry.stw.abs());
         if range < RUN_DOWN && speed > RUN_DOWN_SPEED {
@@ -886,7 +915,7 @@ pub fn update(
                 range,
                 ring_gap: ring_at.map(|r| (r - *him).length()),
             });
-        } else if *hands >= HANDS_ON {
+        } else if *hands >= HANDS_ON || hooked == Some(crate::boathook::Quarry::Person) {
             done = Some(Drill::Recovered {
                 took: now - since,
                 ring_gap: ring_at.map(|r| (r - *him).length()),
