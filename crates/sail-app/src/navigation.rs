@@ -85,6 +85,12 @@ pub struct Navigation {
     /// averaged over a leg somebody chose to time. It is the figure a reckoning should
     /// be run at.
     pub measured: Option<(f64, f64)>,
+    /// The course she was steering when the log was read.
+    ///
+    /// Not a position and not pretending to be one: it is which way the water was going
+    /// past her, which is the other half of what a cast of the log tells you and the
+    /// part that cannot be written in a card.
+    pub measured_on: Option<f64>,
     /// Whether the set has ever been *measured* rather than assumed.
     ///
     /// The circle has to grow at something from the first minute, so the figure starts
@@ -441,6 +447,7 @@ impl Default for Navigation {
             fixes: Vec::new(),
             through_water: 0.0,
             measured: None,
+            measured_on: None,
             log_slip: 0.0,
             set_measured: false,
             adrift: None,
@@ -779,15 +786,22 @@ pub fn enter_in_the_log(
     // check in the cocked hat, and a navigator who has taken a third bearing *has* done
     // the thing the pilot book asks for. The reward for method is a little more rope.
     let good_enough = if on.len() >= 3 { 620.0 } else { 460.0 };
-    nav.sights.clear();
-    // The lines come off the chart the moment the fix is in the log, which is what a
-    // navigator does with them: they were working, the fix is the answer, and leaving
-    // them on is how a plot turns into a thicket nobody can read an hour later. What is
-    // left behind is the fix itself, which is the one thing worth keeping.
-    chart
-        .plot
-        .retain(|item| !matches!(item, crate::chart::Plotted::Line { .. }));
     if out_by < good_enough {
+        // The lines come off the chart the moment the fix is in the log, which is what a
+        // navigator does with them: they were working, the fix is the answer, and
+        // leaving them on is how a plot turns into a thicket nobody can read an hour
+        // later. What is left behind is the fix itself, which is the one thing worth
+        // keeping.
+        //
+        // **Only when there is a fix to leave behind.** Rubbing them out before knowing
+        // whether the cross was good enough took away the navigator's work and gave him
+        // nothing for it — and the lines are exactly what he needs at that moment,
+        // because the answer to a fix that will not close is a third bearing on top of
+        // the two he has. Reported from the deck as a line vanishing for no reason.
+        nav.sights.clear();
+        chart
+            .plot
+            .retain(|item| !matches!(item, crate::chart::Plotted::Line { .. }));
         // **What the last run turned out to be worth.**
         //
         // The reckoning was started at the previous fix and has been run on ever since;

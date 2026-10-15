@@ -1797,9 +1797,10 @@ fn reckoning(t: &Table, nav: &crate::navigation::Navigation, when: f64) {
         // thing nobody in this exercise has. Round the reckoning it says what it
         // means: this is my best position, and this is how far out I may be.
         if run.spread > 1.0 {
+            let radius = (run.spread as f32 * t.scale).clamp(3.0, 400.0);
             t.p.circle(
                 now,
-                (run.spread as f32 * t.scale).clamp(3.0, 400.0),
+                radius,
                 egui::Color32::TRANSPARENT,
                 egui::Stroke::new(1.0, ink::PEN.gamma_multiply(0.55)),
             );
@@ -1810,6 +1811,40 @@ fn reckoning(t: &Table, nav: &crate::navigation::Navigation, when: f64) {
                 egui::FontId::monospace(10.0),
                 ink::PEN,
             );
+            // **What the log said, drawn where it cannot be read as a place.**
+            //
+            // A leg timed with the log is a real measurement and the chart should show
+            // it — the player has just spent a minute of glass on it and wants to see
+            // that it landed. But laid off as a line on the water it is a claim about
+            // two positions, and while she is running on a reckoning she has neither.
+            // Asked for from the deck as *draw it somewhere inside the circle*, which is
+            // the right place and for the right reason: inside the circle nothing is a
+            // position. So it is a vector at the reckoning — which way the water was
+            // going past her and how fast — kept short enough to stay in the doubt it
+            // belongs to.
+            let fresh = nav
+                .measured
+                .zip(nav.measured_on)
+                .filter(|((_, read_at), _)| when - read_at < 1_800.0);
+            if let Some(((knots, _), course)) = fresh {
+                let along = egui::vec2(course.sin() as f32, -(course.cos() as f32));
+                let head = now + along * (radius * 0.7).clamp(10.0, 44.0);
+                let across = egui::vec2(-along.y, along.x);
+                t.p.line_segment([now, head], egui::Stroke::new(1.3, ink::TRACK));
+                for side in [-1.0, 1.0] {
+                    t.p.line_segment(
+                        [head, head - along * 6.0 + across * 3.0 * side],
+                        egui::Stroke::new(1.3, ink::TRACK),
+                    );
+                }
+                t.p.text(
+                    head + egui::vec2(5.0, -4.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("{knots:.1} kn by the log"),
+                    egui::FontId::monospace(9.0),
+                    ink::TRACK,
+                );
+            }
         }
     }
 }
@@ -2642,6 +2677,7 @@ pub fn work_the_watch(
         }
         if let Some(speed) = speed {
             nav.measured = Some(speed);
+            nav.measured_on = Some(sim.sim.state.heading);
             // How late the hand was, which is what the reading is worth.
             if let Some((_, when, _)) = chart.streaming {
                 nav.log_slip = ((now - when) - CAST).abs() / CAST;
