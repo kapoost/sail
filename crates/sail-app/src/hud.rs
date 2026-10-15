@@ -58,11 +58,12 @@ pub fn build_polar(mut polar: ResMut<Polar>, sim: Res<Sim>) {
     };
 }
 
-pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut visible: ResMut<HudVisible>) {
-    if keys.just_pressed(KeyCode::Tab) {
-        visible.0 = !visible.0;
-    }
-}
+// **No key.** The diagnostic panel is a developer's window — the polar, the forces, the
+// counts — and it is off until somebody asks for it. It was on `Tab`, which is a key
+// nobody presses on purpose in a game and everybody presses by accident in anything
+// with a text field in it: the first thing it did was steal the key that moves between
+// the address and the word on the joining page. It lives on the PICTURE page, which is
+// where it was already listed anyway.
 
 #[allow(clippy::too_many_arguments)]
 pub fn draw(

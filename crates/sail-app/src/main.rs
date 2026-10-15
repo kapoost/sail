@@ -361,7 +361,6 @@ fn main() {
                     (help::toggle, logbook::toggle, mob::throw, tutorial::run),
                     (camera::toggle, camera::dress, glance::posts),
                     camera::aim,
-                    hud::toggle,
                     (
                         course::restart,
                         navigation::lost_at_sea,

@@ -278,10 +278,7 @@ pub fn draw(
                             }
                         }
                     });
-                    if ui
-                        .selectable_label(hud.0, "the diagnostic panel  (Tab)")
-                        .clicked()
-                    {
+                    if ui.selectable_label(hud.0, "the diagnostic panel").clicked() {
                         hud.0 = !hud.0;
                     }
                 }

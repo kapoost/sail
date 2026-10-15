@@ -40,12 +40,7 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             ("← →", "the tiller, and it holds the angle you leave it at"),
             (
                 "Space",
-                "centre the helm, and bring the view back to where it looks",
-            ),
-            (
-                " ",
-                "with the pilot engaged it is the view only — the pilot has the helm, \
-                 and ← → or P are how you take it back",
+                "centre the helm, and put the view back where it looks",
             ),
             ("Shift", "fine — hold it with anything for a smaller bite"),
             ("P", "autopilot on and off"),
@@ -54,6 +49,10 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
                 "and whether it steers a compass course or a wind angle",
             ),
             (", .", "move its target ten degrees — one with Shift"),
+            (
+                " ",
+                "with it engaged, Space is the view only: the pilot has the helm",
+            ),
         ],
     ),
     (
@@ -65,13 +64,27 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             ("A D", "and work the one you picked"),
             (
                 "X Z",
-                "headsail: genoa, code 0, gennaker, spinnaker — roll the old one away first",
+                "headsail: genoa, code 0, gennaker, spinnaker — roll the old one away \
+                 first",
             ),
             ("T", "a hand on the sheet: once for the sail that leads"),
             (
                 " ",
                 "press again for the other — main first upwind, headsail off it",
             ),
+            (
+                "G",
+                "back the genoa — the only sail that can be, and the way out of irons",
+            ),
+            (
+                "F",
+                "the preventer: rig it for a long run, take it off before you gybe",
+            ),
+        ],
+    ),
+    (
+        "WHEN IT BLOWS",
+        &[
             (
                 "R",
                 "dump: once eases until the deck is steady and the pilot can hold her",
@@ -81,14 +94,13 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
                 "again, or held, lets everything go — cloth flogging, and she stops",
             ),
             (
-                "G",
-                "back the genoa — the only sail that can be: it stays there until you \
-                 say otherwise",
+                "1 2 A D",
+                "the reef and the furling line are lines in the bank",
             ),
         ],
     ),
     (
-        "FINDING OUT WHERE YOU ARE",
+        "WHERE YOU ARE",
         &[
             (
                 "Shift B",
@@ -101,20 +113,21 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             ),
             (
                 "Shift N",
-                "the hand bearing compass in your hand; aim with the right button held",
-            ),
-            (
-                " ",
-                "one instrument at a time, and either one puts you in the cockpit",
+                "the hand bearing compass; aim with the right button held",
             ),
             (
                 "N",
                 "and shoot: hold the notch *on* it, and it says whether it caught",
             ),
             (
+                " ",
+                "one instrument at a time, and either one puts you in the cockpit",
+            ),
+            ("M", "the chart in the corner, and [ ] to zoom it"),
+            (
                 "Shift M",
-                "the chart on the table: dividers, ruler, parallel rule, pencil, \
-                 watch, log, rubber, and the fix",
+                "spread on the table: dividers, ruler, parallel rule, pencil, watch, \
+                 log, rubber, and the fix",
             ),
             (
                 " ",
@@ -131,19 +144,18 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
         &[
             (
                 "Enter",
-                "throw the lifebuoy, while somebody is in the water — and the throw is \
-                 the part that cannot be late",
+                "throw the lifebuoy — and the throw is the part that cannot be late",
             ),
             (
                 " ",
-                "and the same key again alongside: the boathook reaches by itself, and \
-                 the catch is timed to the sea — take it as she comes level",
+                "the same key alongside: the boathook reaches by itself, and the catch \
+                 is timed to the sea — take it as she comes level",
             ),
-            (" ", "Esc, then DRILL, practises the whole thing on Oscar"),
+            ("Esc", "then DRILL practises the whole thing on Oscar"),
         ],
     ),
     (
-        "THE ROD",
+        "THE ROD, AND THE SCREEN",
         &[
             (
                 "J",
@@ -166,28 +178,25 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
                 "I",
                 "what swims here, how to troll for it, and what you have had",
             ),
-            (
-                " ",
-                "a fish on and the way still on her is a fish you will lose",
-            ),
-            (
-                " ",
-                "lift her on the rise — one swung as she drops is one lost",
-            ),
-        ],
-    ),
-    (
-        "LOOKING AT IT",
-        &[
             ("C", "view: behind her, ahead, down the wake, under it"),
-            ("M", "the chart in the corner, and [ ] to zoom it"),
-            ("Tab", "the diagnostic panel"),
             ("H", "hide the console"),
             ("K", "mute"),
-            ("Esc", "settings — sound, music, weather, sea"),
+            (
+                "Esc",
+                "settings — sound, picture, weather, the passage, together, drill",
+            ),
         ],
     ),
 ];
+
+/// Where the right-hand column starts.
+///
+/// **Two columns because the list outgrew a screen.** It was one tall strip of six
+/// sections, which meant the last of them — the rod and the screen — was below the fold
+/// on a laptop, and a key list you have to scroll is a key list whose bottom half nobody
+/// knows about. Split by section rather than by row so that nothing is cut in half: the
+/// boat's own controls on the left, everything you do *from* the boat on the right.
+const SECOND_COLUMN: usize = 3;
 
 /// Every key the program answers to, as the type the input layer uses.
 ///
@@ -197,7 +206,7 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
 /// help does not mention is a feature nobody will find; a key the help promises and
 /// nothing reads is a lie, and both have happened here.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const DOCUMENTED: [KeyCode; 44] = [
+pub const DOCUMENTED: [KeyCode; 43] = [
     // At the helm.
     KeyCode::ArrowLeft,
     KeyCode::ArrowRight,
@@ -237,7 +246,6 @@ pub const DOCUMENTED: [KeyCode; 44] = [
     KeyCode::KeyM,
     KeyCode::BracketLeft,
     KeyCode::BracketRight,
-    KeyCode::Tab,
     KeyCode::KeyH,
     KeyCode::KeyK,
     // Still here with the bare key gone: Shift and L is somewhere at sea, which is a
@@ -308,33 +316,47 @@ pub fn draw(mut contexts: bevy_egui::EguiContexts, mut help: ResMut<Help>) -> Re
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -20.0))
         .show(ctx, |ui| {
             frame.show(ui, |ui| {
-                ui.set_width(470.0);
-                for (heading, rows) in KEYS {
-                    ui.label(
-                        egui::RichText::new(heading)
-                            .color(egui::Color32::from_rgb(200, 190, 150))
-                            .monospace()
-                            .size(12.0),
-                    );
-                    ui.add_space(3.0);
-                    for (key, what) in rows {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(format!("{key:<7}"))
-                                    .color(egui::Color32::from_rgb(230, 198, 120))
-                                    .monospace()
-                                    .size(12.0),
-                            );
-                            ui.label(
-                                egui::RichText::new(*what)
-                                    .color(egui::Color32::from_rgb(186, 192, 198))
-                                    .monospace()
-                                    .size(11.0),
-                            );
+                ui.set_width(760.0);
+                ui.horizontal_top(|ui| {
+                    for column in [0..SECOND_COLUMN, SECOND_COLUMN..KEYS.len()] {
+                        ui.vertical(|ui| {
+                            ui.set_width(366.0);
+                            for (heading, rows) in &KEYS[column] {
+                                ui.label(
+                                    egui::RichText::new(*heading)
+                                        .color(egui::Color32::from_rgb(200, 190, 150))
+                                        .monospace()
+                                        .size(12.0),
+                                );
+                                ui.add_space(3.0);
+                                for (key, what) in *rows {
+                                    ui.horizontal_top(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!("{key:<8}"))
+                                                .color(egui::Color32::from_rgb(230, 198, 120))
+                                                .monospace()
+                                                .size(12.0),
+                                        );
+                                        // Wrapped rather than cut: a line of help that
+                                        // runs off the edge of its column is the half of
+                                        // the sentence that was worth reading.
+                                        ui.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(*what)
+                                                    .color(egui::Color32::from_rgb(186, 192, 198))
+                                                    .monospace()
+                                                    .size(11.0),
+                                            )
+                                            .wrap(),
+                                        );
+                                    });
+                                }
+                                ui.add_space(9.0);
+                            }
                         });
+                        ui.add_space(14.0);
                     }
-                    ui.add_space(9.0);
-                }
+                });
                 if ui.button("CLOSE  (? or Esc)").clicked() {
                     close = true;
                 }
