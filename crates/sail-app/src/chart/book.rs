@@ -230,8 +230,10 @@ pub(crate) fn lay_it_on_the_chart(
             }
         }
         Wrote::Sighted { name } => {
-            if !nav.recognised.contains(name) {
-                nav.recognised.push(name.clone());
+            // The name goes on the paper. She knew it already — the glasses told her on
+            // deck — and this is the pencil, which is a different act and a later one.
+            if !nav.on_the_paper.contains(name) {
+                nav.on_the_paper.push(name.clone());
             }
             line.plotted = true;
         }
@@ -242,5 +244,110 @@ pub(crate) fn lay_it_on_the_chart(
             *laid_at = Some(*at);
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod the_page {
+    use super::*;
+    use crate::navigation::Navigation;
+
+    /// **Recognising and plotting are two acts, in that order.**
+    ///
+    /// The glasses put the name in her head and a line in the book; the chart gets it
+    /// when a hand at the table says so. The test that matters is the middle state: she
+    /// knows the mark and the paper does not, and everything on deck has to work.
+    #[test]
+    fn a_name_reaches_the_paper_when_it_is_laid_on() {
+        let mut log = DeckLog::default();
+        let mut nav = Navigation::default();
+        // What the glasses do on deck.
+        nav.recognised.push("Bergskerry Spire".to_string());
+        log.write(
+            6.5,
+            Wrote::Sighted {
+                name: "Bergskerry Spire".to_string(),
+            },
+        );
+        assert!(
+            nav.on_the_paper.is_empty(),
+            "nothing is drawn until somebody draws it"
+        );
+        assert!(
+            crate::sight::can_be_named("Bergskerry Spire", true, &nav.recognised),
+            "but she can shoot it from the deck straight away"
+        );
+        let mut laid_at = None;
+        lay_it_on_the_chart(&mut log, &mut nav, &mut laid_at, 0);
+        assert_eq!(nav.on_the_paper, ["Bergskerry Spire"]);
+        assert!(log.lines[0].plotted);
+    }
+
+    /// Looking at the same headland three times is one line in the book.
+    #[test]
+    fn an_identification_is_written_once() {
+        let mut log = DeckLog::default();
+        for _ in 0..3 {
+            log.write(
+                6.5,
+                Wrote::Sighted {
+                    name: "Fuglvoe".to_string(),
+                },
+            );
+        }
+        assert_eq!(log.lines.len(), 1);
+    }
+
+    /// **A bearing plotted late is transferred by what she ran in between.**
+    ///
+    /// This is the field the whole book is built around: shoot a light, sail on, plot it
+    /// twenty minutes later, and the line lands where that bearing applies *now*. Half a
+    /// mile of running through the water between the shot and the pencil is half a mile
+    /// of transfer, and nothing else in the game can supply that number afterwards.
+    #[test]
+    fn a_bearing_carries_the_run_it_was_plotted_after() {
+        let mut log = DeckLog::default();
+        let mut nav = Navigation::default();
+        let mark = glam::DVec2::new(0.0, 4_000.0);
+        log.write(
+            6.5,
+            Wrote::Bearing {
+                name: "Nelstad".to_string(),
+                mark,
+                bearing: 0.0,
+                taken: glam::DVec2::new(100.0, 200.0),
+            },
+        );
+        // She runs on before anybody goes below.
+        nav.water_track = glam::DVec2::new(100.0, 1_126.0);
+        let mut laid_at = None;
+        lay_it_on_the_chart(&mut log, &mut nav, &mut laid_at, 0);
+        assert_eq!(nav.sights.len(), 1);
+        let ran = nav.sights[0].ran;
+        assert!(
+            (ran - glam::DVec2::new(0.0, 926.0)).length() < 1.0,
+            "the transfer is the run between the shot and the pencil, got {ran:?}"
+        );
+        assert!(
+            (nav.sights[0].through() - glam::DVec2::new(0.0, 4_926.0)).length() < 1.0,
+            "so the line passes through the mark carried along by it"
+        );
+        // And the rubber takes it off again, which is how a fix that will not close is
+        // argued with.
+        lay_it_on_the_chart(&mut log, &mut nav, &mut laid_at, 0);
+        assert!(nav.sights.is_empty());
+        assert!(!log.lines[0].plotted);
+    }
+
+    /// Pressing a written-up entry lays the chart over the water it was written about.
+    #[test]
+    fn an_entry_moves_the_paper_rather_than_marking_it() {
+        let mut log = DeckLog::default();
+        let mut nav = Navigation::default();
+        let at = glam::DVec2::new(1_500.0, -800.0);
+        log.write(7.0, Wrote::Entered { at });
+        let mut laid_at = None;
+        lay_it_on_the_chart(&mut log, &mut nav, &mut laid_at, 0);
+        assert_eq!(laid_at, Some(at));
     }
 }

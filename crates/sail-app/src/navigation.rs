@@ -60,6 +60,17 @@ pub struct Navigation {
     /// position line: it is the only reason a bearing can be written in the book now
     /// and plotted twenty minutes later.
     pub water_track: glam::DVec2,
+    /// The marks she has drawn on the chart, which is not the same list.
+    ///
+    /// **Knowing which tower that is and having written its name on the paper are two
+    /// acts**, and the instruments ask different questions: the hand bearing compass
+    /// asks whether she can *name* what is in the notch — knowledge, the moment the
+    /// glasses have told her — and the chart asks whether somebody has put it on the
+    /// paper, which happens when the line in the book is laid on. Running both off one
+    /// list made a bearing impossible to take on a mark she had just identified, because
+    /// the identification was waiting at the chart table for a hand that was on deck
+    /// with the glasses.
+    pub on_the_paper: Vec<String>,
     /// The marks she has *recognised* — worked out through the glasses by the shape of
     /// the coast rather than told to her. Until a mark is on this list it is a symbol on
     /// the chart with no name, which is what an unidentified mark is.
@@ -606,6 +617,7 @@ impl Default for Navigation {
             fixed_on: Vec::new(),
             still_in_sight: 0,
             water_track: glam::DVec2::ZERO,
+            on_the_paper: Vec::new(),
             recognised: Vec::new(),
             reading: None,
             reckoning: None,
@@ -684,6 +696,7 @@ pub fn cast_adrift(
     nav.fixed_on.clear();
     nav.still_in_sight = 0;
     nav.recognised.clear();
+    nav.on_the_paper.clear();
     nav.reading = None;
     nav.reckoning = None;
     nav.fixes.clear();

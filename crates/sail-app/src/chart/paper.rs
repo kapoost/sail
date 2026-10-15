@@ -252,7 +252,7 @@ pub(crate) fn marks_on_the_paper(
         //
         // The coast itself stays. Land does not need identifying — it is there, you
         // can see it, and the shape of it is what you recognise the marks by.
-        if nav.lost && !nav.recognised.contains(&mark.name) {
+        if nav.lost && !nav.on_the_paper.contains(&mark.name) {
             continue;
         }
         match mark.kind {

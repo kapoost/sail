@@ -92,6 +92,22 @@ pub fn nameable_from(mark: &sail_core::land::Landmark, recognised: &[String]) ->
     }
 }
 
+/// Whether the compass can put a name to what is in the notch.
+///
+/// **A question about what she has recognised, and nothing else.** When she knows where
+/// she is, the chart names everything and the instrument needs no help. When she does
+/// not, the chart has a symbol there and she has a tower in front of her, and nothing
+/// joins the two until the glasses have read the shape of the coast — which is the whole
+/// of the lost exercise.
+///
+/// What it must *not* ask is whether the name has been written on the paper. Those are
+/// two acts: the glasses are on deck and the pencil is at the chart table, and tying the
+/// bearing to the pencil made it impossible to shoot a mark she had identified a minute
+/// earlier. Reported from the deck in exactly those words.
+pub fn can_be_named(name: &str, lost: bool, recognised: &[String]) -> bool {
+    !lost || recognised.iter().any(|had| had == name)
+}
+
 /// How near the notch has to be before you can say you are on it, radians.
 ///
 /// **One degree and a quarter**, and it was two and a half. Narrowed because a notch
@@ -262,11 +278,7 @@ pub fn aim(
         if away > NEARLY {
             continue;
         }
-        // And when she does not know where she is, a mark is only nameable once it has
-        // been *recognised* through the glasses: the chart has a symbol there and you
-        // have a tower in front of you, and nothing joins them until you have read the
-        // shape of the coast.
-        let nameable = !nav.lost || nav.recognised.contains(&mark.name);
+        let nameable = can_be_named(&mark.name, nav.lost, &nav.recognised);
         if nearly.as_ref().is_none_or(|(_, b, _)| away < *b) {
             nearly = Some((mark.name.clone(), away, nameable));
         }
@@ -369,7 +381,7 @@ pub fn aim(
                 // to the chart table.
                 sighting.said = Some((
                     format!(
-                        "{name} {:03.0}° — in the log; plot it from the chart table",
+                        "{name} {:03.0}° — in the log; lay it on the chart from the table",
                         sail_core::units::deg(took).rem_euclid(360.0)
                     ),
                     true,
@@ -734,9 +746,10 @@ pub fn recognise(
         let mut fresh: Vec<String> = Vec::new();
         for m in &readable {
             if !nav.recognised.contains(&m.name) {
-                // Into the book. It reaches the chart when he turns to the table and
-                // says so, which is the same rule the bearings follow and for the same
-                // reason: what is on the paper is what somebody decided to put there.
+                // **She knows it now** — the glasses have just told her, and the hand
+                // bearing compass can be put on it this minute. Writing the name on the
+                // chart is the other half, and it happens at the table.
+                nav.recognised.push(m.name.clone());
                 log.write(
                     hour,
                     crate::chart::Wrote::Sighted {
@@ -748,7 +761,7 @@ pub fn recognise(
         }
         nav.reading = Some(if fresh.is_empty() {
             format!(
-                "{} — already on the chart. A bearing on it is one line.",
+                "{} — already named. A bearing on it is one line.",
                 readable
                     .iter()
                     .map(|m| m.name.as_str())
@@ -811,12 +824,13 @@ pub fn recognise(
             let named: Vec<String> = group.iter().map(|m| m.name.clone()).collect();
             for name in &named {
                 if !nav.recognised.contains(name) {
+                    nav.recognised.push(name.clone());
                     log.write(hour, crate::chart::Wrote::Sighted { name: name.clone() });
                 }
             }
             nav.reading = Some(format!(
-                "that is {} — {} and {} beyond it. In the log; name them from the \
-                 chart table.",
+                "that is {} — {} and {} beyond it. You can shoot them now; the names \
+                 go on the chart from the table.",
                 named[0], named[1], named[2]
             ));
         }
@@ -834,5 +848,33 @@ pub fn recognise(
                     .to_string(),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod what_she_may_shoot {
+    use super::*;
+
+    /// **The regression, as a test.** A mark identified through the glasses can be shot
+    /// the moment it has been identified — the compass is in the same hands that just
+    /// put the glasses down, and the chart table is below.
+    #[test]
+    fn a_mark_she_has_just_made_out_can_be_shot() {
+        let known = ["Bergskerry Spire".to_string()];
+        assert!(can_be_named("Bergskerry Spire", true, &known));
+    }
+
+    /// And one she has not made out cannot, which is what the exercise is.
+    #[test]
+    fn a_shape_she_cannot_name_is_not_a_bearing() {
+        let known = ["Bergskerry Spire".to_string()];
+        assert!(!can_be_named("Fuglvoe", true, &known));
+    }
+
+    /// With a position on the chart the question does not arise: the paper names
+    /// everything, because knowing where you are is knowing which symbol is which.
+    #[test]
+    fn not_lost_names_everything() {
+        assert!(can_be_named("Fuglvoe", false, &[]));
     }
 }
