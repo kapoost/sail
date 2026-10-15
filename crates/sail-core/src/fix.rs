@@ -471,7 +471,7 @@ mod tests {
         let only = Sight {
             mark: DVec2::new(1_000.0, 0.0),
             bearing: rad(90.0),
-                ran: DVec2::ZERO,
+            ran: DVec2::ZERO,
         };
         assert!(plot(&[only]).is_none());
         assert!(
@@ -596,4 +596,3 @@ mod the_running_fix {
         );
     }
 }
-

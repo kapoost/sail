@@ -66,14 +66,18 @@ impl Line {
     /// a different rope — and the bank ought to say which rope.
     /// The positions this line rests at, if it has any.
     ///
-    /// Three slabs in the main, because that is what a mainsail has: three rows of reef
-    /// points sewn into it and no fourth. A roller genoa has none — it is a drum, it
-    /// stops wherever you stop it, and sailing with a third of it rolled away is an
-    /// ordinary thing to do. A sail set flying has two, and they are the only two: up,
-    /// or away. So does the staysail, which is hanked on and hoisted and has no middle
-    /// state either.
+    /// **Three slabs and then she comes off her**, which is five positions: full, one,
+    /// two, three, handed. It was four — two slabs and handed — and the jump from the
+    /// second reef to no mainsail at all is the wrong size: it is the step you need in
+    /// the forties, which is exactly where a cruising main has a third row of points
+    /// sewn into it. Reported from the deck as a missing reef.
+    ///
+    /// A roller genoa has none — it is a drum, it stops wherever you stop it, and
+    /// sailing with a third of it rolled away is an ordinary thing to do. A sail set
+    /// flying has two and they are the only two: up, or away. So does the staysail,
+    /// which is hanked on and hoisted and has no middle state either.
     pub fn detents(self, c: &Controls) -> Option<&'static [f64]> {
-        const SLABS: [f64; 4] = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0];
+        const SLABS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
         const EITHER: [f64; 2] = [0.0, 1.0];
         match self {
             Line::Reef => Some(&SLABS),
@@ -81,6 +85,33 @@ impl Line {
             Line::Furl if c.headsail != sail_core::state::Headsail::Genoa => Some(&EITHER),
             _ => None,
         }
+    }
+
+    /// What a detented line says it is *at*, rather than how far along it is.
+    ///
+    /// **A position is not a number.** `0.75` on a reef line means nothing to anybody;
+    /// *third reef* means the thing you did and the thing you can undo. A line with
+    /// stops has names for them and a line without has none — which is also how the
+    /// instrument says which kind of control it is, without a word of explanation.
+    pub fn position(self, c: &Controls) -> Option<&'static str> {
+        let stops = self.detents(c)?;
+        let v = self.get(c);
+        let (mut which, mut best) = (0, f64::MAX);
+        for (i, stop) in stops.iter().enumerate() {
+            let off = (stop - v).abs();
+            if off < best {
+                (which, best) = (i, off);
+            }
+        }
+        Some(match (self, which, stops.len()) {
+            (Line::Reef, 0, _) => "full",
+            (Line::Reef, 1, _) => "1st reef",
+            (Line::Reef, 2, _) => "2nd reef",
+            (Line::Reef, 3, _) => "3rd reef",
+            (Line::Reef, _, _) => "handed",
+            (_, 0, _) => "down",
+            (_, _, _) => "set",
+        })
     }
 
     pub fn name_now(self, c: &Controls) -> &'static str {
@@ -286,5 +317,58 @@ pub fn handle(
         } else {
             l.set(&mut sim.controls, now + step * (want - now).signum());
         }
+    }
+}
+
+#[cfg(test)]
+mod the_bank {
+    use super::*;
+
+    /// **Every stop on the reef line has a name, and they are the right names.**
+    ///
+    /// Three slabs and then she comes off her. It was two and a jump to nothing, which
+    /// is the wrong step in the forties — reported from the deck as a missing reef.
+    #[test]
+    fn the_reef_line_rests_at_five_named_places() {
+        let stops = Line::Reef
+            .detents(&Controls::default())
+            .expect("a slab reef has positions");
+        assert_eq!(stops.len(), 5, "full, three slabs, handed");
+        let said: Vec<&str> = stops
+            .iter()
+            .map(|stop| {
+                let c = Controls {
+                    reef: *stop,
+                    ..Default::default()
+                };
+                Line::Reef.position(&c).expect("a named position")
+            })
+            .collect();
+        assert_eq!(said, ["full", "1st reef", "2nd reef", "3rd reef", "handed"]);
+    }
+
+    /// A line that stops wherever you stop it has no positions to name.
+    ///
+    /// Which is what tells the instrument which kind of control it is drawing: notches
+    /// and a name for *which*, a column and a figure for *how much*.
+    #[test]
+    fn a_line_without_stops_has_nothing_to_name() {
+        let c = Controls::default();
+        assert!(Line::Vang.detents(&c).is_none());
+        assert!(Line::Vang.position(&c).is_none());
+        assert!(
+            Line::Furl.position(&c).is_none(),
+            "a roller genoa is a drum"
+        );
+    }
+
+    /// Half-way between two slabs she is at the nearer one, not at neither.
+    #[test]
+    fn a_line_between_stops_reports_the_nearest() {
+        let c = Controls {
+            reef: 0.47,
+            ..Default::default()
+        };
+        assert_eq!(Line::Reef.position(&c), Some("2nd reef"));
     }
 }

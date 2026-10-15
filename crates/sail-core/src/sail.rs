@@ -262,7 +262,16 @@ pub fn cloth_on_cloth(inner_chord: f64, outer_chord: f64) -> f64 {
 /// Returned as angles to add to each sail's apparent wind, in radians. The sizes are
 /// the usual quoted ones — a few degrees each, the headsail's effect on the main the
 /// larger of the two, both scaled by how hard the sail doing the bending is working.
-pub fn slot_interaction(main_cl: f64, jib_cl: f64) -> (f64, f64) {
+///
+/// **And by how much of it is there.** `main_there` and `jib_there` are the fractions of
+/// each sail actually set: rolled away or reefed down, a sail bends less wind, and a
+/// sail that is not set bends none. Without them the pair took orders from a sail that
+/// was stowed — a lift coefficient knows nothing about whether its sail exists, so a
+/// main rolled up on the boom went on turning the headsail's wind by three degrees, and
+/// the boom had to be trimmed as if the main were there. Reported from the deck in those
+/// words. It is the same mistake that was found once before in `jib_slot_support`, which
+/// is how it was recognised.
+pub fn slot_interaction(main_cl: f64, jib_cl: f64, main_there: f64, jib_there: f64) -> (f64, f64) {
     /// Downwash on the main per unit of headsail lift coefficient.
     ///
     /// Three degrees, not the six this started at, and the reason is that the bend is
@@ -279,8 +288,8 @@ pub fn slot_interaction(main_cl: f64, jib_cl: f64) -> (f64, f64) {
     /// Upwash on the headsail per unit of mainsail lift coefficient.
     const ON_JIB: f64 = 3.2 * std::f64::consts::PI / 180.0;
     (
-        -ON_MAIN * jib_cl.clamp(0.0, 1.8),
-        ON_JIB * main_cl.clamp(0.0, 1.8),
+        -ON_MAIN * jib_cl.clamp(0.0, 1.8) * jib_there.clamp(0.0, 1.0),
+        ON_JIB * main_cl.clamp(0.0, 1.8) * main_there.clamp(0.0, 1.0),
     )
 }
 

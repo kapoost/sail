@@ -3080,9 +3080,22 @@ fn rolling_a_genoa_ruins_it_rather_than_reefing_it() {
         "two thirds rolled, the drive should be nearly gone: {rolled_drive:.0} N against \
          {full_drive:.0}"
     );
+    // **The claim, as a comparison rather than a number.** What this test is about is
+    // that the sail stops *pulling* long before it stops *heeling*, so that is what is
+    // asserted: the fraction of her side force that survives the roller must be several
+    // times the fraction of her drive. Written as an absolute threshold it was tuned to
+    // whatever the rest of the model happened to be doing on the day — and it duly broke
+    // the morning the slot stopped bending wind for sails that were not set, which made
+    // the rolled genoa worse still (drive 17% of full to 5%, side 28% to 22%) without
+    // touching the lesson at all.
+    let kept_drive = rolled_drive / full_drive;
+    let kept_side = rolled_side / full_side;
     assert!(
-        rolled_side > 0.25 * full_side,
-        "and it should still be heeling her: {rolled_side:.0} N against {full_side:.0}"
+        kept_side > 3.0 * kept_drive,
+        "it should stop pulling long before it stops heeling: {:.0}% of her drive left \
+         and {:.0}% of her heeling force",
+        kept_drive * 100.0,
+        kept_side * 100.0
     );
     assert!(
         rolled_ratio < 0.55 * full_ratio,

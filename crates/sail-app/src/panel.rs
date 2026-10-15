@@ -481,7 +481,10 @@ pub fn draw(
                                 } else {
                                     format!("({})", line.name_now(&sim.controls))
                                 };
-                                let (clicked, dragged) = clutch(ui, &name, &mut value, selected);
+                                let stops = line.detents(&sim.controls);
+                                let position = line.position(&sim.controls);
+                                let (clicked, dragged) =
+                                    clutch(ui, &name, &mut value, selected, stops, position);
                                 if clicked {
                                     bank.selected = i;
                                     bank.since_change = 0.0;
@@ -1451,7 +1454,23 @@ fn lever(
 }
 
 /// One clutch: click to put it on the winch, drag to work it.
-fn clutch(ui: &mut egui::Ui, label: &str, value: &mut f64, selected: bool) -> (bool, bool) {
+/// One clutch on the coachroof.
+///
+/// **A line with stops is drawn as a line with stops.** A reef is not seventy-five per
+/// cent of anything — it is the third reef, a place the sail rests at and a job that was
+/// done — so a detented line gets notches across its travel and the name of the position
+/// it is at, while a line that stops wherever you stop it keeps its column and its
+/// figure. Asked for from the deck as showing positional switching differently from
+/// linear, and the difference is worth drawing because it is the difference between
+/// *how much* and *which*.
+fn clutch(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut f64,
+    selected: bool,
+    stops: Option<&[f64]>,
+    position: Option<&str>,
+) -> (bool, bool) {
     ui.vertical(|ui| {
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(50.0, 70.0), egui::Sense::click_and_drag());
@@ -1476,14 +1495,49 @@ fn clutch(ui: &mut egui::Ui, label: &str, value: &mut f64, selected: bool) -> (b
                 *value = f as f64;
             }
         }
-        // Travel drawn as a filled column, because a clutch either has rope through
-        // it or it does not and the amount is what matters.
-        let h = (rect.height() - 30.0) * *value as f32;
-        let bar = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + 6.0, rect.bottom() - 10.0 - h),
-            egui::vec2(rect.width() - 12.0, h),
-        );
-        p.rect_filled(bar, 1.0, if selected { paint::LIVE } else { paint::LABEL });
+        let travel = rect.height() - 30.0;
+        let at = |v: f64| rect.bottom() - 10.0 - travel * v as f32;
+        if let Some(stops) = stops {
+            // The stops themselves, across the whole width, and the one she is resting
+            // at drawn solid. A lever between two notches is a sail half pulled down,
+            // which is a state and not a setting — so it shows as being *between*
+            // rather than as a column of some height.
+            for stop in stops {
+                let y = at(*stop);
+                let near = (stop - *value).abs() < 0.02;
+                p.line_segment(
+                    [
+                        egui::pos2(rect.left() + 6.0, y),
+                        egui::pos2(rect.right() - 6.0, y),
+                    ],
+                    egui::Stroke::new(
+                        if near { 2.4 } else { 1.0 },
+                        if near && selected {
+                            paint::LIVE
+                        } else if near {
+                            paint::FACE
+                        } else {
+                            paint::LABEL
+                        },
+                    ),
+                );
+            }
+            let y = at(*value);
+            p.circle_filled(
+                egui::pos2(rect.center().x, y),
+                3.0,
+                if selected { paint::LIVE } else { paint::FACE },
+            );
+        } else {
+            // Travel drawn as a filled column, because a clutch either has rope through
+            // it or it does not and the amount is what matters.
+            let h = travel * *value as f32;
+            let bar = egui::Rect::from_min_size(
+                egui::pos2(rect.left() + 6.0, rect.bottom() - 10.0 - h),
+                egui::vec2(rect.width() - 12.0, h),
+            );
+            p.rect_filled(bar, 1.0, if selected { paint::LIVE } else { paint::LABEL });
+        }
         p.text(
             rect.center_top() + egui::vec2(0.0, 4.0),
             egui::Align2::CENTER_TOP,
@@ -1494,8 +1548,11 @@ fn clutch(ui: &mut egui::Ui, label: &str, value: &mut f64, selected: bool) -> (b
         p.text(
             rect.center_bottom() + egui::vec2(0.0, -1.0),
             egui::Align2::CENTER_BOTTOM,
-            format!("{:.2}", *value),
-            egui::FontId::monospace(10.0),
+            match position {
+                Some(said) => said.to_string(),
+                None => format!("{:.2}", *value),
+            },
+            egui::FontId::monospace(if position.is_some() { 8.0 } else { 10.0 }),
             paint::FACE,
         );
         (response.clicked(), dragged)

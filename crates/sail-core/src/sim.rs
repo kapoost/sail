@@ -510,9 +510,17 @@ impl Simulation {
         // Taken from the step before, which at two hundred a second is five milliseconds
         // out of date and saves computing every sail twice. The pair is a feedback loop
         // either way; a loop that is one substep behind settles to the same place.
+        // How much of each sail is actually set, as a fraction of the whole: a sail
+        // rolled away or reefed down bends less of the other one's wind, and one that is
+        // not set bends none of it.
+        let main_there = (lower_area + upper_area) / cfg.main.area.max(1e-6);
+        let jib_there =
+            (jib_lower_area + jib_upper_area) / cfg.headsail(controls.headsail).area.max(1e-6);
         let (bend_main, bend_jib) = crate::sail::slot_interaction(
             self.telemetry.main.coeffs.cl,
             self.telemetry.jib.coeffs.cl,
+            main_there,
+            jib_there,
         );
         // And whether there is a mainsail behind the headsail at all, which decides
         // something else again: whether the headsail can be sheeted close. A sloop's

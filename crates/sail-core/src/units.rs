@@ -99,10 +99,13 @@ mod the_card {
         assert_eq!(point(rad(270.0)), "W");
         assert_eq!(point(rad(225.0)), "SW");
         assert_eq!(point(rad(360.0)), "N", "a full turn is north again");
-        assert_eq!(point(rad(-45.0)), "NW", "and so is going the other way round");
+        assert_eq!(
+            point(rad(-45.0)),
+            "NW",
+            "and so is going the other way round"
+        );
         // Half a point either side of north is still north; a whole one is not.
         assert_eq!(point(rad(11.0)), "N");
         assert_eq!(point(rad(23.0)), "NNE");
     }
 }
-
