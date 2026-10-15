@@ -374,6 +374,7 @@ fn main() {
                         sight::recognise,
                     ),
                     chart::toggle,
+                    chart::stopwatch,
                     retro::stress.run_if(|| std::env::var("SAIL_RETRO_STRESS").is_ok()),
                     music::compose,
                     world::apply_ink,

@@ -64,6 +64,20 @@ pub struct Navigation {
     /// chart by a solid line, which is the one line on that paper that is not an
     /// estimate of anything — two positions she worked out and the water between them.
     pub fixes: Vec<(DVec2, f64)>,
+    /// How far she has sailed through the water since the game began, metres.
+    ///
+    /// Which is what a ship's log counts, and the only distance a boat that does not
+    /// know where she is can measure at all: a paddlewheel, an impeller or a line with a
+    /// rotator on the end of it counts water going past, and it goes on counting whether
+    /// or not anybody knows which water.
+    pub through_water: f64,
+    /// The last speed measured by hand off the log, and when — knots, and the clock.
+    ///
+    /// Kept apart from the instrument's own reading because it is a different kind of
+    /// number: the instrument says what she is doing now, and this is what she *did*,
+    /// averaged over a leg somebody chose to time. It is the figure a reckoning should
+    /// be run at.
+    pub measured: Option<(f64, f64)>,
     /// Metres a second of movement the reckoning does not account for, learned from how
     /// far out the last run was.
     ///
@@ -128,6 +142,9 @@ pub fn reckon(sim: Res<Sim>, mut nav: ResMut<Navigation>, time: Res<Time>) {
     let dt = time.delta_secs_f64();
     let now = sim.sim.state.time;
     let unexplained = nav.unexplained;
+    // The log counts whatever happens. Here rather than in the reckoning below because
+    // it goes on counting when there is no reckoning to run.
+    nav.through_water += sim.sim.telemetry.stw.abs() * dt;
     let Some(run) = nav.reckoning.as_mut() else {
         return;
     };
@@ -196,6 +213,8 @@ impl Default for Navigation {
             reading: None,
             reckoning: None,
             fixes: Vec::new(),
+            through_water: 0.0,
+            measured: None,
             adrift: None,
             // Not nought. A circle of uncertainty that starts at nothing tells a
             // beginner that dead reckoning is exact, which is the one thing it is not.

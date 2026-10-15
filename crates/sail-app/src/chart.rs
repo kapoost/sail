@@ -53,8 +53,19 @@ pub struct Chart {
     /// she is it follows her again, because then it is a plotter and that is what a
     /// plotter is for.
     pub laid_at: Option<glam::DVec2>,
+    /// The stopwatch: whether it is running, when it was started, and what it had on it
+    /// before that.
+    ///
+    /// **A navigator's stopwatch is not a timer, it is an instrument of
+    /// identification.** A light is named by its period — `Fl(2) 13s` on the chart means
+    /// two flashes and then dark, the whole pattern repeating every thirteen seconds —
+    /// and the way you tell one light from the next along the same coast is to start the
+    /// watch on a flash, count, and stop it on the same flash some cycles later. It is
+    /// also how you time a leg without doing arithmetic on the ship's clock, and how a
+    /// racing navigator counts down to a start.
+    pub watch: Stopwatch,
     /// A leg being timed: where she was when the log was streamed, and when.
-    pub streaming: Option<(glam::DVec2, f64)>,
+    pub streaming: Option<(glam::DVec2, f64, f64)>,
     /// Which ruled line is being moved, and by which end.
     ///
     /// A line you cannot move is a line you have to rub out and draw again, which is
@@ -166,6 +177,72 @@ pub const TOOLS: [Tool; 7] = [
     Tool::Rubber,
 ];
 
+/// The stopwatch on the chart table.
+#[derive(Default, Clone, Copy, Debug)]
+pub struct Stopwatch {
+    pub running: bool,
+    /// When the current run started, in simulation seconds.
+    pub since: f64,
+    /// And what was on it before that run.
+    pub held: f64,
+    /// Whether the warning has been rung for this run.
+    dinged: bool,
+}
+
+/// How far the hand goes, seconds.
+///
+/// **One turn and no more.** A stopwatch whose hand has gone round twice is a stopwatch
+/// that has told you nothing — you cannot tell a reading of ten seconds from one of
+/// seventy by looking at it, and the whole use of this instrument is reading it at a
+/// glance while you watch a light. So it stops itself at the top of the dial rather
+/// than carrying on round. Asked for from the deck.
+pub const ONE_TURN: f64 = 60.0;
+
+/// When it says so, seconds.
+///
+/// Five from the end, which is a count of five: long enough to look down, decide and
+/// press, and short enough that it is a warning rather than a nuisance. Without it the
+/// watch simply stops at the top and the reading you were taking is lost with no idea
+/// when it went — which is worse than running on, because at least a hand going round
+/// twice is visible.
+const WARNS_AT: f64 = 55.0;
+
+impl Stopwatch {
+    /// What the face is showing at this moment, capped at one turn.
+    pub fn shown(&self, now: f64) -> f64 {
+        let run = if self.running {
+            (now - self.since).max(0.0)
+        } else {
+            0.0
+        };
+        (self.held + run).min(ONE_TURN)
+    }
+}
+
+/// Stop it at the top of the dial, and say so before it gets there.
+///
+/// Its own system because the watch runs whether or not the chart is on the table: a
+/// navigator starts it, puts the chart away and watches the light, which is the whole
+/// point of a thing that counts for you.
+pub fn stopwatch(sim: Res<Sim>, mut chart: ResMut<Chart>, sound: Res<crate::sound::SoundHandle>) {
+    let now = sim.sim.state.time;
+    if !chart.watch.running {
+        return;
+    }
+    let shown = chart.watch.shown(now);
+    if shown >= WARNS_AT && !chart.watch.dinged {
+        chart.watch.dinged = true;
+        // A small high ting rather than the ship's bell: the bell is the hour and this
+        // is somebody tapping a glass.
+        sound.0.strike_damped(1_480.0, 0.16, 0.92);
+    }
+    if shown >= ONE_TURN {
+        chart.watch.running = false;
+        chart.watch.held = ONE_TURN;
+        chart.watch.since = 0.0;
+    }
+}
+
 /// Which part of a ruled line a hand has hold of.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Grab {
@@ -225,6 +302,7 @@ impl Default for Chart {
             laid_at: None,
             moving: None,
             streaming: None,
+            watch: Stopwatch::default(),
             accepted: None,
             // Two and a half miles each way: far enough to see the next island and the
             // one after it, close enough that a shoal is a shape rather than a dot.
@@ -328,7 +406,7 @@ pub fn draw(
     sim: Res<Sim>,
     course: Res<Course>,
     track: Res<Track>,
-    nav: Res<crate::navigation::Navigation>,
+    mut nav: ResMut<crate::navigation::Navigation>,
     coast: Res<crate::marks::Coast>,
     sky: Res<crate::sky::Sky>,
     fleet: Res<crate::fleet::Fleet>,
@@ -380,6 +458,8 @@ pub fn draw(
     let mut shift: Option<(usize, Grab, glam::DVec2)> = None;
     let mut let_go = false;
     let mut stream: Option<bool> = None;
+    let mut press_the_watch = false;
+    let mut timed: Option<(f64, f64)> = None;
     let area = if spread {
         egui::Area::new("chart".into()).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
     } else {
@@ -908,18 +988,32 @@ pub fn draw(
                     if response.clicked() && !on_furniture {
                         match chart.streaming {
                             None => stream = Some(true),
-                            Some((was, when)) => {
+                            Some((was, when, counter)) => {
                                 stream = Some(false);
                                 let minutes = (st.time - when) / 60.0;
                                 // A leg of a few seconds is a slipped finger rather than
                                 // a measurement: at half a minute the distance run is
                                 // inside the width of the pencil.
                                 if minutes > 0.5 {
-                                    draw_on = Some(Plotted::Run {
-                                        from: was,
-                                        to: st.pos,
-                                        minutes,
-                                    });
+                                    // **The speed is measured either way; the track only
+                                    // if she knows where she is.**
+                                    //
+                                    // Through the water is what a log counts, and a log
+                                    // counts whether or not anybody knows which water —
+                                    // so a leg timed while lost still gives the one
+                                    // number a reckoning needs, and it goes on the card
+                                    // rather than on the paper. With a position at both
+                                    // ends it gives the other number as well, the speed
+                                    // made good, and that is a line.
+                                    let ran = (nav.through_water - counter) / 1_852.0;
+                                    timed = Some((ran / (minutes / 60.0), st.time));
+                                    if knows {
+                                        draw_on = Some(Plotted::Run {
+                                            from: was,
+                                            to: st.pos,
+                                            minutes,
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -934,9 +1028,32 @@ pub fn draw(
             // The leg being timed, while it is being timed: a line from where the log
             // was streamed to where she is now, with the figures running. Without it the
             // tool is a button that appears to do nothing for ten minutes.
-            if let Some((was, when)) = chart.streaming.filter(|_| knows) {
+            if let Some((was, when, _)) = chart.streaming.filter(|_| knows) {
                 let (a, b) = (to_screen(was), to_screen(st.pos));
                 p.line_segment([a, b], egui::Stroke::new(1.0, ink::MARK));
+                // Where it was streamed, marked the moment it is streamed. Without this
+                // the first click put a line of zero length on the paper and looked like
+                // nothing happening at all, which is how the tool came to be reported as
+                // unusable: a leg takes minutes to become visible and a button has to
+                // answer in the same second.
+                p.circle(
+                    a,
+                    4.0,
+                    egui::Color32::TRANSPARENT,
+                    egui::Stroke::new(1.2, ink::MARK),
+                );
+                p.circle_filled(a, 1.3, ink::MARK);
+                p.text(
+                    a + egui::vec2(7.0, -6.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!(
+                        "log {:02.0}{:02.0}",
+                        sky.hour.floor(),
+                        (sky.hour.fract() * 60.0).floor()
+                    ),
+                    egui::FontId::monospace(10.0),
+                    ink::MARK,
+                );
                 let off = st.pos - was;
                 let minutes = (st.time - when) / 60.0;
                 let miles = off.length() / 1_852.0;
@@ -1242,6 +1359,175 @@ pub fn draw(
                 );
             }
 
+            // --- The stopwatch -------------------------------------------------
+            //
+            // Drawn where a hand would put one down: top right of the paper, clear of
+            // the instruments along the top and of the rose in the other corner.
+            //
+            // It sweeps. A digital readout alone would be a number on a chart, and the
+            // reason a stopwatch has a hand is that **counting is easier than reading**
+            // — timing a light you are watching the sea and the watch at the same time,
+            // and a hand at the top of the dial is a thing you catch out of the corner
+            // of your eye while the number is a thing you have to look at.
+            let on_it = chart.watch.running;
+            let shown = chart.watch.shown(st.time);
+            let face = egui::pos2(rect.right() - 62.0, rect.top() + 62.0);
+            p.circle(face, 34.0, ink::PAPER, egui::Stroke::new(1.2, ink::COAST));
+            // Sixty ticks, long at the fives, which is what the dial of one looks like
+            // and is also what makes a half-second readable at a glance.
+            for tick in 0..60 {
+                let a = (tick as f32 / 60.0) * std::f32::consts::TAU;
+                let dir = egui::vec2(a.sin(), -a.cos());
+                let long = tick % 5 == 0;
+                p.line_segment(
+                    [
+                        face + dir * if long { 26.0 } else { 29.0 },
+                        face + dir * 32.0,
+                    ],
+                    egui::Stroke::new(if long { 1.1 } else { 0.6 }, ink::COAST),
+                );
+            }
+            let sweep = ((shown % 60.0) / 60.0) as f32 * std::f32::consts::TAU;
+            let hand = egui::vec2(sweep.sin(), -sweep.cos());
+            p.line_segment(
+                [face - hand * 6.0, face + hand * 28.0],
+                egui::Stroke::new(1.6, if on_it { ink::BOAT } else { ink::PEN }),
+            );
+            p.circle_filled(face, 2.2, ink::PEN);
+            // And the minutes, because a light's period is seconds and a leg is minutes
+            // and the same watch has to do both.
+            p.text(
+                face + egui::vec2(0.0, 13.0),
+                egui::Align2::CENTER_CENTER,
+                format!("{}:{:04.1}", (shown / 60.0) as u32, shown % 60.0),
+                egui::FontId::monospace(11.0),
+                ink::PEN,
+            );
+            // The button under it, which says what the next press does rather than what
+            // the watch is: a control labelled with its own state is a control you read
+            // twice.
+            let button =
+                egui::Rect::from_center_size(face + egui::vec2(0.0, 48.0), egui::vec2(74.0, 18.0));
+            p.rect_filled(button, 2.0, if on_it { ink::MARK } else { ink::PAPER });
+            p.rect_stroke(
+                button,
+                2.0,
+                egui::Stroke::new(1.0, ink::COAST),
+                egui::StrokeKind::Inside,
+            );
+            p.text(
+                button.center(),
+                egui::Align2::CENTER_CENTER,
+                if on_it {
+                    "STOP"
+                } else if shown > 0.05 {
+                    "ZERO"
+                } else {
+                    "START"
+                },
+                egui::FontId::monospace(11.0),
+                if on_it { ink::PAPER } else { ink::COAST },
+            );
+            if response.clicked()
+                && response
+                    .interact_pointer_pos()
+                    .is_some_and(|q| button.contains(q) || (q - face).length() < 34.0)
+            {
+                press_the_watch = true;
+            }
+
+            // --- What she knows ------------------------------------------------
+            //
+            // **A sheet of paper with the figures on it, fading as they go stale.**
+            //
+            // Navigation is not a position, it is a *state of knowledge*, and until now
+            // that state was scattered: the fix was a cross, the set was a line in the
+            // log file, the measured speed was gone the moment it was written, and how
+            // old any of it was you had to work out from the clock. A navigator keeps
+            // this on the corner of the chart in pencil, adds to it as things become
+            // known, and stops believing a line when it is old enough to be wrong.
+            //
+            // So each line carries its own age and fades with it, which is the honest
+            // way to draw knowledge: a figure at full strength is one you may act on, a
+            // faint one is one worth taking again. Nothing is deleted — a faded line is
+            // still the last thing you knew, which is more than nothing.
+            {
+                let card = egui::Rect::from_min_size(
+                    egui::pos2(rect.left() + 16.0, rect.bottom() - 128.0),
+                    egui::vec2(214.0, 74.0),
+                );
+                let mut lines: Vec<(String, f32)> = Vec::new();
+                // How much of a figure is left, given how long ago it was taken and how
+                // long that kind of figure stays worth having.
+                let left = |when: f64, good_for: f64| {
+                    (1.0 - ((st.time - when) / good_for).clamp(0.0, 1.0)) as f32
+                };
+                if let Some(at) = nav.fixed_at {
+                    let _ = at;
+                    lines.push((
+                        format!(
+                            "fix     {:>5.0} min ago",
+                            (st.time - nav.last_fix).max(0.0) / 60.0
+                        ),
+                        // A fix is worth having for as long as it is worth sailing on,
+                        // which is the same twenty minutes the chart gives it.
+                        left(nav.last_fix, crate::navigation::FIX_HOLDS),
+                    ));
+                }
+                if let Some((knots, when)) = nav.measured {
+                    lines.push((
+                        format!("log     {knots:>5.1} kn"),
+                        // Half an hour. A boat's speed is a fact about her trim and the
+                        // sea she is in, and both of those have changed by then.
+                        left(when, 1_800.0),
+                    ));
+                }
+                if nav.unexplained > 0.01 {
+                    lines.push((
+                        format!(
+                            "set     {:>5.2} kn",
+                            sail_core::units::ms_to_kn(nav.unexplained)
+                        ),
+                        // The stream is a fact about this water and this hour of the
+                        // tide, and it holds up longer than anything else here.
+                        left(nav.last_fix, 5_400.0).max(0.35),
+                    ));
+                }
+                if let Some(run) = nav.reckoning {
+                    lines.push((
+                        format!("within  {:>5.2} M", run.spread / 1_852.0),
+                        // Always current: it is the one line here that is *about* going
+                        // stale, so it cannot go stale itself.
+                        1.0,
+                    ));
+                }
+                if !lines.is_empty() {
+                    p.rect_filled(card, 2.0, ink::PAPER.gamma_multiply(0.75));
+                    p.rect_stroke(
+                        card,
+                        2.0,
+                        egui::Stroke::new(1.0, ink::COAST.gamma_multiply(0.6)),
+                        egui::StrokeKind::Inside,
+                    );
+                    p.text(
+                        card.left_top() + egui::vec2(8.0, 6.0),
+                        egui::Align2::LEFT_TOP,
+                        "WHAT SHE KNOWS",
+                        egui::FontId::monospace(9.0),
+                        ink::COAST,
+                    );
+                    for (i, (line, alpha)) in lines.iter().take(4).enumerate() {
+                        p.text(
+                            card.left_top() + egui::vec2(8.0, 20.0 + i as f32 * 13.0),
+                            egui::Align2::LEFT_TOP,
+                            line,
+                            egui::FontId::monospace(10.0),
+                            ink::PEN.gamma_multiply(0.25 + 0.75 * alpha),
+                        );
+                    }
+                }
+            }
+
             // The scale, which a chart has to carry or its distances are a rumour.
             // A mile, drawn as a mile is drawn: ten cables, alternating.
             let mile = 1_852.0 * scale;
@@ -1266,10 +1552,15 @@ pub fn draw(
             // way of saying which state it is in is a tool nobody presses twice, which
             // is exactly how the log read from the deck.
             let hint = match (chart.tool, chart.streaming, knows) {
-                (Tool::Log, _, false) => {
-                    "a leg is timed between two positions — take a fix first".to_string()
+                (Tool::Log, Some((_, when, _)), false) => format!(
+                    "timing the log — {:.0} min, and it gives the speed only",
+                    (st.time - when) / 60.0
+                ),
+                (Tool::Log, None, false) => {
+                    "time a leg: lost, it gives the speed through the water and no track"
+                        .to_string()
                 }
-                (Tool::Log, Some((_, when)), true) => format!(
+                (Tool::Log, Some((_, when, _)), true) => format!(
                     "log streamed {:.0} min ago — click again at the end of the leg",
                     (st.time - when) / 60.0
                 ),
@@ -1576,8 +1867,37 @@ pub fn draw(
     if let_go {
         chart.moving = None;
     }
+    // **Start, stop, zero**, in that order and round again, which is the whole of a
+    // stopwatch. Three states on one control because the face *is* the control: a hand
+    // reaches for the watch, not for a row of buttons beside it.
+    if press_the_watch {
+        let now = sim.sim.state.time;
+        let w = chart.watch;
+        chart.watch = if w.running {
+            Stopwatch {
+                running: false,
+                since: 0.0,
+                held: w.shown(now),
+                dinged: w.dinged,
+            }
+        } else if w.held > 0.05 {
+            Stopwatch::default()
+        } else {
+            Stopwatch {
+                running: true,
+                since: now,
+                held: w.held,
+                dinged: false,
+            }
+        };
+    }
+    if let Some(measured) = timed {
+        nav.measured = Some(measured);
+    }
     match stream {
-        Some(true) => chart.streaming = Some((sim.sim.state.pos, sim.sim.state.time)),
+        Some(true) => {
+            chart.streaming = Some((sim.sim.state.pos, sim.sim.state.time, nav.through_water))
+        }
         Some(false) => chart.streaming = None,
         None => {}
     }
