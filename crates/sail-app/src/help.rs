@@ -134,6 +134,11 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
                 "right-drag moves the paper — lost, it does not follow you about",
             ),
             (
+                " ",
+                "the log writes itself up while it is spread: tack, stay on deck, and \
+                 the pencil runs on the old course until you come back to the table",
+            ),
+            (
                 "L",
                 "stream the log and read it: a minute of glass, and the bar says when \
                  to stop her",

@@ -357,9 +357,13 @@ pub fn aim(
                             .iter()
                             .any(|s| (s.mark - line_mark(item)).length() < 1.0)
                 });
-                chart.plot.push(crate::chart::Plotted::Line {
+                chart.pencil(crate::chart::Plotted::Line {
                     through: mark.at,
                     bearing: took,
+                    // What the log was saying when the bearing was taken, so that the
+                    // pair stays a pair: this line and this speed are the two halves of
+                    // the running fix she can work from them.
+                    speed: nav.measured.map(|(knots, _)| knots),
                 });
                 // And she is told she got it, with the number she got — which is what a
                 // navigator writes in the book and the only part of this that survives

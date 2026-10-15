@@ -298,7 +298,18 @@ pub enum Plotted {
     /// A position line: through this point, at this bearing. Drawn both ways from the
     /// mark, because a position line is a line and not an arrow — you are somewhere on
     /// it and the mark does not say which side.
-    Line { through: glam::DVec2, bearing: f64 },
+    ///
+    /// **With the speed that was known when it was drawn**, and not the speed she is
+    /// doing now. A line plus a speed is a running fix waiting to happen, so the figure
+    /// belongs on the paper — but it belongs to the moment the bearing was taken. Read
+    /// off the live log instead, the number on an hour-old line changes every time she
+    /// trims, which is a chart telling you something about the present through a mark
+    /// that is about the past. Written down here it stops moving, like ink.
+    Line {
+        through: glam::DVec2,
+        bearing: f64,
+        speed: Option<f64>,
+    },
     /// A mark at a point: a fix that has been entered in the log, or whatever the
     /// pencil was put down for — an estimated position, a danger, a place to come back
     /// to.
@@ -327,6 +338,42 @@ pub enum Plotted {
         to: glam::DVec2,
         minutes: f64,
     },
+}
+
+/// How much pencil a chart carries before it stops being a plot.
+///
+/// A dozen. Past that it is a scribble and the oldest of it is about water she left an
+/// hour ago — which is also why the oldest is what goes.
+const PAPER_HOLDS: usize = 12;
+
+impl Chart {
+    /// **The player's own hand**: a mark he has chosen to put at a place on the paper.
+    ///
+    /// Allowed whether or not she knows where she is, because none of it is a claim
+    /// about where she is — a danger ringed, a time written, a bearing laid off from a
+    /// charted mark and a leg ruled between two points are all things a lost navigator
+    /// does, and most of them are how he stops being lost.
+    pub fn pencil(&mut self, item: Plotted) {
+        self.plot.push(item);
+        if self.plot.len() > PAPER_HOLDS {
+            self.plot.remove(0);
+        }
+    }
+
+    /// **Anything worked out from her own position**, and the only door it comes
+    /// through.
+    ///
+    /// The one invariant this chart has is that it never draws a position she has not
+    /// established, and it has been broken twice by the same mistake: the ink was added
+    /// in one place and the condition on it lived in another. So the condition is a
+    /// parameter of the door. It can be answered wrongly, but it cannot be forgotten,
+    /// and there is one line to read to see what the answer was.
+    pub fn write_down(&mut self, item: Plotted, knows: bool) {
+        if !knows {
+            return;
+        }
+        self.pencil(item);
+    }
 }
 
 impl Default for Chart {
@@ -736,6 +783,7 @@ pub fn draw(
                                                 .x
                                                 .atan2(off.y)
                                                 .rem_euclid(std::f64::consts::TAU),
+                                            speed: nav.measured.map(|(knots, _)| knots),
                                         });
                                     }
                                     set_protractor = Some(None);
@@ -810,6 +858,7 @@ pub fn draw(
                                             .x
                                             .atan2(off.y)
                                             .rem_euclid(std::f64::consts::TAU),
+                                        speed: nav.measured.map(|(knots, _)| knots),
                                     });
                                 } else if chart.tool == Tool::Ruler {
                                     draw_on = Some(Plotted::Rule { from, to });
@@ -927,9 +976,9 @@ pub fn draw(
                 );
             }
 
-            reckoning(&table, &nav);
+            reckoning(&table, &nav, st.time);
 
-            plotted(&table, &chart, &nav, crossing_at, st.heading);
+            plotted(&table, &chart, crossing_at, st.heading);
 
             protractor(
                 &table,
@@ -1197,13 +1246,7 @@ pub fn draw(
         chart.dividers = None;
     }
     if let Some(item) = draw_on {
-        chart.plot.push(item);
-        // What a navigator would have on the chart and not a day's worth of pencil: past
-        // a dozen lines the plot is a scribble, and the oldest of them is about water she
-        // left an hour ago.
-        if chart.plot.len() > 12 {
-            chart.plot.remove(0);
-        }
+        chart.pencil(item);
     }
     if let Some(at) = rub_out {
         // Whatever is nearest, within a reasonable reach — which is what a rubber does:
@@ -1214,7 +1257,9 @@ pub fn draw(
             let d = match *item {
                 Plotted::Cross { at: c, .. } => (c - at).length(),
                 Plotted::Stamp { at: c, .. } => (c - at).length(),
-                Plotted::Line { through, bearing } => {
+                Plotted::Line {
+                    through, bearing, ..
+                } => {
                     let along = glam::DVec2::new(bearing.sin(), bearing.cos());
                     let off = at - through;
                     (off - along * off.dot(along)).length()
@@ -1613,7 +1658,7 @@ fn compass_rose(t: &Table) {
 ///
 /// Drawn whether or not the chart may say where she is, because none of it *is* where
 /// she is: it is what she worked out, which is hers to have.
-fn reckoning(t: &Table, nav: &crate::navigation::Navigation) {
+fn reckoning(t: &Table, nav: &crate::navigation::Navigation, when: f64) {
     // --- The reckoning ------------------------------------------------
     //
     // **The three lines a navigator draws between fixes**, and they are drawn
@@ -1638,23 +1683,67 @@ fn reckoning(t: &Table, nav: &crate::navigation::Navigation) {
             ink::TRACK,
         );
     }
-    if let Some(run) = nav.reckoning {
-        let from = t.to_screen(run.from);
-        let now = t.to_screen(run.at);
-        // Dashed, because a reckoning is not a track: it is an argument about
-        // where she must have got to, and paper says that with a broken line.
-        let span = now - from;
-        let steps = ((span.length() / 9.0) as usize).clamp(1, 240);
-        for i in (0..steps).step_by(2) {
-            let along_it = |k: usize| k as f32 / steps as f32;
-            t.p.line_segment(
-                [
-                    from + span * along_it(i),
-                    from + span * along_it((i + 1).min(steps)),
-                ],
-                egui::Stroke::new(1.1, ink::PEN),
+    if let Some(run) = nav.reckoning.as_ref() {
+        // **The legs, corner by corner.** The fix at one end, where she has got to at
+        // the other, and every alteration in between — because that is the shape of
+        // the thing she actually worked out, and because a leg she has finished has
+        // stopped moving and can therefore carry numbers. Run as one line it would say
+        // she had sailed straight since the fix, with its course and distance written
+        // at the running end, sliding along under the mark as she went: numbers about
+        // the present, on the one instrument that is not about the present.
+        let mut corners = Vec::with_capacity(run.altered.len() + 2);
+        corners.push((run.from, run.since));
+        corners.extend(run.altered.iter().copied());
+        corners.push((run.plotted_at(), when));
+        let live = corners.len() - 2;
+        let mut span = egui::vec2(0.0, -1.0);
+        for (leg, pair) in corners.windows(2).enumerate() {
+            let ((one, began), (then, ended)) = (pair[0], pair[1]);
+            let (a, b) = (t.to_screen(one), t.to_screen(then));
+            // Dashed, because a reckoning is not a track: it is an argument about
+            // where she must have got to, and paper says that with a broken line.
+            span = b - a;
+            let steps = ((span.length() / 9.0) as usize).clamp(1, 240);
+            for i in (0..steps).step_by(2) {
+                let along_it = |k: usize| k as f32 / steps as f32;
+                t.p.line_segment(
+                    [
+                        a + span * along_it(i),
+                        a + span * along_it((i + 1).min(steps)),
+                    ],
+                    egui::Stroke::new(1.1, ink::PEN),
+                );
+            }
+            if leg == live {
+                continue;
+            }
+            // A leg she has finished, with the two figures a navigator writes along
+            // one: the course she made good on it and how far she ran. Written where
+            // she sailed it and left there, which is the whole point of breaking the
+            // line — the water she has already crossed does not change its mind.
+            let off = then - one;
+            let course = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
+            let hours = ((ended - began) / 3_600.0).max(1e-6);
+            let miles = off.length() / 1_852.0;
+            t.p.text(
+                egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5) + egui::vec2(6.0, -5.0),
+                egui::Align2::LEFT_BOTTOM,
+                format!(
+                    "{:03.0}   {miles:.2} M   {:.1} kn",
+                    course.to_degrees(),
+                    miles / hours
+                ),
+                egui::FontId::monospace(9.0),
+                ink::PEN.gamma_multiply(0.85),
             );
+            // And a bar across the corner, so that the place she altered is a mark on
+            // the paper rather than a bend in a dashed line.
+            if span.length() > 1.0 {
+                let across = egui::vec2(-span.normalized().y, span.normalized().x) * 4.0;
+                t.p.line_segment([b + across, b - across], egui::Stroke::new(1.0, ink::PEN));
+            }
         }
+        let now = t.to_screen(run.plotted_at());
         // Where it says she is: a dot with a bar across it, which is how a dead
         // reckoning position is marked and how it is told apart at a glance from
         // the ringed dot of a fix.
@@ -1669,6 +1758,25 @@ fn reckoning(t: &Table, nav: &crate::navigation::Navigation) {
             [now + across, now - across],
             egui::Stroke::new(1.2, ink::PEN),
         );
+        // **And what the plot does not know yet.**
+        //
+        // The paper has been laying off a course she is no longer steering, so the mark
+        // is somewhere she certainly is not — and without a word on it that reads as a
+        // broken plot rather than as an unwritten log. It is the one number here that is
+        // about the navigator and not about the boat, and it goes away the moment the
+        // chart is spread, because spreading it is the work.
+        if run.unwritten.len() > 1 {
+            t.p.text(
+                now + egui::vec2(8.0, -8.0),
+                egui::Align2::LEFT_BOTTOM,
+                format!(
+                    "log not written up — {:.0} min",
+                    ((when - run.written_up) / 60.0).max(1.0)
+                ),
+                egui::FontId::monospace(9.0),
+                ink::BOAT,
+            );
+        }
         // **And the circle she is somewhere in**, drawn round the reckoning
         // rather than round the boat — which is the whole point of it. Round the
         // boat it would be a statement about the truth, and the truth is the one
@@ -1753,7 +1861,7 @@ fn what_she_knows(t: &Table, nav: &crate::navigation::Navigation, now: f64) {
                 left(nav.last_fix, 5_400.0).max(0.35),
             ));
         }
-        if let Some(run) = nav.reckoning {
+        if let Some(run) = nav.reckoning.as_ref() {
             lines.push((
                 format!("within  {:>5.2} M", run.spread / 1_852.0),
                 // Always current: it is the one line here that is *about* going
@@ -1858,13 +1966,7 @@ fn weather_on_the_chart(
 
 /// Everything the pencil has left on the paper: position lines and their bands, ruled
 /// legs, timed runs, times, fixes and crosses.
-fn plotted(
-    t: &Table,
-    chart: &Chart,
-    nav: &crate::navigation::Navigation,
-    crossing_at: Option<glam::DVec2>,
-    heading: f64,
-) {
+fn plotted(t: &Table, chart: &Chart, crossing_at: Option<glam::DVec2>, heading: f64) {
     // --- What is already on the chart --------------------------------
     //
     // On the table only. The folded chart is a glance — *where am I, what is
@@ -1872,7 +1974,11 @@ fn plotted(
     // square. Working belongs where there is room to work.
     for (i, item) in chart.plot.iter().enumerate() {
         match *item {
-            Plotted::Line { through, bearing } => {
+            Plotted::Line {
+                through,
+                bearing,
+                speed,
+            } => {
                 // Drawn the length a navigator draws one, which is not across the
                 // whole chart: a position line is a *pencil line near where you
                 // think you are*, long enough to cross the others and no longer.
@@ -1944,7 +2050,7 @@ fn plotted(
                     egui::FontId::monospace(9.0),
                     ink::PENCIL.gamma_multiply(0.7),
                 );
-                if let Some((knots, _)) = nav.measured {
+                if let Some(knots) = speed {
                     t.p.text(
                         middle + egui::vec2(6.0, -4.0),
                         egui::Align2::LEFT_BOTTOM,
@@ -2518,10 +2624,7 @@ pub fn work_the_watch(
             knows,
         );
         if let Some(line) = line {
-            chart.plot.push(line);
-            if chart.plot.len() > 12 {
-                chart.plot.remove(0);
-            }
+            chart.write_down(line, knows);
         }
         if let Some(speed) = speed {
             nav.measured = Some(speed);

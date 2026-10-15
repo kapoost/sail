@@ -118,15 +118,147 @@ pub struct Navigation {
 /// is — it is where she would be if the water had stood still and the helmsman had been
 /// perfect — and the whole art is knowing how much to trust it, which is what the
 /// circle round it is for.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Reckoning {
     /// The fix it was started from, and when.
     pub from: DVec2,
     pub since: f64,
-    /// Where the run has got to.
-    pub at: DVec2,
+    /// Where and when she altered course, as the log has it written up.
+    ///
+    /// **A reckoning is a sequence of courses, not a line**, and these are the corners
+    /// between them. A navigator keeps it as *this course for that long, then this
+    /// course* — each leg laid off from the end of the last — and a leg he has written
+    /// up has stopped moving, which is what makes it worth putting numbers beside.
+    pub altered: Vec<(DVec2, f64)>,
+    /// What she has sailed since the log was last written up: the course, the distance
+    /// run on it through the water, and the time she settled on it. Never empty — the
+    /// last of them is the leg she is on now.
+    ///
+    /// **This is the half of a reckoning the chart does not know yet.** The compass is
+    /// on the bulkhead and she knows perfectly well that she tacked; the *plot* does
+    /// not, because nobody has been to the chart table since. So the paper goes on
+    /// laying off the course it was last told, with the distance off the log, and the
+    /// pencil position walks away from the boat — which is not a bug in the plot, it is
+    /// what an unwritten log costs, and every navigator has stood looking at one.
+    pub unwritten: Vec<(f64, f64, f64)>,
+    /// When the log was last written up, for saying how old the plot is.
+    pub written_up: f64,
+    /// The head the leg she is on now was settled on, and how long her head has been
+    /// still. Both only so that an alteration can be told from a helmsman wandering.
+    pub steering: f64,
+    pub steady: f64,
     /// How far the last reckoning turned out to be wrong, for the circle. Metres.
     pub spread: f64,
+}
+
+impl Reckoning {
+    /// A reckoning started from a fix: the fix, the course she is on, and nothing run
+    /// on yet.
+    pub fn from_a_fix(at: DVec2, heading: f64, now: f64) -> Self {
+        Self {
+            from: at,
+            since: now,
+            altered: Vec::new(),
+            unwritten: vec![(heading, 0.0, now)],
+            written_up: now,
+            steering: heading,
+            steady: 0.0,
+            spread: 0.0,
+        }
+    }
+
+    /// Run her on one step: the course steered, the speed through the water, and what
+    /// the step is worth.
+    ///
+    /// Engine-free and takes six numbers, so that what a reckoning does to itself can
+    /// be asserted in a test instead of being sailed for twenty minutes to find out.
+    pub fn run_on(
+        &mut self,
+        heading: f64,
+        stw: f64,
+        yaw_rate: f64,
+        now: f64,
+        dt: f64,
+        unexplained: f64,
+    ) {
+        // The log counts on whatever course she happens to be on, which is the whole of
+        // what a log does.
+        if let Some(leg) = self.unwritten.last_mut() {
+            leg.1 += stw * dt;
+        }
+        // Accumulated rather than worked out from the clock, so that a stretch spent
+        // steering on a mark stays bought: the circle you did not grow while the tower
+        // was on the stem is a circle you do not grow later either.
+        self.spread += unexplained * dt;
+        // **A new course begins where her head stopped moving**, not where the helm went
+        // over: a tack takes fifteen seconds to come round and would otherwise be four
+        // legs a few metres long. Steady is what a navigator waits for before he writes
+        // the new course down.
+        self.steady = if yaw_rate.abs() < sail_core::units::rad(2.0) {
+            self.steady + dt
+        } else {
+            0.0
+        };
+        let turned = sail_core::units::wrap_pi(heading - self.steering);
+        if turned.abs() > ALTERATION && self.steady > SETTLED {
+            self.spread += THE_TURN * turned.abs();
+            self.steering = heading;
+            if self.altered.len() + self.unwritten.len() < CORNERS {
+                self.unwritten.push((heading, 0.0, now));
+            }
+        }
+    }
+
+    /// The last position the log has written down — the fix, or the last corner.
+    pub fn written(&self) -> DVec2 {
+        self.altered.last().map_or(self.from, |(at, _)| *at)
+    }
+
+    /// **Where the plot says she is**, which is not where the reckoning would put her if
+    /// anybody had written it up.
+    ///
+    /// Laid off from the last thing in the log, on the course the log was last told,
+    /// with every mile the log has counted since — including the miles she ran after
+    /// altering. That is what makes the pencil position drift away from her: the
+    /// distance is right and the direction is out of date.
+    pub fn plotted_at(&self) -> DVec2 {
+        let course = self.unwritten.first().map_or(self.steering, |(c, _, _)| *c);
+        let ran: f64 = self.unwritten.iter().map(|(_, ran, _)| ran).sum();
+        self.written() + DVec2::new(course.sin(), course.cos()) * ran
+    }
+
+    /// **Writing the log up**, which is what going to the chart table is.
+    ///
+    /// Every course she has sailed since the last visit, laid off in order from where
+    /// the log left her: the corners appear on the paper where they belong and the
+    /// pencil position stops lying. The compass knew all of this the whole time — the
+    /// paper did not, and this is the moment the two are reconciled.
+    ///
+    /// Costs nothing and changes nothing when there is nothing to write, so it can be
+    /// called on every frame the chart is open: *being at the chart table* is the
+    /// condition, not pressing anything.
+    pub fn write_up(&mut self, now: f64) {
+        self.written_up = now;
+        if self.unwritten.len() < 2 {
+            return;
+        }
+        let legs = std::mem::take(&mut self.unwritten);
+        let mut here = self.written();
+        for (i, (course, ran, _)) in legs.iter().enumerate() {
+            here += DVec2::new(course.sin(), course.cos()) * *ran;
+            // The end of a finished leg is a corner, and it is stamped with the moment
+            // she settled on the *next* course, because that is the time the alteration
+            // goes in the log against.
+            if let Some((_, _, settled)) = legs.get(i + 1) {
+                self.altered.push((here, *settled));
+            }
+        }
+        // The leg she is on survives the write-up with the distance it has already run,
+        // so that the plot carries on from the corner rather than from the fix.
+        if let Some(last) = legs.last() {
+            self.unwritten = vec![*last];
+        }
+    }
 }
 
 /// The set and leeway a passage is assumed to have before it has measured any.
@@ -146,6 +278,40 @@ const ASSUMED_SET: f64 = 0.17;
 /// fixes at noon carries a huge one.
 const KEEPS: f64 = 0.75;
 
+/// How far she has to come round before it is a new course rather than bad steering.
+///
+/// Twenty degrees. A deck log gets a new line at every alteration a navigator would
+/// call one, and below about fifteen degrees what he has is a helmsman, not a course —
+/// writing that down as a leg would break the line into a staircase of nothing.
+const ALTERATION: f64 = 0.349;
+
+/// How long her head has to be still before the corner goes on the paper.
+///
+/// The corner belongs where she **settled** on the new course, not where the helm went
+/// over: a tack takes fifteen seconds to come round and would otherwise leave four
+/// corners a few metres apart, which is a drawing of the turn rather than a plot of the
+/// passage. Four seconds of a steady head is what a navigator waits for before he
+/// writes the new course in the log.
+const SETTLED: f64 = 4.0;
+
+/// Metres of doubt a radian of alteration adds.
+///
+/// **This is leeway, not a tax on tacking.** Leeway is the biggest term in a reckoning
+/// that nothing aboard measures, and an alteration is exactly where it changes sign and
+/// size: she comes out of a tack slow, sails not yet trimmed and hull not yet footing,
+/// and makes ten or twelve degrees of it for the first minute instead of her steady
+/// four. At four knots that first minute is a little over twenty metres across the
+/// track — so a tack through ninety degrees is worth about twenty-five metres, and the
+/// figure is per radian turned because that is what the leeway actually scales with.
+const THE_TURN: f64 = 16.0;
+
+/// How many corners one page of plotting holds.
+///
+/// A reckoning is reset by every fix, so this many alterations without one is already a
+/// long time to have gone unfixed. Past it the line stops breaking rather than silently
+/// dropping the oldest corner — a leg she never sailed is worse than a leg not drawn.
+const CORNERS: usize = 24;
+
 /// Run the reckoning on, and grow the doubt.
 ///
 /// Integrated from **the course steered and the speed through the water**, which is what
@@ -155,6 +321,7 @@ const KEEPS: f64 = 0.75;
 pub fn reckon(
     sim: Res<Sim>,
     coast: Res<crate::marks::Coast>,
+    chart: Res<crate::chart::Chart>,
     mut nav: ResMut<Navigation>,
     time: Res<Time>,
 ) {
@@ -196,13 +363,22 @@ pub fn reckon(
         return;
     };
     let st = &sim.sim.state;
-    // Her head, and her speed through the water: the two numbers on the bulkhead.
-    let along = DVec2::new(st.heading.sin(), st.heading.cos());
-    run.at += along * sim.sim.telemetry.stw * dt;
-    // Accumulated rather than worked out from the clock, so that a stretch spent
-    // steering on a mark stays bought: the circle you did not grow while the tower was
-    // on the stem is a circle you do not grow later either.
-    run.spread += unexplained * dt;
+    run.run_on(
+        st.heading,
+        sim.sim.telemetry.stw,
+        st.yaw_rate,
+        st.time,
+        dt,
+        unexplained,
+    );
+    // **The plot is as old as your last visit to the chart table.** Spread the chart and
+    // the log gets written up — every alteration since you were last here laid off in
+    // order — because that is the work, and it is work you do sitting at the table with
+    // the compass you have been reading all along. Glance at the folded corner of it
+    // instead and you are looking at a plot that has not been told you tacked.
+    if chart.spread {
+        run.write_up(st.time);
+    }
 }
 
 /// What the screen says when the world has just been taken away from underneath her.
@@ -620,24 +796,30 @@ pub fn enter_in_the_log(
         // the leeway, the helmsman — as a speed. It is the only honest figure for how
         // fast the doubt grows, because it is hers, measured on this water on this day.
         let now = sim.sim.state.time;
-        if let Some(run) = nav.reckoning {
-            let ran_for = (now - run.since).max(1.0);
-            let out = (run.at - said).length() / ran_for;
+        // Entering a fix in the log is being at the chart table, so the log is written
+        // up before anything is measured against it: what the run was worth is a
+        // question about where the reckoning actually got her, not about where a plot
+        // nobody had brought up to date was pointing.
+        if let Some(run) = nav.reckoning.as_mut() {
+            run.write_up(now);
+        }
+        if let Some((since, ran_to)) = nav
+            .reckoning
+            .as_ref()
+            .map(|run| (run.since, run.plotted_at()))
+        {
+            let ran_for = (now - since).max(1.0);
+            let out = (ran_to - said).length() / ran_for;
             nav.learn_the_set(out);
             info!(
                 "the reckoning was {:.0} m out over {:.0} min — call it {:.2} kn of set",
-                (run.at - said).length(),
+                (ran_to - said).length(),
                 ran_for / 60.0,
                 sail_core::units::ms_to_kn(nav.unexplained)
             );
         }
         // And it starts again from here, which is what a fix is for.
-        nav.reckoning = Some(Reckoning {
-            from: said,
-            since: now,
-            at: said,
-            spread: 0.0,
-        });
+        nav.reckoning = Some(Reckoning::from_a_fix(said, sim.sim.state.heading, now));
         nav.fixes.push((said, now));
         // Six of them is an afternoon of plotting and as much line as a chart will carry
         // without becoming a drawing of itself.
@@ -653,10 +835,13 @@ pub fn enter_in_the_log(
         // And it goes on the chart where it was worked out, which is where a fix goes:
         // a cross, and the time beside it, so an hour later you can see what you were
         // working from.
-        chart.plot.push(crate::chart::Plotted::Cross {
-            at: said,
-            fix: true,
-        });
+        chart.write_down(
+            crate::chart::Plotted::Cross {
+                at: said,
+                fix: true,
+            },
+            nav.shows_position(now),
+        );
         // **And the time beside it, without being asked.**
         //
         // A fix with no time against it is a fix you cannot run on — run on from when? —
@@ -664,10 +849,13 @@ pub fn enter_in_the_log(
         // here. The watch tool exists for marking anything else; a fix stamps itself,
         // because there is exactly one moment it can mean.
         let below = DVec2::new(0.0, -(chart.range as f64) * 0.012);
-        chart.plot.push(crate::chart::Plotted::Stamp {
-            at: said + below,
-            hour,
-        });
+        chart.write_down(
+            crate::chart::Plotted::Stamp {
+                at: said + below,
+                hour,
+            },
+            nav.shows_position(now),
+        );
         info!(
             "fix entered: {:.0} m from where she is — the chart knows her again for six \
              minutes",
@@ -724,4 +912,175 @@ pub fn the_fix_holds(sim: Res<Sim>, coast: Res<crate::marks::Coast>, mut nav: Re
             range < reach * through_it
         })
         .count();
+}
+
+#[cfg(test)]
+mod the_reckoning {
+    use super::*;
+    use sail_core::units::rad;
+
+    /// Run her on for a stretch, steering what she is told, in steps a frame long.
+    ///
+    /// `yaw_rate` is worked out from the heading she is asked for rather than passed in,
+    /// because that is what the boat does: a head that is moving has a rate and a head
+    /// that is not has none, and a test that could set the two independently could
+    /// assert a corner the sim can never produce.
+    fn sail(run: &mut Reckoning, legs: &[(f64, f64)]) -> f64 {
+        let dt = 1.0 / 60.0;
+        let mut now = run.since + run.unwritten.iter().map(|(_, ran, _)| ran).sum::<f64>() / 2.5;
+        let mut was = run.steering;
+        for &(heading, seconds) in legs {
+            for _ in 0..(seconds / dt) as usize {
+                now += dt;
+                run.run_on(heading, 2.5, (heading - was) / dt, now, dt, ASSUMED_SET);
+                was = heading;
+            }
+        }
+        now
+    }
+
+    /// Coming round through ninety degrees the way she really does it: a few seconds of
+    /// turning, then steady on the new course.
+    fn tack_to(run: &mut Reckoning, to: f64, then_for: f64) -> f64 {
+        let from = run.steering;
+        let mut legs: Vec<(f64, f64)> = (1..=15)
+            .map(|k| (from + (to - from) * k as f64 / 15.0, 1.0))
+            .collect();
+        legs.push((to, then_for));
+        sail(run, &legs)
+    }
+
+    /// **The plot does not know she tacked until somebody tells it.**
+    ///
+    /// This is the whole of it. The compass has been on the bulkhead the entire time and
+    /// she knows exactly what she did; the paper goes on laying off the old course with
+    /// the new miles, so the pencil position walks away from her. Writing the log up
+    /// puts it where it belongs — and the distance it jumps is what the unwritten log
+    /// was worth.
+    #[test]
+    fn an_unwritten_log_leaves_the_plot_on_the_old_course() {
+        let mut run = Reckoning::from_a_fix(DVec2::ZERO, 0.0, 0.0);
+        sail(&mut run, &[(0.0, 300.0)]);
+        let now = tack_to(&mut run, rad(90.0), 600.0);
+        // Nobody has been to the chart table: one leg in the log, still running north.
+        assert!(run.altered.is_empty(), "no corner has been written yet");
+        let stale = run.plotted_at();
+        assert!(
+            stale.x.abs() < 1.0 && stale.y > 2_200.0,
+            "the plot is still running north: {stale:?}"
+        );
+        run.write_up(now);
+        let honest = run.plotted_at();
+        assert_eq!(run.altered.len(), 1, "one alteration goes in the log");
+        assert!(
+            honest.y > 700.0 && honest.y < 800.0 && honest.x > 1_400.0,
+            "written up, she is round the corner and running east: {honest:?}"
+        );
+        let cost = (honest - stale).length();
+        assert!(
+            cost > 1_500.0,
+            "ten minutes of unwritten log is a mile and a half of pencil error, got \
+             {cost:.0} m"
+        );
+    }
+
+    /// Writing up a log with nothing in it changes nothing.
+    ///
+    /// Which is what lets the chart write itself up on every frame it is open: *being at
+    /// the table* is the condition, and a condition that is cheap to satisfy does not
+    /// need a key of its own.
+    #[test]
+    fn writing_up_nothing_costs_nothing() {
+        let mut run = Reckoning::from_a_fix(DVec2::ZERO, rad(30.0), 0.0);
+        sail(&mut run, &[(rad(30.0), 400.0)]);
+        let before = run.plotted_at();
+        for k in 0..50 {
+            run.write_up(400.0 + k as f64);
+        }
+        assert!(run.altered.is_empty(), "there was no alteration to write");
+        assert!(
+            (run.plotted_at() - before).length() < 1e-9,
+            "the plot did not move"
+        );
+    }
+
+    /// A tack is a new leg, and it costs her something.
+    ///
+    /// The two halves of what a reckoning has to say about an alteration: the line
+    /// breaks where she settled on the new course, and the circle grows because her
+    /// leeway has just changed sign and nothing aboard measures it.
+    #[test]
+    fn a_tack_breaks_the_line_and_grows_the_circle() {
+        let mut run = Reckoning::from_a_fix(DVec2::ZERO, rad(40.0), 0.0);
+        sail(&mut run, &[(rad(40.0), 300.0)]);
+        let before = run.spread;
+        let now = tack_to(&mut run, rad(-50.0), 300.0);
+        run.write_up(now);
+        assert_eq!(run.altered.len(), 1, "one corner for one tack");
+        let grew = run.spread - before - ASSUMED_SET * 315.0;
+        assert!(
+            (20.0..35.0).contains(&grew),
+            "a tack through ninety is worth twenty-odd metres of doubt, not {grew:.0} m"
+        );
+    }
+
+    /// A helmsman is not an alteration.
+    ///
+    /// **This is the test the threshold exists for.** Nobody steers to the degree, and a
+    /// reckoning that put a corner on the paper every time she wandered would be a
+    /// staircase of legs a few metres long with a course written on each — which is
+    /// worse than one straight line, because it looks like information.
+    #[test]
+    fn wandering_is_not_a_new_course() {
+        let mut run = Reckoning::from_a_fix(DVec2::ZERO, 0.0, 0.0);
+        let legs: Vec<(f64, f64)> = (0..40)
+            .map(|i| (rad(if i % 2 == 0 { 12.0 } else { -12.0 }), 15.0))
+            .collect();
+        let now = sail(&mut run, &legs);
+        run.write_up(now);
+        assert!(
+            run.altered.is_empty(),
+            "twelve degrees either side of the course is a helmsman, not a leg — got {} \
+             corners",
+            run.altered.len()
+        );
+    }
+
+    /// The corner goes where she settled, not where the helm went over.
+    ///
+    /// A tack takes a quarter of a minute to come round, and in that time she runs a
+    /// hundred feet. Mark the corner at the first degree of the turn and the chart says
+    /// she altered before she did; mark it where her head stopped moving and it says
+    /// what the deck log says.
+    #[test]
+    fn the_corner_is_where_her_head_stopped() {
+        let mut run = Reckoning::from_a_fix(DVec2::ZERO, 0.0, 0.0);
+        let now = tack_to(&mut run, rad(88.0), 60.0);
+        run.write_up(now);
+        assert_eq!(run.altered.len(), 1, "one manoeuvre, one corner");
+        let (corner, _) = run.altered[0];
+        let ran = (corner - run.from).length();
+        assert!(
+            (25.0..80.0).contains(&ran),
+            "the corner belongs where she settled, about fifty metres on — not {ran:.0} m"
+        );
+    }
+
+    /// Ten minutes north is fifteen hundred metres north.
+    ///
+    /// The boring case, asserted because everything else here is about the plot being
+    /// wrong on purpose and something has to pin down that the arithmetic underneath it
+    /// is right.
+    #[test]
+    fn a_straight_run_is_one_leg() {
+        let mut run = Reckoning::from_a_fix(DVec2::ZERO, 0.0, 0.0);
+        sail(&mut run, &[(0.0, 600.0)]);
+        assert!(run.altered.is_empty());
+        assert!(
+            (run.plotted_at().y - 1_500.0).abs() < 10.0,
+            "ten minutes at two and a half metres a second is fifteen hundred metres, \
+             got {:.0}",
+            run.plotted_at().y
+        );
+    }
 }
