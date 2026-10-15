@@ -18,7 +18,6 @@
 //! first and the one ahead last.
 
 use bevy::prelude::*;
-use sail_core::fix::Sight;
 use sail_core::land::Mark;
 use sail_core::units::wrap_tau;
 
@@ -115,16 +114,19 @@ const NEARLY: f64 = 0.07;
 #[allow(clippy::too_many_arguments)]
 pub fn aim(
     keys: Res<ButtonInput<KeyCode>>,
+    sky: Res<crate::sky::Sky>,
+    mut log: ResMut<crate::chart::DeckLog>,
     mut view: ResMut<crate::camera::View>,
     buttons: Res<ButtonInput<MouseButton>>,
     sim: Res<Sim>,
     camera: Query<&GlobalTransform, With<crate::camera::MainCamera>>,
     mut sighting: ResMut<Sighting>,
-    mut nav: ResMut<Navigation>,
+    nav: Res<Navigation>,
     chart: Res<crate::chart::Chart>,
     coast: Res<crate::marks::Coast>,
     sound: Res<crate::sound::SoundHandle>,
 ) {
+    let hour = sky.hour;
     // **Shift and N has the compass in your hand; N shoots what is in the notch.**
     //
     // Asked for from the deck after the first arrangement, which put it down again after
@@ -335,18 +337,28 @@ pub fn aim(
                 let mut rng = sail_core::rng::Pcg32::new(seed);
                 let slip = (rng.next_f64() * 2.0 - 1.0) * sail_core::units::rad(swing);
                 let took = wrap_tau(off.x.atan2(off.y) + slip);
-                nav.sights.push(Sight {
-                    mark: mark.at,
-                    bearing: took,
-                    // Nothing run since: the line goes through the mark until she moves.
-                    ran: glam::DVec2::ZERO,
-                });
-                // Three is a fix and four is a navigator who has stopped sailing. The
-                // oldest goes, because it is the one taken from the furthest back — and
-                // a bearing taken five minutes ago is a bearing on water she has left.
-                if nav.sights.len() > 3 {
-                    nav.sights.remove(0);
-                }
+                // **Into the book, and onto the chart when he says so.**
+                //
+                // Taking a bearing and plotting it are two acts and a navigator does
+                // them minutes apart: you shoot three marks from the cockpit with the
+                // boat moving, and you go below and lay them off. Writing the second
+                // half for him made the chart fill with lines nobody had decided
+                // anything about — and made rubbing out a bad one a thing he could not
+                // do, because the pencil was not in his hand at any point.
+                //
+                // What makes plotting late *work* is the run stamped on the line: the
+                // page remembers how far she had gone through the water when the
+                // bearing was shot, so laying it off twenty minutes later transfers it
+                // by exactly the right distance.
+                log.write(
+                    hour,
+                    crate::chart::Wrote::Bearing {
+                        name: name.clone(),
+                        mark: mark.at,
+                        bearing: took,
+                        taken: nav.water_track,
+                    },
+                );
                 // **The chart draws the sights themselves.** A position line used to be
                 // copied into the plot as well, which made two of everything — a reading
                 // and a picture of it — and the picture had to be matched back to the
@@ -357,9 +369,8 @@ pub fn aim(
                 // to the chart table.
                 sighting.said = Some((
                     format!(
-                        "{name} {:03.0}° — {} of three",
-                        sail_core::units::deg(took).rem_euclid(360.0),
-                        nav.sights.len()
+                        "{name} {:03.0}° — in the log; plot it from the chart table",
+                        sail_core::units::deg(took).rem_euclid(360.0)
                     ),
                     true,
                 ));
@@ -642,10 +653,13 @@ const RECOGNISED_WITHIN: f64 = 900.0;
 pub fn recognise(
     keys: Res<ButtonInput<KeyCode>>,
     sim: Res<Sim>,
+    sky: Res<crate::sky::Sky>,
+    mut log: ResMut<crate::chart::DeckLog>,
     coast: Res<crate::marks::Coast>,
     sighting: Res<Sighting>,
     mut nav: ResMut<Navigation>,
 ) {
+    let hour = sky.hour;
     // Nothing happens until you ask. **B, with the glasses up, is the question *is this
     // enough to name where I am*** — and asking it is the act, rather than the game
     // quietly scanning the horizon for you.
@@ -720,7 +734,15 @@ pub fn recognise(
         let mut fresh: Vec<String> = Vec::new();
         for m in &readable {
             if !nav.recognised.contains(&m.name) {
-                nav.recognised.push(m.name.clone());
+                // Into the book. It reaches the chart when he turns to the table and
+                // says so, which is the same rule the bearings follow and for the same
+                // reason: what is on the paper is what somebody decided to put there.
+                log.write(
+                    hour,
+                    crate::chart::Wrote::Sighted {
+                        name: m.name.clone(),
+                    },
+                );
                 fresh.push(format!("{} {}", m.name, m.kind.abbreviation()));
             }
         }
@@ -789,11 +811,12 @@ pub fn recognise(
             let named: Vec<String> = group.iter().map(|m| m.name.clone()).collect();
             for name in &named {
                 if !nav.recognised.contains(name) {
-                    nav.recognised.push(name.clone());
+                    log.write(hour, crate::chart::Wrote::Sighted { name: name.clone() });
                 }
             }
             nav.reading = Some(format!(
-                "that is {} — {} and {} beyond it. Named on the chart.",
+                "that is {} — {} and {} beyond it. In the log; name them from the \
+                 chart table.",
                 named[0], named[1], named[2]
             ));
         }

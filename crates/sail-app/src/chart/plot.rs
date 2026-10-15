@@ -845,7 +845,7 @@ pub(crate) fn her_own_place(
 /// the point only when the button was pressed; believing it is a decision and decisions
 /// have a button.
 /// What the button under the fix is asking for this frame.
-pub(crate) enum Wrote {
+pub(crate) enum Pressed {
     /// A crossing the navigator says he believes.
     Fix(glam::DVec2),
     /// No crossing, and he wants the line written anyway — with whatever is known.
@@ -870,7 +870,7 @@ pub(crate) fn the_cocked_hat(
     nav: &crate::navigation::Navigation,
     log_button: egui::Rect,
     pressed: Option<egui::Pos2>,
-) -> Option<Wrote> {
+) -> Option<Pressed> {
     let got = sail_core::fix::plot(&nav.sights);
     if let Some(got) = got {
         let at = t.to_screen(got.at);
@@ -917,8 +917,8 @@ pub(crate) fn the_cocked_hat(
         return None;
     }
     Some(match got {
-        Some(got) => Wrote::Fix(got.at),
-        None => Wrote::WhatSheKnows,
+        Some(got) => Pressed::Fix(got.at),
+        None => Pressed::WhatSheKnows,
     })
 }
 

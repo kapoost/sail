@@ -230,6 +230,7 @@ fn main() {
         .init_resource::<fleet::Fleet>()
         .init_resource::<chart::Chart>()
         .init_resource::<chart::Track>()
+        .init_resource::<chart::DeckLog>()
         .init_resource::<world::SurfaceDrift>()
         .init_resource::<camera::ChaseState>()
         // The gear is drawn against the same seed as the weather, so a day worth

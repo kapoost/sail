@@ -52,6 +52,14 @@ pub struct Navigation {
     pub fixed_on: Vec<(glam::DVec2, sail_core::land::Mark)>,
     /// How many of them are in sight now, for the chart to say so.
     pub still_in_sight: usize,
+    /// How far she has run through the water since the game began, as a vector.
+    ///
+    /// **Not a position** — it is the sum of what the compass and the log have said,
+    /// which is a thing she has whether or not she knows where she is. Two of them
+    /// subtracted give the run between two moments, and that is what transfers a
+    /// position line: it is the only reason a bearing can be written in the book now
+    /// and plotted twenty minutes later.
+    pub water_track: glam::DVec2,
     /// The marks she has *recognised* — worked out through the glasses by the shape of
     /// the coast rather than told to her. Until a mark is on this list it is a symbol on
     /// the chart with no name, which is what an unidentified mark is.
@@ -358,6 +366,7 @@ fn note(
 pub fn write_up_the_log(
     sim: Res<Sim>,
     sky: Res<crate::sky::Sky>,
+    mut log: ResMut<crate::chart::DeckLog>,
     mut nav: ResMut<Navigation>,
     mut chart: ResMut<crate::chart::Chart>,
 ) {
@@ -387,6 +396,7 @@ pub fn write_up_the_log(
         .or_else(|| nav.reckoning.as_ref().map(|run| run.steering));
     let line = note(&sim, &nav, sky.hour, at, course);
     chart.pencil(crate::chart::Plotted::Entry(line));
+    log.write(sky.hour, crate::chart::Wrote::Entered { at });
     info!(
         "log written up at {:02.0}{:02.0}",
         sky.hour.floor(),
@@ -455,7 +465,8 @@ pub fn reckon(
     sim: Res<Sim>,
     coast: Res<crate::marks::Coast>,
     sky: Res<crate::sky::Sky>,
-    mut chart: ResMut<crate::chart::Chart>,
+    chart: Res<crate::chart::Chart>,
+    mut log: ResMut<crate::chart::DeckLog>,
     mut nav: ResMut<Navigation>,
     time: Res<Time>,
 ) {
@@ -501,6 +512,7 @@ pub fn reckon(
     // lighthouse on a long coast worth two bearings and a wait. Through the water,
     // because the compass and the log are what she has.
     let step = DVec2::new(heading.sin(), heading.cos()) * sim.sim.telemetry.stw * dt;
+    nav.water_track += step;
     for sight in nav.sights.iter_mut() {
         sight.ran += step;
     }
@@ -526,14 +538,16 @@ pub fn reckon(
     } else {
         None
     };
-    // **And one line in the book for it**, which is what a skipper does when he comes
-    // below: the course he is on, at the corner where he settled on it, with the glass
-    // and the sail plan beside it. Not one line per tack — a beat up a sound is twenty
-    // alterations and one entry.
-    if let Some((at, when, course)) = altered {
+    // **And one line in the book for it**, with the time she actually settled on the
+    // course rather than the time anybody noticed. Not one line per tack — a beat up a
+    // sound is twenty alterations and one entry in the book.
+    //
+    // In the book and not on the paper: writing it on the chart is a thing the navigator
+    // does, with the button that writes the log up, and the difference matters because
+    // ink that appears on a chart by itself is ink nobody can account for.
+    if let Some((_, when, course)) = altered {
         let hour = (sky.hour - ((st.time - when) / 3_600.0) as f32).rem_euclid(24.0);
-        let line = note(&sim, &nav, hour, at, Some(course));
-        chart.pencil(crate::chart::Plotted::Entry(line));
+        log.write(hour, crate::chart::Wrote::Altered { course });
     }
 }
 
@@ -591,6 +605,7 @@ impl Default for Navigation {
             sights: Vec::new(),
             fixed_on: Vec::new(),
             still_in_sight: 0,
+            water_track: glam::DVec2::ZERO,
             recognised: Vec::new(),
             reading: None,
             reckoning: None,
@@ -654,6 +669,7 @@ impl Navigation {
 pub fn cast_adrift(
     nav: &mut Navigation,
     chart: &mut crate::chart::Chart,
+    log: &mut crate::chart::DeckLog,
     track: &mut crate::chart::Track,
     now: f64,
 ) {
@@ -679,6 +695,11 @@ pub fn cast_adrift(
     // rather than where she is.
     chart.laid_at = Some(DVec2::ZERO);
     chart.plot.clear();
+    // And the book starts a new page. Every line in it was about water she is no longer
+    // in — bearings on marks that may not be on this coast at all, when the world has
+    // been changed under her — and a log book that carries them over is a log book that
+    // lies about the morning.
+    log.lines.clear();
     track.clear();
     // **And whatever was being measured is over.**
     //
@@ -781,6 +802,7 @@ pub fn adrift_card(
 pub fn lost_at_sea(
     keys: Res<ButtonInput<KeyCode>>,
     mut chart: ResMut<crate::chart::Chart>,
+    mut log: ResMut<crate::chart::DeckLog>,
     mut sim: ResMut<Sim>,
     mut nav: ResMut<Navigation>,
     mut track: ResMut<crate::chart::Track>,
@@ -879,7 +901,7 @@ pub fn lost_at_sea(
     sim.controls.jib_sheet = jib;
 
     let now = sim.sim.state.time;
-    cast_adrift(&mut nav, &mut chart, &mut track, now);
+    cast_adrift(&mut nav, &mut chart, &mut log, &mut track, now);
     pilot.disengage();
 
     info!(
@@ -906,6 +928,7 @@ pub fn lost_at_sea(
 pub fn enter_in_the_log(
     sim: Res<Sim>,
     sky: Res<crate::sky::Sky>,
+    mut log: ResMut<crate::chart::DeckLog>,
     coast: Res<crate::marks::Coast>,
     mut nav: ResMut<Navigation>,
     mut chart: ResMut<crate::chart::Chart>,
@@ -1028,6 +1051,7 @@ pub fn enter_in_the_log(
             crate::chart::Plotted::Entry(note(&sim, &nav, hour, said + below, None)),
             nav.shows_position(now),
         );
+        log.write(hour, crate::chart::Wrote::Entered { at: said });
         info!(
             "fix entered: {:.0} m from where she is — the chart knows her again for six \
              minutes",

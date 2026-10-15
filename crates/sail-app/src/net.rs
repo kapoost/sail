@@ -123,6 +123,7 @@ pub fn rebuild(
     mut track: ResMut<crate::chart::Track>,
     mut nav_state: ResMut<crate::navigation::Navigation>,
     mut chart: ResMut<crate::chart::Chart>,
+    mut log: ResMut<crate::chart::DeckLog>,
     old: Query<Entity, OfTheOldWorld>,
 ) {
     let Some(world) = net.rebuild.take() else {
@@ -163,7 +164,7 @@ pub fn rebuild(
     // inconvenience. The boat has already been put somewhere by the new simulation
     // above; this is the half that happens to the paper. See `navigation::cast_adrift`.
     let now = sim.sim.state.time;
-    crate::navigation::cast_adrift(&mut nav_state, &mut chart, &mut track, now);
+    crate::navigation::cast_adrift(&mut nav_state, &mut chart, &mut log, &mut track, now);
     info!(
         "sailing in seed {} now — and nobody knows where they are",
         world.seed

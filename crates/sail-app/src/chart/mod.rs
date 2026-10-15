@@ -22,10 +22,12 @@ use sail_core::land::OPEN_WATER;
 use crate::course::Course;
 use crate::sim::Sim;
 
+mod book;
 mod instruments;
 mod paper;
 mod plot;
 
+pub(crate) use book::*;
 pub(crate) use instruments::*;
 pub(crate) use paper::*;
 pub(crate) use plot::*;
@@ -758,6 +760,7 @@ pub fn draw(
     course: Res<Course>,
     track: Res<Track>,
     mut nav: ResMut<crate::navigation::Navigation>,
+    mut log: ResMut<DeckLog>,
     coast: Res<crate::marks::Coast>,
     sky: Res<crate::sky::Sky>,
     fleet: Res<crate::fleet::Fleet>,
@@ -805,6 +808,7 @@ pub fn draw(
     let mut explain: Option<bool> = None;
     let mut accept: Option<glam::DVec2> = None;
     let mut writing_up = false;
+    let mut laid: Option<usize> = None;
     let mut lay_at: Option<glam::DVec2> = None;
     let mut press_the_watch = false;
     let area = if spread {
@@ -906,8 +910,16 @@ pub fn draw(
                 egui::pos2(rect.right() - 62.0, rect.top() + 110.0),
                 egui::vec2(74.0, 18.0),
             );
+            // The book lies open beside the chart, down the right-hand side where
+            // there is paper to spare. Its rectangle joins the furniture, because a
+            // press on a page is not a press on the water under it.
+            let page = egui::Rect::from_min_max(
+                egui::pos2(rect.right() - 250.0, rect.top() + 140.0),
+                egui::pos2(rect.right() - 14.0, rect.bottom() - 150.0),
+            );
             let on_furniture = response.interact_pointer_pos().is_some_and(|at| {
-                furniture.iter().any(|slot| slot.contains(at))
+                page.contains(at)
+                    || furniture.iter().any(|slot| slot.contains(at))
                     || why_button.contains(at)
                     || log_button.contains(at)
                     || watch_face.contains(at)
@@ -992,9 +1004,13 @@ pub fn draw(
                 explain = explained;
             }
 
+            if let Some(line) = the_book(&table, &log, page, pressed) {
+                laid = Some(line);
+            }
+
             match the_cocked_hat(&table, &nav, log_button, pressed) {
-                Some(Wrote::Fix(at)) => accept = Some(at),
-                Some(Wrote::WhatSheKnows) => writing_up = true,
+                Some(Pressed::Fix(at)) => accept = Some(at),
+                Some(Pressed::WhatSheKnows) => writing_up = true,
                 None => {}
             }
 
@@ -1108,7 +1124,7 @@ pub fn draw(
     // stopwatch. Three states on one control because the face *is* the control: a hand
     // reaches for the watch, not for a row of buttons beside it.
     if press_the_watch {
-        work_the_watch(&mut chart, &mut nav, &sim, knows);
+        work_the_watch(&mut chart, &mut nav, &mut log, &sim, sky.hour, knows);
     }
     if let Some(measured) = asked.timed {
         nav.measured = Some(measured);
@@ -1147,6 +1163,17 @@ pub fn draw(
         // Handled by `navigation::enter_in_the_log`, which owns the question of whether
         // the fix was good enough to believe — the chart draws, it does not judge.
         chart.accepted = accept;
+    }
+    if writing_up {
+        // Likewise: the line is made where the glass, the sounder and the sails live.
+        chart.writing_up = true;
+    }
+    // A line of the book laid on the chart, or taken off it again — the pencil and the
+    // rubber, which is the whole of what this page does to the paper.
+    if let Some(line) = laid {
+        let mut over = chart.laid_at;
+        lay_it_on_the_chart(&mut log, &mut nav, &mut over, line);
+        chart.laid_at = over;
     }
     Ok(())
 }

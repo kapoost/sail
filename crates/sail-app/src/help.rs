@@ -126,8 +126,13 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             ("M", "the chart in the corner, and [ ] to zoom it"),
             (
                 "Shift M",
-                "spread on the table: dividers, ruler, parallel rule, pencil, watch, \
-                 log, rubber, and the fix",
+                "spread on the table: dividers, ruler, parallel rule, protractor, \
+                 pencil, watch, log, rubber, and the fix",
+            ),
+            (
+                " ",
+                "bearings and what you have made out go in the DECK LOG; click a line \
+                 there to lay it on the chart, and again to take it off",
             ),
             (
                 " ",

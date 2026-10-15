@@ -468,7 +468,9 @@ pub(crate) fn the_instruments(
 pub fn work_the_watch(
     chart: &mut Chart,
     nav: &mut crate::navigation::Navigation,
+    log: &mut DeckLog,
     sim: &Sim,
+    hour: f32,
     knows: bool,
 ) {
     let now = sim.sim.state.time;
@@ -493,6 +495,16 @@ pub fn work_the_watch(
         if let Some(speed) = speed {
             nav.measured = Some(speed);
             nav.measured_on = Some(sim.sim.state.heading);
+            // And in the book, with how good the reading was. A speed with no note of
+            // how carefully it was taken is a speed that will be believed exactly as
+            // much as a careful one.
+            log.write(
+                hour,
+                Wrote::Speed {
+                    knots: speed.0,
+                    slip: nav.log_slip,
+                },
+            );
             // How late the hand was, which is what the reading is worth.
             if let Some((_, when, _)) = chart.streaming {
                 nav.log_slip = ((now - when) - CAST).abs() / CAST;
@@ -533,13 +545,15 @@ pub fn work_the_watch(
 pub fn by_hand(
     keys: Res<ButtonInput<KeyCode>>,
     sim: Res<Sim>,
+    sky: Res<crate::sky::Sky>,
     mut chart: ResMut<Chart>,
     mut nav: ResMut<crate::navigation::Navigation>,
+    mut log: ResMut<DeckLog>,
 ) {
     let shifted = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     if !keys.just_pressed(KeyCode::KeyL) || shifted {
         return;
     }
     let knows = nav.shows_position(sim.sim.state.time);
-    work_the_watch(&mut chart, &mut nav, &sim, knows);
+    work_the_watch(&mut chart, &mut nav, &mut log, &sim, sky.hour, knows);
 }
