@@ -41,6 +41,18 @@ pub struct Chart {
     pub tool: Tool,
     /// What has been drawn on the chart with it.
     pub plot: Vec<Plotted>,
+    /// Where the paper is lying, if it is not simply following her.
+    ///
+    /// **A chart centred on the boat is a chart that says where the boat is** — which is
+    /// most of the exercise given away for nothing: recognise one mark and its position
+    /// relative to the middle of the paper is your own position, measured with a ruler.
+    /// Reported from the deck in one line.
+    ///
+    /// So while she is lost the paper lies where it is put, the way a chart on a table
+    /// does, and moving it is dragging it with the right button. When she knows where
+    /// she is it follows her again, because then it is a plotter and that is what a
+    /// plotter is for.
+    pub laid_at: Option<glam::DVec2>,
     /// A fix the navigator has just said he believes. Taken by `navigation` the same
     /// frame, which is what decides whether it was worth believing.
     pub accepted: Option<glam::DVec2>,
@@ -119,6 +131,7 @@ impl Default for Chart {
             dividers: None,
             tool: Tool::Dividers,
             plot: Vec::new(),
+            laid_at: None,
             accepted: None,
             // Two and a half miles each way: far enough to see the next island and the
             // one after it, close enough that a shoal is a shape rather than a dot.
@@ -232,6 +245,9 @@ pub fn draw(
     };
     let ctx = contexts.ctx_mut()?;
     let st = &sim.sim.state;
+    // Where the middle of the paper is: her position when the chart is following her,
+    // and wherever it was laid down when it is not.
+    let middle_of_paper = chart.laid_at.unwrap_or(st.pos);
 
     let screen = ctx.viewport_rect();
     let spread = chart.spread;
@@ -250,6 +266,7 @@ pub fn draw(
     let mut rub_out: Option<glam::DVec2> = None;
     let mut pick: Option<Tool> = None;
     let mut accept: Option<glam::DVec2> = None;
+    let mut lay_at: Option<glam::DVec2> = None;
     let area = if spread {
         egui::Area::new("chart".into()).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
     } else {
@@ -275,14 +292,14 @@ pub fn draw(
         // way. Getting this backwards puts every island on the wrong side of you,
         // which is the one mistake a chart must never make.
         let to_water = |s: egui::Pos2| -> glam::DVec2 {
-            st.pos
+            middle_of_paper
                 + glam::DVec2::new(
                     ((s.x - centre.x) / scale) as f64,
                     ((centre.y - s.y) / scale) as f64,
                 )
         };
         let to_screen = |w: glam::DVec2| -> egui::Pos2 {
-            let d = w - st.pos;
+            let d = w - middle_of_paper;
             egui::pos2(centre.x + d.x as f32 * scale, centre.y - d.y as f32 * scale)
         };
 
@@ -545,15 +562,19 @@ pub fn draw(
             }
         }
         if knows {
-            // The boat: a wedge pointing where she is pointing.
+            // The boat: a wedge pointing where she is pointing, drawn where she *is* on
+            // the paper rather than in the middle of it. Those are the same point only
+            // while the chart is following her, which it stops doing the moment she does
+            // not know where she is.
+            let her = to_screen(st.pos);
             let heading = st.heading as f32;
             let nose = egui::vec2(heading.sin(), -heading.cos());
             let beam = egui::vec2(-nose.y, nose.x);
             p.add(egui::Shape::convex_polygon(
                 vec![
-                    centre + nose * 9.0,
-                    centre - nose * 5.0 + beam * 4.0,
-                    centre - nose * 5.0 - beam * 4.0,
+                    her + nose * 9.0,
+                    her - nose * 5.0 + beam * 4.0,
+                    her - nose * 5.0 - beam * 4.0,
                 ],
                 ink::BOAT,
                 egui::Stroke::NONE,
@@ -561,7 +582,7 @@ pub fn draw(
             // And the bearing to the consignment, which is the line you are trying to
             // make good rather than the one you are sailing.
             let target = to_screen(course.target());
-            p.line_segment([centre, target], egui::Stroke::new(1.0, ink::MARK));
+            p.line_segment([her, target], egui::Stroke::new(1.0, ink::MARK));
         }
 
         // --- Dividers and a straight edge --------------------------------
@@ -601,6 +622,18 @@ pub fn draw(
             let on_furniture = response.interact_pointer_pos().is_some_and(|at| {
                 furniture.iter().any(|slot| slot.contains(at)) || log_button.contains(at)
             });
+
+            // Moving the paper. The right button drags the chart about under the
+            // instruments, which is what a hand does to a chart on a table and is the
+            // only way to look at water she is not in — the left button belongs to
+            // whatever is in your other hand.
+            if response.dragged_by(egui::PointerButton::Secondary) {
+                let moved = response.drag_delta();
+                lay_at = Some(
+                    middle_of_paper
+                        + glam::DVec2::new((-moved.x / scale) as f64, (moved.y / scale) as f64),
+                );
+            }
 
             // What a drag means depends on what is in your hand, which is how a chart
             // table works: the dividers measure, the rule plots, the pencil marks and
@@ -1024,6 +1057,9 @@ pub fn draw(
     if let Some(tool) = pick {
         chart.tool = tool;
         chart.dividers = None;
+    }
+    if let Some(at) = lay_at {
+        chart.laid_at = Some(at);
     }
     if let Some(_at) = accept {
         // Handled by `navigation::enter_in_the_log`, which owns the question of whether

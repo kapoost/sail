@@ -91,6 +91,7 @@ impl Navigation {
 /// gives. The exercise is navigation and nothing else, so nothing else is made difficult.
 pub fn lost_at_sea(
     keys: Res<ButtonInput<KeyCode>>,
+    mut chart: ResMut<crate::chart::Chart>,
     mut sim: ResMut<Sim>,
     mut nav: ResMut<Navigation>,
     mut track: ResMut<crate::chart::Track>,
@@ -198,6 +199,11 @@ pub fn lost_at_sea(
     nav.still_in_sight = 0;
     nav.recognised.clear();
     nav.reading = None;
+    // And the paper stops following her. Laid down over the middle of the archipelago,
+    // which tells her nothing she did not already have: it is where the chart is *of*
+    // rather than where she is.
+    chart.laid_at = Some(DVec2::ZERO);
+    chart.plot.clear();
     track.clear();
     pilot.disengage();
 
@@ -265,6 +271,9 @@ pub fn enter_in_the_log(
         nav.last_fix = sim.sim.state.time;
         nav.fixed_at = Some(said);
         nav.fixed_on = on.clone();
+        // The paper is laid over the fix, which is where a navigator puts it: you work
+        // where you are, and she sails across the page from there.
+        chart.laid_at = Some(said);
         // And it goes on the chart where it was worked out, which is where a fix goes:
         // a cross, and the time beside it, so an hour later you can see what you were
         // working from.

@@ -92,6 +92,10 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
                 "the chart on the table: dividers, rule, pencil, rubber, and the fix",
             ),
             (
+                " ",
+                "right-drag moves the paper — lost, it does not follow you about",
+            ),
+            (
                 "Shift L",
                 "somewhere at sea with the sails set and no idea where",
             ),
