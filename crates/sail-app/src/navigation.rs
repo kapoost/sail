@@ -829,6 +829,16 @@ pub fn enter_in_the_log(
         nav.last_fix = sim.sim.state.time;
         nav.fixed_at = Some(said);
         nav.fixed_on = on.clone();
+        // **And they are in sight, because she has just shot them.**
+        //
+        // Counting how many of the marks a fix stands on is another system's job and it
+        // runs on the next frame, so for one frame the count belonged to the *previous*
+        // fix — usually nought, which is why she was taking this one. Everything that
+        // asks whether the chart may say where she is was told no at the exact moment it
+        // learned where she was, and the cross and the time went on the paper through
+        // that answer: the fix appeared with no hour against it. Reported from the deck
+        // in those words. The marks were shot a second ago; this is not an assumption.
+        nav.still_in_sight = on.len();
         // The paper is laid over the fix, which is where a navigator puts it: you work
         // where you are, and she sails across the page from there.
         chart.laid_at = Some(said);

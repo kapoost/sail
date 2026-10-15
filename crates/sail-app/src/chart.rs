@@ -1683,6 +1683,20 @@ fn reckoning(t: &Table, nav: &crate::navigation::Navigation, when: f64) {
             ink::TRACK,
         );
     }
+    // **The reckoning is the half of navigation the fix cannot do — so it is drawn
+    // when the fix cannot do it.**
+    //
+    // While the chart can say where she is it says so, and a dashed argument about where
+    // she must have got to, laid alongside a leg she actually measured, is two lines
+    // within a pencil-width of each other carrying two sets of numbers about the same
+    // water. Reported from the deck as *two lines drawn for no reason*, and it is the
+    // right reading: the second one is not telling her anything she has not been told
+    // better. It is still run on underneath, every frame, so that the moment the last
+    // mark goes behind the headland the plot is already there — which is the moment it
+    // was always for.
+    if t.knows {
+        return;
+    }
     if let Some(run) = nav.reckoning.as_ref() {
         // **The legs, corner by corner.** The fix at one end, where she has got to at
         // the other, and every alteration in between — because that is the shape of
