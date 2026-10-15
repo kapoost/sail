@@ -43,6 +43,15 @@ pub struct Sighting {
     pub on: Option<(String, Mark, f64)>,
     /// The bearing the card is showing, radians true.
     pub bearing: f64,
+    /// What the instrument last said back, whether it was a sight taken or a sight
+    /// missed, and until when it stays on the screen.
+    ///
+    /// An instrument that answers is the whole of the difference between a key that
+    /// works and a key you are not sure about. A hand bearing compass answers by having
+    /// the number under the lubber line and the tower in the notch at the same moment —
+    /// you *see* that you got it. On a screen that moment has to be said out loud.
+    pub said: Option<(String, bool)>,
+    said_until: f64,
 }
 
 /// What the glasses are worth.
@@ -61,10 +70,21 @@ pub const GLASSES_REACH: f64 = 2.2;
 
 /// How near the notch has to be before you can say you are on it, radians.
 ///
-/// Two degrees and a half. A hand bearing compass has a notch and a prism and that is
-/// about the width of the notch at arm's length — which is also, not by coincidence,
-/// about the accuracy of the reading.
-const NOTCH: f64 = 0.044;
+/// **One degree and a quarter**, and it was two and a half. Narrowed because a notch
+/// you cannot miss is not a notch: the old one caught a tower from a yard either side
+/// of it, so a bearing was a key press rather than a thing you lined up, and lining it
+/// up is the entire skill the instrument exists to need. A real notch-and-prism is
+/// about this wide at arm's length, and holding it on a mark from a moving deck is
+/// genuinely a small act of steadiness.
+const NOTCH: f64 = 0.022;
+
+/// And how near counts as having nearly got it, radians.
+///
+/// Four degrees. Inside this she was *aiming at it* and missed, which is worth saying
+/// and worth saying differently from "there is nothing there" — a miss you are told
+/// about is a miss you correct, and a shot that quietly does nothing teaches that the
+/// key is broken.
+const NEARLY: f64 = 0.07;
 
 /// Raise and lower it, and read what it is on.
 #[allow(clippy::too_many_arguments)]
@@ -78,6 +98,7 @@ pub fn aim(
     mut nav: ResMut<Navigation>,
     mut chart: ResMut<crate::chart::Chart>,
     coast: Res<crate::marks::Coast>,
+    sound: Res<crate::sound::SoundHandle>,
 ) {
     // **Shift and N has the compass in your hand; N shoots what is in the notch.**
     //
@@ -161,9 +182,12 @@ pub fn aim(
     let shoot_key = keys.just_pressed(KeyCode::KeyN);
 
     // What is in the notch: the nearest thing you could actually name, within the width
-    // of the notch of the line you are looking down.
+    // of the notch of the line you are looking down. And, separately, whatever she was
+    // *nearly* on — which is not the same question and is the one that makes a miss
+    // worth something.
     let here = sim.sim.state.pos;
     let mut best: Option<(String, Mark, f64, f64)> = None;
+    let mut nearly: Option<(String, f64, bool)> = None;
     for mark in &coast.marks {
         let off = mark.at - here;
         let range = off.length();
@@ -175,14 +199,18 @@ pub fn aim(
         }
         let to_it = wrap_tau(off.x.atan2(off.y));
         let away = sail_core::units::wrap_pi(to_it - bearing).abs();
-        if away > NOTCH {
+        if away > NEARLY {
             continue;
         }
         // And when she does not know where she is, a mark is only nameable once it has
         // been *recognised* through the glasses: the chart has a symbol there and you
         // have a tower in front of you, and nothing joins them until you have read the
         // shape of the coast.
-        if nav.lost && !nav.recognised.contains(&mark.name) {
+        let nameable = !nav.lost || nav.recognised.contains(&mark.name);
+        if nearly.as_ref().is_none_or(|(_, b, _)| away < *b) {
+            nearly = Some((mark.name.clone(), away, nameable));
+        }
+        if !nameable || away > NOTCH {
             continue;
         }
         if best.as_ref().is_none_or(|(_, _, _, b)| away < *b) {
@@ -192,11 +220,41 @@ pub fn aim(
     sighting.on = best
         .as_ref()
         .map(|(name, kind, range, _)| (name.clone(), *kind, *range));
+    if sighting.said_until < sim.sim.state.time {
+        sighting.said = None;
+    }
 
     // And taking it. A click is the moment you read the card — the bearing is to what is
     // in the notch rather than to where the camera happens to point, because that is
     // what you did: you put the notch *on the lighthouse*.
     if buttons.just_pressed(MouseButton::Left) || shoot_key {
+        // **And it either catches or it does not, out loud.**
+        //
+        // Three ways to miss and they are three different mistakes, so they get three
+        // different answers: aiming a few degrees off a mark you could have had, aiming
+        // at something you have not identified yet — which is the whole of the lost
+        // exercise and must not look like a broken key — and aiming at open water.
+        if best.is_none() {
+            let (word, good) = match &nearly {
+                Some((_, away, false)) if *away <= NOTCH => (
+                    "that is on the chart but you cannot name it — the glasses first".to_string(),
+                    false,
+                ),
+                Some((name, away, _)) => (
+                    format!(
+                        "missed {name} by {:.1}° — hold the notch on it and take it \
+                         between seas",
+                        sail_core::units::deg(*away)
+                    ),
+                    false,
+                ),
+                None => ("nothing in the notch".to_string(), false),
+            };
+            sighting.said = Some((word, good));
+            sighting.said_until = sim.sim.state.time + 4.0;
+            sound.0.strike_damped(196.0, 0.16, 0.9);
+            return;
+        }
         if let Some((name, _, _, _)) = best {
             if let Some(mark) = coast.marks.iter().find(|m| m.name == name) {
                 let off = mark.at - here;
@@ -244,6 +302,19 @@ pub fn aim(
                     through: mark.at,
                     bearing: took,
                 });
+                // And she is told she got it, with the number she got — which is what a
+                // navigator writes in the book and the only part of this that survives
+                // to the chart table.
+                sighting.said = Some((
+                    format!(
+                        "{name} {:03.0}° — {} of three",
+                        sail_core::units::deg(took).rem_euclid(360.0),
+                        nav.sights.len()
+                    ),
+                    true,
+                ));
+                sighting.said_until = sim.sim.state.time + 4.0;
+                sound.0.strike_damped(784.0, 0.2, 0.85);
             }
         }
     }
@@ -452,6 +523,23 @@ pub fn draw(
         egui::FontId::monospace(11.0),
         ink,
     );
+    // And what the last press of the key did, which is the half of an instrument that a
+    // screen has to say and a real one does not: on the water the tower is in the notch
+    // and the number is under the lubber line and you can see for yourself that you have
+    // it. Above the card rather than below, where the eye already is for the number.
+    if let Some((said, got_it)) = &sighting.said {
+        painter.text(
+            egui::pos2(middle, strip.top() - 40.0),
+            egui::Align2::CENTER_BOTTOM,
+            said,
+            egui::FontId::monospace(14.0),
+            if *got_it {
+                egui::Color32::from_rgb(142, 214, 128)
+            } else {
+                egui::Color32::from_rgb(226, 118, 96)
+            },
+        );
+    }
     Ok(())
 }
 

@@ -89,7 +89,7 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             ),
             (
                 "N",
-                "and shoot what is in the notch — the line goes on the chart",
+                "and shoot: hold the notch *on* it, and it says whether it caught",
             ),
             (
                 "Shift M",
