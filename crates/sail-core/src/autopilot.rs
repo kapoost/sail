@@ -179,10 +179,6 @@ impl TillerPilot {
         load: f64,
         dt: f64,
     ) -> f64 {
-        /// Helm load the ram handles without noticing, newton-metres.
-        const EASY: f64 = 9_000.0;
-        /// And the load at which it has nothing left.
-        const OVERWHELMED: f64 = 24_000.0;
         /// How fast the ram swings the helm with nothing against it, rad/s.
         const RAM_RATE: f64 = 0.55;
 
@@ -197,7 +193,7 @@ impl TillerPilot {
         /// back* is, and a real pilot's alarm is an off-course alarm for that reason.
         const OFF_COURSE: f64 = 10.0 * std::f64::consts::PI / 180.0;
 
-        let capacity = 1.0 - smoothstep(EASY, OVERWHELMED, load.abs());
+        let capacity = 1.0 - smoothstep(EASY_HELM, OVERWHELMED_HELM, load.abs());
         let (kp, ki, kd) = cfg.pilot_gains();
         let raw = kp * error + ki * self.integral - kd * yaw_rate;
         // What it can hold, and what it can hold it at.
@@ -600,6 +596,17 @@ pub enum PilotMode {
     /// nudged, so there is one instruction and no mode to be in the wrong one of.
     ApparentWind { awa: f64, twa: f64 },
 }
+
+/// Helm load the ram handles without noticing, newton-metres.
+///
+/// Public because two things need the same number from opposite ends of the boat: the
+/// loop deciding what the ram can hold, and the hand on the mainsheet deciding how much
+/// sail to take off her. *Ease until the pilot can hold it* is a real instruction a crew
+/// gives, and this is the number it means — so it is one number rather than a constant
+/// in here and a guess over there.
+pub const EASY_HELM: f64 = 9_000.0;
+/// And the load at which the ram has nothing left.
+pub const OVERWHELMED_HELM: f64 = 24_000.0;
 
 /// A tiller pilot with a wind vane in the same box.
 #[derive(Clone, Debug)]

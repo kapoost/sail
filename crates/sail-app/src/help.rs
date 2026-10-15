@@ -38,7 +38,15 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
         "AT THE HELM",
         &[
             ("← →", "the tiller, and it holds the angle you leave it at"),
-            ("Space", "centre the helm"),
+            (
+                "Space",
+                "centre the helm, and bring the view back to where it looks",
+            ),
+            (
+                " ",
+                "with the pilot engaged it is the view only — the pilot has the helm, \
+                 and ← → or P are how you take it back",
+            ),
             ("Shift", "fine — hold it with anything for a smaller bite"),
             ("P", "autopilot on and off"),
             (
@@ -64,7 +72,14 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
                 " ",
                 "press again for the other — main first upwind, headsail off it",
             ),
-            ("R", "dump: hold it and the sheets run until she stands up"),
+            (
+                "R",
+                "dump: once eases until the deck is steady and the pilot can hold her",
+            ),
+            (
+                " ",
+                "again, or held, lets everything go — cloth flogging, and she stops",
+            ),
             (
                 "G",
                 "back the genoa — the only sail that can be: it stays there until you \

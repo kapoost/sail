@@ -30,6 +30,16 @@ use crate::sim::Sim;
 /// Dead zone on the sticks. Analog hardware drifts, and a drifting helm is maddening.
 const STICK_DEADZONE: f32 = 0.12;
 
+/// How far the stick has to go to take the helm off the pilot.
+///
+/// A quarter, which is a long way past the dead zone and nowhere near a real steer. The
+/// two numbers are different on purpose: the dead zone is what the helm *ignores*, and
+/// this is what counts as somebody deciding to steer. A pad whose stick rests a little
+/// off centre — which is most pads over a year old — otherwise disengages the autopilot
+/// the instant it is switched on, with a reason that reads like a lie because nobody
+/// touched anything.
+const TAKES_THE_HELM: f32 = 0.25;
+
 /// The autopilot, as a Bevy resource.
 ///
 /// A newtype only because `Resource` cannot be derived on a type from another crate —
@@ -67,6 +77,22 @@ impl Pilot {
             self.since_reason = 0.0;
         }
     }
+}
+
+/// What the dump is doing, between frames.
+///
+/// Two stages and not a held key, because they are two manoeuvres: one press gets her on
+/// her feet and keeps her sailing, a second — or a hand that stays on it — takes
+/// everything off and stops her. A stage latches until its job is done, so a tap does a
+/// whole job rather than a frame of one.
+#[derive(Default, PartialEq, Eq, Clone, Copy)]
+pub enum Dump {
+    #[default]
+    Off,
+    /// Easing until the deck is steady and the pilot is not being overrun.
+    Steadying,
+    /// Everything off. She will stop.
+    Letting,
 }
 
 /// Which device last touched the helm.
@@ -131,6 +157,8 @@ pub fn gather(
     mut helm_source: ResMut<HelmSource>,
     mut pilot: ResMut<Pilot>,
     mut assisting: Local<f32>,
+    mut dumping: Local<Dump>,
+    mut held_for: Local<f32>,
     mut stage: Local<u8>,
 ) {
     let dt = time.delta_secs_f64();
@@ -227,12 +255,26 @@ pub fn gather(
         sound.0.alarm();
     }
     // Touching the helm throws the pilot out, and says so.
+    //
+    // **Space is not touching the helm while the pilot has it**, and that was reported
+    // from the deck twice as "it keeps switching itself off and nothing says why". It
+    // was saying why — in the pilot's own box, in red — but the press that did it was
+    // not a press at the helm: `Space` is also the key that brings the camera back to
+    // where it was looking, which is a thing you do every time you put the glasses down.
+    // So a camera key was quietly undoing a course somebody had set up, and the message
+    // explaining it was about a helm they had not touched.
+    //
+    // Centring the helm with a machine holding it is not a manoeuvre anyway. The ram is
+    // clipped to the tiller; what you do when you want the helm is take it — the arrows,
+    // the stick, or `P` — and all three of those still throw the pilot out at once.
+    //
+    // And the stick has to *move*, not merely read something. A worn one sits a little
+    // off centre for ever, which past the dead zone is a pilot that cannot be engaged at
+    // all and a dropout a second with a reason that reads like a lie.
     if pilot.engaged() {
         if key_rate != 0.0 {
             pilot.drop_out("you took the helm");
-        } else if centring {
-            pilot.drop_out("you centred the helm");
-        } else if stick != 0.0 {
+        } else if stick.abs() > TAKES_THE_HELM {
             pilot.drop_out("the stick moved");
         }
     }
@@ -261,6 +303,292 @@ pub fn gather(
                     };
                 }
                 // Otherwise: left exactly where you put it.
+            }
+        }
+    }
+
+    // --- Mainsheet: a tackle you pull and hold, so absolute ---------------------
+    let sheet_rate = if fine { SHEET_FINE } else { SHEET_RATE };
+
+    let mut main_set = false;
+    if let Some(pad) = pad {
+        let y = deadzone(pad.get(GamepadAxis::RightStickY).unwrap_or(0.0));
+        if y != 0.0 {
+            // Stick forward eases, stick back hauls in — the direction your arm moves.
+            sim.controls.main_sheet = ((-y as f64) * 0.5 + 0.5).clamp(0.0, 1.0);
+            main_set = true;
+        }
+    }
+    if !main_set {
+        let mut way = 0.0;
+        if keys.pressed(KeyCode::KeyW) {
+            way -= 1.0; // haul in
+        }
+        if keys.pressed(KeyCode::KeyS) {
+            way += 1.0; // ease
+        }
+        if way != 0.0 {
+            // At a rate in **boom degrees**, not in sheet travel.
+            //
+            // Reported from the deck as the boom reacting too strongly when trimming by
+            // hand, and the reason is in the sheet's own curve: the chord angle goes with
+            // the square of the sheet, so a fixed fraction of travel a second swings the
+            // boom at about twenty degrees a second when it is hauled in and seventy when
+            // it is eased — the same key doing three different things depending on where
+            // you already are, and the fast end is exactly where a reach is trimmed.
+            //
+            // A hand on a tackle does not work like that. The tail comes in at the speed
+            // an arm pulls, which at a fixed purchase is a roughly constant angular rate
+            // at the boom. So the key asks for degrees and the sheet step is worked back
+            // through the profile's own slope — numerically, so that this stays right if
+            // anybody changes the curve.
+            let profile = &sim.config().main.profile;
+            let here = sim.controls.main_sheet;
+            let h = 1.0e-3;
+            let slope = ((profile.chord_angle((here + h).min(1.0))
+                - profile.chord_angle((here - h).max(0.0)))
+                / (2.0 * h))
+                .abs()
+                .max(rad(8.0));
+            let wanted = rad(if fine { BOOM_FINE } else { BOOM_RATE });
+            let step = way * (wanted / slope) * dt;
+            sim.controls.main_sheet = (sim.controls.main_sheet + step).clamp(0.0, 1.0);
+        }
+    }
+
+    // --- Genoa sheet: a winch, so a rate ---------------------------------------
+    let mut winch = 0.0;
+    if let Some(pad) = pad {
+        let grind = pad.get(GamepadButton::RightTrigger2).unwrap_or(0.0);
+        let ease = pad.get(GamepadButton::LeftTrigger2).unwrap_or(0.0);
+        winch += (ease - grind) as f64;
+    }
+    if keys.pressed(KeyCode::KeyQ) {
+        winch += 1.0; // ease
+    }
+    if keys.pressed(KeyCode::KeyE) {
+        winch -= 1.0; // grind in
+    }
+    if winch != 0.0 {
+        sim.controls.jib_sheet =
+            (sim.controls.jib_sheet + winch.clamp(-1.0, 1.0) * sheet_rate * dt).clamp(0.0, 1.0);
+    }
+
+    // --- The sail wardrobe ---------------------------------------------------
+    // Z and X walk through it: genoa, Code 0, gennaker. They used to be the engine's
+    // throttle, which is a fair trade — the boat has no engine and the thing you
+    // actually change on a passage is which sail is up.
+    //
+    // Only with the sail rolled away, because that is the only way it happens on a
+    // boat: you furl what is up, change it, and set the new one. A sail that teleports
+    // into a different sail while drawing would be the one piece of this rig that
+    // nobody could believe.
+    let mut step = 0i32;
+    if keys.just_pressed(KeyCode::KeyX) {
+        step += 1;
+    }
+    if keys.just_pressed(KeyCode::KeyZ) {
+        step -= 1;
+    }
+    if step != 0 {
+        if sim.controls.furl > 0.9 {
+            let order = [
+                Headsail::Genoa,
+                Headsail::Code0,
+                Headsail::Gennaker,
+                Headsail::Spinnaker,
+            ];
+            let at = order
+                .iter()
+                .position(|h| *h == sim.controls.headsail)
+                .unwrap_or(0) as i32;
+            let next = (at + step).clamp(0, order.len() as i32 - 1) as usize;
+            if order[next] != sim.controls.headsail {
+                sim.controls.headsail = order[next];
+                info!("bent on the {}", order[next].name());
+            }
+        } else {
+            info!("roll the headsail away first — furling line is on the bank");
+        }
+    }
+
+    // --- Trim assist: a crew on the sheets for five seconds -------------------
+    //
+    // It used to trim once, on the keypress, which is the one moment it is least use.
+    // The reason is the gybe: through a gybe the apparent wind swings across a hundred
+    // and something degrees in a few seconds, and a trim taken at the start of it is
+    // wrong before the boom has moved. What a crew does is *stay on the sheets* while
+    // the boat comes round, and that is what this does now — five seconds of somebody
+    // trimming, which is about as long as a gybe takes and not nearly long enough to
+    // sail the boat for you.
+    // --- Aback: the sheet on the wrong side, which is sometimes the right side -------
+    //
+    // A switch, not a key you hold down. It went in as a hold on the reasoning that it
+    // is a rope you have in your hand, and that is wrong about the rope: a backed sheet
+    // is made up on a cleat like every other sheet. Nobody stands there holding it — and
+    // the case it exists for is *heaving to*, where the whole point is that she looks
+    // after herself while you go below. A control you have to keep a finger on cannot
+    // express a boat left to lie for an hour.
+    //
+    // It is the only way out of irons and half of what it means to heave to. Head to
+    // wind with a genoa sheeted normally there is nothing to be done — the sail is at a
+    // negative angle of attack and luffs whatever you do with the helm — and the boat
+    // sits there going slowly backwards, which is a real and miserable state that this
+    // simulator could get into and not out of.
+    if keys.just_pressed(KeyCode::KeyG) || pad.is_some_and(|p| p.just_pressed(GamepadButton::East))
+    {
+        // **Only the genoa**, because it is the only sail aboard with a clew, a sheet
+        // and a side deck to hold it against. The sails set flying are tacked out on
+        // the sprit ahead of everything with nothing to back them onto, and the
+        // staysail's club boom goes across whatever anybody wants. The engine already
+        // ignores the flag for those — this is so that pressing the key says why
+        // instead of appearing to do something.
+        if sim.controls.headsail != sail_core::state::Headsail::Genoa {
+            info!("only the genoa can be backed — the rest are set flying");
+        } else if sim.controls.furl > 0.9 {
+            info!("the genoa is rolled away — there is nothing to back");
+        } else {
+            sim.controls.headsail_aback = !sim.controls.headsail_aback;
+            info!(
+                "{}",
+                if sim.controls.headsail_aback {
+                    "genoa backed — the clew is against the rail and she will pay off"
+                } else {
+                    "genoa sheeted across"
+                }
+            );
+        }
+    }
+
+    // --- Dump: the other half of the sheet, and the one you need in a hurry ---------
+    //
+    // `T` hauls towards the right trim. There was nothing that let it *go*, and letting
+    // it go is the thing you do first and fastest: a gust arrives, she lies over, and
+    // what a crew does is dump the mainsheet — not trim it correctly, dump it — and sort
+    // the shape out once she is on her feet again.
+    //
+    // Held rather than pressed, because that is what a hand on a clutch is. The rate is
+    // the sheet running out through the jammer and it is quick: a main can be dumped in
+    // a second and a half, which is the difference between a broach and a wobble.
+    //
+    // The mainsail first and then the headsail, which is the order that works and the
+    // order a crew uses. The main is up high with a long lever and it is the sail that
+    // spills cleanly: eased, it lets the top go first and the heeling moment comes off
+    // before the drive does. A headsail eased just stops working. So the main goes to
+    // the shrouds before the genoa is touched at all.
+    //
+    // It stops at the heel it is aiming for rather than running the sheets right out,
+    // and it never hauls anything back in — this is a release, and a control that both
+    // eased and trimmed would be `T` with a different name.
+    // The preventer. A toggle rather than a held key, because it is a rope somebody ties
+    // on and leaves: you rig it at the top of a long run and you take it off before you
+    // mean to gybe, and forgetting which of those you have done is part of the thing.
+    if keys.just_pressed(KeyCode::KeyF) {
+        sim.controls.preventer = !sim.controls.preventer;
+        info!(
+            "preventer {}",
+            if sim.controls.preventer {
+                "rigged — she will not gybe until it is off"
+            } else {
+                "off"
+            }
+        );
+    }
+
+    // **One press steadies her; a second, or holding it, lets everything go.**
+    //
+    // Asked for from the deck, and the two are different manoeuvres that happen to use
+    // the same hand. The first is what a crew does in a gust: dump enough to get her on
+    // her feet and keep sailing — and *enough* has a definition, because the thing you
+    // are easing against is the helm. Past a certain load the pilot is holding the
+    // rudder over instead of steering with it, and a boat whose autopilot is being
+    // overrun is a boat sailing itself off the course whatever the sails are doing. So
+    // the first press eases until she is upright and the helm load is back inside what
+    // the ram can hold, and then it stops — it does not keep running the sheets out
+    // because the key is still down.
+    //
+    // The second is what you do when you want to *stop*: everything off, both sheets to
+    // the knot, cloth flogging. Nobody sails like that and that is the point of it.
+    let dump_key =
+        keys.pressed(KeyCode::KeyR) || pad.is_some_and(|p| p.pressed(GamepadButton::West));
+    let dump_now = keys.just_pressed(KeyCode::KeyR)
+        || pad.is_some_and(|p| p.just_pressed(GamepadButton::West));
+    if dump_now {
+        *dumping = match *dumping {
+            // Already easing, and asked again: she is to stop.
+            Dump::Steadying => Dump::Letting,
+            _ => Dump::Steadying,
+        };
+        if *dumping == Dump::Letting {
+            info!("everything off — she will stop");
+        }
+    }
+    if dump_key {
+        *held_for += dt as f32;
+        // Held rather than tapped is the same instruction as pressing it twice, because
+        // a hand that stays on the clutch is a hand that means all of it.
+        if *held_for > 0.6 && *dumping == Dump::Steadying {
+            *dumping = Dump::Letting;
+            info!("everything off — she will stop");
+        }
+    } else {
+        *held_for = 0.0;
+    }
+    if *dumping != Dump::Off {
+        let heel = sim.sim.telemetry.heel.abs();
+        let over = ((heel - sail_core::autopilot::OVERPOWERED_HEEL)
+            / sail_core::autopilot::OVERPOWERED_HEEL)
+            .clamp(0.0, 1.0) as f32;
+        // **Is she steady enough to leave alone?**
+        //
+        // Two readings and both are hers rather than the sails': on her feet, and a
+        // helm the ram is not fighting. Eight tenths of the easy load leaves the pilot
+        // somewhere to go when the next gust arrives — stopping exactly on the line
+        // would be a boat that is overrun by the first puff after you let go of the key.
+        let helm_load = sim.sim.telemetry.weather_helm.abs();
+        let steady = heel <= sail_core::autopilot::OVERPOWERED_HEEL
+            && helm_load <= sail_core::autopilot::EASY_HELM * 0.8;
+        if *dumping == Dump::Steadying && steady {
+            *dumping = Dump::Off;
+            info!("that is the deck steady — she is sailing and the pilot can hold her");
+        } else {
+            // A second and a half of travel when she is right over, and still four
+            // seconds when she is barely past the mark — because a hand on a clutch
+            // does not meter the rope out in proportion to anything, it opens it. The
+            // proportional part is there so the last of it comes off gently instead of
+            // the sheet running out and the boom slamming against the shrouds.
+            //
+            // Letting her go runs at the full rate whatever she is doing: the point of
+            // it is not to depower, it is to stop, and a sheet that comes off slowly
+            // because the boat happens to be upright is a sheet that is no use for it.
+            let urgency = if *dumping == Dump::Letting {
+                1.0
+            } else {
+                0.35 + 0.65 * over
+            };
+            let run = (0.7 * urgency * dt as f32).min(1.0);
+            // The mainsail first and then the headsail, which is the order that works
+            // and the order a crew uses. The main is up high with a long lever and it
+            // is the sail that spills cleanly: eased, it lets the top go first and the
+            // heeling moment comes off before the drive does. A headsail eased just
+            // stops working. So the main goes to the shrouds before the genoa is
+            // touched at all.
+            let main_room = 1.0 - sim.controls.main_sheet as f32;
+            if main_room > 0.01 {
+                sim.controls.main_sheet = (sim.controls.main_sheet + run as f64).clamp(0.0, 1.0);
+            } else {
+                sim.controls.jib_sheet = (sim.controls.jib_sheet + run as f64).clamp(0.0, 1.0);
+            }
+            // And it takes the hands off whatever `T` was doing, or the two of them
+            // fight over the same winch.
+            *assisting = 0.0;
+            // Everything is out and she is flogging: the job is done and the key is
+            // free to mean "steady her" again next time.
+            if *dumping == Dump::Letting
+                && sim.controls.main_sheet > 0.999
+                && sim.controls.jib_sheet > 0.999
+            {
+                *dumping = Dump::Off;
             }
         }
     }
