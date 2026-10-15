@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 /// Bumped whenever a message changes shape. Two versions that disagree refuse each other
 /// at the handshake rather than at the first malformed snapshot, because "my friend's
 /// boat is in the sky" is a much worse afternoon than "you are both on different builds".
-pub const PROTOCOL: u16 = 2;
+pub const PROTOCOL: u16 = 3;
 
 /// Whether an address is on the same network as us, for the things that only make
 /// sense there.
@@ -304,7 +304,20 @@ pub enum ToServer {
         /// needs. Anybody who wants it can have it; they are welcome to come sailing.
         word: String,
     },
-    /// Shouted at the whole network rather than sent to anybody: is there a game here?
+    /// Asked of one address or shouted at the whole network: is there a game here, and
+    /// what is it?
+    ///
+    /// **The word comes with the question**, which is what makes it askable over the
+    /// internet at all. The reply is thirty times the size of the question and goes to
+    /// whatever address the question claims to come from, so answering strangers is a
+    /// reflector — see `on_our_own_network`. A server with a word on it answers whoever
+    /// says the word and nobody else; a server with no word answers its own network,
+    /// which is where shouting was ever going to reach.
+    ///
+    /// What it buys is the thing that was missing from joining a game over the
+    /// internet: you could type an address and press join, and if nothing happened you
+    /// had no way of telling a closed port from a wrong word from a server that was not
+    /// running. Now you can knock first.
     ///
     /// The clients ask and the servers answer, rather than the servers announcing
     /// themselves to a fixed port and the clients listening on it. Which way round this
@@ -312,7 +325,9 @@ pub enum ToServer {
     /// the game on one machine then cannot both have it, and the first thing anybody does
     /// when testing this is run two copies on one machine. Asking from an ephemeral port
     /// and being answered unicast has neither problem and needs no second port.
-    WhoIsThere,
+    WhoIsThere {
+        word: String,
+    },
     /// Fifteen times a second, and nothing else from here on.
     Here {
         id: BoatId,

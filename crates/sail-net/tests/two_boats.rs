@@ -137,7 +137,9 @@ fn a_server_says_it_is_there() {
     socket
         .set_read_timeout(Some(Duration::from_millis(400)))
         .unwrap();
-    let ask = sail_net::encode(&sail_net::ToServer::WhoIsThere);
+    let ask = sail_net::encode(&sail_net::ToServer::WhoIsThere {
+        word: String::new(),
+    });
     let mut buf = [0u8; 2048];
     let until = Instant::now() + Duration::from_secs(5);
     let mut found = None;
@@ -251,4 +253,60 @@ fn a_client_finds_its_way_back_after_the_server_restarts() {
     // id at all, by the handshake above rather than by the number.
     assert!(boat.id.is_some(), "rejoined without an id");
     let _ = was;
+}
+
+/// **Knocking before joining**, which is the half of a lobby that matters over the
+/// internet: the question carries the word, and a server that does not hear the right
+/// one says nothing at all rather than becoming a reflector.
+#[test]
+fn you_can_knock_on_a_game_before_joining_it() {
+    let port = 7796;
+    let word = std::env::temp_dir().join("sail-test-knock");
+    std::fs::write(&word, "two bells\n").expect("a writable temp dir");
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_sail-server"))
+            .args([
+                "--port",
+                &port.to_string(),
+                "--seed",
+                "7",
+                "--word-file",
+                word.to_str().expect("a sane temp path"),
+            ])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("the server binary"),
+    );
+    let at = format!("127.0.0.1:{port}");
+
+    let knock = sail_net::discovery::Probe::begin(&at, "two bells");
+    let until = Instant::now() + Duration::from_secs(8);
+    let mut answer = None;
+    while Instant::now() < until && answer.is_none() {
+        answer = knock.answer();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    match answer.expect("the probe never answered at all") {
+        Ok(found) => assert_eq!(found.seed, 7, "it described the game it is offering"),
+        Err(why) => panic!("the word was right and it would not say what it is: {why}"),
+    }
+
+    // And with the wrong word: silence, then a sentence a person can act on. Silence
+    // rather than a refusal is the point — a refusal is a packet, and a packet sent to
+    // whoever asked is the amplifier this is all about.
+    let stranger = sail_net::discovery::Probe::begin(&at, "three bells");
+    let until = Instant::now() + Duration::from_secs(8);
+    let mut answer = None;
+    while Instant::now() < until && answer.is_none() {
+        answer = stranger.answer();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    match answer.expect("the probe never gave up") {
+        Ok(found) => panic!("it told a stranger about the game: {}", found.game),
+        Err(why) => assert!(
+            why.contains("word"),
+            "the first thing to check is the word, and it did not say so: {why}"
+        ),
+    }
+    let _ = std::fs::remove_file(&word);
 }

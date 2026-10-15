@@ -215,17 +215,22 @@ fn main() -> std::io::Result<()> {
                     });
                     let _ = socket.send_to(&welcome, from);
                 }
-                ToServer::WhoIsThere => {
-                    // **Only to the network we are on.** One byte in, thirty out, to
-                    // whatever address the shout claims to come from: on a public
-                    // address that is a reflector with a thirty-times gain, and the
-                    // first thing it costs is the provider null-routing the machine —
-                    // with everything else on it. See `on_our_own_network`.
+                ToServer::WhoIsThere { word: said } => {
+                    // **Who gets an answer**, which is the whole of the reflector
+                    // question. The reply is thirty times the size of the question and
+                    // goes to whatever address the question claims to come from, so
+                    // answering strangers is a thirty-times amplifier — and the first
+                    // thing that costs is the provider null-routing the machine, with
+                    // everything else on it.
                     //
-                    // Nothing is lost by it. Discovery exists so a game on the wifi
-                    // turns up in a list without anybody typing an address, and a
-                    // broadcast has never crossed a router in its life.
-                    if !on_our_own_network(from.ip()) {
+                    // Two ways to deserve an answer and no third. Say the word, which is
+                    // how somebody knocks on a game across the internet before joining
+                    // it. Or be on this network and be asking a game that has no word on
+                    // it, which is the wifi case discovery was built for — a broadcast
+                    // has never crossed a router in its life.
+                    let knows = !word.is_empty() && said == word;
+                    let at_home = word.is_empty() && on_our_own_network(from.ip());
+                    if !knows && !at_home {
                         continue;
                     }
                     // Answered unicast, straight back to whoever shouted. The name is

@@ -559,7 +559,15 @@ sail-server --seed 42          # on one machine
 Everybody else presses `Esc` and opens the **TOGETHER** page: a game on the same network
 is in the list, because an address read out over a chat window is wrong about a third of
 the time. The world comes from whoever is hosting — join and you are in their
-archipelago, their weather and their time of day.
+archipelago, their weather and their time of day. Everybody's boat is on the chart with
+a name beside it, which is the only place "where is everybody" has a useful answer.
+
+A game on a server rather than a laptop has an address and a **word**, and both go in
+that page. **KNOCK** asks what is there without joining it — the game, how many are
+aboard, which sea — and when nothing answers it says which of the three things it is:
+the word, the port, or a server that is not running. All three used to look identical
+and all three are different evenings. The address and the word are remembered between
+sessions.
 
 Over the internet the same thing works with the host's address typed in, and the
 least-work answer is one Tailscale network between friends: no port forwarding and no

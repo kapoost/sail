@@ -38,6 +38,12 @@ pub struct Net {
     /// it travels in the clear — so it is kept with the address rather than treated as
     /// a credential, and it is never written to the log.
     pub word: String,
+    /// Knocking on one typed address, and what came back. Not the same thing as the
+    /// scan: the scan shouts at the wifi, this asks a server somewhere by name.
+    pub probe: Option<sail_net::discovery::Probe>,
+    /// What the knock found, kept after the probe is dropped so the answer stays on the
+    /// screen rather than flashing past.
+    pub knocked: Option<Result<sail_net::discovery::Found, String>>,
     /// Looking for games on this network, while the panel's page is open. Dropping it
     /// stops the thread.
     pub scan: Option<sail_net::discovery::Scan>,
@@ -46,14 +52,27 @@ pub struct Net {
 }
 
 pub fn setup(mut commands: Commands) {
+    // What the last session was sailing on. An address and a word retyped every time is
+    // the kind of friction that quietly ends a thing like this.
+    let (remembered_name, address, word) = crate::remembered::read();
     let mut net = Net {
-        name: std::env::var("SAIL_NAME").unwrap_or_else(|_| whoami()),
+        name: std::env::var("SAIL_NAME").unwrap_or_else(|_| {
+            if remembered_name.is_empty() {
+                whoami()
+            } else {
+                remembered_name.clone()
+            }
+        }),
+        address,
+        word,
         ..Default::default()
     };
     if let Ok(server) = std::env::var("SAIL_JOIN") {
         let name = net.name.clone();
         net.address = server.clone();
-        net.word = std::env::var("SAIL_WORD").unwrap_or_default();
+        if let Ok(word) = std::env::var("SAIL_WORD") {
+            net.word = word;
+        }
         let word = net.word.clone();
         match Link::join(&server, &name, &word) {
             Ok(link) => {

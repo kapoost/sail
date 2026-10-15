@@ -118,6 +118,7 @@ pub fn toggle(
     keys: Res<ButtonInput<KeyCode>>,
     mut settings: ResMut<Settings>,
     mut help: ResMut<crate::help::Help>,
+    net: Res<crate::net::Net>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
@@ -126,6 +127,13 @@ pub fn toggle(
         help.open = false;
     } else {
         settings.open = !settings.open;
+        // On the way out, remember where the game was. Here rather than on every
+        // keystroke in the box: closing the panel is the moment somebody has finished
+        // changing their mind, and a file written sixty times a second while a person
+        // types an address is a file waiting to be found half-written.
+        if !settings.open {
+            crate::remembered::write(&net.name, &net.address, &net.word);
+        }
     }
 }
 
@@ -562,6 +570,13 @@ fn together(
 ) {
     heading(ui, "SAILING TOGETHER");
 
+    // Whatever the knock has turned up, taken out of the thread and kept. The probe is
+    // dropped with it: a question that has been answered is not a question any more.
+    if let Some(answer) = net.probe.as_ref().and_then(|p| p.answer()) {
+        net.knocked = Some(answer);
+        net.probe = None;
+    }
+
     match (&net.link, net.joined) {
         (Some(_), true) => {
             let n = fleet.boats.len();
@@ -681,6 +696,24 @@ fn together(
                 {
                     join(net);
                 }
+                // **Knock first.**
+                //
+                // A game on the wifi is in the list above and needs none of this. A game
+                // on a server somewhere is an address somebody read out, and pressing
+                // join on a wrong one used to do nothing whatever — no telling a shut
+                // port from a wrong word from a machine that is switched off. Three
+                // different evenings and the same silence for all of them.
+                if ui
+                    .add_enabled(typed, egui::Button::new("KNOCK"))
+                    .on_hover_text("ask what is there, without joining it")
+                    .clicked()
+                {
+                    net.knocked = None;
+                    net.probe = Some(sail_net::discovery::Probe::begin(
+                        &with_port(&net.address),
+                        &net.word,
+                    ));
+                }
             });
             // And the word, for a game that is not on this network.
             //
@@ -707,6 +740,37 @@ fn together(
                      will not have one",
                 );
             });
+            // Whatever the knock found, or that it is still knocking.
+            if net.probe.is_some() && net.knocked.is_none() {
+                ui.label(
+                    egui::RichText::new("knocking…")
+                        .color(egui::Color32::from_rgb(150, 150, 130))
+                        .monospace()
+                        .size(10.0),
+                );
+            }
+            match &net.knocked {
+                Some(Ok(found)) => {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} — {} aboard, sea {}",
+                            found.game, found.players, found.seed
+                        ))
+                        .color(egui::Color32::from_rgb(150, 200, 150))
+                        .monospace()
+                        .size(10.0),
+                    );
+                }
+                Some(Err(why)) => {
+                    ui.label(
+                        egui::RichText::new(why)
+                            .color(egui::Color32::from_rgb(210, 140, 120))
+                            .monospace()
+                            .size(10.0),
+                    );
+                }
+                None => {}
+            }
         }
     }
 
@@ -721,17 +785,27 @@ fn together(
     }
 }
 
+/// What a typed address means, in the one place that decides it.
+///
+/// A bare name or number is the commonest thing to type and the port is fixed anyway,
+/// so it gets one. Here rather than inside `join` because the knock has to ask the same
+/// address the join would use — two readings of the same box is how a game answers a
+/// knock and then refuses the join.
+fn with_port(typed: &str) -> String {
+    let typed = typed.trim();
+    if typed.contains(':') {
+        typed.to_string()
+    } else {
+        format!("{typed}:{}", sail_net::PORT)
+    }
+}
+
 fn join(net: &mut crate::net::Net) {
     if net.address.trim().is_empty() {
         net.trouble = "nothing to join: pick a game above, or type an address".into();
         return;
     }
-    let address = if net.address.contains(':') {
-        net.address.trim().to_string()
-    } else {
-        // A bare address is the commonest thing to type and the port is fixed anyway.
-        format!("{}:{}", net.address.trim(), sail_net::PORT)
-    };
+    let address = with_port(&net.address);
     net.trouble.clear();
     match sail_net::link::Link::join(&address, &net.name, &net.word.clone()) {
         Ok(link) => {

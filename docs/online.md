@@ -107,10 +107,29 @@ are two honest answers for a game with this many players:
    one tailnet, and the LAN build works unchanged over the internet with encryption and
    no port forwarding. Zero lines of code. This is the recommendation: it is what the
    problem is actually worth.
-2. **A small relay** — a four-euro VPS running `sail-server` with a public address. About
-   a hundred and fifty lines beyond M2 (a token so strangers do not wander in, and a
-   lobby that lists running passages). Worth doing if friends will not install anything,
-   or if the game ever wants to be joined from a link.
+2. **A small relay** — a four-euro VPS running `sail-server` with a public address, or a
+   machine somebody already rents for something else. **Done, on 15 October**, and it
+   came to rather less than the hundred and fifty lines guessed at here:
+
+   * a *word* on the door — `--word-file` or `SAIL_WORD`, never an argument, because
+     `/proc/<pid>/cmdline` is readable by every user on the machine;
+   * a guard on the beacon, which was a thirty-times UDP amplifier the moment it had a
+     public address: it answers whoever says the word, and otherwise only its own
+     network;
+   * a knock — ask one address what game is there before joining it, and be told which
+     of the three silences it is when nothing answers;
+   * a client that knocks again after six seconds of nothing, because a server that
+     restarts used to leave everybody sending snapshots to an id it had never issued;
+   * `dist/sail-server.service` and `dist/install-server.sh`, and a Linux build in the
+     release — static against musl, x86 and ARM.
+
+   Measured on the machine it now runs on: 412 kB of memory and a third of a second of
+   processor since it started. Eight boats is 91 kB a second out of the server and 13 GB
+   a month at forty hours a week.
+
+   What a lobby in the fuller sense would add — several passages on one server, a list
+   of them, joining from a link — is not here and is not obviously wanted: a word and an
+   address is what friends actually exchange.
 
 NAT hole-punching is the third answer and it is not worth it here: it is the hardest part
 of multiplayer networking and it exists to avoid renting a server, which at this scale is

@@ -269,6 +269,7 @@ pub fn draw(
     nav: Res<crate::navigation::Navigation>,
     coast: Res<crate::marks::Coast>,
     sky: Res<crate::sky::Sky>,
+    fleet: Res<crate::fleet::Fleet>,
 ) -> Result {
     if !chart.open {
         return Ok(());
@@ -629,6 +630,50 @@ pub fn draw(
             // make good rather than the one you are sailing.
             let target = to_screen(course.target());
             p.line_segment([her, target], egui::Stroke::new(1.0, ink::MARK));
+
+            // **And everybody else.**
+            //
+            // Until now the only place another boat appeared was a list of names in the
+            // settings panel with a distance beside each — which answers "how far" and
+            // not the question anybody actually has, which is *where*. A fleet on a
+            // chart is the oldest answer to it and it costs one wedge each.
+            //
+            // Hollow rather than filled, so your own boat is still the one the eye finds
+            // first on a page with five of them on it, and named on the table where
+            // there is room for the lettering. Not on the folded chart: at two inches
+            // square a name is a smudge across an island.
+            //
+            // Only when she knows where she is, like everything else here — a chart that
+            // will not say where *you* are cannot say where your friends are either, or
+            // the exercise is over the moment somebody else joins.
+            for boat in &fleet.boats {
+                let at = glam::DVec2::new(boat.drawn.pos[0] as f64, boat.drawn.pos[1] as f64);
+                let them = to_screen(at);
+                if !rect.contains(them) {
+                    continue;
+                }
+                let heading = boat.drawn.heading;
+                let nose = egui::vec2(heading.sin(), -heading.cos());
+                let beam = egui::vec2(-nose.y, nose.x);
+                p.add(egui::Shape::convex_polygon(
+                    vec![
+                        them + nose * 8.0,
+                        them - nose * 4.5 + beam * 3.5,
+                        them - nose * 4.5 - beam * 3.5,
+                    ],
+                    egui::Color32::TRANSPARENT,
+                    egui::Stroke::new(1.3, ink::BOAT),
+                ));
+                if spread && !boat.name.is_empty() {
+                    p.text(
+                        them + egui::vec2(10.0, -2.0),
+                        egui::Align2::LEFT_CENTER,
+                        &boat.name,
+                        egui::FontId::monospace(10.0),
+                        ink::BOAT,
+                    );
+                }
+            }
         }
 
         // --- Dividers and a straight edge --------------------------------
