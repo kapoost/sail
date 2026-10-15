@@ -58,9 +58,84 @@ pub struct Navigation {
     pub recognised: Vec<String>,
     /// What the glasses last made of what they are looking at, for the player to read.
     pub reading: Option<String>,
+    /// The reckoning: where she *ought* to be, run on from the last fix.
+    pub reckoning: Option<Reckoning>,
+    /// The fixes she has entered in the log, in order, with their times. Joined on the
+    /// chart by a solid line, which is the one line on that paper that is not an
+    /// estimate of anything — two positions she worked out and the water between them.
+    pub fixes: Vec<(DVec2, f64)>,
+    /// Metres a second of movement the reckoning does not account for, learned from how
+    /// far out the last run was.
+    ///
+    /// **Which is the honest way to draw a circle of uncertainty.** A radius picked by
+    /// the programmer is a decoration; a radius measured from your own last mistake is
+    /// navigation. Every time a fix lands on top of a reckoning that was run from the
+    /// one before it, the distance between them, divided by the time it took, is the
+    /// set and the leeway and the steering error added together — and that number,
+    /// multiplied by how long it has been since the last fix, is how big the circle is
+    /// now. Start it at a third of a knot, which is a modest tidal stream, so the first
+    /// circle of a passage is not nought.
+    pub unexplained: f64,
     /// When she was last put somewhere with no idea where, and which of the cards was
     /// drawn for it. `None` once it has been read.
     pub adrift: Option<(f64, usize)>,
+}
+
+/// Where she ought to be, worked up from the last fix.
+///
+/// **This is dead reckoning and it is the half of navigation the fix cannot do.** A fix
+/// tells you where you were at one moment; between fixes all you have is what you
+/// steered and how fast you went, and laying that off from the last known position is
+/// what a navigator does every half hour of every passage. The result is not where she
+/// is — it is where she would be if the water had stood still and the helmsman had been
+/// perfect — and the whole art is knowing how much to trust it, which is what the
+/// circle round it is for.
+#[derive(Clone, Copy, Debug)]
+pub struct Reckoning {
+    /// The fix it was started from, and when.
+    pub from: DVec2,
+    pub since: f64,
+    /// Where the run has got to.
+    pub at: DVec2,
+    /// How far the last reckoning turned out to be wrong, for the circle. Metres.
+    pub spread: f64,
+}
+
+/// The set and leeway a passage is assumed to have before it has measured any.
+///
+/// A third of a knot. Modest, real, and not nought: a circle of uncertainty that starts
+/// at nothing tells a beginner that dead reckoning is exact, which is the one thing it
+/// is not.
+const ASSUMED_SET: f64 = 0.17;
+
+/// How much of the old estimate survives a new measurement.
+///
+/// Three quarters, so four runs in and the number is the water's rather than the
+/// assumption's. **Frequent fixes are worth more than careful ones** — that is the
+/// whole of coastal navigation — and this is where the game says so: every fix both
+/// resets the reckoning to a known point and sharpens the figure the circle grows at,
+/// so a navigator who fixes every twenty minutes carries a small circle and one who
+/// fixes at noon carries a huge one.
+const KEEPS: f64 = 0.75;
+
+/// Run the reckoning on, and grow the doubt.
+///
+/// Integrated from **the course steered and the speed through the water**, which is what
+/// a navigator has: not the boat's true track over the ground, which is the answer and
+/// would make the exercise a formality. The difference between the two is exactly the
+/// thing the circle is about.
+pub fn reckon(sim: Res<Sim>, mut nav: ResMut<Navigation>, time: Res<Time>) {
+    let dt = time.delta_secs_f64();
+    let now = sim.sim.state.time;
+    let unexplained = nav.unexplained;
+    let Some(run) = nav.reckoning.as_mut() else {
+        return;
+    };
+    let st = &sim.sim.state;
+    // Her head, and her speed through the water: the two numbers on the bulkhead.
+    let along = DVec2::new(st.heading.sin(), st.heading.cos());
+    run.at += along * sim.sim.telemetry.stw * dt;
+    run.spread = unexplained * (now - run.since).max(0.0);
 }
 
 /// What the screen says when the world has just been taken away from underneath her.
@@ -158,6 +233,11 @@ pub fn cast_adrift(
     nav.still_in_sight = 0;
     nav.recognised.clear();
     nav.reading = None;
+    nav.reckoning = None;
+    nav.fixes.clear();
+    // Back to the assumption, because what was learned was learned about water she is
+    // no longer in.
+    nav.unexplained = ASSUMED_SET;
     // And the paper stops following her. Laid down over the middle of the archipelago,
     // which tells her nothing she did not already have: it is where the chart is *of*
     // rather than where she is.
@@ -417,6 +497,38 @@ pub fn enter_in_the_log(
         .plot
         .retain(|item| !matches!(item, crate::chart::Plotted::Line { .. }));
     if out_by < good_enough {
+        // **What the last run turned out to be worth.**
+        //
+        // The reckoning was started at the previous fix and has been run on ever since;
+        // this fix says where she actually got to. The distance between the two,
+        // divided by the time, is everything the reckoning could not know — the stream,
+        // the leeway, the helmsman — as a speed. It is the only honest figure for how
+        // fast the doubt grows, because it is hers, measured on this water on this day.
+        let now = sim.sim.state.time;
+        if let Some(run) = nav.reckoning {
+            let ran_for = (now - run.since).max(1.0);
+            let out = (run.at - said).length() / ran_for;
+            nav.unexplained = nav.unexplained * KEEPS + out * (1.0 - KEEPS);
+            info!(
+                "the reckoning was {:.0} m out over {:.0} min — call it {:.2} kn of set",
+                (run.at - said).length(),
+                ran_for / 60.0,
+                sail_core::units::ms_to_kn(nav.unexplained)
+            );
+        }
+        // And it starts again from here, which is what a fix is for.
+        nav.reckoning = Some(Reckoning {
+            from: said,
+            since: now,
+            at: said,
+            spread: 0.0,
+        });
+        nav.fixes.push((said, now));
+        // Six of them is an afternoon of plotting and as much line as a chart will carry
+        // without becoming a drawing of itself.
+        if nav.fixes.len() > 6 {
+            nav.fixes.remove(0);
+        }
         nav.last_fix = sim.sim.state.time;
         nav.fixed_at = Some(said);
         nav.fixed_on = on.clone();

@@ -850,10 +850,85 @@ pub fn draw(
                     } else if response.drag_stopped() {
                         // The rule leaves its line on the chart; the dividers leave
                         // nothing, because dividers are for reading and not for drawing.
+                        // --- The reckoning ------------------------------------------------
+                        //
+                        // **The three lines a navigator draws between fixes**, and they are drawn
+                        // whether or not the chart is allowed to say where she is — because none of
+                        // them is where she is. They are what she worked out, which is hers to have.
+                        //
+                        // The track made good, solid, from fix to fix: the one line on this paper
+                        // that is not an estimate. The speed on it is distance over time between two
+                        // positions she established, which is speed over the ground and the number
+                        // the instruments cannot give her.
+                        for pair in nav.fixes.windows(2) {
+                            let (one, then) = (pair[0], pair[1]);
+                            let (a, b) = (to_screen(one.0), to_screen(then.0));
+                            p.line_segment([a, b], egui::Stroke::new(1.4, ink::TRACK));
+                            let hours = ((then.1 - one.1) / 3_600.0).max(1e-6);
+                            let miles = (then.0 - one.0).length() / 1_852.0;
+                            p.text(
+                                egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)
+                                    + egui::vec2(7.0, -5.0),
+                                egui::Align2::LEFT_BOTTOM,
+                                format!("{:.1} kn made good", miles / hours),
+                                egui::FontId::monospace(10.0),
+                                ink::TRACK,
+                            );
+                        }
+                        if let Some(run) = nav.reckoning {
+                            let from = to_screen(run.from);
+                            let now = to_screen(run.at);
+                            // Dashed, because a reckoning is not a track: it is an argument about
+                            // where she must have got to, and paper says that with a broken line.
+                            let span = now - from;
+                            let steps = ((span.length() / 9.0) as usize).clamp(1, 240);
+                            for i in (0..steps).step_by(2) {
+                                let t = |k: usize| k as f32 / steps as f32;
+                                p.line_segment(
+                                    [from + span * t(i), from + span * t((i + 1).min(steps))],
+                                    egui::Stroke::new(1.1, ink::PEN),
+                                );
+                            }
+                            // Where it says she is: a dot with a bar across it, which is how a dead
+                            // reckoning position is marked and how it is told apart at a glance from
+                            // the ringed dot of a fix.
+                            p.circle_filled(now, 1.5, ink::PEN);
+                            let along = if span.length() > 1.0 {
+                                span.normalized()
+                            } else {
+                                egui::vec2(0.0, -1.0)
+                            };
+                            let across = egui::vec2(-along.y, along.x) * 5.0;
+                            p.line_segment(
+                                [now + across, now - across],
+                                egui::Stroke::new(1.2, ink::PEN),
+                            );
+                            // **And the circle she is somewhere in**, drawn round the reckoning
+                            // rather than round the boat — which is the whole point of it. Round the
+                            // boat it would be a statement about the truth, and the truth is the one
+                            // thing nobody in this exercise has. Round the reckoning it says what it
+                            // means: this is my best position, and this is how far out I may be.
+                            if run.spread > 1.0 {
+                                p.circle(
+                                    now,
+                                    (run.spread as f32 * scale).clamp(3.0, 400.0),
+                                    egui::Color32::TRANSPARENT,
+                                    egui::Stroke::new(1.0, ink::PEN.gamma_multiply(0.55)),
+                                );
+                                p.text(
+                                    now + egui::vec2(8.0, 8.0),
+                                    egui::Align2::LEFT_TOP,
+                                    format!("DR — within {:.1} M", run.spread / 1_852.0),
+                                    egui::FontId::monospace(10.0),
+                                    ink::PEN,
+                                );
+                            }
+                        }
+
                         // The leg being timed, while it is being timed: a line from where the log
                         // was streamed to where she is now, with the figures running. Without it the
                         // tool is a button that appears to do nothing for ten minutes.
-                        if let Some((was, when)) = chart.streaming {
+                        if let Some((was, when)) = chart.streaming.filter(|_| knows) {
                             let (a, b) = (to_screen(was), to_screen(st.pos));
                             p.line_segment([a, b], egui::Stroke::new(1.0, ink::MARK));
                             let off = st.pos - was;
@@ -1186,10 +1261,24 @@ pub fn draw(
                 egui::FontId::monospace(11.0),
                 ink::COAST,
             );
+            // What the instrument in hand is for — and, when it is in the middle of
+            // doing something, what it is in the middle of. A tool with a state and no
+            // way of saying which state it is in is a tool nobody presses twice, which
+            // is exactly how the log read from the deck.
+            let hint = match (chart.tool, chart.streaming, knows) {
+                (Tool::Log, _, false) => {
+                    "a leg is timed between two positions — take a fix first".to_string()
+                }
+                (Tool::Log, Some((_, when)), true) => format!(
+                    "log streamed {:.0} min ago — click again at the end of the leg",
+                    (st.time - when) / 60.0
+                ),
+                _ => chart.tool.hint().to_string(),
+            };
             p.text(
                 egui::pos2(rect.left() + 24.0, rect.top() + 46.0),
                 egui::Align2::LEFT_CENTER,
-                chart.tool.hint(),
+                hint,
                 egui::FontId::monospace(11.0),
                 ink::COAST,
             );

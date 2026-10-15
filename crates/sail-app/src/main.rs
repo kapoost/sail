@@ -366,6 +366,7 @@ fn main() {
                         navigation::lost_at_sea,
                         navigation::enter_in_the_log,
                         navigation::the_fix_holds,
+                        navigation::reckon,
                         boathook::reach,
                         boathook::dress,
                         sight::aim,
