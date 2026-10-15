@@ -41,6 +41,23 @@ impl Sim {
             wind.squall_interval = interval.max(10.0);
             wind.next_squall = wind.next_squall.min(interval);
         }
+        // `SAIL_BANDS=20` for the planetary belts, twenty kilometres from one trade
+        // belt to the next. The experiment the round-the-world idea stands on: sail
+        // north out of the trades, through the light stuff, and into the westerlies —
+        // and find out whether that reads as a passage or as a sine wave. Off by
+        // default, because every validated number in this engine was measured in a
+        // world with one wind in it.
+        if let Some(km) = std::env::var("SAIL_BANDS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|km| *km > 0.1)
+        {
+            wind.bands = Some(sail_core::wind::Bands {
+                spacing: km * 1_000.0,
+                along: 0.0,
+            });
+            info!("the belts are in: {km:.0} km from one trade belt to the next");
+        }
         let heading = wrap_tau(weather.wind_from - weather.start_twa);
         let mut state = BoatState::at_rest(heading);
         // Start with way on, close-hauled. Dead in the water head to wind is realistic

@@ -274,6 +274,15 @@ fn main() -> std::io::Result<()> {
                 0.0,
                 3600.0,
             ),
+            Row::number(
+                "wind belts",
+                "SAIL_BANDS",
+                "km from one trade belt to the next; 0 is one wind everywhere",
+                0.0,
+                5.0,
+                0.0,
+                400.0,
+            ),
             Row::rule("THE ROD"),
             Row::number(
                 "line out",

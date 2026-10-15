@@ -119,6 +119,13 @@ pub trait WindField: Send + Sync {
     fn gust_at(&self, _pos: DVec2, _t: f64) -> f64 {
         0.0
     }
+
+    /// Which planetary belt a point is in, in the words a sailor uses, or `None` for a
+    /// world with one wind in it — which is every world this engine had until the belts
+    /// went in, and still the default.
+    fn band_at(&self, _pos: DVec2) -> Option<&'static str> {
+        None
+    }
 }
 
 /// The slow weather: the mean wind is not a constant either.
@@ -500,6 +507,108 @@ pub fn direction_of(flow: DVec2) -> f64 {
     wrap_tau((-flow.x).atan2(-flow.y))
 }
 
+/// The planetary wind bands, laid across a flat sea.
+///
+/// **The cheapest half of a round-the-world game.** The fantasy is a real one and it is
+/// the oldest in sailing: leave, never beat once, and come back from the other side.
+/// What that needs is not a globe — a globe costs the horizon, and the arithmetic is
+/// brutal, `√(2Rh)` — it needs *the trades*: wind that depends on where you are rather
+/// than only on what the weather is doing. A sailor crossing from one belt into the next
+/// has the wind go light, hang about, and then fill in from the opposite quarter, and
+/// that is a passage rather than a weather report.
+///
+/// So the bands go in first, in the flat world, where they cost nothing and can be
+/// sailed through this afternoon. If they read well, wrapping the world east to west is
+/// mechanical. If they do not, a sphere was never going to save them.
+///
+/// The model is one cosine and it is not a simplification of the real thing so much as
+/// the shape of it:
+///
+/// * the trade belt, wind from the north-east, steady;
+/// * the horse latitudes, where the two systems meet and the wind goes light and
+///   variable — and which fall out of the arithmetic rather than being written in,
+///   because a flow vector interpolating between two opposite flows passes through
+///   nothing on the way;
+/// * the westerly belt, wind from the south-west, stronger;
+/// * and then the pattern repeats, which is what a planet does.
+///
+/// It is the northern hemisphere, because the rest of the model is: the gusts veer
+/// right, the squalls track the way they track here, and the sun is drawn for fifty-
+/// seven north.
+#[derive(Clone, Copy, Debug)]
+pub struct Bands {
+    /// Metres from one trade belt to the next: a whole cycle, trades to westerlies and
+    /// back. Earth's is about five thousand kilometres; a world you can sail round in an
+    /// afternoon wants tens of them, and this is the knob that decides which.
+    pub spacing: f64,
+    /// Which way the belts run, as a bearing. North-south belts are what a planet has;
+    /// the knob exists because a test that can turn the pattern sideways is a test that
+    /// can tell a band apart from a coincidence.
+    pub along: f64,
+}
+
+/// How much of the wind is the *day* rather than the belt it is blowing in.
+///
+/// A quarter. Not a fudge factor and not taste: without it the horse latitudes are a
+/// line of dead calm, which is both wrong — they are light and variable, not empty —
+/// and the one regime this model is known to handle badly. A quarter of the day's own
+/// wind, blowing the day's own way, is what keeps the boat moving across the gap and is
+/// what makes crossing it a decision rather than a wall.
+const THE_DAY_ITSELF: f64 = 0.25;
+
+/// How square the belts are.
+///
+/// A pure cosine makes the calms as wide as the trades, which is not what a planet
+/// looks like: the belts are broad and the gaps between them are narrow. Raising the
+/// cosine to a power below one flattens the tops and tightens the crossings, and
+/// four-tenths puts about a fifth of the cycle in the light stuff — which is the Atlantic
+/// in about the right proportion.
+const HOW_SQUARE: f64 = 0.4;
+
+impl Bands {
+    /// The mean flow the belts want at a point, as a vector, given the day's own wind.
+    ///
+    /// A vector rather than a bearing and a speed on purpose. Interpolating a *bearing*
+    /// between the trades and the westerlies swings it through a hundred and eighty
+    /// degrees of wind that never blows and leaves the speed up at full strength all the
+    /// way across; interpolating the flow takes it through nothing, which is the calm
+    /// belt, and the direction change happens where the wind is too light to care about.
+    /// The thing that is hard to model is the thing the arithmetic does for free.
+    pub fn flow_at(&self, pos: DVec2, day_direction: f64, day_speed: f64) -> DVec2 {
+        // Which belt, as an angle round the cycle. Measured along whichever way the
+        // belts are laid, which is north-south on a planet.
+        let across = pos.x * self.along.sin() + pos.y * self.along.cos();
+        let phase = std::f64::consts::TAU * across / self.spacing.max(1.0);
+        // Minus one deep in the trades, plus one deep in the westerlies, nothing
+        // between.
+        let swing = -phase.cos();
+        let shaped = swing.signum() * swing.abs().powf(HOW_SQUARE);
+        // The westerly flow runs towards the north-east, the trade flow towards the
+        // south-west, and `shaped` picks which and how hard.
+        let toward = self.along + crate::units::rad(60.0);
+        let belt = DVec2::new(toward.sin(), toward.cos()) * shaped * day_speed;
+        // And the day underneath it, which is what blows in the gaps.
+        flow_from(day_direction, day_speed) * THE_DAY_ITSELF + belt * (1.0 - THE_DAY_ITSELF)
+    }
+
+    /// What a sailor would call where he is, for the instruments to say out loud.
+    ///
+    /// Worth having as words rather than as a number: "the trades" is a thing you plan a
+    /// passage around and 0.37 of a cycle is not.
+    pub fn name(&self, pos: DVec2) -> &'static str {
+        let across = pos.x * self.along.sin() + pos.y * self.along.cos();
+        let phase = std::f64::consts::TAU * across / self.spacing.max(1.0);
+        let swing = -phase.cos();
+        if swing.abs() < 0.25 {
+            "the horse latitudes"
+        } else if swing < 0.0 {
+            "the trades"
+        } else {
+            "the westerlies"
+        }
+    }
+}
+
 /// Steady wind. Useful as a baseline and for isolating a bug to the gust model.
 #[derive(Clone, Debug)]
 pub struct SteadyWind {
@@ -543,6 +652,10 @@ pub struct SyntheticWind {
     pub shift_timescale: f64,
     /// How strongly a gust veers right, radians per unit normalised speed anomaly.
     pub veer_coupling: f64,
+    /// The planetary belts, when the world has them. `None` is one wind everywhere,
+    /// which is what this has always been and what every validated number was measured
+    /// in.
+    pub bands: Option<Bands>,
 
     direction_anomaly: f64,
     /// How far the gust pattern has been carried downwind, metres. Integrated, so a
@@ -573,6 +686,8 @@ impl SyntheticWind {
             direction_spread: 6.0_f64.to_radians(),
             shift_timescale: 90.0,
             veer_coupling: 7.0_f64.to_radians(),
+            // One wind everywhere unless somebody asks for a planet.
+            bands: None,
             direction_anomaly: 0.0,
             carried: DVec2::ZERO,
             squalls: Vec::new(),
@@ -616,7 +731,23 @@ impl SyntheticWind {
 
     /// Speed at a point and an instant, at the reference height.
     pub fn speed_at(&self, pos: DVec2, t: f64) -> f64 {
-        (self.mean_speed * (1.0 + self.gust_at(pos, t))).max(0.0)
+        (self.mean_at(pos).1 * (1.0 + self.gust_at(pos, t))).max(0.0)
+    }
+
+    /// The mean wind at a point before the gusts: the day's own, or what the belt it is
+    /// blowing in makes of it.
+    ///
+    /// One function because the speed and the direction have to come from the same
+    /// vector — working them out separately is how a wind ends up blowing at one speed
+    /// and from a direction a quarter of a mile away.
+    fn mean_at(&self, pos: DVec2) -> (f64, f64) {
+        match self.bands {
+            None => (self.mean_direction, self.mean_speed),
+            Some(bands) => {
+                let flow = bands.flow_at(pos, self.mean_direction, self.mean_speed);
+                (direction_of(flow), flow.length())
+            }
+        }
     }
 
     /// Direction at a point and an instant, including the veer that goes with a gust.
@@ -628,7 +759,7 @@ impl SyntheticWind {
     /// rather than happening everywhere at once.
     pub fn direction_at(&self, pos: DVec2, t: f64) -> f64 {
         wrap_tau(
-            self.mean_direction
+            self.mean_at(pos).0
                 + self.direction_anomaly
                 + self.veer_coupling * self.gust_at(pos, t),
         )
@@ -702,6 +833,10 @@ impl WindField for SyntheticWind {
 
     fn gust_at(&self, pos: DVec2, _t: f64) -> f64 {
         self.gusts.at(pos, self.carried)
+    }
+
+    fn band_at(&self, pos: DVec2) -> Option<&'static str> {
+        self.bands.map(|b| b.name(pos))
     }
 
     fn outlook(&self) -> (f64, f64) {

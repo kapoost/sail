@@ -189,6 +189,14 @@ pub fn draw(
                 );
                 let (building, turning) = sim.sim.wind.outlook();
                 readout(ui, "OUTLOOK", &outlook_words(building, turning));
+                // Which belt she is in, when the world has belts. Words rather than a
+                // number, because "the trades" is a thing you plan a passage round and
+                // a phase angle is not — and only when there are any, like the squall
+                // line above it: an instrument that says the same thing all day is an
+                // instrument nobody reads.
+                if let Some(belt) = sim.sim.wind.band_at(sim.sim.state.pos) {
+                    readout(ui, "BELT", belt);
+                }
                 // And the one piece of weather that is not a trend but an object. A
                 // squall is a thing with a position, a size and a time of arrival, and
                 // every one of those is a decision: reef, bear away, or carry on and
