@@ -1182,3 +1182,120 @@ mod vane {
         assert!((wind_from(std::f32::consts::PI) - Vec3::Z).length() < 1.0e-5);
     }
 }
+
+/// What is on the end of a spar.
+///
+/// A boom, a club and a spinnaker pole are all drawn as a cylinder, which is what they
+/// are and is also why they read as dowel: a real spar is *terminated*. Every one of them
+/// has a band round each end with something bolted through it, and those fittings are
+/// what the eye uses to tell a spar from a stick — and to tell which end is which, which
+/// matters on a foredeck in the dark.
+///
+/// Cosmetic, deliberately and completely. Nothing here is read by the rig model, nothing
+/// moves, and no line is made fast to any of it: the vang's bail is modelled where it is
+/// *because the vang pulls on it*, and these are not that. They are the difference
+/// between a spar and a length of broom handle.
+#[derive(Clone, Copy, PartialEq)]
+pub enum SparEnd {
+    /// The inboard end of a boom: a band, a clevis and the pin it swings on.
+    Gooseneck,
+    /// The outboard end of a boom: a band, a sheave box for the outhaul, and the eye
+    /// the topping lift takes hold of.
+    Outhaul,
+    /// Either end of a spinnaker pole: a band, a beak and the plunger that opens it.
+    Jaw,
+}
+
+/// Put one on, at a station along the spar's own axis.
+///
+/// `along` is where the end is in the spar's frame, `out` is which way the spar runs
+/// from there — plus or minus one — so the same call does both ends of anything.
+pub fn spar_end(
+    meshes: &mut Assets<Mesh>,
+    metal: &Handle<StandardMaterial>,
+    b: &mut ChildSpawnerCommands,
+    along: f32,
+    radius: f32,
+    out: f32,
+    kind: SparEnd,
+) {
+    let flat = std::f32::consts::FRAC_PI_2;
+    // The band itself: a collar a little proud of the spar, a hand's width in from the
+    // end, which is where one goes — the wood is weakest where the bolts are and the
+    // band is what stops it splitting.
+    b.spawn((
+        Mesh3d(meshes.add(Cylinder::new(radius * 1.12, radius * 1.4))),
+        MeshMaterial3d(metal.clone()),
+        Transform::from_xyz(0.0, 0.0, along + out * radius * 1.6)
+            .with_rotation(Quat::from_rotation_x(flat)),
+    ));
+    // And the end of the wood capped, so it is not an open tube.
+    b.spawn((
+        Mesh3d(meshes.add(Cylinder::new(radius * 1.02, radius * 0.22))),
+        MeshMaterial3d(metal.clone()),
+        Transform::from_xyz(0.0, 0.0, along).with_rotation(Quat::from_rotation_x(flat)),
+    ));
+    match kind {
+        SparEnd::Gooseneck => {
+            // The clevis: two cheeks either side of the pin, standing forward of the
+            // band towards the mast.
+            for side in [-1.0, 1.0] {
+                b.spawn((
+                    Mesh3d(meshes.add(Cuboid::new(radius * 0.3, radius * 1.5, radius * 1.1))),
+                    MeshMaterial3d(metal.clone()),
+                    Transform::from_xyz(side * radius * 0.6, 0.0, along - out * radius * 0.55),
+                ));
+            }
+            // And the pin through them, athwartships, which is the axis the boom lifts
+            // about.
+            b.spawn((
+                Mesh3d(meshes.add(Cylinder::new(radius * 0.16, radius * 1.8))),
+                MeshMaterial3d(metal.clone()),
+                Transform::from_xyz(0.0, 0.0, along - out * radius * 0.55)
+                    .with_rotation(Quat::from_rotation_z(flat)),
+            ));
+        }
+        SparEnd::Outhaul => {
+            // The sheave box: a slot in the end of the spar with a wheel in it, which is
+            // where the outhaul comes out.
+            b.spawn((
+                Mesh3d(meshes.add(Cuboid::new(radius * 0.5, radius * 1.3, radius * 1.9))),
+                MeshMaterial3d(metal.clone()),
+                Transform::from_xyz(0.0, 0.0, along - out * radius * 0.9),
+            ));
+            b.spawn((
+                Mesh3d(meshes.add(Cylinder::new(radius * 0.42, radius * 0.18))),
+                MeshMaterial3d(metal.clone()),
+                Transform::from_xyz(0.0, 0.0, along - out * radius * 0.2)
+                    .with_rotation(Quat::from_rotation_z(flat)),
+            ));
+            // The eye on top for the topping lift, standing up off the band.
+            b.spawn((
+                Mesh3d(meshes.add(Torus::new(radius * 0.18, radius * 0.34))),
+                MeshMaterial3d(metal.clone()),
+                Transform::from_xyz(0.0, radius * 1.2, along + out * radius * 1.6)
+                    .with_rotation(Quat::from_rotation_x(flat)),
+            ));
+        }
+        SparEnd::Jaw => {
+            // The beak: a hook that goes over a guy, open upwards, which is what a pole
+            // end is and why you can put one on with one hand.
+            b.spawn((
+                Mesh3d(meshes.add(Torus::new(radius * 0.22, radius * 0.95))),
+                MeshMaterial3d(metal.clone()),
+                Transform::from_xyz(0.0, 0.0, along + out * radius * 0.4)
+                    .with_rotation(Quat::from_rotation_y(flat))
+                    // Half a ring: the open side is what the guy drops into.
+                    .with_scale(Vec3::new(1.0, 1.0, 0.5)),
+            ));
+            // And the plunger, with the lanyard eye on the end of it: the thing you pull
+            // to open the beak, and the one piece of a pole anybody ever looks at.
+            b.spawn((
+                Mesh3d(meshes.add(Cylinder::new(radius * 0.17, radius * 1.3))),
+                MeshMaterial3d(metal.clone()),
+                Transform::from_xyz(0.0, -radius * 0.5, along + out * radius * 1.0)
+                    .with_rotation(Quat::from_rotation_x(flat)),
+            ));
+        }
+    }
+}

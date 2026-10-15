@@ -273,7 +273,19 @@ pub fn setup(
     // goes over the side the first time she rolls, so it lives in a pair of cradles with
     // a shock cord over it, and that is what lifts it clear of the camber.
     let deck = crate::deck::deck_height(CHOCKS_Z);
-    let out = crate::deck::deck_half_beam(CHOCKS_Z) - 0.22;
+    // **Clear of the rail at both ends**, which is not the same as clear of it in the
+    // middle. She narrows going aft — a tenth of a metre of half-beam in the length of
+    // this spar — so a boathook laid parallel to the centreline and placed by the
+    // station it is centred on has its after end inside the bulwark. Reported from the
+    // deck as climbing onto the rail. The place to measure is the narrowest station the
+    // thing covers, and it is the same trap the grab bag was in.
+    let narrowest = [-0.5, 0.0, 0.5]
+        .into_iter()
+        .map(|t| crate::deck::inside_the_rail(CHOCKS_Z + t * SHAFT))
+        .fold(f32::MAX, f32::min);
+    // Its own half-width, the width of a chock, and a hand's breadth for the shock cord
+    // to be got round it.
+    let out = narrowest - 0.1;
     let rests_at = deck + 0.115;
     commands.entity(root).with_children(|b| {
         // Lying fore and aft in its chocks, hook forward, which is how one is stowed so

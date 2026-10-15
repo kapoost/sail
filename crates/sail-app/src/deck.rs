@@ -429,6 +429,18 @@ pub fn deck_height(z: f32) -> f32 {
     sheer_at(z).1
 }
 
+/// How far out anything may lie at a station before it is inside the toerail, metres.
+///
+/// The deck's half-beam less the rail's own thickness, which is the inner face of the
+/// wood. **Anything lying fore and aft has to clear this at both of its ends**, and the
+/// trap is that she narrows: a two-metre spar laid parallel to the centreline beside the
+/// cockpit is inboard at its forward end and through the bulwark at its after one, which
+/// is how the boathook came to be living in the rail. Worked out from the same two
+/// numbers the rail is drawn from, so it cannot drift away from the wood it describes.
+pub fn inside_the_rail(z: f32) -> f32 {
+    deck_half_beam(z) - TOERAIL_THICK
+}
+
 /// Half-beam at the sheer, for putting the headsail tracks on the side deck.
 pub fn deck_half_beam(z: f32) -> f32 {
     sheer_at(z).0

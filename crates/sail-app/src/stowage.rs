@@ -531,20 +531,88 @@ pub fn setup(
     // not follow the curve — it sits in the wide part and stops.
     let club = crate::boat::staysail_boom_length(&sim.config());
     let club_z = CLUB_Z;
-    let club_end = |z: f32| crate::deck::deck_height(z) + 0.055;
+    // On its chocks: the drawn deck is cambered and a spar laid at the deck *line* is
+    // half inside it. The boathook taught this one the expensive way.
+    let club_end = |z: f32| crate::deck::deck_height(z) + 0.105;
+    let spar = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.52, 0.38, 0.21),
+        perceptual_roughness: 0.22,
+        ..default()
+    });
+    let galv = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.47, 0.49, 0.52),
+        perceptual_roughness: 0.55,
+        metallic: 0.8,
+        ..default()
+    });
+    let teak = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.46, 0.34, 0.20),
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+    let cord = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.12, 0.13, 0.15),
+        perceptual_roughness: 0.9,
+        ..default()
+    });
+    let chock = meshes.add(Cuboid::new(0.10, 0.09, 0.07));
+    let lashing = meshes.add(Torus::new(0.026, 0.034));
     commands.entity(root).with_children(|b| {
+        // **In chocks, like the boathook and for the same reason.** A six-foot spar
+        // loose on a foredeck is a spar in the water the first time she buries her bow,
+        // and lying it straight on the paint buries half of it in the camber — which is
+        // how the boathook came to be invisible. Two cradles and a cord over the top.
         b.spawn((
             StowedClub,
-            Mesh3d(meshes.add(Cylinder::new(0.040, club))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.52, 0.38, 0.21),
-                perceptual_roughness: 0.22,
-                ..default()
-            })),
-            Transform::from_xyz(CLUB_X, club_end(club_z), club_z)
-                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            Transform::from_xyz(CLUB_X, club_end(club_z), club_z),
             Visibility::default(),
-        ));
+        ))
+        .with_children(|c| {
+            c.spawn((
+                Mesh3d(meshes.add(Cylinder::new(0.040, club))),
+                MeshMaterial3d(spar.clone()),
+                Transform::from_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            ));
+            // A gooseneck forward, where it swings on the stay's fitting, and the clew
+            // end aft. The same fittings as the main boom at a third the size, because
+            // that is what a club is: a boom for a small sail.
+            crate::fittings::spar_end(
+                &mut meshes,
+                &galv,
+                c,
+                -club * 0.5,
+                0.040,
+                1.0,
+                crate::fittings::SparEnd::Gooseneck,
+            );
+            crate::fittings::spar_end(
+                &mut meshes,
+                &galv,
+                c,
+                club * 0.5,
+                0.040,
+                -1.0,
+                crate::fittings::SparEnd::Outhaul,
+            );
+        });
+        for along in [-club * 0.3, club * 0.3] {
+            b.spawn((
+                Mesh3d(chock.clone()),
+                MeshMaterial3d(teak.clone()),
+                Transform::from_xyz(
+                    CLUB_X,
+                    crate::deck::deck_height(club_z + along) + 0.03,
+                    club_z + along,
+                ),
+            ));
+            b.spawn((
+                Mesh3d(lashing.clone()),
+                MeshMaterial3d(cord.clone()),
+                Transform::from_xyz(CLUB_X, club_end(club_z) + 0.012, club_z + along)
+                    .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::new(1.0, 1.0, 0.5)),
+            ));
+        }
     });
 
     for which in [Headsail::Genoa, Headsail::Spinnaker] {

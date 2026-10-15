@@ -444,6 +444,28 @@ pub fn setup(
                     Transform::from_xyz(0.0, 0.0, crate::rig::BOOM_LENGTH * 0.5)
                         .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                 ));
+                // What is on the ends of it. Cosmetic, and the difference between a
+                // spar and a length of dowel: a band round each end with the gooseneck
+                // at the mast and the outhaul sheave and topping lift eye out at the
+                // clew. See `fittings::spar_end`.
+                crate::fittings::spar_end(
+                    &mut meshes,
+                    &spar_mat,
+                    boom,
+                    0.0,
+                    0.065,
+                    -1.0,
+                    crate::fittings::SparEnd::Gooseneck,
+                );
+                crate::fittings::spar_end(
+                    &mut meshes,
+                    &spar_mat,
+                    boom,
+                    crate::rig::BOOM_LENGTH,
+                    0.065,
+                    1.0,
+                    crate::fittings::SparEnd::Outhaul,
+                );
                 // The vang bail, under the boom where the vang is made fast.
                 //
                 // The line was ending in mid-air against the side of the spar. A vang
@@ -498,17 +520,28 @@ pub fn setup(
             // only spar on the boat that is only there some of the time — which is also
             // true of the real one, since it lives on the foredeck until it is needed.
             let pole = pole_length(cfg.loa as f32);
-            b.spawn((
-                SpinnakerPole,
-                Transform::default(),
-                Visibility::Hidden,
-                children![(
-                    Mesh3d(meshes.add(Cylinder::new(0.05, pole))),
-                    MeshMaterial3d(spar_mat.clone()),
-                    Transform::from_xyz(0.0, 0.0, -pole * 0.5)
-                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-                )],
-            ));
+            b.spawn((SpinnakerPole, Transform::default(), Visibility::Hidden))
+                .with_children(|p| {
+                    p.spawn((
+                        Mesh3d(meshes.add(Cylinder::new(0.05, pole))),
+                        MeshMaterial3d(spar_mat.clone()),
+                        Transform::from_xyz(0.0, 0.0, -pole * 0.5)
+                            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                    ));
+                    // A jaw at each end, which is what a spinnaker pole is: both ends are
+                    // the same fitting because either of them can be the one on the mast.
+                    for (at, out) in [(0.0, 1.0), (-pole, -1.0)] {
+                        crate::fittings::spar_end(
+                            &mut meshes,
+                            &spar_mat,
+                            p,
+                            at,
+                            0.05,
+                            out,
+                            crate::fittings::SparEnd::Jaw,
+                        );
+                    }
+                });
             // Sails. Their meshes are rebuilt every frame from the trim.
             b.spawn((
                 SailSurface {

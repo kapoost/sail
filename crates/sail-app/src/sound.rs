@@ -71,6 +71,7 @@ impl Default for SeaParams {
             notes_lost: AtomicU32::default(),
             bell: AtomicU32::default(),
             water_level: AtomicU32::default(),
+            sea_surge: AtomicU32::default(),
             water_cutoff: AtomicU32::default(),
             flog_level: AtomicU32::default(),
             flog_hz: AtomicU32::default(),
@@ -112,6 +113,21 @@ pub struct SeaParams {
     bell: AtomicU32,
     water_level: AtomicU32,
     water_cutoff: AtomicU32,
+    /// How hard the sea is working on the hull just now, 0 to 1.
+    ///
+    /// **The sound of a wave is an event and the water voice had none in it.** What was
+    /// there was a steady hiss at the speed through the water with a half-hertz wobble
+    /// on top, and the wobble was a number somebody picked: it did not know where the
+    /// waves were, so in a seaway you heard an even rushing that had nothing to do with
+    /// the water going past the window. A boat in a sea does not sound like that. Each
+    /// one comes up, works along her, and goes — loud, then nothing, then the next.
+    ///
+    /// This is that, taken from her own motion rather than from a wave model the mixer
+    /// would need a second copy of: the vertical rate of the hull, which is what a sea
+    /// does to a boat and is zero in flat water. Which is the other half of it — in
+    /// flat water the voice goes back to being a steady hiss, because that is what
+    /// flat water sounds like.
+    sea_surge: AtomicU32,
     flog_level: AtomicU32,
     flog_hz: AtomicU32,
     rain_level: AtomicU32,
@@ -648,7 +664,6 @@ pub struct SeaStream {
     /// The whine's pitch half a second ago, and whether the wire is holding its note.
     rig_steady: f32,
     rig_gate: f32,
-    surge_phase: f32,
     flog_phase: f32,
     /// Twelve voices, each one a note that has been struck and is dying.
     voices: [Plucked; 12],
@@ -677,6 +692,8 @@ struct Smoothed {
     rig_hz: f32,
     water: f32,
     water_cutoff: f32,
+    /// The sea working on the hull, smoothed over a wave rather than over a frame.
+    sea_surge: f32,
     flog: f32,
     rain: f32,
     gear: f32,
@@ -730,7 +747,6 @@ impl SeaStream {
             rig_phase2: 0.0,
             rig_steady: 200.0,
             rig_gate: 1.0,
-            surge_phase: 0.0,
             flog_phase: 0.0,
             flog_env: 0.0,
         }
@@ -761,6 +777,7 @@ impl Iterator for SeaStream {
             t_rig_hz,
             t_water,
             t_water_cut,
+            t_surge,
             t_flog,
             flog_hz,
             t_rain,
@@ -783,6 +800,7 @@ impl Iterator for SeaStream {
                 load(&p.rig_hz),
                 load(&p.water_level),
                 load(&p.water_cutoff),
+                load(&p.sea_surge),
                 load(&p.flog_level),
                 load(&p.flog_hz),
                 load(&p.rain_level),
@@ -811,6 +829,12 @@ impl Iterator for SeaStream {
         Smoothed::towards(&mut self.smooth.rig_hz, t_rig_hz, SLEW);
         Smoothed::towards(&mut self.smooth.water, t_water, SLEW);
         Smoothed::towards(&mut self.smooth.water_cutoff, t_water_cut, SLEW);
+        // **Slower than everything else in here, on purpose.** Thirty milliseconds is
+        // the time constant for a parameter that must not step; a wave is a second and
+        // a half of swelling and dying away, and smoothing it at thirty milliseconds
+        // would follow the hull's own jitter and give you a rattle rather than a sea.
+        // Two hundred milliseconds is the rise and fall of water against a hull.
+        Smoothed::towards(&mut self.smooth.sea_surge, t_surge, 0.00011);
         Smoothed::towards(&mut self.smooth.flog, t_flog, SLEW);
         Smoothed::towards(&mut self.smooth.rain, t_rain, SLEW);
         Smoothed::towards(&mut self.smooth.gear, t_gear, SLEW);
@@ -858,9 +882,19 @@ impl Iterator for SeaStream {
             * self.rig_gate
             * 0.14;
 
-        // --- Water at the hull: bandpassed noise with a bow-wave surge -------------
-        self.surge_phase = (self.surge_phase + 0.73 * dt).fract();
-        let surge = 0.78 + 0.22 * fast_sin(self.surge_phase);
+        // --- Water at the hull: bandpassed noise, and the sea on top of it --------
+        //
+        // The steady part is the water going past her, which is a function of speed and
+        // nothing else. On top of it the sea itself: each wave that works along her
+        // swells the hiss and lets it fall away again, which is how one actually sounds
+        // from inside a boat — a rush that arrives and leaves rather than a level that
+        // is set. In flat water the second term is nought and the voice is the hiss, as
+        // it should be.
+        //
+        // The little half-hertz wobble that used to be here is gone with it. It was a
+        // frequency somebody chose, it never agreed with a single wave on the screen,
+        // and what it bought was the *impression* of a sea in a game that now has one.
+        let surge = 0.74 + 0.9 * self.smooth.sea_surge;
         let n2 = self.noise();
         let low = self.water_lp.run(n2, self.smooth.water_cutoff);
         let dc = self.water_hp.run(low, 110.0);
@@ -1236,10 +1270,45 @@ pub fn update(
         ((aws - 11.0) / 16.0).clamp(0.0, 1.0).powf(1.6),
     );
 
-    // Water at the hull: speed through the water, since that is what the hull feels.
+    // **Water at the hull is two sounds, and until now it was one.**
+    //
+    // The first is the water she is pushing through, which is a function of speed and of
+    // nothing else — hove to in a gale it is silent, and that part was right.
+    //
+    // The second is the sea, and leaving it out meant a boat lying stopped in a breaking
+    // swell made no noise at all while the same boat ghosting across a millpond at six
+    // knots was loud. Nobody who has been out in one would believe either. A sea makes
+    // its own noise: crests tumbling, water slapping into the topsides, the hiss of a
+    // broken one going past — and *none* of that asks how fast you are going.
+    //
+    // It scales with the height of it and with how much of it is breaking, which is a
+    // wind question rather than a wave one: below about eight knots a sea does not
+    // whitecap however big the swell, and by twenty-five it is white all over. That is
+    // the difference between a long silent swell and the same height of sea in a gale,
+    // and it is the one thing that makes the sound of weather rather than the sound of
+    // water.
     let stw = ms_to_kn(t.stw) as f32;
-    store(&p.water_level, (stw / 7.0).clamp(0.0, 1.3).powf(1.4));
+    let through_it = (stw / 7.0).clamp(0.0, 1.3).powf(1.4);
+    let whitecaps = crate::curve::smoothstep(8.0, 25.0, ms_to_kn(t.tws) as f32);
+    let sea = (t.significant_height as f32 / 1.6)
+        .clamp(0.0, 1.5)
+        .powf(0.9)
+        * (0.3 + 0.7 * whitecaps);
+    store(&p.water_level, (through_it + 0.85 * sea).clamp(0.0, 1.8));
     store(&p.water_cutoff, 260.0 + 150.0 * stw.min(9.0));
+
+    // **Which waves you hear.**
+    //
+    // Her vertical rate, with the quiet half of it taken off: below a quarter of a metre
+    // a second nothing is said at all, so a long low swell passes in silence the way it
+    // does on the water, and what speaks is the sea actually working on the hull.
+    //
+    // That threshold is the whole of "only some of them", and it is measured rather than
+    // felt: in a metre of coastal sea it leaves the voice up **sixty per cent of the
+    // time and loud for twenty-four**, which is a sea that arrives and leaves. See
+    // `the_sea_voice` below, which is also where the three conditions are printed.
+    let lift = (sim.sim.state.heave_rate.abs() as f32 - 0.25).max(0.0) / 0.75;
+    store(&p.sea_surge, lift.clamp(0.0, 1.0).powf(0.85));
 
     // Flogging: the worse-behaved of the two sails, and faster in more wind.
     let luffing = t
@@ -1916,6 +1985,83 @@ mod the_reel_and_the_band {
             (winching - nothing).abs() < 1.0,
             "winding a winch ducked the band by {:.1} dB",
             nothing - winching
+        );
+    }
+}
+
+#[cfg(test)]
+mod the_sea_voice {
+    /// **Which waves speak, as a number.**
+    ///
+    /// "Only some of them" is an instruction and this is the measurement of it: put her
+    /// in a real sea with no way on and count what fraction of the time the sea voice is
+    /// above nothing, and how often it is up near the top. A voice that is always on is
+    /// the even rushing this replaced; one that is almost never on is a silent sea.
+    #[test]
+    fn only_some_of_the_waves_speak() {
+        use sail_core::sim::{Simulation, SUBSTEP};
+        use sail_core::state::{BoatState, Controls};
+        let breeze = sail_core::units::kn_to_ms(14.0);
+        let mut sim = Simulation::new(
+            sail_core::boat::BoatConfig::charter_sloop_34(),
+            BoatState::at_rest(0.0),
+            Box::new(sail_core::wind::SteadyWind::new(0.0, breeze)),
+        )
+        .with_water(Box::new(sail_core::water::WindSea::new(
+            breeze, 20_000.0, 0.0, 11,
+        )));
+        let controls = Controls {
+            main_sheet: 1.0,
+            jib_sheet: 1.0,
+            reef: 1.0,
+            furl: 1.0,
+            ..Default::default()
+        };
+        let (mut heard, mut loud, mut all) = (0u32, 0u32, 0u32);
+        for step in 0..(180.0 / SUBSTEP) as u32 {
+            sim.run(SUBSTEP, &controls);
+            if (step as f64) * SUBSTEP < 30.0 {
+                continue;
+            }
+            all += 1;
+            let lift = ((sim.state.heave_rate.abs() as f32 - 0.25).max(0.0) / 0.75)
+                .clamp(0.0, 1.0)
+                .powf(0.85);
+            if lift > 0.02 {
+                heard += 1;
+            }
+            if lift > 0.5 {
+                loud += 1;
+            }
+        }
+        let (heard, loud) = (
+            heard as f64 / all as f64 * 100.0,
+            loud as f64 / all as f64 * 100.0,
+        );
+        println!("the sea speaks {heard:.0}% of the time, and is loud {loud:.0}%");
+        // And what the level under it comes to, in the three conditions that matter.
+        for (name, stw_kn, hs, tws_kn) in [
+            ("ghosting on a millpond", 6.0_f32, 0.0_f32, 5.0_f32),
+            ("hove to in a gale", 0.6, 2.6, 34.0),
+            ("reaching in a fresh breeze", 6.5, 1.2, 18.0),
+        ] {
+            let through_it = (stw_kn / 7.0).clamp(0.0, 1.3).powf(1.4);
+            let whitecaps = crate::curve::smoothstep(8.0, 25.0, tws_kn);
+            let sea = (hs / 1.6).clamp(0.0, 1.5).powf(0.9) * (0.3 + 0.7 * whitecaps);
+            println!(
+                "   {name:<28} hull {through_it:.2} + sea {:.2} = {:.2}",
+                0.85 * sea,
+                (through_it + 0.85 * sea).clamp(0.0, 1.8)
+            );
+        }
+        assert!(
+            (25.0..85.0).contains(&heard),
+            "the sea voice is up {heard:.0}% of the time, which is {} rather than a sea",
+            if heard > 85.0 {
+                "a rushing"
+            } else {
+                "a silence"
+            }
         );
     }
 }
