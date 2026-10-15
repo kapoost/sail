@@ -48,6 +48,9 @@ pub struct Chart {
     /// the sails or the sounder — the log line is made where those live and this is the
     /// chart asking for it.
     pub writing_up: bool,
+    /// Which page of the book is open, and the entry its rubrics are filled from.
+    pub page: Page,
+    pub showing: Option<usize>,
     /// Whether each line on the paper says what it is and why.
     pub explain: bool,
     /// Half-width of what is shown, metres.
@@ -367,6 +370,8 @@ impl Default for Chart {
             open: true,
             spread: false,
             writing_up: false,
+            page: Page::default(),
+            showing: None,
             explain: false,
             dividers: None,
             tool: Tool::Dividers,
@@ -809,6 +814,7 @@ pub fn draw(
     let mut accept: Option<glam::DVec2> = None;
     let mut writing_up = false;
     let mut laid: Option<usize> = None;
+    let mut turn_to: Option<Page> = None;
     let mut lay_at: Option<glam::DVec2> = None;
     let mut press_the_watch = false;
     let area = if spread {
@@ -914,7 +920,7 @@ pub fn draw(
             // there is paper to spare. Its rectangle joins the furniture, because a
             // press on a page is not a press on the water under it.
             let page = egui::Rect::from_min_max(
-                egui::pos2(rect.right() - 250.0, rect.top() + 140.0),
+                egui::pos2(rect.right() - 320.0, rect.top() + 140.0),
                 egui::pos2(rect.right() - 14.0, rect.bottom() - 150.0),
             );
             let on_furniture = response.interact_pointer_pos().is_some_and(|at| {
@@ -1004,8 +1010,17 @@ pub fn draw(
                 explain = explained;
             }
 
-            if let Some(line) = the_book(&table, &log, page, pressed) {
-                laid = Some(line);
+            match the_book(
+                &table,
+                &log,
+                &nav,
+                page,
+                (chart.page, chart.showing),
+                pressed,
+            ) {
+                Some(Turned::Line(line)) => laid = Some(line),
+                Some(Turned::To(which)) => turn_to = Some(which),
+                None => {}
             }
 
             match the_cocked_hat(&table, &nav, log_button, pressed) {
@@ -1168,12 +1183,24 @@ pub fn draw(
         // Likewise: the line is made where the glass, the sounder and the sails live.
         chart.writing_up = true;
     }
+    if let Some(which) = turn_to {
+        chart.page = which;
+    }
     // A line of the book laid on the chart, or taken off it again — the pencil and the
     // rubber, which is the whole of what this page does to the paper.
     if let Some(line) = laid {
         let mut over = chart.laid_at;
         lay_it_on_the_chart(&mut log, &mut nav, &mut over, line);
         chart.laid_at = over;
+        // An entry pressed is an entry he wants to read, so the rubrics follow the
+        // press rather than making him find the tab afterwards.
+        if matches!(
+            log.lines.get(line).map(|l| &l.wrote),
+            Some(Wrote::Entered(_))
+        ) {
+            chart.showing = Some(line);
+            chart.page = Page::Entries;
+        }
     }
     Ok(())
 }

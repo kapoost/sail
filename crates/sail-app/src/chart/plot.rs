@@ -1051,88 +1051,58 @@ pub(crate) fn the_sights(
 /// spelled, because a sail plan is the one thing in a log book that has always been a
 /// picture.
 pub(crate) fn an_entry(t: &Table, e: &Entry) {
+    // **On the paper, the navigational minimum and nothing else.**
+    //
+    // A log line has a dozen figures in it and most of them are about the day rather
+    // than about the place: the glass, the sea, what was set. Written beside every mark
+    // they turn a plot into a wall of type you have to read past to see the coast —
+    // reported from the deck as clutter, which is exactly what it was. The time, the
+    // course and what she was doing are the three a navigator wants *at the position*;
+    // the rest of the line is kept in the book, down the side of the table, where it
+    // can be read as a column instead of hunted for among islands.
     let c = t.to_screen(e.at);
     t.p.line_segment(
         [c + egui::vec2(0.0, -3.0), c + egui::vec2(0.0, 3.0)],
         egui::Stroke::new(1.2, ink::PENCIL),
     );
-    let mut line = c + egui::vec2(7.0, -6.0);
-    let mut write = |what: String, size: f32| {
-        t.p.text(
-            line,
-            egui::Align2::LEFT_TOP,
-            what,
-            egui::FontId::monospace(size),
-            ink::PENCIL,
-        );
-        line += egui::vec2(0.0, size + 2.0);
-    };
-    let mut first = format!(
+    let mut said = format!(
         "{:02.0}{:02.0}",
         e.hour.floor(),
         (e.hour.fract() * 60.0).floor()
     );
     if let Some(course) = e.course {
-        first += &format!("  co {:03.0}", course.to_degrees().rem_euclid(360.0));
+        said += &format!("  co {:03.0}", course.to_degrees().rem_euclid(360.0));
     }
     if let Some(knots) = e.speed {
-        first += &format!("  {knots:.1} kn");
+        said += &format!("  {knots:.1} kn");
     }
-    // The sounding on the same line as the time, because the two of them together are a
-    // position line even when nothing else is: *at 0648 there were twenty-three metres
-    // under her*, and an hour later that sentence is still worth something.
-    first += &format!("   {:.0} m", e.sounding);
-    write(first, 11.0);
-    // The glass first, because that is the order a skipper writes them in: the barometer
-    // is about the next six hours and everything else on this line is about now.
-    let way = if e.tendency.abs() < 0.5 {
-        "steady"
-    } else if e.tendency < 0.0 {
-        "falling"
-    } else {
-        "rising"
-    };
-    write(
-        format!(
-            "{:.0} {way}   {} {:.0} kn   sea {:.1} m",
-            e.glass,
-            sail_core::units::point(e.wind_from),
-            sail_core::units::ms_to_kn(e.wind),
-            e.sea
-        ),
-        9.0,
+    t.p.text(
+        c + egui::vec2(7.0, -6.0),
+        egui::Align2::LEFT_BOTTOM,
+        said,
+        egui::FontId::monospace(11.0),
+        ink::PENCIL,
     );
-    // **How much to believe the line**, when there is anything to say about it. The
-    // set is what the water has been doing to her and the circle is how far out the
-    // reckoning may be — the two figures that say whether the position on this line is
-    // a position or a hope.
-    if e.set.is_some() || e.within.is_some() {
-        let mut said = String::new();
-        if let Some(set) = e.set {
-            said += &format!("set {:.2} kn", sail_core::units::ms_to_kn(set));
-        }
-        if let Some(within) = e.within {
-            if !said.is_empty() {
-                said += "   ";
-            }
-            said += &format!("within {:.2} M", within / 1_852.0);
-        }
-        write(said, 9.0);
-    }
-    sail_plan(t, line + egui::vec2(2.0, 2.0), e);
+    t.note(
+        c + egui::vec2(7.0, 4.0),
+        "a line of the log: the rest of it is in the book",
+        ink::PENCIL,
+    );
 }
 
 /// What was set, drawn the way a log book draws it.
 ///
 /// The main with a bar across the foot for every reef in her, and the headsail as the
 /// triangle that is actually up — rolled away, it is drawn narrower, because that is
-/// what a furling genoa *is* and a log that wrote "genoa" for a hand's width of cloth
-/// would be a log that lied about the morning.
-pub(crate) fn sail_plan(t: &Table, at: egui::Pos2, e: &Entry) {
+/// what a furling genoa *is* and a book that wrote "genoa" for a hand's width of cloth
+/// would be a book that lied about the morning.
+///
+/// In the book and not on the chart: a sail plan beside every mark is a page of pictures
+/// over the coast you are trying to look at.
+pub(crate) fn sail_plan(t: &Table, at: egui::Pos2, e: &Entry, tall: f32) {
     let ink = ink::PENCIL;
-    let (tall, foot) = (16.0, 9.0);
+    let foot = tall * 0.56;
     let mast = at + egui::vec2(0.0, tall);
-    // The main: luff up the mast, foot aft along the boom.
     t.p.line_segment([at, mast], egui::Stroke::new(1.0, ink));
     t.p.line_segment(
         [mast, mast + egui::vec2(foot, 0.0)],
@@ -1163,32 +1133,24 @@ pub(crate) fn sail_plan(t: &Table, at: egui::Pos2, e: &Entry) {
         t.p.line_segment([tack, clew], egui::Stroke::new(1.0, ink));
         t.p.line_segment([head, clew], egui::Stroke::new(1.0, ink));
     }
+}
+
+/// What the sail plan says in words, for the column beside the picture.
+pub(crate) fn what_was_set(e: &Entry) -> String {
+    let reefs = (e.reef * 3.0).round() as i32;
+    let set = 1.0 - e.furl;
     let what = match e.headsail {
         sail_core::state::Headsail::Genoa => "gen",
         sail_core::state::Headsail::Code0 => "C0",
         sail_core::state::Headsail::Gennaker => "gnk",
         sail_core::state::Headsail::Spinnaker => "kite",
     };
-    let said = match (reefs, set > 0.02) {
+    match (reefs, set > 0.02) {
+        (0, true) if set < 0.75 => format!("full + {what} rolled"),
         (0, true) => format!("full main + {what}"),
-        (0, false) => "full main, headsail in".to_string(),
-        (n, true) if set < 0.75 => format!("{n} reef{} + {what} rolled", plural(n)),
-        (n, true) => format!("{n} reef{} + {what}", plural(n)),
-        (n, false) => format!("{n} reef{}, headsail in", plural(n)),
-    };
-    t.p.text(
-        at + egui::vec2(foot + 6.0, tall * 0.5),
-        egui::Align2::LEFT_CENTER,
-        said,
-        egui::FontId::monospace(9.0),
-        ink,
-    );
-}
-
-fn plural(n: i32) -> &'static str {
-    if n == 1 {
-        ""
-    } else {
-        "s"
+        (0, false) => "full main alone".to_string(),
+        (n, true) if set < 0.75 => format!("{n} reef + {what} rolled"),
+        (n, true) => format!("{n} reef + {what}"),
+        (n, false) => format!("{n} reef, no headsail"),
     }
 }

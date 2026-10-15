@@ -407,7 +407,7 @@ pub fn write_up_the_log(
         .or_else(|| nav.reckoning.as_ref().map(|run| run.steering));
     let line = note(&sim, &nav, sky.hour, at, course);
     chart.pencil(crate::chart::Plotted::Entry(line));
-    log.write(sky.hour, crate::chart::Wrote::Entered { at });
+    log.write(sky.hour, crate::chart::Wrote::Entered(line));
     info!(
         "log written up at {:02.0}{:02.0}",
         sky.hour.floor(),
@@ -1060,11 +1060,9 @@ pub fn enter_in_the_log(
         // here. The watch tool exists for marking anything else; a fix stamps itself,
         // because there is exactly one moment it can mean.
         let below = DVec2::new(0.0, -(chart.range as f64) * 0.012);
-        chart.write_down(
-            crate::chart::Plotted::Entry(note(&sim, &nav, hour, said + below, None)),
-            nav.shows_position(now),
-        );
-        log.write(hour, crate::chart::Wrote::Entered { at: said });
+        let line = note(&sim, &nav, hour, said + below, None);
+        chart.write_down(crate::chart::Plotted::Entry(line), nav.shows_position(now));
+        log.write(hour, crate::chart::Wrote::Entered(line));
         info!(
             "fix entered: {:.0} m from where she is — the chart knows her again for six \
              minutes",
