@@ -209,9 +209,31 @@ impl Reckoning {
         if turned.abs() > ALTERATION && self.steady > SETTLED {
             self.spread += THE_TURN * turned.abs();
             self.steering = heading;
-            if self.altered.len() + self.unwritten.len() < CORNERS {
-                self.unwritten.push((heading, 0.0, now));
+            // **The alteration is always recorded; it is the far end of the plot that
+            // goes.**
+            //
+            // Refusing the new leg at the cap was the wrong half to drop. The course she
+            // is steering had already been accepted, so every mile after it went on
+            // being laid off along a heading she had stopped steering: the reckoning did
+            // not merely stop drawing her turns, it walked away from her, confidently,
+            // in the wrong direction — one and three quarter miles over a thirty-tack
+            // beat, which the test measures. Losing the oldest corner loses the drawing
+            // of water she crossed an hour ago and moves nothing.
+            if self.altered.len() + self.unwritten.len() >= CORNERS {
+                if self.altered.is_empty() {
+                    // Nothing written up, so the start of the plot is what gives: the
+                    // oldest leg is folded into where the reckoning begins. It stops
+                    // being *from the fix* — which is honest, because after this many
+                    // alterations with nobody at the chart table it is not from the fix
+                    // in any useful sense either.
+                    let (course, ran, _) = self.unwritten.remove(0);
+                    self.from += DVec2::new(course.sin(), course.cos()) * ran;
+                    self.since = self.unwritten.first().map_or(now, |(_, _, began)| *began);
+                } else {
+                    self.altered.remove(0);
+                }
             }
+            self.unwritten.push((heading, 0.0, now));
         }
     }
 
@@ -1117,6 +1139,37 @@ mod the_reckoning {
             "ten minutes at two and a half metres a second is fifteen hundred metres, \
              got {:.0}",
             run.plotted_at().y
+        );
+    }
+
+    /// **Past the corner limit she must still know where she is.**
+    ///
+    /// The cap exists so that one page of plotting does not become a thousand corners.
+    /// But refusing to record the alteration while still accepting the new course was
+    /// the wrong half to drop: every mile after it went on being laid off along a
+    /// heading she had stopped steering, so the reckoning did not merely stop drawing
+    /// the turns — it walked away from her, confidently, in the wrong direction.
+    ///
+    /// A beat to windward in a narrow sound is twenty tacks, and twenty-five is not an
+    /// unusual hour. So: thirty alterations, and the plot still has to agree with the
+    /// water she went through.
+    #[test]
+    fn a_long_beat_does_not_walk_the_plot_off_the_chart() {
+        let mut run = Reckoning::from_a_fix(DVec2::ZERO, rad(45.0), 0.0);
+        let mut truth = DVec2::ZERO;
+        let mut now = 0.0;
+        for tack in 0..30 {
+            let course = if tack % 2 == 0 { rad(-45.0) } else { rad(45.0) };
+            now = tack_to(&mut run, course, 120.0);
+            run.write_up(now);
+            // What she actually went through the water, laid off the same way a
+            // navigator would: the course she settled on, for the minutes she held it.
+            truth += DVec2::new(course.sin(), course.cos()) * 2.5 * 135.0;
+        }
+        let out = (run.plotted_at() - truth).length();
+        assert!(
+            out < 400.0,
+            "after thirty tacks the plot is {out:.0} m from the water she ran through"
         );
     }
 }
