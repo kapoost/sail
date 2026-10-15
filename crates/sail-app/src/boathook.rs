@@ -225,6 +225,20 @@ pub fn setup(
         ..default()
     });
     let shaft = meshes.add(Cylinder::new(0.022, SHAFT));
+    // The cradles: a block each side of the shaft rather than a bar under it, which is
+    // what a chock is — the spar drops into the notch between them.
+    let w_chock = meshes.add(Cuboid::new(0.10, 0.09, 0.07));
+    let w_cord = meshes.add(Torus::new(0.030, 0.038));
+    let teak = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.46, 0.34, 0.20),
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+    let cord = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.12, 0.13, 0.15),
+        perceptual_roughness: 0.9,
+        ..default()
+    });
     // The head: a spike forward and a hook out to the side, which is what the thing is —
     // one end to push with and one to pull with.
     let spike = meshes.add(Cylinder::new(0.012, 0.13));
@@ -246,8 +260,21 @@ pub fn setup(
         ));
     };
 
+    // **On chocks, not lying on the paint.**
+    //
+    // The first attempt put the shaft's centre forty millimetres above `deck_height`,
+    // which is the deck *line* — and the drawn deck at this station is cambered and
+    // bulwarked up to eighty, so two thirds of a boathook was inside the deck and what
+    // showed was a thin varnished line on a painted surface. Reported from the deck as
+    // not being there at all, which it very nearly was not. Measured off the drawn mesh
+    // rather than reasoned about: the walked-on surface runs 0.77 to 0.80 here.
+    //
+    // Chocks are also simply what one lies in. A two-metre spar loose on a side deck
+    // goes over the side the first time she rolls, so it lives in a pair of cradles with
+    // a shock cord over it, and that is what lifts it clear of the camber.
     let deck = crate::deck::deck_height(CHOCKS_Z);
     let out = crate::deck::deck_half_beam(CHOCKS_Z) - 0.22;
+    let rests_at = deck + 0.115;
     commands.entity(root).with_children(|b| {
         // Lying fore and aft in its chocks, hook forward, which is how one is stowed so
         // that the first thing your hand finds is the handle.
@@ -255,11 +282,26 @@ pub fn setup(
             InTheChocks,
             Mesh3d(shaft.clone()),
             MeshMaterial3d(wood.clone()),
-            Transform::from_xyz(out, deck + 0.04, CHOCKS_Z)
+            Transform::from_xyz(out, rests_at, CHOCKS_Z)
                 .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
             Visibility::default(),
         ))
         .with_children(&head);
+        // The cradles it sits in, and the cord over the top of it.
+        for along in [-0.62, 0.42] {
+            b.spawn((
+                Mesh3d(w_chock.clone()),
+                MeshMaterial3d(teak.clone()),
+                Transform::from_xyz(out, deck + 0.045, CHOCKS_Z + along),
+            ));
+            b.spawn((
+                Mesh3d(w_cord.clone()),
+                MeshMaterial3d(cord.clone()),
+                Transform::from_xyz(out, rests_at + 0.015, CHOCKS_Z + along)
+                    .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::new(1.0, 1.0, 0.5)),
+            ));
+        }
         // And the same thing in somebody's hands. A second object rather than one that
         // is moved, because the two have nothing in common but the shape: this one is
         // held at an angle, swings with what it is reaching for, and is placed by the
