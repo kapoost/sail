@@ -152,6 +152,11 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
                 "Shift L",
                 "somewhere at sea with the sails set and no idea where",
             ),
+            (
+                "F12",
+                "a picture of the screen, into your Pictures folder — the fault you \
+                 cannot describe is the one nobody fixes",
+            ),
         ],
     ),
     (
@@ -221,7 +226,7 @@ const SECOND_COLUMN: usize = 3;
 /// help does not mention is a feature nobody will find; a key the help promises and
 /// nothing reads is a lie, and both have happened here.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const DOCUMENTED: [KeyCode; 43] = [
+pub const DOCUMENTED: [KeyCode; 44] = [
     // At the helm.
     KeyCode::ArrowLeft,
     KeyCode::ArrowRight,
@@ -273,6 +278,7 @@ pub const DOCUMENTED: [KeyCode; 43] = [
     KeyCode::Enter,
     // And the help itself, which the list cannot very well leave out.
     KeyCode::F1,
+    KeyCode::F12,
     KeyCode::Slash,
 ];
 

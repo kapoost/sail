@@ -43,6 +43,7 @@ mod sail_texture;
 mod scenarios;
 mod sea_texture;
 mod settings;
+mod shot;
 mod sight;
 mod sim;
 mod sky;
@@ -167,249 +168,254 @@ fn main() {
     //
     // The loose `assets` directory still wins when it exists, which is what keeps the
     // development loop: drop a new hull in and run, no rebuild.
-    App::new()
-        .add_plugins(
-            DefaultPlugins
-                .set(AssetPlugin {
-                    file_path: asset_root(),
-                    ..default()
-                })
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "sail".into(),
-                        resolution: (1440u32, 880u32).into(),
-                        // The window is fixed at this size on purpose. The instruments are
-                        // not a responsive layout: the console, the chart and the gauges are
-                        // drawn at known pixel sizes into a 480-line image that is then
-                        // scaled, and at any other aspect the needles sit off their dials and
-                        // the chart corner crawls out of the frame. A resizable window offers
-                        // a promise the picture cannot keep, so it is withdrawn.
-                        resizable: false,
-                        // Resizing is also reachable past `resizable` on macOS: the green
-                        // button zooms the window to the display. Turning the button off is
-                        // part of the same decision, not a separate nicety.
-                        enabled_buttons: EnabledButtons {
-                            maximize: false,
-                            ..default()
-                        },
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(AssetPlugin {
+                file_path: asset_root(),
+                ..default()
+            })
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "sail".into(),
+                    resolution: (1440u32, 880u32).into(),
+                    // The window is fixed at this size on purpose. The instruments are
+                    // not a responsive layout: the console, the chart and the gauges are
+                    // drawn at known pixel sizes into a 480-line image that is then
+                    // scaled, and at any other aspect the needles sit off their dials and
+                    // the chart corner crawls out of the frame. A resizable window offers
+                    // a promise the picture cannot keep, so it is withdrawn.
+                    resizable: false,
+                    // Resizing is also reachable past `resizable` on macOS: the green
+                    // button zooms the window to the display. Turning the button off is
+                    // part of the same decision, not a separate nicety.
+                    enabled_buttons: EnabledButtons {
+                        maximize: false,
                         ..default()
-                    }),
+                    },
                     ..default()
                 }),
-        )
-        .add_plugins(EguiPlugin::default())
-        // The plugin must not claim the first camera for its context: that is the one
-        // looking at the sea, and in the pixelated picture it draws into a 480-pixel
-        // image. The instruments get a camera of their own — see `retro::UiCamera`.
-        .insert_resource(bevy_egui::EguiGlobalSettings {
-            auto_create_primary_context: false,
-            ..default()
-        })
-        .add_plugins(sound::plugin)
-        .insert_resource(sim::Sim::new(weather))
-        .insert_resource(weather)
-        // The console is the interface now; the diagnostic panel is the microscope and
-        // starts put away. Tab brings it back, or the switch on the console does.
-        .insert_resource(hud::HudVisible(false))
-        .init_resource::<hud::Polar>()
-        .init_resource::<input::HelmSource>()
-        .init_resource::<clutch::Bank>()
-        .init_resource::<input::Pilot>()
-        .init_resource::<frame::RenderOrigin>()
-        .insert_resource(sky::Sky::at(
-            weather.start_hour as f32,
-            weather.cover as f32,
-        ))
-        .init_resource::<sky::Baking>()
-        .init_resource::<settings::Settings>()
-        .init_resource::<help::Help>()
-        .init_resource::<logbook::Logbook>()
-        .insert_resource(retro::Retro::from_env())
-        .insert_resource(world::Ink::from_env())
-        .init_resource::<world::SeaFilm>()
-        .init_resource::<music::Music>()
-        .init_resource::<fleet::Fleet>()
-        .init_resource::<chart::Chart>()
-        .init_resource::<chart::Track>()
-        .init_resource::<chart::DeckLog>()
-        .init_resource::<world::SurfaceDrift>()
-        .init_resource::<camera::ChaseState>()
-        // The gear is drawn against the same seed as the weather, so a day worth
-        // sailing again is also a day worth fishing again: the same fish take in the
-        // same places, and a passage can be repeated rather than merely re-rolled.
-        .insert_resource(fishing::Fishing::new(weather.seed))
-        .init_resource::<camera::ViewAim>()
-        .init_resource::<boathook::Boathook>()
-        .init_resource::<navigation::Navigation>()
-        .init_resource::<sight::Sighting>()
-        .init_resource::<marks::Coast>()
-        // `SAIL_TUTORIAL=1` starts the drill on the first frame, which is how it gets
-        // looked at twenty times in an afternoon without clicking through a panel.
-        .insert_resource(tutorial::Tutorial::asked_for(
-            std::env::var("SAIL_TUTORIAL").is_ok(),
-        ))
-        .add_systems(
-            Startup,
+                ..default()
+            }),
+    )
+    .add_plugins(EguiPlugin::default())
+    // The plugin must not claim the first camera for its context: that is the one
+    // looking at the sea, and in the pixelated picture it draws into a 480-pixel
+    // image. The instruments get a camera of their own — see `retro::UiCamera`.
+    .insert_resource(bevy_egui::EguiGlobalSettings {
+        auto_create_primary_context: false,
+        ..default()
+    })
+    .add_plugins(sound::plugin)
+    .insert_resource(sim::Sim::new(weather))
+    .insert_resource(weather)
+    // The console is the interface now; the diagnostic panel is the microscope and
+    // starts put away. Tab brings it back, or the switch on the console does.
+    .insert_resource(hud::HudVisible(false))
+    .init_resource::<hud::Polar>()
+    .init_resource::<input::HelmSource>()
+    .init_resource::<clutch::Bank>()
+    .init_resource::<input::Pilot>()
+    .init_resource::<frame::RenderOrigin>()
+    .insert_resource(sky::Sky::at(
+        weather.start_hour as f32,
+        weather.cover as f32,
+    ))
+    .init_resource::<sky::Baking>()
+    .init_resource::<settings::Settings>()
+    .init_resource::<help::Help>()
+    .init_resource::<logbook::Logbook>()
+    .insert_resource(retro::Retro::from_env())
+    .insert_resource(world::Ink::from_env())
+    .init_resource::<world::SeaFilm>()
+    .init_resource::<music::Music>()
+    .init_resource::<fleet::Fleet>()
+    .init_resource::<chart::Chart>()
+    .init_resource::<chart::Track>()
+    .init_resource::<chart::DeckLog>()
+    .init_resource::<world::SurfaceDrift>()
+    .init_resource::<camera::ChaseState>()
+    // The gear is drawn against the same seed as the weather, so a day worth
+    // sailing again is also a day worth fishing again: the same fish take in the
+    // same places, and a passage can be repeated rather than merely re-rolled.
+    .insert_resource(fishing::Fishing::new(weather.seed))
+    .init_resource::<camera::ViewAim>()
+    .init_resource::<boathook::Boathook>()
+    .init_resource::<navigation::Navigation>()
+    .init_resource::<sight::Sighting>()
+    .init_resource::<marks::Coast>()
+    // `SAIL_TUTORIAL=1` starts the drill on the first frame, which is how it gets
+    // looked at twenty times in an afternoon without clicking through a panel.
+    .insert_resource(tutorial::Tutorial::asked_for(
+        std::env::var("SAIL_TUTORIAL").is_ok(),
+    ))
+    .add_systems(
+        Startup,
+        (
+            retro::setup_ui_camera,
+            world::setup,
+            boat::setup,
+            boat::report,
+            islands::setup,
+            horizon::setup,
+            clouds::setup,
+            camera::setup,
+            hud::build_polar,
+            sound::setup,
+            course::setup,
+            wake::setup,
+            spray::setup,
+            rain::setup,
+            rig::setup,
+            panel::setup,
+            // The deck gear, the rod, and the basket the catch goes in: things put
+            // on the boat once she exists. Grouped because a startup tuple is
+            // twenty long at the most and this one is full.
+            (stowage::setup, rod::setup, creel::setup),
             (
-                retro::setup_ui_camera,
-                world::setup,
-                boat::setup,
-                boat::report,
-                islands::setup,
-                horizon::setup,
-                clouds::setup,
-                camera::setup,
-                hud::build_polar,
-                sound::setup,
-                course::setup,
-                wake::setup,
-                spray::setup,
-                rain::setup,
-                rig::setup,
-                panel::setup,
-                // The deck gear, the rod, and the basket the catch goes in: things put
-                // on the boat once she exists. Grouped because a startup tuple is
-                // twenty long at the most and this one is full.
-                (stowage::setup, rod::setup, creel::setup),
-                (
-                    mob::setup,
-                    boathook::setup,
-                    tutorial::setup,
-                    marks::setup,
-                    net::setup,
-                ),
-                windstreaks::setup,
-            )
-                // Chained because several of these depend on each other's entities,
-                // and at startup the cost of ordering them is nothing at all.
-                .chain(),
+                mob::setup,
+                boathook::setup,
+                tutorial::setup,
+                marks::setup,
+                net::setup,
+            ),
+            windstreaks::setup,
         )
-        .add_systems(
-            Update,
+            // Chained because several of these depend on each other's entities,
+            // and at startup the cost of ordering them is nothing at all.
+            .chain(),
+    )
+    .add_systems(
+        Update,
+        (
+            // Intent, then physics, then everything that reads the result.
+            input::gather,
+            clutch::handle,
+            // The rod is worked before the physics for the same reason the helm is:
+            // it is intent, and intent belongs at the top of the frame. The fight
+            // reads last frame's speed through the water, which is five milliseconds
+            // stale and matters to nothing.
+            fishing::work,
+            sim::advance,
+            // Pick where the world is drawn from before anything is placed in it,
+            // so the whole frame agrees on one mark.
+            frame::rebase_origin,
+            world::report_vitals,
+            world::report_frame_times,
+            chart::record,
             (
-                // Intent, then physics, then everything that reads the result.
-                input::gather,
-                clutch::handle,
-                // The rod is worked before the physics for the same reason the helm is:
-                // it is intent, and intent belongs at the top of the frame. The fight
-                // reads last frame's speed through the water, which is five milliseconds
-                // stale and matters to nothing.
-                fishing::work,
-                sim::advance,
-                // Pick where the world is drawn from before anything is placed in it,
-                // so the whole frame agrees on one mark.
-                frame::rebase_origin,
-                world::report_vitals,
-                world::report_frame_times,
-                chart::record,
-                (
-                    islands::follow_origin,
-                    marks::follow_origin,
-                    marks::keep_the_coast,
-                ),
-                // Everybody else's boats: told where they are, given their hulls, then
-                // placed and dressed like any other thing in the scene. One group of its
-                // own because the four have to happen in that order and because a tuple
-                // of systems is twenty long at the most.
-                (
-                    net::exchange,
-                    net::rebuild,
-                    fleet::rehearsal,
-                    fleet::sync,
-                    fleet::place,
-                    fleet::dress,
-                )
-                    .chain(),
-                (
-                    boat::update_hull,
-                    boat::update_rudder,
-                    fittings::update_tiller,
-                    fittings::update_compass,
-                    boat::update_boom,
-                    (
-                        boat::update_staysail_boom,
-                        boat::update_pole,
-                        (stowage::update, stowage::flutter),
-                    ),
-                    boat::update_windex,
-                    boat::update_genoa_cars,
-                    boat::update_telltales,
-                    boat::update_sails,
-                    course::update,
-                    world::update_sea,
-                    course::float_marks,
-                    // The things that live in the water she has just left.
-                    (wake::update, rod::update, creel::update, mob::update),
-                    rig::update,
-                    camera::follow,
-                    sound::update,
-                    windstreaks::update,
-                    spray::update,
-                    clouds::update,
-                ),
-                (
-                    // The weather you can see, after everything that places it.
-                    (
-                        fittings::update_vane,
-                        fittings::light_the_lamps,
-                        marks::flash,
-                    ),
-                    horizon::follow,
-                    sky::drift,
-                    sky::light,
-                    rain::update,
-                    rain::shroud,
-                    (settings::toggle, settings::apply),
-                    (help::toggle, logbook::toggle, mob::throw, tutorial::run),
-                    (camera::toggle, camera::dress, glance::posts),
-                    camera::aim,
-                    (
-                        course::restart,
-                        navigation::lost_at_sea,
-                        navigation::enter_in_the_log,
-                        navigation::write_up_the_log,
-                        navigation::the_fix_holds,
-                        navigation::reckon,
-                        boathook::reach,
-                        boathook::dress,
-                        sight::aim,
-                        sight::glasses,
-                        sight::recognise,
-                    ),
-                    chart::toggle,
-                    chart::stopwatch,
-                    chart::by_hand,
-                    retro::stress.run_if(|| std::env::var("SAIL_RETRO_STRESS").is_ok()),
-                    music::compose,
-                    world::apply_ink,
-                    world::roll_sea_film,
-                    ink::apply,
-                    retro::apply,
-                ),
+                islands::follow_origin,
+                marks::follow_origin,
+                marks::keep_the_coast,
+            ),
+            // Everybody else's boats: told where they are, given their hulls, then
+            // placed and dressed like any other thing in the scene. One group of its
+            // own because the four have to happen in that order and because a tuple
+            // of systems is twenty long at the most.
+            (
+                net::exchange,
+                net::rebuild,
+                fleet::rehearsal,
+                fleet::sync,
+                fleet::place,
+                fleet::dress,
             )
                 .chain(),
-        )
-        .add_systems(
-            EguiPrimaryContextPass,
             (
-                // Once, at the start: `set_fonts` rebuilds the atlas, so it must not
-                // be called every frame.
-                retro::install_font.run_if(bevy::ecs::schedule::common_conditions::run_once),
-                retro::scale_instruments,
-                panel::draw,
-                settings::draw,
-                help::draw,
-                chart::draw,
-                logbook::draw,
-                logbook::lost,
-                hud::draw,
-                tutorial::draw,
-                sight::draw,
-                navigation::adrift_card,
-                chart::glass,
-                boathook::draw,
-            )
-                .chain(),
+                boat::update_hull,
+                boat::update_rudder,
+                fittings::update_tiller,
+                fittings::update_compass,
+                boat::update_boom,
+                (
+                    boat::update_staysail_boom,
+                    boat::update_pole,
+                    (stowage::update, stowage::flutter),
+                ),
+                boat::update_windex,
+                boat::update_genoa_cars,
+                boat::update_telltales,
+                boat::update_sails,
+                course::update,
+                world::update_sea,
+                course::float_marks,
+                // The things that live in the water she has just left.
+                (wake::update, rod::update, creel::update, mob::update),
+                rig::update,
+                camera::follow,
+                sound::update,
+                windstreaks::update,
+                spray::update,
+                clouds::update,
+            ),
+            (
+                // The weather you can see, after everything that places it.
+                (
+                    fittings::update_vane,
+                    fittings::light_the_lamps,
+                    marks::flash,
+                ),
+                horizon::follow,
+                sky::drift,
+                sky::light,
+                rain::update,
+                rain::shroud,
+                (settings::toggle, settings::apply),
+                (help::toggle, logbook::toggle, mob::throw, tutorial::run),
+                (camera::toggle, camera::dress, glance::posts),
+                camera::aim,
+                (
+                    course::restart,
+                    navigation::lost_at_sea,
+                    navigation::enter_in_the_log,
+                    navigation::write_up_the_log,
+                    navigation::the_fix_holds,
+                    navigation::reckon,
+                    boathook::reach,
+                    boathook::dress,
+                    sight::aim,
+                    sight::glasses,
+                    sight::recognise,
+                ),
+                chart::toggle,
+                chart::stopwatch,
+                chart::by_hand,
+                retro::stress.run_if(|| std::env::var("SAIL_RETRO_STRESS").is_ok()),
+                music::compose,
+                world::apply_ink,
+                world::roll_sea_film,
+                ink::apply,
+                retro::apply,
+            ),
         )
-        .run();
+            .chain(),
+    )
+    .add_systems(
+        EguiPrimaryContextPass,
+        (
+            // Once, at the start: `set_fonts` rebuilds the atlas, so it must not
+            // be called every frame.
+            retro::install_font.run_if(bevy::ecs::schedule::common_conditions::run_once),
+            retro::scale_instruments,
+            panel::draw,
+            settings::draw,
+            help::draw,
+            chart::draw,
+            logbook::draw,
+            logbook::lost,
+            hud::draw,
+            tutorial::draw,
+            sight::draw,
+            navigation::adrift_card,
+            chart::glass,
+            boathook::draw,
+        )
+            .chain(),
+    );
+    // A picture of herself on a timer, when one was asked for: see `shot`.
+    if let Some(shot) = shot::wanted() {
+        app.insert_resource(shot)
+            .add_systems(Update, shot::on_a_timer);
+    }
+    app.run();
 }
