@@ -32,6 +32,26 @@ pub struct Polar {
     pub max_speed: f64,
 }
 
+impl Polar {
+    /// The angle to the wind she makes the best of to windward, in radians.
+    ///
+    /// **Read off her own curve rather than written down.** The best beating angle is
+    /// wherever `speed × cos(angle)` peaks — how fast she goes *towards* where the wind
+    /// is coming from — and that moves with the boat, the wind strength and whatever is
+    /// set. A number typed into an instrument would be a lie the first time she was
+    /// reefed.
+    pub fn beat(&self) -> f64 {
+        self.points
+            .iter()
+            .map(|(twa, speed)| (twa, speed * twa.cos()))
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(twa, _)| *twa)
+            // Before the curve is solved, the figure every pilot book gives for a
+            // cruising sloop.
+            .unwrap_or(sail_core::units::rad(42.0))
+    }
+}
+
 /// Solve the polar at startup. Fifteen steady-state solves is a fraction of a second
 /// in release, and having the curve on screen from the first frame is worth it.
 pub fn build_polar(mut polar: ResMut<Polar>, sim: Res<Sim>) {
