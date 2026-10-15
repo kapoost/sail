@@ -365,6 +365,17 @@ pub fn reckon(
     // The log counts whatever happens. Here rather than in the reckoning below because
     // it goes on counting when there is no reckoning to run.
     nav.through_water += sim.sim.telemetry.stw.abs() * dt;
+    // **And every position line walks with her.**
+    //
+    // A bearing is a statement about where she was when it was taken, and she does not
+    // stay there. So each line carries the run since it was shot, and crossing them is
+    // crossing them *now* — which is the running fix, and which is what makes a single
+    // lighthouse on a long coast worth two bearings and a wait. Through the water,
+    // because the compass and the log are what she has.
+    let step = DVec2::new(heading.sin(), heading.cos()) * sim.sim.telemetry.stw * dt;
+    for sight in nav.sights.iter_mut() {
+        sight.ran += step;
+    }
     let Some(run) = nav.reckoning.as_mut() else {
         return;
     };
@@ -798,10 +809,11 @@ pub fn enter_in_the_log(
         // nothing for it — and the lines are exactly what he needs at that moment,
         // because the answer to a fix that will not close is a third bearing on top of
         // the two he has. Reported from the deck as a line vanishing for no reason.
+        // Clearing the sights takes the position lines off the paper with them: they
+        // are drawn from the sights themselves rather than copied into the plot, so
+        // there is one place where a line exists and no way for the copy to outlive the
+        // reading. What is left behind is the fix, which is the one thing worth keeping.
         nav.sights.clear();
-        chart
-            .plot
-            .retain(|item| !matches!(item, crate::chart::Plotted::Line { .. }));
         // **What the last run turned out to be worth.**
         //
         // The reckoning was started at the previous fix and has been run on ever since;

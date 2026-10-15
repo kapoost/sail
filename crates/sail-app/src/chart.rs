@@ -32,6 +32,8 @@ pub struct Chart {
     /// are. A chart on a table is an instrument: you put a straight edge on it and work
     /// something out. They are different objects and this is the switch between them.
     pub spread: bool,
+    /// Whether each line on the paper says what it is and why.
+    pub explain: bool,
     /// Half-width of what is shown, metres.
     pub range: f32,
     /// The dividers: where they were set down, and where they are now. In simulation
@@ -381,6 +383,7 @@ impl Default for Chart {
         Self {
             open: true,
             spread: false,
+            explain: false,
             dividers: None,
             tool: Tool::Dividers,
             plot: Vec::new(),
@@ -566,6 +569,7 @@ pub fn draw(
     let mut draw_on: Option<Plotted> = None;
     let mut rub_out: Option<glam::DVec2> = None;
     let mut pick: Option<Tool> = None;
+    let mut explain: Option<bool> = None;
     let mut accept: Option<glam::DVec2> = None;
     let mut lay_at: Option<glam::DVec2> = None;
     let mut take_hold: Option<(usize, Grab)> = None;
@@ -621,6 +625,7 @@ pub fn draw(
             scale,
             middle: middle_of_paper,
             knows,
+            why: chart.explain,
         };
 
         // A kilometre grid, so distance on the chart means something.
@@ -726,6 +731,11 @@ pub fn draw(
                 ));
                 x += wide + 8.0;
             }
+            // The legend switch, at the end of the row of instruments because that is
+            // what it is: a thing you pick up when you want to know what you are
+            // looking at.
+            let why_button =
+                egui::Rect::from_min_size(egui::pos2(x, rect.top() + 14.0), egui::vec2(48.0, 20.0));
             let log_button = egui::Rect::from_min_size(
                 egui::pos2(rect.left() + 24.0, rect.top() + 66.0),
                 egui::vec2(188.0, 22.0),
@@ -746,6 +756,7 @@ pub fn draw(
             );
             let on_furniture = response.interact_pointer_pos().is_some_and(|at| {
                 furniture.iter().any(|slot| slot.contains(at))
+                    || why_button.contains(at)
                     || log_button.contains(at)
                     || watch_face.contains(at)
                     || watch_button.contains(at)
@@ -978,6 +989,14 @@ pub fn draw(
 
             reckoning(&table, &nav, st.time);
 
+            the_sights(
+                &table,
+                &nav,
+                &coast,
+                crossing_at,
+                chart.range as f64,
+                st.heading,
+            );
             plotted(&table, &chart, crossing_at, st.heading);
 
             protractor(
@@ -1136,6 +1155,31 @@ pub fn draw(
                         .is_some_and(|at| slot.contains(at))
                 {
                     pick = Some(tool);
+                }
+            }
+
+            {
+                let on = chart.explain;
+                p.rect_filled(why_button, 2.0, if on { ink::MARK } else { ink::PAPER });
+                p.rect_stroke(
+                    why_button,
+                    2.0,
+                    egui::Stroke::new(1.0, ink::COAST),
+                    egui::StrokeKind::Inside,
+                );
+                p.text(
+                    why_button.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "WHY",
+                    egui::FontId::monospace(10.0),
+                    ink::COAST,
+                );
+                if response.clicked()
+                    && response
+                        .interact_pointer_pos()
+                        .is_some_and(|at| why_button.contains(at))
+                {
+                    explain = Some(!on);
                 }
             }
 
@@ -1325,6 +1369,9 @@ pub fn draw(
     }
     if let Some(where_) = set_protractor {
         chart.protractor = where_;
+    }
+    if let Some(up) = explain {
+        chart.explain = up;
     }
     if let Some(tool) = pick {
         chart.tool = tool;
@@ -1585,9 +1632,34 @@ pub struct Table {
     /// Whether the chart may say where she is — carried here because half the drawing
     /// has to ask it and the answer must be the same for all of them.
     pub knows: bool,
+    /// Whether every line says what it is and why it is there.
+    ///
+    /// **A teaching switch, and a debugging one.** A plot is six kinds of line in two
+    /// colours and no legend, and the difference between a position line, a transferred
+    /// position line and a reckoning is the whole of the subject — but a chart carrying
+    /// a sentence beside every line is a chart nobody can read. So it is a button.
+    pub why: bool,
 }
 
 impl Table {
+    /// A word beside a line saying what it is, when the legend is up.
+    ///
+    /// Deliberately plain and deliberately short: the question it answers is *which of
+    /// these six lines is which*, and an explanation long enough to be interesting would
+    /// cover the chart it is explaining.
+    pub fn note(&self, at: egui::Pos2, what: impl ToString, ink: egui::Color32) {
+        if !self.why {
+            return;
+        }
+        self.p.text(
+            at,
+            egui::Align2::LEFT_TOP,
+            what.to_string(),
+            egui::FontId::monospace(8.0),
+            ink.gamma_multiply(0.8),
+        );
+    }
+
     pub fn to_screen(&self, at: glam::DVec2) -> egui::Pos2 {
         let off = at - self.middle;
         self.rect.center() + egui::vec2(off.x as f32, -off.y as f32) * self.scale
@@ -1682,6 +1754,11 @@ fn reckoning(t: &Table, nav: &crate::navigation::Navigation, when: f64) {
             egui::FontId::monospace(10.0),
             ink::TRACK,
         );
+        t.note(
+            egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5) + egui::vec2(7.0, 6.0),
+            "track made good: fix to fix, the one line here that is not an estimate",
+            ink::TRACK,
+        );
     }
     // **The reckoning is the half of navigation the fix cannot do — so it is drawn
     // when the fix cannot do it.**
@@ -1749,6 +1826,11 @@ fn reckoning(t: &Table, nav: &crate::navigation::Navigation, when: f64) {
                 ),
                 egui::FontId::monospace(9.0),
                 ink::PEN.gamma_multiply(0.85),
+            );
+            t.note(
+                egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5) + egui::vec2(6.0, 6.0),
+                "reckoning: a course she steered and the miles the log counted on it",
+                ink::PEN,
             );
             // And a bar across the corner, so that the place she altered is a mark on
             // the paper rather than a bend in a dashed line.
@@ -2099,6 +2181,11 @@ fn plotted(t: &Table, chart: &Chart, crossing_at: Option<glam::DVec2>, heading: 
                     egui::FontId::monospace(9.0),
                     ink::PENCIL.gamma_multiply(0.7),
                 );
+                t.note(
+                    middle + egui::vec2(6.0, 14.0),
+                    "laid off by hand: a bearing you ruled, not one the compass took",
+                    ink::PENCIL,
+                );
                 if let Some(knots) = speed {
                     t.p.text(
                         middle + egui::vec2(6.0, -4.0),
@@ -2114,6 +2201,15 @@ fn plotted(t: &Table, chart: &Chart, crossing_at: Option<glam::DVec2>, heading: 
                 // The dot first, because the dot is the position and everything
                 // else on this mark exists to point at it.
                 t.p.circle_filled(c, 1.5, ink::PENCIL);
+                t.note(
+                    c + egui::vec2(8.0, 6.0),
+                    if fix {
+                        "fix: where the bearings crossed, and the position she worked"
+                    } else {
+                        "pencil: a point you marked yourself"
+                    },
+                    ink::PENCIL,
+                );
                 if fix {
                     // A ring round it, which is what a fix is on paper — and
                     // left open at the dot so the ink never covers the point it
@@ -2170,6 +2266,11 @@ fn plotted(t: &Table, chart: &Chart, crossing_at: Option<glam::DVec2>, heading: 
                     egui::FontId::monospace(10.0),
                     ink::TRACK,
                 );
+                t.note(
+                    middle + egui::vec2(6.0, 16.0),
+                    "log leg: timed with the glass between two positions she had",
+                    ink::TRACK,
+                );
                 t.p.text(
                     middle + egui::vec2(6.0, 4.0),
                     egui::Align2::LEFT_TOP,
@@ -2192,6 +2293,11 @@ fn plotted(t: &Table, chart: &Chart, crossing_at: Option<glam::DVec2>, heading: 
                 t.p.line_segment(
                     [c + egui::vec2(0.0, -3.0), c + egui::vec2(0.0, 3.0)],
                     egui::Stroke::new(1.2, ink::PENCIL),
+                );
+                t.note(
+                    c + egui::vec2(5.0, 4.0),
+                    "the time the mark beside it was made",
+                    ink::PENCIL,
                 );
                 t.p.text(
                     c + egui::vec2(5.0, -4.0),
@@ -2241,6 +2347,11 @@ fn plotted(t: &Table, chart: &Chart, crossing_at: Option<glam::DVec2>, heading: 
                     }
                     t.p.circle_filled(end, 1.4, ink::PENCIL);
                 }
+                t.note(
+                    egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5) + egui::vec2(6.0, 6.0),
+                    "ruled by hand: a leg to steer, or two marks held in line",
+                    ink::PENCIL,
+                );
                 t.p.text(
                     egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5) + egui::vec2(6.0, -6.0),
                     egui::Align2::LEFT_BOTTOM,
@@ -2279,6 +2390,11 @@ fn plotted(t: &Table, chart: &Chart, crossing_at: Option<glam::DVec2>, heading: 
             (bearing.to_degrees() + 180.0) % 360.0
         );
         let middle = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+        t.note(
+            middle + egui::vec2(8.0, 6.0),
+            "dividers: measuring, not drawing — they leave nothing behind",
+            ink::TRACK,
+        );
         t.p.text(
             middle + egui::vec2(8.0, -8.0),
             egui::Align2::LEFT_BOTTOM,
@@ -2597,6 +2713,11 @@ fn her_own_place(
         // make good rather than the one you are sailing.
         let target = t.to_screen(course.target());
         t.p.line_segment([her, target], egui::Stroke::new(1.0, ink::MARK));
+        t.note(
+            egui::pos2((her.x + target.x) * 0.5, (her.y + target.y) * 0.5) + egui::vec2(6.0, 6.0),
+            "to where she is bound: where you are going, not where you are",
+            ink::MARK,
+        );
 
         // **And everybody else.**
         //
@@ -2641,6 +2762,127 @@ fn her_own_place(
                 );
             }
         }
+    }
+}
+
+/// The position lines: the sights themselves, drawn where they now apply.
+///
+/// **A position line is a statement about where she was when the bearing was taken**,
+/// and she does not stay there — so each one carries the run since it was shot and is
+/// drawn through the mark *plus that run*. Fresh, it goes through the mark, which is
+/// where a position line starts its life. Twenty minutes later it is a hand's breadth
+/// off it, dashed, with the run it was carried along drawn in: that is a transferred
+/// position line, and crossing one with a fresh bearing on the same mark is a running
+/// fix — the oldest trick on a coast with one lighthouse and nothing else to shoot.
+fn the_sights(
+    t: &Table,
+    nav: &crate::navigation::Navigation,
+    coast: &crate::marks::Coast,
+    crossing_at: Option<glam::DVec2>,
+    range: f64,
+    heading: f64,
+) {
+    for sight in &nav.sights {
+        let through = sight.through();
+        let carried = sight.ran.length();
+        let moved = carried > 60.0;
+        let away = (sight.bearing + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
+        let along = glam::DVec2::new(away.sin(), away.cos());
+        // The length a navigator draws one: from the mark towards the observer, as far
+        // as the crossing it makes plus a little. Lines run off both edges make a cobweb
+        // and hide the coast under it.
+        let reach = crossing_at
+            .map(|c| ((c - through).length() * 1.25).max(range * 0.25))
+            .unwrap_or(range * 0.9);
+        let a = t.to_screen(through);
+        let b = t.to_screen(through + along * reach);
+        // **The corridor, not the line.** A hand bearing compass is good to two or three
+        // degrees, so a position line is honestly a band — and a navigator who draws the
+        // band can see at a glance how much of the chart his fix is standing on.
+        for side in [-1.0, 1.0] {
+            let edge = (away + side * sail_core::units::rad(3.0)).rem_euclid(std::f64::consts::TAU);
+            let off = glam::DVec2::new(edge.sin(), edge.cos());
+            t.p.line_segment(
+                [a, t.to_screen(through + off * reach)],
+                egui::Stroke::new(0.7, ink::PENCIL.gamma_multiply(0.4)),
+            );
+        }
+        if moved {
+            // Dashed, because it is no longer a reading — it is a reading carried, and
+            // everything carried on a chart is drawn broken.
+            let span = b - a;
+            let steps = ((span.length() / 10.0) as usize).clamp(1, 240);
+            for i in (0..steps).step_by(2) {
+                let at = |k: usize| k as f32 / steps as f32;
+                t.p.line_segment(
+                    [a + span * at(i), a + span * at((i + 1).min(steps))],
+                    egui::Stroke::new(1.1, ink::PENCIL),
+                );
+            }
+            // The run it was carried along, drawn from the mark to where the line stands
+            // now. This is the construction, and drawing it is the difference between a
+            // chart that shows a transferred line and one that shows *why* it is there.
+            let from = t.to_screen(sight.mark);
+            t.p.line_segment(
+                [from, a],
+                egui::Stroke::new(0.8, ink::TRACK.gamma_multiply(0.7)),
+            );
+            t.p.circle_filled(a, 1.6, ink::PENCIL);
+            t.p.text(
+                egui::pos2((from.x + a.x) * 0.5, (from.y + a.y) * 0.5) + egui::vec2(4.0, 2.0),
+                egui::Align2::LEFT_TOP,
+                format!("ran {:.2} M", carried / 1_852.0),
+                egui::FontId::monospace(9.0),
+                ink::TRACK,
+            );
+        } else {
+            t.p.line_segment([a, b], egui::Stroke::new(1.1, ink::PENCIL));
+        }
+        t.p.text(
+            a + egui::vec2(6.0, 10.0),
+            egui::Align2::LEFT_TOP,
+            format!("{:03.0}", sight.bearing.to_degrees()),
+            egui::FontId::monospace(10.0),
+            ink::PENCIL,
+        );
+        // **What the line is worth, written on the line.** One taken ahead or astern
+        // tells you how far along your track you have got and nothing about how far off;
+        // one on the beam tells you how far off and nothing about how far along. Every
+        // pilot book says it and no chart shows it.
+        let off_the_bow = sail_core::units::wrap_pi(sight.bearing - heading)
+            .abs()
+            .to_degrees();
+        let worth = if !(30.0..150.0).contains(&off_the_bow) {
+            "how far along"
+        } else {
+            "how far off"
+        };
+        let middle = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+        t.p.text(
+            middle + egui::vec2(6.0, 4.0),
+            egui::Align2::LEFT_TOP,
+            worth,
+            egui::FontId::monospace(9.0),
+            ink::PENCIL.gamma_multiply(0.7),
+        );
+        let name = coast
+            .marks
+            .iter()
+            .find(|m| (m.at - sight.mark).length() < 1.0)
+            .map(|m| m.name.clone())
+            .unwrap_or_default();
+        t.note(
+            middle + egui::vec2(6.0, 14.0),
+            if moved {
+                format!(
+                    "transferred line on {name}: the old bearing carried along her run, to \
+                     cross with the new one"
+                )
+            } else {
+                format!("position line on {name}: she is somewhere on it")
+            },
+            ink::PENCIL,
+        );
     }
 }
 

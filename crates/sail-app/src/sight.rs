@@ -121,7 +121,7 @@ pub fn aim(
     camera: Query<&GlobalTransform, With<crate::camera::MainCamera>>,
     mut sighting: ResMut<Sighting>,
     mut nav: ResMut<Navigation>,
-    mut chart: ResMut<crate::chart::Chart>,
+    chart: Res<crate::chart::Chart>,
     coast: Res<crate::marks::Coast>,
     sound: Res<crate::sound::SoundHandle>,
 ) {
@@ -338,6 +338,8 @@ pub fn aim(
                 nav.sights.push(Sight {
                     mark: mark.at,
                     bearing: took,
+                    // Nothing run since: the line goes through the mark until she moves.
+                    ran: glam::DVec2::ZERO,
                 });
                 // Three is a fix and four is a navigator who has stopped sailing. The
                 // oldest goes, because it is the one taken from the furthest back — and
@@ -345,26 +347,11 @@ pub fn aim(
                 if nav.sights.len() > 3 {
                     nav.sights.remove(0);
                 }
-                // And it goes on the chart, because a bearing you have not plotted is a
-                // number you will have forgotten by the time you get below.
-                // On the chart, and only the ones that are still part of a fix: a plot
-                // with ten old position lines on it is not a plot, it is a scribble, and
-                // the first thing a navigator does with a stale line is rub it out.
-                chart.plot.retain(|item| {
-                    !matches!(item, crate::chart::Plotted::Line { .. })
-                        || nav
-                            .sights
-                            .iter()
-                            .any(|s| (s.mark - line_mark(item)).length() < 1.0)
-                });
-                chart.pencil(crate::chart::Plotted::Line {
-                    through: mark.at,
-                    bearing: took,
-                    // What the log was saying when the bearing was taken, so that the
-                    // pair stays a pair: this line and this speed are the two halves of
-                    // the running fix she can work from them.
-                    speed: nav.measured.map(|(knots, _)| knots),
-                });
+                // **The chart draws the sights themselves.** A position line used to be
+                // copied into the plot as well, which made two of everything — a reading
+                // and a picture of it — and the picture had to be matched back to the
+                // reading by comparing coordinates to decide which pictures to rub out.
+                // One line exists in one place now, and it is this one.
                 // And she is told she got it, with the number she got — which is what a
                 // navigator writes in the book and the only part of this that survives
                 // to the chart table.
@@ -618,17 +605,6 @@ pub fn draw(
         );
     }
     Ok(())
-}
-
-/// Where a plotted line's mark is, for keeping the chart tidy.
-fn line_mark(item: &crate::chart::Plotted) -> glam::DVec2 {
-    match item {
-        crate::chart::Plotted::Line { through, .. } => *through,
-        crate::chart::Plotted::Cross { at, .. } => *at,
-        crate::chart::Plotted::Rule { from, .. } => *from,
-        crate::chart::Plotted::Run { from, .. } => *from,
-        crate::chart::Plotted::Stamp { at, .. } => *at,
-    }
 }
 
 /// How wide a group has to be before it is a *shape* rather than a row of dots, radians.

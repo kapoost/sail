@@ -38,6 +38,22 @@ pub struct Sight {
     /// is the whole reason this type exists: a reciprocal applied twice is a fix on the
     /// wrong side of the island, and it looks perfectly reasonable.
     pub bearing: f64,
+    /// How far she has run since this bearing was taken, through the water.
+    ///
+    /// **This is what turns two bearings into one fix.** A position line is a statement
+    /// about where she was at the moment the bearing was taken, and she does not stay
+    /// there: take a bearing, sail for twenty minutes, take another, and the two lines
+    /// are about two different places. The navigator's answer is four hundred years old
+    /// and is the running fix — *transfer* the first line along the course and distance
+    /// run and cross it with the second, and the crossing is where she is now. The line
+    /// moves; the bearing does not.
+    ///
+    /// It is the run **through the water**, because that is what the compass and the log
+    /// give you, and it is why a running fix is weaker than two marks shot together: a
+    /// knot of tide that nobody has measured goes straight into the transfer and comes
+    /// out as position. That is not a defect in the method, it is the method being
+    /// honest about what it is made of.
+    pub ran: DVec2,
 }
 
 impl Sight {
@@ -45,7 +61,16 @@ impl Sight {
     /// running *away* from the mark towards the observer.
     pub fn line(&self) -> (DVec2, DVec2) {
         let away = wrap_tau(self.bearing + std::f64::consts::PI);
-        (self.mark, DVec2::new(away.sin(), away.cos()))
+        (self.through(), DVec2::new(away.sin(), away.cos()))
+    }
+
+    /// The point the line passes through: the mark, carried along by the run since.
+    ///
+    /// Through the mark itself while the bearing is fresh, which is where a position
+    /// line starts its life — and a hand's breadth off it twenty minutes later, which is
+    /// where the fix comes from.
+    pub fn through(&self) -> DVec2 {
+        self.mark + self.ran
     }
 }
 
@@ -255,6 +280,7 @@ mod tests {
             .map(|m| Sight {
                 mark: *m,
                 bearing: bearing_to(me, *m),
+                ran: DVec2::ZERO,
             })
             .collect();
         let fix = plot(&sights).expect("three good bearings");
@@ -289,6 +315,7 @@ mod tests {
             .map(|m| Sight {
                 mark: *m,
                 bearing: bearing_to(me, *m),
+                ran: DVec2::ZERO,
             })
             .collect();
         let fix = plot(&sights).expect("three bearings");
@@ -323,6 +350,7 @@ mod tests {
                 // A degree and a half each way, which is a careful hand on a hand bearing
                 // compass in a seaway.
                 bearing: bearing_to(me, *m) + rad(1.5) * if i % 2 == 0 { 1.0 } else { -1.0 },
+                ran: DVec2::ZERO,
             })
             .collect();
         let fix = plot(&sights).expect("three bearings");
@@ -352,6 +380,7 @@ mod tests {
             .map(|m| Sight {
                 mark: *m,
                 bearing: bearing_to(me, *m),
+                ran: DVec2::ZERO,
             })
             .collect();
         let fix = plot(&sights).expect("they do cross");
@@ -368,6 +397,7 @@ mod tests {
             .map(|m| Sight {
                 mark: *m,
                 bearing: bearing_to(me, *m),
+                ran: DVec2::ZERO,
             })
             .collect();
         let fix = plot(&good).expect("a right-angled cut");
@@ -441,6 +471,7 @@ mod tests {
         let only = Sight {
             mark: DVec2::new(1_000.0, 0.0),
             bearing: rad(90.0),
+                ran: DVec2::ZERO,
         };
         assert!(plot(&[only]).is_none());
         assert!(
@@ -449,3 +480,120 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod the_running_fix {
+    use super::*;
+    use crate::units::{rad, wrap_tau};
+
+    fn bearing_to(from: DVec2, mark: DVec2) -> f64 {
+        let off = mark - from;
+        wrap_tau(off.x.atan2(off.y))
+    }
+
+    /// **One mark, two bearings and the run between them is a position.**
+    ///
+    /// The oldest trick in coastal navigation and the one a single lighthouse on a long
+    /// coast is good for: take her, sail on, take her again, transfer the first line by
+    /// what the log and the compass say you have run, and cross the two. Without the
+    /// transfer both lines go through the same mark and cross at the mark — which is a
+    /// fix on the rocks, and is what the chart drew before this existed.
+    #[test]
+    fn two_bearings_on_one_mark_cross_where_she_is() {
+        let light = DVec2::new(0.0, 4_000.0);
+        let first = DVec2::new(-3_000.0, 0.0);
+        // Half an hour at six knots, due east: five and a half thousand metres.
+        let run = DVec2::new(5_556.0, 0.0);
+        let now = first + run;
+        let sights = [
+            Sight {
+                mark: light,
+                bearing: bearing_to(first, light),
+                ran: run,
+            },
+            Sight {
+                mark: light,
+                bearing: bearing_to(now, light),
+                ran: DVec2::ZERO,
+            },
+        ];
+        let fix = plot(&sights).expect("a transferred line and a fresh one cross");
+        assert!(
+            (fix.at - now).length() < 1.0,
+            "the running fix is {:.0} m from where she is",
+            (fix.at - now).length()
+        );
+        assert!(
+            fix.cut > rad(30.0),
+            "half an hour of running opens the cut to {:.0}°",
+            fix.cut.to_degrees()
+        );
+    }
+
+    /// Without the run, the same two bearings say she is standing on the lighthouse.
+    ///
+    /// The test that says why the field exists. Two position lines through one mark
+    /// cross at the mark however carefully the bearings were taken, so a chart that does
+    /// not transfer is not merely less accurate — it is confidently wrong, and wrong in
+    /// the direction of the rocks.
+    #[test]
+    fn without_the_transfer_she_is_on_the_rock() {
+        let light = DVec2::new(0.0, 4_000.0);
+        let first = DVec2::new(-3_000.0, 0.0);
+        let now = first + DVec2::new(5_556.0, 0.0);
+        let sights = [
+            Sight {
+                mark: light,
+                bearing: bearing_to(first, light),
+                ran: DVec2::ZERO,
+            },
+            Sight {
+                mark: light,
+                bearing: bearing_to(now, light),
+                ran: DVec2::ZERO,
+            },
+        ];
+        if let Some(fix) = plot(&sights) {
+            assert!(
+                (fix.at - light).length() < 1.0,
+                "untransferred, the crossing is the mark itself"
+            );
+        }
+    }
+
+    /// A tide nobody measured goes into the transfer and comes out as position.
+    ///
+    /// Which is the honest limit of the method, and the reason a running fix is the one
+    /// you take when you cannot have a better one. Half a knot of set across the track
+    /// for half an hour is five hundred metres, and the fix is out by about that — not
+    /// because the arithmetic is poor but because the arithmetic was given the run
+    /// through the water and she went through the ground.
+    #[test]
+    fn an_unmeasured_set_comes_out_as_error() {
+        let light = DVec2::new(0.0, 4_000.0);
+        let first = DVec2::new(-3_000.0, 0.0);
+        let through_water = DVec2::new(5_556.0, 0.0);
+        // Half a knot northward for half an hour, which nobody aboard knows about.
+        let set = DVec2::new(0.0, 463.0);
+        let really = first + through_water + set;
+        let sights = [
+            Sight {
+                mark: light,
+                bearing: bearing_to(first, light),
+                ran: through_water,
+            },
+            Sight {
+                mark: light,
+                bearing: bearing_to(really, light),
+                ran: DVec2::ZERO,
+            },
+        ];
+        let fix = plot(&sights).expect("they still cross");
+        let out = (fix.at - really).length();
+        assert!(
+            (200.0..900.0).contains(&out),
+            "the set should come out as a few hundred metres of error, got {out:.0} m"
+        );
+    }
+}
+
