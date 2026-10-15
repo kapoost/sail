@@ -366,6 +366,7 @@ fn main() {
                 camera::aim,
                 (
                     course::restart,
+                    shot::on_a_key,
                     navigation::lost_at_sea,
                     navigation::enter_in_the_log,
                     navigation::write_up_the_log,
