@@ -1006,49 +1006,18 @@ pub fn draw(
                     if response.clicked() && !on_furniture {
                         match chart.streaming {
                             None => stream = Some(true),
-                            Some((was, when, counter)) => {
+                            Some(_) => {
                                 stream = Some(false);
-                                let minutes = (st.time - when) / 60.0;
-                                // A leg of a few seconds is a slipped finger rather than
-                                // a measurement: at half a minute the distance run is
-                                // inside the width of the pencil.
-                                if minutes > 0.5 {
-                                    // **The speed is measured either way; the track only
-                                    // if she knows where she is.**
-                                    //
-                                    // Through the water is what a log counts, and a log
-                                    // counts whether or not anybody knows which water —
-                                    // so a leg timed while lost still gives the one
-                                    // number a reckoning needs, and it goes on the card
-                                    // rather than on the paper. With a position at both
-                                    // ends it gives the other number as well, the speed
-                                    // made good, and that is a line.
-                                    let ran = (nav.through_water - counter) / 1_852.0;
-                                    timed = Some((ran / (minutes / 60.0), st.time));
-                                    if knows {
-                                        draw_on = Some(Plotted::Run {
-                                            from: was,
-                                            to: st.pos,
-                                            minutes,
-                                        });
-                                        // **And the two numbers together are the set.**
-                                        //
-                                        // Through the water from the log, over the
-                                        // ground from the chart, over the same leg: what
-                                        // is left when you take one from the other is
-                                        // the water moving, and that is the figure the
-                                        // circle of uncertainty grows at. Measuring it
-                                        // here rather than waiting for the next fix is
-                                        // the whole of *frequent measurements are worth
-                                        // more than careful ones* — a navigator who
-                                        // times a leg has just told the chart how wrong
-                                        // its reckoning is about to be.
-                                        let over_ground = (st.pos - was).length() / 1_852.0;
-                                        out_by = Some(sail_core::units::kn_to_ms(
-                                            (over_ground - ran).abs() / (minutes / 60.0),
-                                        ));
-                                    }
-                                }
+                                let (line, speed, set) = the_leg(
+                                    chart.streaming,
+                                    st.time,
+                                    st.pos,
+                                    nav.through_water,
+                                    knows,
+                                );
+                                draw_on = line;
+                                timed = speed;
+                                out_by = set;
                             }
                         }
                     }
@@ -1453,11 +1422,11 @@ pub fn draw(
                 button.center(),
                 egui::Align2::CENTER_CENTER,
                 if on_it {
-                    "STOP"
+                    "STOP & LOG"
                 } else if shown > 0.05 {
                     "ZERO"
                 } else {
-                    "START"
+                    "START & LOG"
                 },
                 egui::FontId::monospace(11.0),
                 if on_it { ink::PAPER } else { ink::COAST },
@@ -1907,6 +1876,32 @@ pub fn draw(
         let now = sim.sim.state.time;
         let w = chart.watch;
         chart.watch = if w.running {
+            // **And the log comes in with it.** Starting a watch and streaming a log
+            // are one act on a boat: you are timing a leg, and the two instruments are
+            // the two halves of the same measurement. Asked for from the deck after the
+            // two were pressed separately once too often — and it is the right way
+            // round, because the thing that must not be late is the start, and the
+            // stopwatch is what a hand goes to.
+            let (line, speed, set) = the_leg(
+                chart.streaming,
+                now,
+                sim.sim.state.pos,
+                nav.through_water,
+                knows,
+            );
+            if let Some(line) = line {
+                chart.plot.push(line);
+                if chart.plot.len() > 12 {
+                    chart.plot.remove(0);
+                }
+            }
+            if let Some(speed) = speed {
+                nav.measured = Some(speed);
+            }
+            if let Some(set) = set {
+                nav.learn_the_set(set);
+            }
+            chart.streaming = None;
             Stopwatch {
                 running: false,
                 since: 0.0,
@@ -1916,6 +1911,10 @@ pub fn draw(
         } else if w.held > 0.05 {
             Stopwatch::default()
         } else {
+            // Streamed at the moment the watch is started, which is what makes the
+            // reading afterwards a measurement rather than two things that happened
+            // near each other.
+            chart.streaming = Some((sim.sim.state.pos, now, nav.through_water));
             Stopwatch {
                 running: true,
                 since: now,
@@ -2024,6 +2023,56 @@ fn stream_arrow(p: &egui::Painter, from: egui::Pos2, to: egui::Pos2, colour: egu
     for side in [1.0_f32, -1.0] {
         p.line_segment([to, to - along * 6.0 + across * (4.0 * side)], stroke);
     }
+}
+
+/// What a timed leg comes to, when the log is hauled in.
+///
+/// One function because two hands end a leg — the log tool's second click and the
+/// stopwatch's STOP — and a leg that measured one thing from one of them and something
+/// else from the other would be worse than having only one of them.
+///
+/// Gives back the line for the paper, the speed for the card, and the set, in that
+/// order; `None` for any of them that this leg cannot honestly claim.
+#[allow(clippy::type_complexity)]
+fn the_leg(
+    streaming: Option<(glam::DVec2, f64, f64)>,
+    now: f64,
+    pos: glam::DVec2,
+    through_water: f64,
+    knows: bool,
+) -> (Option<Plotted>, Option<(f64, f64)>, Option<f64>) {
+    let Some((was, when, counter)) = streaming else {
+        return (None, None, None);
+    };
+    let minutes = (now - when) / 60.0;
+    // A leg of a few seconds is a slipped finger rather than a measurement: at half a
+    // minute the distance run is inside the width of the pencil.
+    if minutes <= 0.5 {
+        return (None, None, None);
+    }
+    // **The speed is measured either way; the track only if she knows where she is.**
+    //
+    // Through the water is what a log counts, and a log counts whether or not anybody
+    // knows which water — so a leg timed while lost still gives the one number a
+    // reckoning needs. With a position at both ends it gives the other number as well,
+    // the speed made good, and the difference between the two is the water moving her.
+    let ran = (through_water - counter) / 1_852.0;
+    let speed = Some((ran / (minutes / 60.0), now));
+    if !knows {
+        return (None, speed, None);
+    }
+    let over_ground = (pos - was).length() / 1_852.0;
+    (
+        Some(Plotted::Run {
+            from: was,
+            to: pos,
+            minutes,
+        }),
+        speed,
+        Some(sail_core::units::kn_to_ms(
+            (over_ground - ran).abs() / (minutes / 60.0),
+        )),
+    )
 }
 
 /// How far a point is from a segment, in whatever units the points are in.
