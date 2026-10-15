@@ -426,7 +426,10 @@ pub fn enter_in_the_log(
         // And it goes on the chart where it was worked out, which is where a fix goes:
         // a cross, and the time beside it, so an hour later you can see what you were
         // working from.
-        chart.plot.push(crate::chart::Plotted::Cross { at: said });
+        chart.plot.push(crate::chart::Plotted::Cross {
+            at: said,
+            fix: true,
+        });
         // **And the time beside it, without being asked.**
         //
         // A fix with no time against it is a fix you cannot run on — run on from when? —

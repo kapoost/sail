@@ -184,8 +184,18 @@ pub enum Plotted {
     /// mark, because a position line is a line and not an arrow — you are somewhere on
     /// it and the mark does not say which side.
     Line { through: glam::DVec2, bearing: f64 },
-    /// A cross: an estimated position, a danger, a place to come back to.
-    Cross { at: glam::DVec2 },
+    /// A mark at a point: a fix that has been entered in the log, or whatever the
+    /// pencil was put down for — an estimated position, a danger, a place to come back
+    /// to.
+    ///
+    /// `fix` decides which of the two it is drawn as, and that is the convention off a
+    /// real chart rather than decoration: **a fix is a dot with a circle round it** and
+    /// anything else is a dot with a cross. The dot is the position; the ring or the
+    /// arms are only there to make the dot findable among the pencil. Which is the whole
+    /// point of the shape — asked for from the deck as *mark it precisely*, because an
+    /// X drawn with two strokes has its position somewhere in the middle of the ink and
+    /// nowhere exactly.
+    Cross { at: glam::DVec2, fix: bool },
     /// A ruled line between two points: a leg, an edge, a transit. Ends where it was
     /// drawn to end, which is the whole difference between it and a position line —
     /// a position line has no ends, and this is a line *from here to there*.
@@ -888,7 +898,10 @@ pub fn draw(
                 Tool::Pencil => {
                     if response.clicked() && !on_furniture {
                         if let Some(at) = response.interact_pointer_pos() {
-                            draw_on = Some(Plotted::Cross { at: to_water(at) });
+                            draw_on = Some(Plotted::Cross {
+                                at: to_water(at),
+                                fix: false,
+                            });
                         }
                     }
                 }
@@ -974,13 +987,37 @@ pub fn draw(
                             ink::PENCIL,
                         );
                     }
-                    Plotted::Cross { at } => {
+                    Plotted::Cross { at, fix } => {
                         let c = to_screen(at);
-                        for (dx, dy) in [(-5.0, -5.0), (-5.0, 5.0)] {
-                            p.line_segment(
-                                [c + egui::vec2(dx, dy), c - egui::vec2(dx, dy)],
-                                egui::Stroke::new(1.3, ink::PENCIL),
+                        // The dot first, because the dot is the position and everything
+                        // else on this mark exists to point at it.
+                        p.circle_filled(c, 1.5, ink::PENCIL);
+                        if fix {
+                            // A ring round it, which is what a fix is on paper — and
+                            // left open at the dot so the ink never covers the point it
+                            // is claiming.
+                            p.circle(
+                                c,
+                                6.0,
+                                egui::Color32::TRANSPARENT,
+                                egui::Stroke::new(1.2, ink::PENCIL),
                             );
+                        } else {
+                            // Arms with a gap in the middle. A cross drawn through its
+                            // own centre has its position buried under the crossing of
+                            // two strokes; one drawn as four short arms leaves the dot
+                            // showing, which is how a draughtsman marks a point.
+                            for (dx, dy) in [(1.0, 1.0), (1.0, -1.0)] {
+                                let along = egui::vec2(dx, dy);
+                                p.line_segment(
+                                    [c + along * 3.0, c + along * 7.0],
+                                    egui::Stroke::new(1.3, ink::PENCIL),
+                                );
+                                p.line_segment(
+                                    [c - along * 3.0, c - along * 7.0],
+                                    egui::Stroke::new(1.3, ink::PENCIL),
+                                );
+                            }
                         }
                     }
                     // A leg that was sailed, drawn the way a course made good is drawn:
@@ -1104,7 +1141,16 @@ pub fn draw(
                 let bearing = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
                 p.line_segment([a, b], egui::Stroke::new(1.4, ink::TRACK));
                 for end in [a, b] {
-                    p.circle(end, 3.0, ink::PAPER, egui::Stroke::new(1.2, ink::TRACK));
+                    // A ring with the point showing through it, like every other mark on
+                    // this paper: the dividers measure *between two points* and a filled
+                    // circle three pixels across hides the one it is standing on.
+                    p.circle(
+                        end,
+                        3.5,
+                        egui::Color32::TRANSPARENT,
+                        egui::Stroke::new(1.2, ink::TRACK),
+                    );
+                    p.circle_filled(end, 1.2, ink::TRACK);
                 }
                 let label = format!(
                     "{miles:.2} M   {:03.0} / {:03.0}",
@@ -1399,7 +1445,7 @@ pub fn draw(
         let mut nearest: Option<(usize, f64)> = None;
         for (i, item) in chart.plot.iter().enumerate() {
             let d = match *item {
-                Plotted::Cross { at: c } => (c - at).length(),
+                Plotted::Cross { at: c, .. } => (c - at).length(),
                 Plotted::Stamp { at: c, .. } => (c - at).length(),
                 Plotted::Line { through, bearing } => {
                     let along = glam::DVec2::new(bearing.sin(), bearing.cos());

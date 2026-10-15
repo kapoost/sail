@@ -327,11 +327,11 @@ fn main() -> std::io::Result<()> {
             Row::number(
                 "pixels",
                 "SAIL_PIXELS",
-                "0 sharp, or 480, 720, 960 for the old machines",
+                "0 is the sharp picture, anything else is the drawn one",
                 0.0,
-                240.0,
+                720.0,
                 0.0,
-                960.0,
+                720.0,
             ),
             Row::flag(
                 "the ink drawing",

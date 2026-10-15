@@ -56,12 +56,20 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 
 use crate::camera::MainCamera;
 
-/// How many pixels across the world is drawn, at each step.
+/// How many pixels across the world is drawn.
 ///
-/// Four hundred and eighty is a VGA mode and is where this looks most like what it is
-/// remembering; 720 keeps more of the rigging legible; 960 is a nod rather than a
-/// commitment.
-const WIDTHS: [u32; 3] = [480, 720, 960];
+/// **One width, and the picture is either this or it is sharp.** There were three — 480
+/// for the VGA mode this is remembering, 720, and 960 as a nod — and they were three
+/// variants of one idea with no argument between them: nobody sat down and chose 960,
+/// and 480 lost the rigging, which is half of what there is to look at on a boat. Every
+/// person who has played this has ended up at 720, which is the number that keeps a
+/// shroud legible and still draws the sea as lit pixels rather than as a sheen.
+///
+/// Dropping the other two is not only tidying. Each was a texture size, a settings row
+/// and a code path that had to be right on somebody else's machine, and the one thing
+/// this week has taught is that the paths you do not exercise are the ones that fail on
+/// a Mac you have never seen.
+const WIDTH: u32 = 720;
 
 /// How many samples across each pixel of the small picture the world is drawn with.
 ///
@@ -85,7 +93,7 @@ pub struct Retro {
 
 impl Retro {
     pub fn width(&self) -> Option<u32> {
-        self.step.map(|s| WIDTHS[s])
+        self.step.map(|_| WIDTH)
     }
 
     /// Start in the pixelated picture, from `SAIL_PIXELS` in the environment.
@@ -108,23 +116,20 @@ impl Retro {
                 ..Self::default()
             };
         };
+        // Any number but nought is the drawn picture; nought is sharp. The value used
+        // to pick a width and now picks a side, which is all there is to pick.
         if want == 0 {
             return Self::default();
         }
-        let step = WIDTHS
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, w)| w.abs_diff(want))
-            .map(|(i, _)| i);
         Self {
-            step,
+            step: Some(0),
             supersample: std::env::var("SAIL_SUPERSAMPLE").is_ok_and(|v| v != "0"),
             ..Self::default()
         }
     }
 }
 
-/// Steps through sharp, 960, 720, 480 and back — from the settings panel, which is
+/// Between the drawn picture and the sharp one — from the settings panel, which is
 /// where it belongs.
 ///
 /// It had a key, and the key is gone. The list of keys on this boat should be things
@@ -135,9 +140,7 @@ impl Retro {
 #[allow(dead_code)]
 pub fn step(retro: &mut Retro) {
     retro.step = match retro.step {
-        None => Some(2),
-        Some(2) => Some(1),
-        Some(1) => Some(0),
+        None => Some(0),
         _ => None,
     };
 }

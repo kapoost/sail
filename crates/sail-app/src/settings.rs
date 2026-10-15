@@ -267,12 +267,11 @@ pub fn draw(
                                 .monospace()
                                 .size(11.0),
                         );
-                        for (name, step) in [
-                            ("sharp", None),
-                            ("960", Some(2usize)),
-                            ("720", Some(1)),
-                            ("480", Some(0)),
-                        ] {
+                        // Two states rather than four: the drawn picture, which is what
+                        // this game looks like, and the sharp one for when you want to
+                        // see what is actually on the deck. The sizes in between were
+                        // variants of one idea with nothing to choose between them.
+                        for (name, step) in [("drawn", Some(0usize)), ("sharp", None)] {
                             if ui.selectable_label(retro.step == step, name).clicked() {
                                 retro.step = step;
                             }
