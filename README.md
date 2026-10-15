@@ -25,8 +25,8 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
 1. **The engine stays a reversible decision.** Bevy, Fyrox and Godot-via-gdext are all
    still on the table; the presentation layer is a few days of work on top of this
    crate, not a rewrite.
-2. **The physics is testable without opening a window.** 98 tests in the core assert
-   against figures a sailor knows from the water — 127 across the workspace. When one
+2. **The physics is testable without opening a window.** 128 tests in the core assert
+   against figures a sailor knows from the water — 248 across the workspace. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
 
@@ -107,35 +107,43 @@ sane; run it after touching `sail.rs`, `hull.rs` or `boat.rs`.
 | Added resistance in waves | Charged from the power the motion damping dissipates |
 | Integration | Fixed 200 Hz substeps, decoupled from frame rate |
 
-Not modelled yet, and known to be absent: tide and current, sail-to-sail interaction
-beyond headsail blanketing, and sail twist.
+Not modelled yet, and known to be absent: **tide and current**. The chart draws a
+wind-driven set and drift in its corner, two and a half per cent of the wind, and the
+sea's own texture is carried along by it — but the hull is not, so that arrow is the one
+thing on the paper the boat does not obey. Worth knowing before trusting a dead-reckoning
+position.
 
-### One measured calibration gap, with its cause
+Sail twist and sail-to-sail interaction *are* modelled now and were on this list until
+recently: every sail is carried as two sections with the upper one twisted off, the lead
+car and the vang are what set that twist, and a headsail works in the main's slot rather
+than beside it.
 
-The model's upwind VMG peaks around **29 degrees of heel**, about eight degrees past
-where a real cruiser's does. `examples/outhaul.rs` is the measurement; it was written
-to check whether the outhaul recommendation agreed with the model and found this
-instead.
+### A calibration gap, and what closed most of it
 
-The consequence is that sail depth looks nearly free: flattening the main never pays
-on pure speed until the boat physically cannot be held on course. A real boat gains
-from flattening well before that. The `rail_down_*` terms in `BoatConfig` push back on
-this with a steeper drag regime above 20 degrees — physically justified, since a
-cruiser past that angle is burying its leeward rail and the waterplane goes badly
-asymmetric — and that closed roughly half the gap. It does not close all of it, and a
-harsher penalty than the rail-down term would not be defensible.
+The model's upwind VMG used to peak around **29 degrees of heel**, about eight degrees
+past where a real cruiser's does, which made sail depth look nearly free: flattening the
+main never paid on pure speed until the boat physically could not be held on course.
+`examples/outhaul.rs` is the measurement, and it was written to check whether the outhaul
+recommendation agreed with the model and found this instead.
 
-The missing mechanism is **twist**. Flattening a real mainsail takes power out of the
-*top* of the sail, where the heeling arm is longest; a sail with one section and one
-centre of effort can only remove force evenly. Sections, and therefore twist, are the
-real fix — and the same limitation is why the outhaul here stands in for the whole
-shape rather than just the lower third, and why cunningham, vang and backstay are not
-separate controls.
+Two things closed most of it. The `rail_down_*` terms in `BoatConfig` put a steeper drag
+regime above 20 degrees — physically justified, since a cruiser past that angle is burying
+its leeward rail and the waterplane goes badly asymmetric. And then the missing mechanism
+arrived: **twist**. Flattening a real mainsail takes power out of the *top* of the sail,
+where the heeling arm is longest, and a sail carried as one section with one centre of
+effort can only remove force evenly. Every sail is two sections now, the upper one twisted
+off by the vang and the lead car, which are controls on the bank rather than a constant.
 
-Because the outhaul rule flattens at 20 degrees of heel — the cruising call, not the
-model's fastest — it gives away up to about 0.8 percent of VMG in a breeze. That is
-asserted and bounded by `the_outhaul_rule_costs_little_against_the_measured_best`
-rather than left to drift.
+Measured again on the thirty-four footer, best upwind VMG by outhaul at each wind's own
+best course: 19 degrees of heel in 12 knots, 28 in 16, 35 in 20 with no reef in — the
+first of those is where a real cruiser sits, and the others are a boat that should have
+been reefed two sweeps ago and is being measured without one on purpose.
+
+The cost of the rule is unchanged and measured in the same sweep: because the outhaul
+recommendation flattens at 20 degrees of heel — the cruising call, not the model's
+fastest — it gives away at most 0.045 knots of VMG, about one per cent, and less than
+that everywhere except twelve knots. It used to be bounded by a test; that test is gone,
+and the number is now only as fresh as the last time somebody ran the example.
 
 ## Sound
 
@@ -223,6 +231,80 @@ enters as an offset to the heel it is evaluated at.
 
 Flat water remains the default, so the polar is unchanged to the last digit and every
 flat-water test still measures what it did before.
+
+## Navigation
+
+The archipelago has names on it, and finding out which bit of it you are looking at is a
+game in its own right — the oldest one there is, and the one a chart plotter deleted.
+
+**The chart.** `M` puts it in the corner, `Shift M` spreads it on the table. The corner
+one is a glance: where am I, what is ahead, and it stays under the boat. The one on the
+table is an instrument, and it has the instruments a chart table has — dividers for
+distance and bearing, a plain ruler for a leg with two ends, a parallel rule that plots a
+position line through a mark, a pencil, a watch that writes the time where you put it,
+and a rubber. The coast on it is read off the same signed-distance field the boat runs
+aground on, so the chart cannot lie about the depths: there is only one set of them.
+
+**The instruments are in your hands, and you get one hand.** `Shift B` is a pair of
+glasses and `Shift N` a hand bearing compass, and picking one up puts the other down —
+seven-by-fifties are two-handed on a moving boat and a compass is held out at arm's
+length. Either of them puts you in the cockpit, because there are no instruments fifteen
+metres astern of her, and gives the view back when it goes down. Spreading the chart puts
+both away: you work on the paper or you work on the horizon.
+
+**Seeing a thing and knowing which thing it is are different questions**, and the second
+one is the whole difficulty. A lighthouse is painted to be told apart and lit; a beacon
+has to be close enough for its topmark to be read, or it is a stick. The glasses roughly
+double the range at which a mark can be *named*, which is what they are for, and `B` asks
+the question: a mark near enough to read its symbol names itself, and three well spread
+apart are a shape that belongs in one place on the coast and nowhere else — worked out
+the way a station pointer does it, from the two horizontal angles between them.
+
+**A bearing is a line, not a position.** The compass has a notch about a degree and a
+quarter wide, which is what a notch at arm's length is, and holding it on a mark from a
+moving deck is the small act of steadiness the instrument exists to need. It answers
+either way: the name and the number if it caught, and how far off you were if it did not.
+The number carries the error a card in a bowl actually has — two or three degrees in a
+seaway — which is why a fix is a triangle rather than a point, why a fine cut is a bad
+fix, and why the third line is worth taking.
+
+**`Shift L` puts you somewhere at sea with no idea where.** The sails are set for the
+wind she is in and nothing else is made difficult; the chart stops following her, the
+names come off the marks, and getting them back is the exercise. Three bearings, crossed,
+entered in the log — and the scoring is the honest one: a fix is good if it is near where
+she actually is, not if the cocked hat was small. A tight triangle on two misidentified
+marks is a confident lie and the classic way to put a boat on a rock.
+
+## Man overboard
+
+There is a horseshoe lashed to the starboard quarter on a short strop, twenty metres of
+floating line coiled on the same cleat, and a canvas grab bag lying on the deck over
+them. `Enter` throws the ring, and the throw is the part that cannot be late: a person in
+the water makes two per cent of the wind speed and a ring of foam makes four to eight, so
+the ring walks away downwind at fifteen metres a minute — thrown early it is something he
+can swim to, thrown after a minute of getting organised it is upwind of nothing. Those are
+search-and-rescue numbers rather than invented ones, and the whole drill turns on them.
+
+`Esc`, then the **DRILL** page, practises the lot on a dan buoy: get her sailing, lose
+Oscar over the side, and get him back. It talks you through a recognised recovery rather
+than leaving you to invent one — and it is the one piece of boat handling where being bad
+at it costs a life and nobody practises.
+
+## The pilot
+
+Two pieces of gear in one box, because they are two pieces of gear on a real boat. `P`
+engages and `O` chooses which: a tiller pilot holding a compass course, good for a
+passage leg and useless upwind because a shift leaves the sails wrong, or a vane holding
+an angle to the wind, which follows every shift and is how you sleep on a long passage.
+
+The electric one can let go and says so — it is a ram with a controller, and a controller
+that has been on the stops and off the course together for six seconds knows it is
+braking rather than steering. The vane has nothing to let go *with*: no controller, no
+relay, nothing to decide anything. Overpowered it does not disengage, it stops coping —
+the blade lies over on its stop, she wanders further and further off, and in the end she
+tacks or gybes herself and the gear goes on patiently steering the new course. That is a
+different failure to be caught out by, and `tests/the_pilot.rs` is the bench that keeps
+both of them honest.
 
 ## Fishing
 

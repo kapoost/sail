@@ -4,20 +4,21 @@ Four commands, and one of them is the one that is easy to forget.
 
 ```sh
 # 1. The version, in both crates that carry one into a build.
-sed -i '' 's/^version = "0.1.7"/version = "0.1.8"/' \
+sed -i '' 's/^version = "0.1.14"/version = "0.1.15"/' \
   crates/sail-app/Cargo.toml crates/sail-net/Cargo.toml
 cargo build --release -p sail-app        # so Cargo.lock moves with them
 
 # 2. Commit, tag, push.
-git commit -am "v0.1.8"
-git tag v0.1.8
+git commit -am "v0.1.15"
+git tag v0.1.15
 git push origin main --tags
 ```
 
 The tag starts `.github/workflows/release.yml`, which builds a universal macOS bundle, a
-Windows executable and `sail-server` for both, and publishes them. **It takes about an
-hour**, nearly all of it the Windows job compiling Bevy from cold; the macOS job is done
-in half that. Watch it with `gh run list` or `gh run view --log`.
+Windows executable and `sail-server` for both, and publishes them. **An hour from cold,
+and about twenty-five minutes when the runner cache is still warm from a recent
+release** — nearly all of the cold hour is the Windows job compiling Bevy. Watch it with
+`gh run list` or `gh run view --log`.
 
 ## The part that is easy to get wrong
 
@@ -26,7 +27,7 @@ in half that. Watch it with `gh run list` or `gh run view --log`.
 If the notes need fixing on a release that is already building or already out:
 
 ```sh
-gh release edit v0.1.8 --notes-file notes.md
+gh release edit v0.1.15 --notes-file notes.md
 ```
 
 This happened for real: the macOS instructions told people to right-click and Open, which
@@ -36,7 +37,7 @@ afterwards.
 ## Before the tag
 
 ```sh
-cargo test --release          # 205 of them, about half a minute
+cargo test --release          # 248 of them, about twenty seconds
 cargo clippy --release --all-targets    # has to be silent
 cargo fmt --all
 ```
