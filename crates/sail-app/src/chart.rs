@@ -565,6 +565,16 @@ pub fn draw(
             let d = w - middle_of_paper;
             egui::pos2(centre.x + d.x as f32 * scale, centre.y - d.y as f32 * scale)
         };
+        // The same paper, as a thing that can be handed to a function. The closures
+        // above stay for the sections not yet lifted out; everything lifted takes this,
+        // and the two cannot disagree because both come from here.
+        let table = Table {
+            p: p.clone(),
+            rect,
+            scale,
+            middle: middle_of_paper,
+            knows,
+        };
 
         // A kilometre grid, so distance on the chart means something.
         let step = if chart.range > 6_000.0 {
@@ -635,273 +645,9 @@ pub fn draw(
             p.add(egui::Shape::line(pts, egui::Stroke::new(1.2, ink::TRACK)));
         }
 
-        // --- The marks ---------------------------------------------------
-        //
-        // The things you navigate by, drawn the way a chart draws them: a symbol you
-        // can tell apart at a glance, a name, and for a light its character — which
-        // is the only thing that identifies it in the dark and is therefore the one
-        // piece of text on a chart that is worth more than the name beside it.
-        for mark in &coast.marks {
-            let at = to_screen(mark.at);
-            if !rect.contains(at) {
-                continue;
-            }
-            // **Nothing is on the chart until she has recognised it.**
-            //
-            // Which is a decision about what this chart *is*. A printed chart carries
-            // every mark on the coast whether you know which is which or not — but the
-            // exercise is not about reading a printed chart, it is about building one:
-            // you look at a group through the glasses, you work out what it is, and
-            // *then* it goes on the paper with its name. Asked for from the deck in
-            // exactly those terms.
-            //
-            // The coast itself stays. Land does not need identifying — it is there, you
-            // can see it, and the shape of it is what you recognise the marks by.
-            if nav.lost && !nav.recognised.contains(&mark.name) {
-                continue;
-            }
-            match mark.kind {
-                Mark::Lighthouse => {
-                    // The magenta flare: a dot with a teardrop out of it, which is
-                    // how every chart in the world says "light" and has since they
-                    // were engraved.
-                    p.circle_filled(at, 2.6, ink::LIGHT);
-                    for i in 0..7 {
-                        let a = -0.9 + i as f32 * 0.3;
-                        p.line_segment(
-                            [at, at + egui::vec2(a.sin(), -a.cos()) * 11.0],
-                            egui::Stroke::new(1.0, ink::LIGHT),
-                        );
-                    }
-                }
-                Mark::Spire => {
-                    // A circle with a dot in it and a cross on top: the chart symbol
-                    // for a church, and the dot is the bit that is the position.
-                    p.circle(
-                        at,
-                        3.4,
-                        egui::Color32::TRANSPARENT,
-                        egui::Stroke::new(1.1, ink::COAST),
-                    );
-                    p.circle_filled(at, 1.0, ink::COAST);
-                    p.line_segment(
-                        [at + egui::vec2(0.0, -4.0), at + egui::vec2(0.0, -8.5)],
-                        egui::Stroke::new(1.1, ink::COAST),
-                    );
-                    p.line_segment(
-                        [at + egui::vec2(-2.0, -6.5), at + egui::vec2(2.0, -6.5)],
-                        egui::Stroke::new(1.1, ink::COAST),
-                    );
-                }
-                Mark::Beacon => {
-                    p.line_segment(
-                        [at, at + egui::vec2(0.0, -9.0)],
-                        egui::Stroke::new(1.2, ink::COAST),
-                    );
-                    p.circle_filled(at + egui::vec2(0.0, -10.0), 2.0, ink::COAST);
-                    p.circle_filled(at, 1.4, ink::COAST);
-                }
-                Mark::Cairn => {
-                    p.circle_filled(at, 1.8, ink::COAST);
-                    p.circle(
-                        at,
-                        4.2,
-                        egui::Color32::TRANSPARENT,
-                        egui::Stroke::new(0.7, ink::COAST),
-                    );
-                }
-            }
-            // Named when the chart is big enough to have room for the name, which on
-            // the folded one means the lights only.
-            // Labelled where there is room for the label. On the folded chart only the
-            // lights are named, and none of them within a label's width of the edge —
-            // names running off the corner of a chart are worse than no names, because
-            // the eye reads half of one and believes it.
-            let room = rect.contains(at + egui::vec2(120.0, 0.0))
-                && at.y > rect.top() + 14.0
-                && at.y < rect.bottom() - 14.0;
-            // And named only if she knows which one it is. While she is lost the chart
-            // carries the symbols — the coast does not stop being surveyed because you
-            // are — but the names belong to marks she has recognised through the
-            // glasses. A chart that names everything is a chart that has told you where
-            // you are.
-            // Anything that is drawn at all has been recognised, so it carries its
-            // name: there is no such thing here as a mark on the chart that she cannot
-            // name.
-            if room && (spread || mark.kind == Mark::Lighthouse || nav.lost) {
-                let label = if mark.kind.lit() {
-                    format!(
-                        "{}  {}",
-                        mark.name,
-                        crate::marks::light_character(&mark.name)
-                    )
-                } else {
-                    format!("{}  {}", mark.name, mark.kind.abbreviation())
-                };
-                p.text(
-                    at + egui::vec2(9.0, 1.0),
-                    egui::Align2::LEFT_CENTER,
-                    label,
-                    egui::FontId::monospace(if spread { 11.0 } else { 9.0 }),
-                    if mark.kind.lit() {
-                        ink::LIGHT
-                    } else {
-                        ink::COAST
-                    },
-                );
-            }
-        }
+        marks_on_the_paper(&table, &coast, &nav, chart.range as f64, spread, &course);
 
-        // Anchorages, with the one in hand picked out — and not at all while she is
-        // lost. A harbour is a navigation object like any other: four of them named on
-        // the chart is a position given away to anybody who can count islands.
-        for (i, h) in course.harbours.iter().enumerate().filter(|_| !nav.lost) {
-            let at = to_screen(h.at);
-            let bound = i == course.to;
-            p.circle(
-                at,
-                if bound { 5.0 } else { 3.0 },
-                if bound { ink::MARK } else { ink::PAPER },
-                egui::Stroke::new(1.0, ink::COAST),
-            );
-            if bound || chart.range < 6_000.0 {
-                p.text(
-                    at + egui::vec2(7.0, -6.0),
-                    egui::Align2::LEFT_TOP,
-                    &h.name,
-                    egui::FontId::monospace(10.0),
-                    ink::COAST,
-                );
-            }
-        }
-
-        // What a chart with no fix on it says, which is nothing — and it says it where
-        // the boat would have been, because that is where the eye goes first.
-        // How long the fix has left, when she is living on one. A position is a
-        // statement about a moment and this is the moment running out — drawn rather
-        // than counted, because a bar is read without being looked at.
-        if nav.lost && knows && spread {
-            // How many of the marks this fix was taken on can still be made out, which
-            // is what is actually keeping the position: while two of them are there,
-            // another fix is a minute's work and she is not lost in any sense that
-            // matters. The clock behind it is only a backstop.
-            p.text(
-                egui::pos2(rect.left() + 24.0, rect.top() + 84.0),
-                egui::Align2::LEFT_CENTER,
-                format!(
-                    "{} of {} marks still in sight",
-                    nav.still_in_sight.min(nav.fixed_on.len()),
-                    nav.fixed_on.len()
-                ),
-                egui::FontId::monospace(11.0),
-                if nav.still_in_sight > 2 {
-                    ink::COAST
-                } else {
-                    ink::BOAT
-                },
-            );
-            let left = nav.fix_left(sim.sim.state.time);
-            let bar = egui::Rect::from_min_size(
-                egui::pos2(rect.left() + 24.0, rect.top() + 66.0),
-                egui::vec2(188.0, 7.0),
-            );
-            p.rect_filled(bar, 1.0, ink::PAPER);
-            let mut run = bar;
-            run.set_width(bar.width() * left);
-            p.rect_filled(run, 1.0, ink::MARK);
-            p.text(
-                egui::pos2(bar.right() + 8.0, bar.center().y),
-                egui::Align2::LEFT_CENTER,
-                "this fix",
-                egui::FontId::monospace(10.0),
-                ink::COAST,
-            );
-        }
-        if !knows {
-            p.text(
-                centre,
-                egui::Align2::CENTER_CENTER,
-                "POSITION UNKNOWN",
-                egui::FontId::monospace(if spread { 16.0 } else { 11.0 }),
-                ink::BOAT,
-            );
-            if spread {
-                p.text(
-                    centre + egui::vec2(0.0, 20.0),
-                    egui::Align2::CENTER_CENTER,
-                    "take bearings on two marks and cross them",
-                    egui::FontId::monospace(11.0),
-                    ink::COAST,
-                );
-            }
-        }
-        if knows {
-            // The boat: a wedge pointing where she is pointing, drawn where she *is* on
-            // the paper rather than in the middle of it. Those are the same point only
-            // while the chart is following her, which it stops doing the moment she does
-            // not know where she is.
-            let her = to_screen(st.pos);
-            let heading = st.heading as f32;
-            let nose = egui::vec2(heading.sin(), -heading.cos());
-            let beam = egui::vec2(-nose.y, nose.x);
-            p.add(egui::Shape::convex_polygon(
-                vec![
-                    her + nose * 9.0,
-                    her - nose * 5.0 + beam * 4.0,
-                    her - nose * 5.0 - beam * 4.0,
-                ],
-                ink::BOAT,
-                egui::Stroke::NONE,
-            ));
-            // And the bearing to the consignment, which is the line you are trying to
-            // make good rather than the one you are sailing.
-            let target = to_screen(course.target());
-            p.line_segment([her, target], egui::Stroke::new(1.0, ink::MARK));
-
-            // **And everybody else.**
-            //
-            // Until now the only place another boat appeared was a list of names in the
-            // settings panel with a distance beside each — which answers "how far" and
-            // not the question anybody actually has, which is *where*. A fleet on a
-            // chart is the oldest answer to it and it costs one wedge each.
-            //
-            // Hollow rather than filled, so your own boat is still the one the eye finds
-            // first on a page with five of them on it, and named on the table where
-            // there is room for the lettering. Not on the folded chart: at two inches
-            // square a name is a smudge across an island.
-            //
-            // Only when she knows where she is, like everything else here — a chart that
-            // will not say where *you* are cannot say where your friends are either, or
-            // the exercise is over the moment somebody else joins.
-            for boat in &fleet.boats {
-                let at = glam::DVec2::new(boat.drawn.pos[0] as f64, boat.drawn.pos[1] as f64);
-                let them = to_screen(at);
-                if !rect.contains(them) {
-                    continue;
-                }
-                let heading = boat.drawn.heading;
-                let nose = egui::vec2(heading.sin(), -heading.cos());
-                let beam = egui::vec2(-nose.y, nose.x);
-                p.add(egui::Shape::convex_polygon(
-                    vec![
-                        them + nose * 8.0,
-                        them - nose * 4.5 + beam * 3.5,
-                        them - nose * 4.5 - beam * 3.5,
-                    ],
-                    egui::Color32::TRANSPARENT,
-                    egui::Stroke::new(1.3, ink::BOAT),
-                ));
-                if spread && !boat.name.is_empty() {
-                    p.text(
-                        them + egui::vec2(10.0, -2.0),
-                        egui::Align2::LEFT_CENTER,
-                        &boat.name,
-                        egui::FontId::monospace(10.0),
-                        ink::BOAT,
-                    );
-                }
-            }
-        }
+        her_own_place(&table, &sim, &fleet, &course, &nav, spread);
 
         // --- Dividers and a straight edge --------------------------------
         //
@@ -1181,402 +927,16 @@ pub fn draw(
                 );
             }
 
-            // --- The reckoning ------------------------------------------------
-            //
-            // **The three lines a navigator draws between fixes**, and they are drawn
-            // whether or not the chart is allowed to say where she is — because none of
-            // them is where she is. They are what she worked out, which is hers to have.
-            //
-            // The track made good, solid, from fix to fix: the one line on this paper
-            // that is not an estimate. The speed on it is distance over time between two
-            // positions she established, which is speed over the ground and the number
-            // the instruments cannot give her.
-            for pair in nav.fixes.windows(2) {
-                let (one, then) = (pair[0], pair[1]);
-                let (a, b) = (to_screen(one.0), to_screen(then.0));
-                p.line_segment([a, b], egui::Stroke::new(1.4, ink::TRACK));
-                let hours = ((then.1 - one.1) / 3_600.0).max(1e-6);
-                let miles = (then.0 - one.0).length() / 1_852.0;
-                p.text(
-                    egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5) + egui::vec2(7.0, -5.0),
-                    egui::Align2::LEFT_BOTTOM,
-                    format!("{:.1} kn made good", miles / hours),
-                    egui::FontId::monospace(10.0),
-                    ink::TRACK,
-                );
-            }
-            if let Some(run) = nav.reckoning {
-                let from = to_screen(run.from);
-                let now = to_screen(run.at);
-                // Dashed, because a reckoning is not a track: it is an argument about
-                // where she must have got to, and paper says that with a broken line.
-                let span = now - from;
-                let steps = ((span.length() / 9.0) as usize).clamp(1, 240);
-                for i in (0..steps).step_by(2) {
-                    let t = |k: usize| k as f32 / steps as f32;
-                    p.line_segment(
-                        [from + span * t(i), from + span * t((i + 1).min(steps))],
-                        egui::Stroke::new(1.1, ink::PEN),
-                    );
-                }
-                // Where it says she is: a dot with a bar across it, which is how a dead
-                // reckoning position is marked and how it is told apart at a glance from
-                // the ringed dot of a fix.
-                p.circle_filled(now, 1.5, ink::PEN);
-                let along = if span.length() > 1.0 {
-                    span.normalized()
-                } else {
-                    egui::vec2(0.0, -1.0)
-                };
-                let across = egui::vec2(-along.y, along.x) * 5.0;
-                p.line_segment(
-                    [now + across, now - across],
-                    egui::Stroke::new(1.2, ink::PEN),
-                );
-                // **And the circle she is somewhere in**, drawn round the reckoning
-                // rather than round the boat — which is the whole point of it. Round the
-                // boat it would be a statement about the truth, and the truth is the one
-                // thing nobody in this exercise has. Round the reckoning it says what it
-                // means: this is my best position, and this is how far out I may be.
-                if run.spread > 1.0 {
-                    p.circle(
-                        now,
-                        (run.spread as f32 * scale).clamp(3.0, 400.0),
-                        egui::Color32::TRANSPARENT,
-                        egui::Stroke::new(1.0, ink::PEN.gamma_multiply(0.55)),
-                    );
-                    p.text(
-                        now + egui::vec2(8.0, 8.0),
-                        egui::Align2::LEFT_TOP,
-                        format!("DR — within {:.1} M", run.spread / 1_852.0),
-                        egui::FontId::monospace(10.0),
-                        ink::PEN,
-                    );
-                }
-            }
+            reckoning(&table, &nav);
 
-            // --- What is already on the chart --------------------------------
-            //
-            // On the table only. The folded chart is a glance — *where am I, what is
-            // ahead* — and a plot on it is a thicket of pencil over a picture two inches
-            // square. Working belongs where there is room to work.
-            for (i, item) in chart.plot.iter().enumerate() {
-                match *item {
-                    Plotted::Line { through, bearing } => {
-                        // Drawn the length a navigator draws one, which is not across the
-                        // whole chart: a position line is a *pencil line near where you
-                        // think you are*, long enough to cross the others and no longer.
-                        // Lines run off both edges make a cobweb and hide the coast under
-                        // it — reported from the deck in those words.
-                        //
-                        // So it runs from the mark towards the observer, as far as the
-                        // crossing it makes plus a little, and when there is no crossing
-                        // yet, far enough to be worth looking at.
-                        let away =
-                            (bearing + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
-                        let along = glam::DVec2::new(away.sin(), away.cos());
-                        let reach = crossing_at
-                            .map(|c| ((c - through).length() * 1.25).max(chart.range as f64 * 0.25))
-                            .unwrap_or(chart.range as f64 * 0.9);
-                        let a = to_screen(through);
-                        let b = to_screen(through + along * reach);
-                        // **The corridor, not the line.**
-                        //
-                        // A hand bearing compass is good to two or three degrees, so a
-                        // position line is honestly a band — and a navigator who draws
-                        // the band knows at a glance how much of the chart his fix is
-                        // actually standing on. Three degrees either side, which is the
-                        // error the instrument in this game really has.
-                        for side in [-1.0, 1.0] {
-                            let edge = (away + side * sail_core::units::rad(3.0))
-                                .rem_euclid(std::f64::consts::TAU);
-                            let off = glam::DVec2::new(edge.sin(), edge.cos());
-                            p.line_segment(
-                                [a, to_screen(through + off * reach)],
-                                egui::Stroke::new(0.7, ink::PENCIL.gamma_multiply(0.4)),
-                            );
-                        }
-                        p.line_segment([a, b], egui::Stroke::new(1.1, ink::PENCIL));
-                        p.text(
-                            to_screen(through) + egui::vec2(6.0, 10.0),
-                            egui::Align2::LEFT_TOP,
-                            format!("{:03.0}", bearing.to_degrees()),
-                            egui::FontId::monospace(10.0),
-                            ink::PENCIL,
-                        );
-                        // **What the line is worth, written on the line.**
-                        //
-                        // A position line is not a position and the two things it *is*
-                        // depend entirely on where the mark lay: one taken ahead or
-                        // astern tells you how far along your track you have got and
-                        // nothing about how far off you are; one on the beam tells you
-                        // how far off and nothing about how far along. Every pilot book
-                        // says it and no chart shows it, and a navigator who does not
-                        // know which of the two he has just drawn will believe a fix
-                        // made of two lines that are both the same one.
-                        //
-                        // And the speed above it when there is a speed, because a line
-                        // plus a speed is a running fix waiting to happen: that is the
-                        // pair that lets the next bearing on the same mark be crossed
-                        // with this one.
-                        let off_the_bow = sail_core::units::wrap_pi(bearing - st.heading)
-                            .abs()
-                            .to_degrees();
-                        let worth = if !(30.0..150.0).contains(&off_the_bow) {
-                            "how far along"
-                        } else {
-                            "how far off"
-                        };
-                        let middle = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
-                        p.text(
-                            middle + egui::vec2(6.0, 4.0),
-                            egui::Align2::LEFT_TOP,
-                            worth,
-                            egui::FontId::monospace(9.0),
-                            ink::PENCIL.gamma_multiply(0.7),
-                        );
-                        if let Some((knots, _)) = nav.measured {
-                            p.text(
-                                middle + egui::vec2(6.0, -4.0),
-                                egui::Align2::LEFT_BOTTOM,
-                                format!("{knots:.1} kn"),
-                                egui::FontId::monospace(10.0),
-                                ink::PENCIL,
-                            );
-                        }
-                    }
-                    Plotted::Cross { at, fix } => {
-                        let c = to_screen(at);
-                        // The dot first, because the dot is the position and everything
-                        // else on this mark exists to point at it.
-                        p.circle_filled(c, 1.5, ink::PENCIL);
-                        if fix {
-                            // A ring round it, which is what a fix is on paper — and
-                            // left open at the dot so the ink never covers the point it
-                            // is claiming.
-                            p.circle(
-                                c,
-                                6.0,
-                                egui::Color32::TRANSPARENT,
-                                egui::Stroke::new(1.2, ink::PENCIL),
-                            );
-                        } else {
-                            // Arms with a gap in the middle. A cross drawn through its
-                            // own centre has its position buried under the crossing of
-                            // two strokes; one drawn as four short arms leaves the dot
-                            // showing, which is how a draughtsman marks a point.
-                            for (dx, dy) in [(1.0, 1.0), (1.0, -1.0)] {
-                                let along = egui::vec2(dx, dy);
-                                p.line_segment(
-                                    [c + along * 3.0, c + along * 7.0],
-                                    egui::Stroke::new(1.3, ink::PENCIL),
-                                );
-                                p.line_segment(
-                                    [c - along * 3.0, c - along * 7.0],
-                                    egui::Stroke::new(1.3, ink::PENCIL),
-                                );
-                            }
-                        }
-                    }
-                    // A leg that was sailed, drawn the way a course made good is drawn:
-                    // one arrow along it, the course over the line and what she did
-                    // under it. Two figures rather than three, because the distance is
-                    // the one you can measure off the paper with the dividers and the
-                    // speed is the one you cannot.
-                    Plotted::Run { from, to, minutes } => {
-                        let (a, b) = (to_screen(from), to_screen(to));
-                        p.line_segment([a, b], egui::Stroke::new(1.3, ink::TRACK));
-                        let off = to - from;
-                        let miles = off.length() / 1_852.0;
-                        let course = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
-                        // The arrowhead, at the far end and pointing the way she went.
-                        let along = (b - a).normalized();
-                        let across = egui::vec2(-along.y, along.x);
-                        for side in [-1.0, 1.0] {
-                            p.line_segment(
-                                [b, b - along * 9.0 + across * 4.0 * side],
-                                egui::Stroke::new(1.3, ink::TRACK),
-                            );
-                        }
-                        let middle = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
-                        p.text(
-                            middle + egui::vec2(6.0, -4.0),
-                            egui::Align2::LEFT_BOTTOM,
-                            format!("{:03.0}", course.to_degrees()),
-                            egui::FontId::monospace(10.0),
-                            ink::TRACK,
-                        );
-                        p.text(
-                            middle + egui::vec2(6.0, 4.0),
-                            egui::Align2::LEFT_TOP,
-                            format!(
-                                "{:.2} M in {:.0} min — {:.1} kn",
-                                miles,
-                                minutes,
-                                miles / (minutes / 60.0).max(1e-6)
-                            ),
-                            egui::FontId::monospace(10.0),
-                            ink::TRACK,
-                        );
-                    }
-                    Plotted::Stamp { at, hour } => {
-                        // Four figures and a tick under them, which is how a time is
-                        // written beside a mark: no colon, because a deck log has never
-                        // used one, and the tick so that a page with six times on it
-                        // still says which is which.
-                        let c = to_screen(at);
-                        p.line_segment(
-                            [c + egui::vec2(0.0, -3.0), c + egui::vec2(0.0, 3.0)],
-                            egui::Stroke::new(1.2, ink::PENCIL),
-                        );
-                        p.text(
-                            c + egui::vec2(5.0, -4.0),
-                            egui::Align2::LEFT_BOTTOM,
-                            format!(
-                                "{:02.0}{:02.0}",
-                                hour.floor(),
-                                (hour.fract() * 60.0).floor()
-                            ),
-                            egui::FontId::monospace(11.0),
-                            ink::PENCIL,
-                        );
-                    }
-                    Plotted::Rule { from, to } => {
-                        // A ruled leg, with the two things written along it that a
-                        // navigator writes along one: the course to steer and how far it
-                        // is. Written once, above the line, which is where it goes on
-                        // paper — the distance goes underneath on a passage chart, but
-                        // one label on a screen this size is already two lines of type.
-                        let (a, b) = (to_screen(from), to_screen(to));
-                        // Darker while it is in your hand, which is the only feedback a
-                        // straight edge needs: you can see that you have hold of this
-                        // one rather than of the chart.
-                        let in_hand = chart.moving.is_some_and(|(held, _)| held == i);
-                        p.line_segment(
-                            [a, b],
-                            egui::Stroke::new(if in_hand { 2.0 } else { 1.2 }, ink::PENCIL),
-                        );
-                        let off = to - from;
-                        let bearing = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
-                        // **The ends say which point they mean.**
-                        //
-                        // A tick across the line says *the line stops here*, which is
-                        // not the same thing and was what was drawn: at a glance you
-                        // could not tell whether the leg ended at the tick, at the
-                        // middle of it, or somewhere under the pencil. A small upright
-                        // cross with a dot at its centre says a point and nothing else,
-                        // which is how a position is marked on paper and why a cocked
-                        // hat has a dot in the middle of it. Asked for from the deck as
-                        // ends that point at something exactly and unambiguously.
-                        for end in [a, b] {
-                            for (dx, dy) in [(5.0, 0.0), (0.0, 5.0)] {
-                                p.line_segment(
-                                    [end + egui::vec2(dx, dy), end - egui::vec2(dx, dy)],
-                                    egui::Stroke::new(1.0, ink::PENCIL),
-                                );
-                            }
-                            p.circle_filled(end, 1.4, ink::PENCIL);
-                        }
-                        p.text(
-                            egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)
-                                + egui::vec2(6.0, -6.0),
-                            egui::Align2::LEFT_BOTTOM,
-                            format!(
-                                "{:03.0}   {:.2} M",
-                                bearing.to_degrees(),
-                                off.length() / 1_852.0
-                            ),
-                            egui::FontId::monospace(10.0),
-                            ink::PENCIL,
-                        );
-                    }
-                }
-            }
-            if let Some((from, to)) = chart.dividers {
-                let (a, b) = (to_screen(from), to_screen(to));
-                let off = to - from;
-                let miles = off.length() / 1_852.0;
-                let bearing = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
-                p.line_segment([a, b], egui::Stroke::new(1.4, ink::TRACK));
-                for end in [a, b] {
-                    // A ring with the point showing through it, like every other mark on
-                    // this paper: the dividers measure *between two points* and a filled
-                    // circle three pixels across hides the one it is standing on.
-                    p.circle(
-                        end,
-                        3.5,
-                        egui::Color32::TRANSPARENT,
-                        egui::Stroke::new(1.2, ink::TRACK),
-                    );
-                    p.circle_filled(end, 1.2, ink::TRACK);
-                }
-                let label = format!(
-                    "{miles:.2} M   {:03.0} / {:03.0}",
-                    bearing.to_degrees(),
-                    (bearing.to_degrees() + 180.0) % 360.0
-                );
-                let middle = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
-                p.text(
-                    middle + egui::vec2(8.0, -8.0),
-                    egui::Align2::LEFT_BOTTOM,
-                    label,
-                    egui::FontId::monospace(12.0),
-                    ink::TRACK,
-                );
-            }
+            plotted(&table, &chart, &nav, crossing_at, st.heading);
 
-            // The protractor, while a bearing is being laid off: a rose standing on the
-            // mark, and the bearing under the cursor written beside it. The reading is
-            // the thing that was missing from the old drag — you could not see the
-            // angle you were setting until you had let go of it.
-            if let Some(centre) = chart.protractor {
-                let c = to_screen(centre);
-                let radius = 54.0_f32;
-                p.circle(
-                    c,
-                    radius,
-                    egui::Color32::TRANSPARENT,
-                    egui::Stroke::new(1.0, ink::PEN.gamma_multiply(0.7)),
-                );
-                for tick in 0..72 {
-                    let a = (tick as f32 * 5.0).to_radians();
-                    let dir = egui::vec2(a.sin(), -a.cos());
-                    let long = tick % 6 == 0;
-                    p.line_segment(
-                        [
-                            c + dir * if long { radius - 8.0 } else { radius - 4.0 },
-                            c + dir * radius,
-                        ],
-                        egui::Stroke::new(if long { 1.0 } else { 0.5 }, ink::PEN),
-                    );
-                }
-                for (label, at) in [("N", 0.0_f32), ("E", 90.0), ("S", 180.0), ("W", 270.0)] {
-                    let a = at.to_radians();
-                    p.text(
-                        c + egui::vec2(a.sin(), -a.cos()) * (radius - 15.0),
-                        egui::Align2::CENTER_CENTER,
-                        label,
-                        egui::FontId::monospace(9.0),
-                        ink::PEN,
-                    );
-                }
-                p.circle_filled(c, 1.6, ink::PEN);
-                if let Some(cursor) = ctx.pointer_latest_pos() {
-                    let off = to_water(cursor) - centre;
-                    if off.length() > 1.0 {
-                        let bearing = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
-                        let far = to_screen(centre + off.normalize() * chart.range as f64 * 0.9);
-                        p.line_segment([c, far], egui::Stroke::new(1.0, ink::MARK));
-                        p.text(
-                            c + egui::vec2(10.0, -radius - 4.0),
-                            egui::Align2::LEFT_BOTTOM,
-                            format!("{:03.0}", bearing.to_degrees()),
-                            egui::FontId::monospace(13.0),
-                            ink::MARK,
-                        );
-                    }
-                }
-            }
+            protractor(
+                &table,
+                chart.protractor,
+                ctx.pointer_latest_pos(),
+                chart.range as f64,
+            );
 
             // --- The stopwatch -------------------------------------------------
             //
@@ -1655,96 +1015,7 @@ pub fn draw(
                 press_the_watch = true;
             }
 
-            // --- What she knows ------------------------------------------------
-            //
-            // **A sheet of paper with the figures on it, fading as they go stale.**
-            //
-            // Navigation is not a position, it is a *state of knowledge*, and until now
-            // that state was scattered: the fix was a cross, the set was a line in the
-            // log file, the measured speed was gone the moment it was written, and how
-            // old any of it was you had to work out from the clock. A navigator keeps
-            // this on the corner of the chart in pencil, adds to it as things become
-            // known, and stops believing a line when it is old enough to be wrong.
-            //
-            // So each line carries its own age and fades with it, which is the honest
-            // way to draw knowledge: a figure at full strength is one you may act on, a
-            // faint one is one worth taking again. Nothing is deleted — a faded line is
-            // still the last thing you knew, which is more than nothing.
-            {
-                let card = egui::Rect::from_min_size(
-                    egui::pos2(rect.left() + 16.0, rect.bottom() - 128.0),
-                    egui::vec2(214.0, 74.0),
-                );
-                let mut lines: Vec<(String, f32)> = Vec::new();
-                // How much of a figure is left, given how long ago it was taken and how
-                // long that kind of figure stays worth having.
-                let left = |when: f64, good_for: f64| {
-                    (1.0 - ((st.time - when) / good_for).clamp(0.0, 1.0)) as f32
-                };
-                if nav.fixed_at.is_some() {
-                    lines.push((
-                        format!(
-                            "fix     {:>5.0} min ago",
-                            (st.time - nav.last_fix).max(0.0) / 60.0
-                        ),
-                        // A fix is worth having for as long as it is worth sailing on,
-                        // which is the same twenty minutes the chart gives it.
-                        left(nav.last_fix, crate::navigation::FIX_HOLDS),
-                    ));
-                }
-                if let Some((knots, when)) = nav.measured {
-                    lines.push((
-                        format!("log     {knots:>5.1} kn  ±{:.0}%", nav.log_slip * 100.0),
-                        // Half an hour. A boat's speed is a fact about her trim and the
-                        // sea she is in, and both of those have changed by then.
-                        left(when, 1_800.0),
-                    ));
-                }
-                if nav.set_measured && nav.unexplained > 0.01 {
-                    lines.push((
-                        format!(
-                            "set     {:>5.2} kn",
-                            sail_core::units::ms_to_kn(nav.unexplained)
-                        ),
-                        // The stream is a fact about this water and this hour of the
-                        // tide, and it holds up longer than anything else here.
-                        left(nav.last_fix, 5_400.0).max(0.35),
-                    ));
-                }
-                if let Some(run) = nav.reckoning {
-                    lines.push((
-                        format!("within  {:>5.2} M", run.spread / 1_852.0),
-                        // Always current: it is the one line here that is *about* going
-                        // stale, so it cannot go stale itself.
-                        1.0,
-                    ));
-                }
-                if !lines.is_empty() {
-                    p.rect_filled(card, 2.0, ink::PAPER.gamma_multiply(0.75));
-                    p.rect_stroke(
-                        card,
-                        2.0,
-                        egui::Stroke::new(1.0, ink::COAST.gamma_multiply(0.6)),
-                        egui::StrokeKind::Inside,
-                    );
-                    p.text(
-                        card.left_top() + egui::vec2(8.0, 6.0),
-                        egui::Align2::LEFT_TOP,
-                        "WHAT SHE KNOWS",
-                        egui::FontId::monospace(9.0),
-                        ink::COAST,
-                    );
-                    for (i, (line, alpha)) in lines.iter().take(4).enumerate() {
-                        p.text(
-                            card.left_top() + egui::vec2(8.0, 20.0 + i as f32 * 13.0),
-                            egui::Align2::LEFT_TOP,
-                            line,
-                            egui::FontId::monospace(10.0),
-                            ink::PEN.gamma_multiply(0.25 + 0.75 * alpha),
-                        );
-                    }
-                }
-            }
+            what_she_knows(&table, &nav, st.time);
 
             // The scale, which a chart has to carry or its distances are a rumour.
             // A mile, drawn as a mile is drawn: ten cables, alternating.
@@ -1874,55 +1145,7 @@ pub fn draw(
                 }
             }
 
-            // --- The compass rose --------------------------------------------
-            //
-            // Printed on every chart ever made, and not as decoration: it is what a
-            // parallel rule is laid against to read a bearing off, and it is how you can
-            // tell at a glance which way is north on a chart somebody has turned round on
-            // the table. Graduated every ten degrees and numbered every thirty.
-            let rose = egui::pos2(rect.right() - 86.0, rect.bottom() - 86.0);
-            p.circle(
-                rose,
-                56.0,
-                egui::Color32::TRANSPARENT,
-                egui::Stroke::new(1.0, ink::COAST),
-            );
-            p.circle(
-                rose,
-                44.0,
-                egui::Color32::TRANSPARENT,
-                egui::Stroke::new(0.7, ink::COAST),
-            );
-            for tick in 0..36 {
-                let a = (tick as f32 * 10.0).to_radians();
-                let dir = egui::vec2(a.sin(), -a.cos());
-                let long = tick % 3 == 0;
-                p.line_segment(
-                    [
-                        rose + dir * if long { 44.0 } else { 50.0 },
-                        rose + dir * 56.0,
-                    ],
-                    egui::Stroke::new(if long { 1.1 } else { 0.6 }, ink::COAST),
-                );
-                if long {
-                    p.text(
-                        rose + dir * 34.0,
-                        egui::Align2::CENTER_CENTER,
-                        format!("{:03}", tick * 10),
-                        egui::FontId::monospace(8.0),
-                        ink::COAST,
-                    );
-                }
-            }
-            p.add(egui::Shape::convex_polygon(
-                vec![
-                    rose + egui::vec2(0.0, -56.0),
-                    rose + egui::vec2(-4.5, -40.0),
-                    rose + egui::vec2(4.5, -40.0),
-                ],
-                ink::BOAT,
-                egui::Stroke::NONE,
-            ));
+            compass_rose(&table);
         }
 
         p.rect_stroke(
@@ -1931,61 +1154,7 @@ pub fn draw(
             egui::Stroke::new(1.0, ink::COAST),
             egui::StrokeKind::Inside,
         );
-        // --- The weather, pencilled on ---------------------------------------
-        //
-        // A navigator corrects the chart in ink and writes the forecast on it in
-        // pencil, because the coastline is true next year and the wind is true for
-        // the afternoon. These are drawn from the *live* field rather than from the
-        // forecast's own numbers, which is a better reading of the same thing: the
-        // barbs show the lee of an island and the outflow of a squall, neither of
-        // which a forecast can tell you and both of which decide which side you pass.
-        // Four of them, one to a quadrant, and the middle left clear for the boat
-        // and her track. Twenty-five was a weather map; this is a chart with the
-        // weather written on it, and the difference is that the chart is still
-        // legible underneath. Four is also honest about what the symbol is for: the
-        // wind over this much water is one wind, and the barbs are there to say
-        // which way it sets and roughly how hard, not to map a field.
-        const BARBS: i32 = 1;
-        for ix in -BARBS..=BARBS {
-            for iy in -BARBS..=BARBS {
-                if ix == 0 || iy == 0 {
-                    continue;
-                }
-                let step = chart.range as f64 * 0.62;
-                let at = st.pos + glam::DVec2::new(ix as f64 * step, iy as f64 * step);
-                // Nothing over the land: a wind arrow on a hillside is a symbol
-                // placed where its quantity does not exist.
-                if land.depth(at) <= 0.0 {
-                    continue;
-                }
-                let screen = to_screen(at);
-                if !rect.contains(screen) {
-                    continue;
-                }
-                let flow = sim.sim.wind.sample(at, st.time);
-                barb(
-                    &p,
-                    screen,
-                    sail_core::wind::direction_of(flow),
-                    sail_core::units::ms_to_kn(flow.length()),
-                    ink::PEN,
-                );
-            }
-        }
-
-        // Squalls, as a ring round what they cover. The console says how far off the
-        // nearest one is; this says which way it is going and what it will miss,
-        // which is the question you actually have.
-        for (centre, radius, maturity) in sim.sim.wind.squalls() {
-            let at = to_screen(centre);
-            let r = radius as f32 * scale;
-            if r < 2.0 {
-                continue;
-            }
-            let ring = ink::SQUALL.gamma_multiply(0.35 + 0.65 * maturity as f32);
-            p.circle_stroke(at, r, egui::Stroke::new(1.0, ring));
-            p.circle_stroke(at, r * 0.55, egui::Stroke::new(1.0, ring));
-        }
+        weather_on_the_chart(&table, &sim, land, chart.range as f64, st.pos, st.time);
 
         // The set and drift. Uniform over this much water — it is the wind dragging
         // the top of the sea along, not a tidal stream round a headland — so it is
@@ -2347,6 +1516,977 @@ pub fn glass(mut contexts: bevy_egui::EguiContexts, chart: Res<Chart>, sim: Res<
         },
     );
     Ok(())
+}
+
+/// The paper, as everything that draws on it needs to see it.
+///
+/// **Five things that always travel together**, which is the shape this file was
+/// missing: the painter, the rectangle it works in, the scale, where the middle of the
+/// paper is over the water, and whether the chart may say where she is. Without it every
+/// section of the drawing had to stay inside one closure to reach the locals — which is
+/// how `draw` reached sixteen hundred lines, and how a block of drawing came to be
+/// pasted inside a drag handler where it ran on one frame in a hundred.
+///
+/// With it, each thing that puts ink on the chart is a function with a name next to the
+/// comment that explains it, and the compiler says so when one of them is handed
+/// something it has no business with.
+pub struct Table {
+    pub p: egui::Painter,
+    pub rect: egui::Rect,
+    /// Pixels per metre.
+    pub scale: f32,
+    /// Where the middle of the paper is, in the world.
+    pub middle: glam::DVec2,
+    /// Whether the chart may say where she is — carried here because half the drawing
+    /// has to ask it and the answer must be the same for all of them.
+    pub knows: bool,
+}
+
+impl Table {
+    pub fn to_screen(&self, at: glam::DVec2) -> egui::Pos2 {
+        let off = at - self.middle;
+        self.rect.center() + egui::vec2(off.x as f32, -off.y as f32) * self.scale
+    }
+
+    pub fn to_water(&self, at: egui::Pos2) -> glam::DVec2 {
+        let off = at - self.rect.center();
+        self.middle + glam::DVec2::new((off.x / self.scale) as f64, (-off.y / self.scale) as f64)
+    }
+}
+
+/// The rose, printed on every chart ever made and not as decoration: it is what a
+/// parallel rule is laid against, and how you tell which way is north on a chart
+/// somebody has turned round on the table.
+fn compass_rose(t: &Table) {
+    // --- The compass rose --------------------------------------------
+    //
+    // Printed on every chart ever made, and not as decoration: it is what a
+    // parallel rule is laid against to read a bearing off, and it is how you can
+    // tell at a glance which way is north on a chart somebody has turned round on
+    // the table. Graduated every ten degrees and numbered every thirty.
+    let rose = egui::pos2(t.rect.right() - 86.0, t.rect.bottom() - 86.0);
+    t.p.circle(
+        rose,
+        56.0,
+        egui::Color32::TRANSPARENT,
+        egui::Stroke::new(1.0, ink::COAST),
+    );
+    t.p.circle(
+        rose,
+        44.0,
+        egui::Color32::TRANSPARENT,
+        egui::Stroke::new(0.7, ink::COAST),
+    );
+    for tick in 0..36 {
+        let a = (tick as f32 * 10.0).to_radians();
+        let dir = egui::vec2(a.sin(), -a.cos());
+        let long = tick % 3 == 0;
+        t.p.line_segment(
+            [
+                rose + dir * if long { 44.0 } else { 50.0 },
+                rose + dir * 56.0,
+            ],
+            egui::Stroke::new(if long { 1.1 } else { 0.6 }, ink::COAST),
+        );
+        if long {
+            t.p.text(
+                rose + dir * 34.0,
+                egui::Align2::CENTER_CENTER,
+                format!("{:03}", tick * 10),
+                egui::FontId::monospace(8.0),
+                ink::COAST,
+            );
+        }
+    }
+    t.p.add(egui::Shape::convex_polygon(
+        vec![
+            rose + egui::vec2(0.0, -56.0),
+            rose + egui::vec2(-4.5, -40.0),
+            rose + egui::vec2(4.5, -40.0),
+        ],
+        ink::BOAT,
+        egui::Stroke::NONE,
+    ));
+}
+
+/// The reckoning, the track between fixes, and the circle she is somewhere in.
+///
+/// Drawn whether or not the chart may say where she is, because none of it *is* where
+/// she is: it is what she worked out, which is hers to have.
+fn reckoning(t: &Table, nav: &crate::navigation::Navigation) {
+    // --- The reckoning ------------------------------------------------
+    //
+    // **The three lines a navigator draws between fixes**, and they are drawn
+    // whether or not the chart is allowed to say where she is — because none of
+    // them is where she is. They are what she worked out, which is hers to have.
+    //
+    // The track made good, solid, from fix to fix: the one line on this paper
+    // that is not an estimate. The speed on it is distance over time between two
+    // positions she established, which is speed over the ground and the number
+    // the instruments cannot give her.
+    for pair in nav.fixes.windows(2) {
+        let (one, then) = (pair[0], pair[1]);
+        let (a, b) = (t.to_screen(one.0), t.to_screen(then.0));
+        t.p.line_segment([a, b], egui::Stroke::new(1.4, ink::TRACK));
+        let hours = ((then.1 - one.1) / 3_600.0).max(1e-6);
+        let miles = (then.0 - one.0).length() / 1_852.0;
+        t.p.text(
+            egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5) + egui::vec2(7.0, -5.0),
+            egui::Align2::LEFT_BOTTOM,
+            format!("{:.1} kn made good", miles / hours),
+            egui::FontId::monospace(10.0),
+            ink::TRACK,
+        );
+    }
+    if let Some(run) = nav.reckoning {
+        let from = t.to_screen(run.from);
+        let now = t.to_screen(run.at);
+        // Dashed, because a reckoning is not a track: it is an argument about
+        // where she must have got to, and paper says that with a broken line.
+        let span = now - from;
+        let steps = ((span.length() / 9.0) as usize).clamp(1, 240);
+        for i in (0..steps).step_by(2) {
+            let along_it = |k: usize| k as f32 / steps as f32;
+            t.p.line_segment(
+                [
+                    from + span * along_it(i),
+                    from + span * along_it((i + 1).min(steps)),
+                ],
+                egui::Stroke::new(1.1, ink::PEN),
+            );
+        }
+        // Where it says she is: a dot with a bar across it, which is how a dead
+        // reckoning position is marked and how it is told apart at a glance from
+        // the ringed dot of a fix.
+        t.p.circle_filled(now, 1.5, ink::PEN);
+        let along = if span.length() > 1.0 {
+            span.normalized()
+        } else {
+            egui::vec2(0.0, -1.0)
+        };
+        let across = egui::vec2(-along.y, along.x) * 5.0;
+        t.p.line_segment(
+            [now + across, now - across],
+            egui::Stroke::new(1.2, ink::PEN),
+        );
+        // **And the circle she is somewhere in**, drawn round the reckoning
+        // rather than round the boat — which is the whole point of it. Round the
+        // boat it would be a statement about the truth, and the truth is the one
+        // thing nobody in this exercise has. Round the reckoning it says what it
+        // means: this is my best position, and this is how far out I may be.
+        if run.spread > 1.0 {
+            t.p.circle(
+                now,
+                (run.spread as f32 * t.scale).clamp(3.0, 400.0),
+                egui::Color32::TRANSPARENT,
+                egui::Stroke::new(1.0, ink::PEN.gamma_multiply(0.55)),
+            );
+            t.p.text(
+                now + egui::vec2(8.0, 8.0),
+                egui::Align2::LEFT_TOP,
+                format!("DR — within {:.1} M", run.spread / 1_852.0),
+                egui::FontId::monospace(10.0),
+                ink::PEN,
+            );
+        }
+    }
+}
+
+/// The card in the corner: the figures she has, each fading with its own age.
+///
+/// Navigation is a state of knowledge rather than a position, and this is that state
+/// written down the way a navigator keeps it — added to as things become known, and
+/// believed less as they go stale.
+fn what_she_knows(t: &Table, nav: &crate::navigation::Navigation, now: f64) {
+    // --- What she knows ------------------------------------------------
+    //
+    // **A sheet of paper with the figures on it, fading as they go stale.**
+    //
+    // Navigation is not a position, it is a *state of knowledge*, and until now
+    // that state was scattered: the fix was a cross, the set was a line in the
+    // log file, the measured speed was gone the moment it was written, and how
+    // old any of it was you had to work out from the clock. A navigator keeps
+    // this on the corner of the chart in pencil, adds to it as things become
+    // known, and stops believing a line when it is old enough to be wrong.
+    //
+    // So each line carries its own age and fades with it, which is the honest
+    // way to draw knowledge: a figure at full strength is one you may act on, a
+    // faint one is one worth taking again. Nothing is deleted — a faded line is
+    // still the last thing you knew, which is more than nothing.
+    {
+        let card = egui::Rect::from_min_size(
+            egui::pos2(t.rect.left() + 16.0, t.rect.bottom() - 128.0),
+            egui::vec2(214.0, 74.0),
+        );
+        let mut lines: Vec<(String, f32)> = Vec::new();
+        // How much of a figure is left, given how long ago it was taken and how
+        // long that kind of figure stays worth having.
+        let left =
+            |when: f64, good_for: f64| (1.0 - ((now - when) / good_for).clamp(0.0, 1.0)) as f32;
+        if nav.fixed_at.is_some() {
+            lines.push((
+                format!(
+                    "fix     {:>5.0} min ago",
+                    (now - nav.last_fix).max(0.0) / 60.0
+                ),
+                // A fix is worth having for as long as it is worth sailing on,
+                // which is the same twenty minutes the chart gives it.
+                left(nav.last_fix, crate::navigation::FIX_HOLDS),
+            ));
+        }
+        if let Some((knots, when)) = nav.measured {
+            lines.push((
+                format!("log     {knots:>5.1} kn  ±{:.0}%", nav.log_slip * 100.0),
+                // Half an hour. A boat's speed is a fact about her trim and the
+                // sea she is in, and both of those have changed by then.
+                left(when, 1_800.0),
+            ));
+        }
+        if nav.set_measured && nav.unexplained > 0.01 {
+            lines.push((
+                format!(
+                    "set     {:>5.2} kn",
+                    sail_core::units::ms_to_kn(nav.unexplained)
+                ),
+                // The stream is a fact about this water and this hour of the
+                // tide, and it holds up longer than anything else here.
+                left(nav.last_fix, 5_400.0).max(0.35),
+            ));
+        }
+        if let Some(run) = nav.reckoning {
+            lines.push((
+                format!("within  {:>5.2} M", run.spread / 1_852.0),
+                // Always current: it is the one line here that is *about* going
+                // stale, so it cannot go stale itself.
+                1.0,
+            ));
+        }
+        if !lines.is_empty() {
+            t.p.rect_filled(card, 2.0, ink::PAPER.gamma_multiply(0.75));
+            t.p.rect_stroke(
+                card,
+                2.0,
+                egui::Stroke::new(1.0, ink::COAST.gamma_multiply(0.6)),
+                egui::StrokeKind::Inside,
+            );
+            t.p.text(
+                card.left_top() + egui::vec2(8.0, 6.0),
+                egui::Align2::LEFT_TOP,
+                "WHAT SHE KNOWS",
+                egui::FontId::monospace(9.0),
+                ink::COAST,
+            );
+            for (i, (line, alpha)) in lines.iter().take(4).enumerate() {
+                t.p.text(
+                    card.left_top() + egui::vec2(8.0, 20.0 + i as f32 * 13.0),
+                    egui::Align2::LEFT_TOP,
+                    line,
+                    egui::FontId::monospace(10.0),
+                    ink::PEN.gamma_multiply(0.25 + 0.75 * alpha),
+                );
+            }
+        }
+    }
+}
+
+/// The forecast, pencilled on: wind barbs over the water the way a navigator writes
+/// the afternoon's wind on a chart he has corrected in ink.
+fn weather_on_the_chart(
+    t: &Table,
+    sim: &Sim,
+    land: &sail_core::land::Archipelago,
+    range: f64,
+    here: glam::DVec2,
+    now: f64,
+) {
+    // --- The weather, pencilled on ---------------------------------------
+    //
+    // A navigator corrects the chart in ink and writes the forecast on it in
+    // pencil, because the coastline is true next year and the wind is true for
+    // the afternoon. These are drawn from the *live* field rather than from the
+    // forecast's own numbers, which is a better reading of the same thing: the
+    // barbs show the lee of an island and the outflow of a squall, neither of
+    // which a forecast can tell you and both of which decide which side you pass.
+    // Four of them, one to a quadrant, and the middle left clear for the boat
+    // and her track. Twenty-five was a weather map; this is a chart with the
+    // weather written on it, and the difference is that the chart is still
+    // legible underneath. Four is also honest about what the symbol is for: the
+    // wind over this much water is one wind, and the barbs are there to say
+    // which way it sets and roughly how hard, not to map a field.
+    const BARBS: i32 = 1;
+    for ix in -BARBS..=BARBS {
+        for iy in -BARBS..=BARBS {
+            if ix == 0 || iy == 0 {
+                continue;
+            }
+            let step = range * 0.62;
+            let at = here + glam::DVec2::new(ix as f64 * step, iy as f64 * step);
+            // Nothing over the land: a wind arrow on a hillside is a symbol
+            // placed where its quantity does not exist.
+            if land.depth(at) <= 0.0 {
+                continue;
+            }
+            let screen = t.to_screen(at);
+            if !t.rect.contains(screen) {
+                continue;
+            }
+            let flow = sim.sim.wind.sample(at, now);
+            barb(
+                &t.p,
+                screen,
+                sail_core::wind::direction_of(flow),
+                sail_core::units::ms_to_kn(flow.length()),
+                ink::PEN,
+            );
+        }
+    }
+
+    // Squalls, as a ring round what they cover. The console says how far off the
+    // nearest one is; this says which way it is going and what it will miss,
+    // which is the question you actually have.
+    for (centre, radius, maturity) in sim.sim.wind.squalls() {
+        let at = t.to_screen(centre);
+        let r = radius as f32 * t.scale;
+        if r < 2.0 {
+            continue;
+        }
+        let ring = ink::SQUALL.gamma_multiply(0.35 + 0.65 * maturity as f32);
+        t.p.circle_stroke(at, r, egui::Stroke::new(1.0, ring));
+        t.p.circle_stroke(at, r * 0.55, egui::Stroke::new(1.0, ring));
+    }
+}
+
+/// Everything the pencil has left on the paper: position lines and their bands, ruled
+/// legs, timed runs, times, fixes and crosses.
+fn plotted(
+    t: &Table,
+    chart: &Chart,
+    nav: &crate::navigation::Navigation,
+    crossing_at: Option<glam::DVec2>,
+    heading: f64,
+) {
+    // --- What is already on the chart --------------------------------
+    //
+    // On the table only. The folded chart is a glance — *where am I, what is
+    // ahead* — and a plot on it is a thicket of pencil over a picture two inches
+    // square. Working belongs where there is room to work.
+    for (i, item) in chart.plot.iter().enumerate() {
+        match *item {
+            Plotted::Line { through, bearing } => {
+                // Drawn the length a navigator draws one, which is not across the
+                // whole chart: a position line is a *pencil line near where you
+                // think you are*, long enough to cross the others and no longer.
+                // Lines run off both edges make a cobweb and hide the coast under
+                // it — reported from the deck in those words.
+                //
+                // So it runs from the mark towards the observer, as far as the
+                // crossing it makes plus a little, and when there is no crossing
+                // yet, far enough to be worth looking at.
+                let away = (bearing + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
+                let along = glam::DVec2::new(away.sin(), away.cos());
+                let reach = crossing_at
+                    .map(|c| ((c - through).length() * 1.25).max(chart.range as f64 * 0.25))
+                    .unwrap_or(chart.range as f64 * 0.9);
+                let a = t.to_screen(through);
+                let b = t.to_screen(through + along * reach);
+                // **The corridor, not the line.**
+                //
+                // A hand bearing compass is good to two or three degrees, so a
+                // position line is honestly a band — and a navigator who draws
+                // the band knows at a glance how much of the chart his fix is
+                // actually standing on. Three degrees either side, which is the
+                // error the instrument in this game really has.
+                for side in [-1.0, 1.0] {
+                    let edge = (away + side * sail_core::units::rad(3.0))
+                        .rem_euclid(std::f64::consts::TAU);
+                    let off = glam::DVec2::new(edge.sin(), edge.cos());
+                    t.p.line_segment(
+                        [a, t.to_screen(through + off * reach)],
+                        egui::Stroke::new(0.7, ink::PENCIL.gamma_multiply(0.4)),
+                    );
+                }
+                t.p.line_segment([a, b], egui::Stroke::new(1.1, ink::PENCIL));
+                t.p.text(
+                    t.to_screen(through) + egui::vec2(6.0, 10.0),
+                    egui::Align2::LEFT_TOP,
+                    format!("{:03.0}", bearing.to_degrees()),
+                    egui::FontId::monospace(10.0),
+                    ink::PENCIL,
+                );
+                // **What the line is worth, written on the line.**
+                //
+                // A position line is not a position and the two things it *is*
+                // depend entirely on where the mark lay: one taken ahead or
+                // astern tells you how far along your track you have got and
+                // nothing about how far off you are; one on the beam tells you
+                // how far off and nothing about how far along. Every pilot book
+                // says it and no chart shows it, and a navigator who does not
+                // know which of the two he has just drawn will believe a fix
+                // made of two lines that are both the same one.
+                //
+                // And the speed above it when there is a speed, because a line
+                // plus a speed is a running fix waiting to happen: that is the
+                // pair that lets the next bearing on the same mark be crossed
+                // with this one.
+                let off_the_bow = sail_core::units::wrap_pi(bearing - heading)
+                    .abs()
+                    .to_degrees();
+                let worth = if !(30.0..150.0).contains(&off_the_bow) {
+                    "how far along"
+                } else {
+                    "how far off"
+                };
+                let middle = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+                t.p.text(
+                    middle + egui::vec2(6.0, 4.0),
+                    egui::Align2::LEFT_TOP,
+                    worth,
+                    egui::FontId::monospace(9.0),
+                    ink::PENCIL.gamma_multiply(0.7),
+                );
+                if let Some((knots, _)) = nav.measured {
+                    t.p.text(
+                        middle + egui::vec2(6.0, -4.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        format!("{knots:.1} kn"),
+                        egui::FontId::monospace(10.0),
+                        ink::PENCIL,
+                    );
+                }
+            }
+            Plotted::Cross { at, fix } => {
+                let c = t.to_screen(at);
+                // The dot first, because the dot is the position and everything
+                // else on this mark exists to point at it.
+                t.p.circle_filled(c, 1.5, ink::PENCIL);
+                if fix {
+                    // A ring round it, which is what a fix is on paper — and
+                    // left open at the dot so the ink never covers the point it
+                    // is claiming.
+                    t.p.circle(
+                        c,
+                        6.0,
+                        egui::Color32::TRANSPARENT,
+                        egui::Stroke::new(1.2, ink::PENCIL),
+                    );
+                } else {
+                    // Arms with a gap in the middle. A cross drawn through its
+                    // own centre has its position buried under the crossing of
+                    // two strokes; one drawn as four short arms leaves the dot
+                    // showing, which is how a draughtsman marks a point.
+                    for (dx, dy) in [(1.0, 1.0), (1.0, -1.0)] {
+                        let along = egui::vec2(dx, dy);
+                        t.p.line_segment(
+                            [c + along * 3.0, c + along * 7.0],
+                            egui::Stroke::new(1.3, ink::PENCIL),
+                        );
+                        t.p.line_segment(
+                            [c - along * 3.0, c - along * 7.0],
+                            egui::Stroke::new(1.3, ink::PENCIL),
+                        );
+                    }
+                }
+            }
+            // A leg that was sailed, drawn the way a course made good is drawn:
+            // one arrow along it, the course over the line and what she did
+            // under it. Two figures rather than three, because the distance is
+            // the one you can measure off the paper with the dividers and the
+            // speed is the one you cannot.
+            Plotted::Run { from, to, minutes } => {
+                let (a, b) = (t.to_screen(from), t.to_screen(to));
+                t.p.line_segment([a, b], egui::Stroke::new(1.3, ink::TRACK));
+                let off = to - from;
+                let miles = off.length() / 1_852.0;
+                let course = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
+                // The arrowhead, at the far end and pointing the way she went.
+                let along = (b - a).normalized();
+                let across = egui::vec2(-along.y, along.x);
+                for side in [-1.0, 1.0] {
+                    t.p.line_segment(
+                        [b, b - along * 9.0 + across * 4.0 * side],
+                        egui::Stroke::new(1.3, ink::TRACK),
+                    );
+                }
+                let middle = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+                t.p.text(
+                    middle + egui::vec2(6.0, -4.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("{:03.0}", course.to_degrees()),
+                    egui::FontId::monospace(10.0),
+                    ink::TRACK,
+                );
+                t.p.text(
+                    middle + egui::vec2(6.0, 4.0),
+                    egui::Align2::LEFT_TOP,
+                    format!(
+                        "{:.2} M in {:.0} min — {:.1} kn",
+                        miles,
+                        minutes,
+                        miles / (minutes / 60.0).max(1e-6)
+                    ),
+                    egui::FontId::monospace(10.0),
+                    ink::TRACK,
+                );
+            }
+            Plotted::Stamp { at, hour } => {
+                // Four figures and a tick under them, which is how a time is
+                // written beside a mark: no colon, because a deck log has never
+                // used one, and the tick so that a page with six times on it
+                // still says which is which.
+                let c = t.to_screen(at);
+                t.p.line_segment(
+                    [c + egui::vec2(0.0, -3.0), c + egui::vec2(0.0, 3.0)],
+                    egui::Stroke::new(1.2, ink::PENCIL),
+                );
+                t.p.text(
+                    c + egui::vec2(5.0, -4.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!(
+                        "{:02.0}{:02.0}",
+                        hour.floor(),
+                        (hour.fract() * 60.0).floor()
+                    ),
+                    egui::FontId::monospace(11.0),
+                    ink::PENCIL,
+                );
+            }
+            Plotted::Rule { from, to } => {
+                // A ruled leg, with the two things written along it that a
+                // navigator writes along one: the course to steer and how far it
+                // is. Written once, above the line, which is where it goes on
+                // paper — the distance goes underneath on a passage chart, but
+                // one label on a screen this size is already two lines of type.
+                let (a, b) = (t.to_screen(from), t.to_screen(to));
+                // Darker while it is in your hand, which is the only feedback a
+                // straight edge needs: you can see that you have hold of this
+                // one rather than of the chart.
+                let in_hand = chart.moving.is_some_and(|(held, _)| held == i);
+                t.p.line_segment(
+                    [a, b],
+                    egui::Stroke::new(if in_hand { 2.0 } else { 1.2 }, ink::PENCIL),
+                );
+                let off = to - from;
+                let bearing = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
+                // **The ends say which point they mean.**
+                //
+                // A tick across the line says *the line stops here*, which is
+                // not the same thing and was what was drawn: at a glance you
+                // could not tell whether the leg ended at the tick, at the
+                // middle of it, or somewhere under the pencil. A small upright
+                // cross with a dot at its centre says a point and nothing else,
+                // which is how a position is marked on paper and why a cocked
+                // hat has a dot in the middle of it. Asked for from the deck as
+                // ends that point at something exactly and unambiguously.
+                for end in [a, b] {
+                    for (dx, dy) in [(5.0, 0.0), (0.0, 5.0)] {
+                        t.p.line_segment(
+                            [end + egui::vec2(dx, dy), end - egui::vec2(dx, dy)],
+                            egui::Stroke::new(1.0, ink::PENCIL),
+                        );
+                    }
+                    t.p.circle_filled(end, 1.4, ink::PENCIL);
+                }
+                t.p.text(
+                    egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5) + egui::vec2(6.0, -6.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!(
+                        "{:03.0}   {:.2} M",
+                        bearing.to_degrees(),
+                        off.length() / 1_852.0
+                    ),
+                    egui::FontId::monospace(10.0),
+                    ink::PENCIL,
+                );
+            }
+        }
+    }
+    if let Some((from, to)) = chart.dividers {
+        let (a, b) = (t.to_screen(from), t.to_screen(to));
+        let off = to - from;
+        let miles = off.length() / 1_852.0;
+        let bearing = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
+        t.p.line_segment([a, b], egui::Stroke::new(1.4, ink::TRACK));
+        for end in [a, b] {
+            // A ring with the point showing through it, like every other mark on
+            // this paper: the dividers measure *between two points* and a filled
+            // circle three pixels across hides the one it is standing on.
+            t.p.circle(
+                end,
+                3.5,
+                egui::Color32::TRANSPARENT,
+                egui::Stroke::new(1.2, ink::TRACK),
+            );
+            t.p.circle_filled(end, 1.2, ink::TRACK);
+        }
+        let label = format!(
+            "{miles:.2} M   {:03.0} / {:03.0}",
+            bearing.to_degrees(),
+            (bearing.to_degrees() + 180.0) % 360.0
+        );
+        let middle = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+        t.p.text(
+            middle + egui::vec2(8.0, -8.0),
+            egui::Align2::LEFT_BOTTOM,
+            label,
+            egui::FontId::monospace(12.0),
+            ink::TRACK,
+        );
+    }
+}
+
+/// The rose standing on a mark while a bearing is laid off, with the figure under the
+/// hand written beside it — which is the thing the parallel rule cannot show you until
+/// you have let go of it.
+fn protractor(t: &Table, centre: Option<glam::DVec2>, cursor: Option<egui::Pos2>, range: f64) {
+    // The protractor, while a bearing is being laid off: a rose standing on the
+    // mark, and the bearing under the cursor written beside it. The reading is
+    // the thing that was missing from the old drag — you could not see the
+    // angle you were setting until you had let go of it.
+    if let Some(centre) = centre {
+        let c = t.to_screen(centre);
+        let radius = 54.0_f32;
+        t.p.circle(
+            c,
+            radius,
+            egui::Color32::TRANSPARENT,
+            egui::Stroke::new(1.0, ink::PEN.gamma_multiply(0.7)),
+        );
+        for tick in 0..72 {
+            let a = (tick as f32 * 5.0).to_radians();
+            let dir = egui::vec2(a.sin(), -a.cos());
+            let long = tick % 6 == 0;
+            t.p.line_segment(
+                [
+                    c + dir * if long { radius - 8.0 } else { radius - 4.0 },
+                    c + dir * radius,
+                ],
+                egui::Stroke::new(if long { 1.0 } else { 0.5 }, ink::PEN),
+            );
+        }
+        for (label, at) in [("N", 0.0_f32), ("E", 90.0), ("S", 180.0), ("W", 270.0)] {
+            let a = at.to_radians();
+            t.p.text(
+                c + egui::vec2(a.sin(), -a.cos()) * (radius - 15.0),
+                egui::Align2::CENTER_CENTER,
+                label,
+                egui::FontId::monospace(9.0),
+                ink::PEN,
+            );
+        }
+        t.p.circle_filled(c, 1.6, ink::PEN);
+        if let Some(cursor) = cursor {
+            let off = t.to_water(cursor) - centre;
+            if off.length() > 1.0 {
+                let bearing = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
+                let far = t.to_screen(centre + off.normalize() * range * 0.9);
+                t.p.line_segment([c, far], egui::Stroke::new(1.0, ink::MARK));
+                t.p.text(
+                    c + egui::vec2(10.0, -radius - 4.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("{:03.0}", bearing.to_degrees()),
+                    egui::FontId::monospace(13.0),
+                    ink::MARK,
+                );
+            }
+        }
+    }
+}
+
+/// The things you navigate by, drawn the way a chart draws them: a symbol you can
+/// tell apart at a glance, a name, and for a light its character.
+///
+/// Nothing is named while she is lost and has not recognised it — a symbol on a chart
+/// with no name is what an unidentified mark is, and the naming is the exercise.
+fn marks_on_the_paper(
+    t: &Table,
+    coast: &crate::marks::Coast,
+    nav: &crate::navigation::Navigation,
+    range: f64,
+    spread: bool,
+    course: &Course,
+) {
+    // --- The marks ---------------------------------------------------
+    //
+    // The things you navigate by, drawn the way a chart draws them: a symbol you
+    // can tell apart at a glance, a name, and for a light its character — which
+    // is the only thing that identifies it in the dark and is therefore the one
+    // piece of text on a chart that is worth more than the name beside it.
+    for mark in &coast.marks {
+        let at = t.to_screen(mark.at);
+        if !t.rect.contains(at) {
+            continue;
+        }
+        // **Nothing is on the chart until she has recognised it.**
+        //
+        // Which is a decision about what this chart *is*. A printed chart carries
+        // every mark on the coast whether you know which is which or not — but the
+        // exercise is not about reading a printed chart, it is about building one:
+        // you look at a group through the glasses, you work out what it is, and
+        // *then* it goes on the paper with its name. Asked for from the deck in
+        // exactly those terms.
+        //
+        // The coast itself stays. Land does not need identifying — it is there, you
+        // can see it, and the shape of it is what you recognise the marks by.
+        if nav.lost && !nav.recognised.contains(&mark.name) {
+            continue;
+        }
+        match mark.kind {
+            Mark::Lighthouse => {
+                // The magenta flare: a dot with a teardrop out of it, which is
+                // how every chart in the world says "light" and has since they
+                // were engraved.
+                t.p.circle_filled(at, 2.6, ink::LIGHT);
+                for i in 0..7 {
+                    let a = -0.9 + i as f32 * 0.3;
+                    t.p.line_segment(
+                        [at, at + egui::vec2(a.sin(), -a.cos()) * 11.0],
+                        egui::Stroke::new(1.0, ink::LIGHT),
+                    );
+                }
+            }
+            Mark::Spire => {
+                // A circle with a dot in it and a cross on top: the chart symbol
+                // for a church, and the dot is the bit that is the position.
+                t.p.circle(
+                    at,
+                    3.4,
+                    egui::Color32::TRANSPARENT,
+                    egui::Stroke::new(1.1, ink::COAST),
+                );
+                t.p.circle_filled(at, 1.0, ink::COAST);
+                t.p.line_segment(
+                    [at + egui::vec2(0.0, -4.0), at + egui::vec2(0.0, -8.5)],
+                    egui::Stroke::new(1.1, ink::COAST),
+                );
+                t.p.line_segment(
+                    [at + egui::vec2(-2.0, -6.5), at + egui::vec2(2.0, -6.5)],
+                    egui::Stroke::new(1.1, ink::COAST),
+                );
+            }
+            Mark::Beacon => {
+                t.p.line_segment(
+                    [at, at + egui::vec2(0.0, -9.0)],
+                    egui::Stroke::new(1.2, ink::COAST),
+                );
+                t.p.circle_filled(at + egui::vec2(0.0, -10.0), 2.0, ink::COAST);
+                t.p.circle_filled(at, 1.4, ink::COAST);
+            }
+            Mark::Cairn => {
+                t.p.circle_filled(at, 1.8, ink::COAST);
+                t.p.circle(
+                    at,
+                    4.2,
+                    egui::Color32::TRANSPARENT,
+                    egui::Stroke::new(0.7, ink::COAST),
+                );
+            }
+        }
+        // Named when the chart is big enough to have room for the name, which on
+        // the folded one means the lights only.
+        // Labelled where there is room for the label. On the folded chart only the
+        // lights are named, and none of them within a label's width of the edge —
+        // names running off the corner of a chart are worse than no names, because
+        // the eye reads half of one and believes it.
+        let room = t.rect.contains(at + egui::vec2(120.0, 0.0))
+            && at.y > t.rect.top() + 14.0
+            && at.y < t.rect.bottom() - 14.0;
+        // And named only if she knows which one it is. While she is lost the chart
+        // carries the symbols — the coast does not stop being surveyed because you
+        // are — but the names belong to marks she has recognised through the
+        // glasses. A chart that names everything is a chart that has told you where
+        // you are.
+        // Anything that is drawn at all has been recognised, so it carries its
+        // name: there is no such thing here as a mark on the chart that she cannot
+        // name.
+        if room && (spread || mark.kind == Mark::Lighthouse || nav.lost) {
+            let label = if mark.kind.lit() {
+                format!(
+                    "{}  {}",
+                    mark.name,
+                    crate::marks::light_character(&mark.name)
+                )
+            } else {
+                format!("{}  {}", mark.name, mark.kind.abbreviation())
+            };
+            t.p.text(
+                at + egui::vec2(9.0, 1.0),
+                egui::Align2::LEFT_CENTER,
+                label,
+                egui::FontId::monospace(if spread { 11.0 } else { 9.0 }),
+                if mark.kind.lit() {
+                    ink::LIGHT
+                } else {
+                    ink::COAST
+                },
+            );
+        }
+    }
+
+    // Anchorages, with the one in hand picked out — and not at all while she is
+    // lost. A harbour is a navigation object like any other: four of them named on
+    // the chart is a position given away to anybody who can count islands.
+    for (i, h) in course.harbours.iter().enumerate().filter(|_| !nav.lost) {
+        let at = t.to_screen(h.at);
+        let bound = i == course.to;
+        t.p.circle(
+            at,
+            if bound { 5.0 } else { 3.0 },
+            if bound { ink::MARK } else { ink::PAPER },
+            egui::Stroke::new(1.0, ink::COAST),
+        );
+        if bound || range < 6_000.0 {
+            t.p.text(
+                at + egui::vec2(7.0, -6.0),
+                egui::Align2::LEFT_TOP,
+                &h.name,
+                egui::FontId::monospace(10.0),
+                ink::COAST,
+            );
+        }
+    }
+}
+
+/// Where she is, where she is bound, and who else is on the water — or the words that
+/// say the chart is not allowed to tell you.
+///
+/// All of it behind one question, which is the whole of the exercise: a chart that
+/// always knows is a plotter, and the question *which bay is that* cannot be asked of
+/// one.
+fn her_own_place(
+    t: &Table,
+    sim: &Sim,
+    fleet: &crate::fleet::Fleet,
+    course: &Course,
+    nav: &crate::navigation::Navigation,
+    spread: bool,
+) {
+    // What a chart with no fix on it says, which is nothing — and it says it where
+    // the boat would have been, because that is where the eye goes first.
+    // How long the fix has left, when she is living on one. A position is a
+    // statement about a moment and this is the moment running out — drawn rather
+    // than counted, because a bar is read without being looked at.
+    if nav.lost && t.knows && spread {
+        // How many of the marks this fix was taken on can still be made out, which
+        // is what is actually keeping the position: while two of them are there,
+        // another fix is a minute's work and she is not lost in any sense that
+        // matters. The clock behind it is only a backstop.
+        t.p.text(
+            egui::pos2(t.rect.left() + 24.0, t.rect.top() + 84.0),
+            egui::Align2::LEFT_CENTER,
+            format!(
+                "{} of {} marks still in sight",
+                nav.still_in_sight.min(nav.fixed_on.len()),
+                nav.fixed_on.len()
+            ),
+            egui::FontId::monospace(11.0),
+            if nav.still_in_sight > 2 {
+                ink::COAST
+            } else {
+                ink::BOAT
+            },
+        );
+        let left = nav.fix_left(sim.sim.state.time);
+        let bar = egui::Rect::from_min_size(
+            egui::pos2(t.rect.left() + 24.0, t.rect.top() + 66.0),
+            egui::vec2(188.0, 7.0),
+        );
+        t.p.rect_filled(bar, 1.0, ink::PAPER);
+        let mut run = bar;
+        run.set_width(bar.width() * left);
+        t.p.rect_filled(run, 1.0, ink::MARK);
+        t.p.text(
+            egui::pos2(bar.right() + 8.0, bar.center().y),
+            egui::Align2::LEFT_CENTER,
+            "this fix",
+            egui::FontId::monospace(10.0),
+            ink::COAST,
+        );
+    }
+    if !t.knows {
+        t.p.text(
+            t.rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "POSITION UNKNOWN",
+            egui::FontId::monospace(if spread { 16.0 } else { 11.0 }),
+            ink::BOAT,
+        );
+        if spread {
+            t.p.text(
+                t.rect.center() + egui::vec2(0.0, 20.0),
+                egui::Align2::CENTER_CENTER,
+                "take bearings on two marks and cross them",
+                egui::FontId::monospace(11.0),
+                ink::COAST,
+            );
+        }
+    }
+    if t.knows {
+        // The boat: a wedge pointing where she is pointing, drawn where she *is* on
+        // the paper rather than in the middle of it. Those are the same point only
+        // while the chart is following her, which it stops doing the moment she does
+        // not know where she is.
+        let her = t.to_screen(sim.sim.state.pos);
+        let heading = sim.sim.state.heading as f32;
+        let nose = egui::vec2(heading.sin(), -heading.cos());
+        let beam = egui::vec2(-nose.y, nose.x);
+        t.p.add(egui::Shape::convex_polygon(
+            vec![
+                her + nose * 9.0,
+                her - nose * 5.0 + beam * 4.0,
+                her - nose * 5.0 - beam * 4.0,
+            ],
+            ink::BOAT,
+            egui::Stroke::NONE,
+        ));
+        // And the bearing to the consignment, which is the line you are trying to
+        // make good rather than the one you are sailing.
+        let target = t.to_screen(course.target());
+        t.p.line_segment([her, target], egui::Stroke::new(1.0, ink::MARK));
+
+        // **And everybody else.**
+        //
+        // Until now the only place another boat appeared was a list of names in the
+        // settings panel with a distance beside each — which answers "how far" and
+        // not the question anybody actually has, which is *where*. A fleet on a
+        // chart is the oldest answer to it and it costs one wedge each.
+        //
+        // Hollow rather than filled, so your own boat is still the one the eye finds
+        // first on a page with five of them on it, and named on the table where
+        // there is room for the lettering. Not on the folded chart: at two inches
+        // square a name is a smudge across an island.
+        //
+        // Only when she knows where she is, like everything else here — a chart that
+        // will not say where *you* are cannot say where your friends are either, or
+        // the exercise is over the moment somebody else joins.
+        for boat in &fleet.boats {
+            let at = glam::DVec2::new(boat.drawn.pos[0] as f64, boat.drawn.pos[1] as f64);
+            let them = t.to_screen(at);
+            if !t.rect.contains(them) {
+                continue;
+            }
+            let heading = boat.drawn.heading;
+            let nose = egui::vec2(heading.sin(), -heading.cos());
+            let beam = egui::vec2(-nose.y, nose.x);
+            t.p.add(egui::Shape::convex_polygon(
+                vec![
+                    them + nose * 8.0,
+                    them - nose * 4.5 + beam * 3.5,
+                    them - nose * 4.5 - beam * 3.5,
+                ],
+                egui::Color32::TRANSPARENT,
+                egui::Stroke::new(1.3, ink::BOAT),
+            ));
+            if spread && !boat.name.is_empty() {
+                t.p.text(
+                    them + egui::vec2(10.0, -2.0),
+                    egui::Align2::LEFT_CENTER,
+                    &boat.name,
+                    egui::FontId::monospace(10.0),
+                    ink::BOAT,
+                );
+            }
+        }
+    }
 }
 
 /// Start the cast or end it, whichever the watch is doing.
