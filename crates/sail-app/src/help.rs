@@ -396,12 +396,23 @@ mod tests {
     #[test]
     fn every_key_the_game_answers_to_is_in_the_list() {
         let mut found: Vec<String> = Vec::new();
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        for entry in std::fs::read_dir(&dir).expect("the crate's own source") {
-            let path = entry.expect("a readable directory").path();
-            if path.extension().is_none_or(|e| e != "rs") {
-                continue;
+        // **Every module, not every module in the top directory.** The chart grew into a
+        // folder and the test went on reading the flat listing beside it, so `M` — the
+        // key that opens the thing — became a key the help promised and nothing read.
+        // It failed the moment the files moved, which is the whole reason it exists.
+        let mut sources = Vec::new();
+        let mut look = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+        while let Some(dir) = look.pop() {
+            for entry in std::fs::read_dir(&dir).expect("the crate's own source") {
+                let path = entry.expect("a readable directory").path();
+                if path.is_dir() {
+                    look.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    sources.push(path);
+                }
             }
+        }
+        for path in sources {
             let source = std::fs::read_to_string(&path).expect("a readable module");
             // This file's own list is not a use of the key.
             let source = match path.file_name().and_then(|n| n.to_str()) {
