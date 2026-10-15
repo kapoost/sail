@@ -93,7 +93,8 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             ),
             (
                 "Shift M",
-                "the chart on the table: dividers, rule, pencil, rubber, and the fix",
+                "the chart on the table: dividers, ruler, parallel rule, pencil, \
+                 rubber, and the fix",
             ),
             (
                 " ",

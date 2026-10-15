@@ -68,6 +68,16 @@ pub enum Tool {
     /// along the latitude scale and that is a mile a step.
     #[default]
     Dividers,
+    /// A plain straight edge. Two points on the paper and a line between them, which
+    /// is the oldest thing anybody does on a chart and the one the set was missing:
+    /// the course from here to there, the edge of a shoal, the transit of two marks,
+    /// the line you are not crossing. Asked for from the deck in two words.
+    ///
+    /// It is not the parallel rule with the mark left out. The parallel rule carries an
+    /// *angle* from one place on the chart to another and that is all it is for; a
+    /// ruler joins two places you can point at, and the bearing and distance are what
+    /// you read off afterwards rather than what you set.
+    Ruler,
     /// The parallel rule: a straight edge that walks across the chart without changing
     /// its angle, which is how a bearing gets from the compass rose onto the water you
     /// are looking at. Here it plots a position line through a mark.
@@ -83,6 +93,7 @@ impl Tool {
     pub fn name(&self) -> &'static str {
         match self {
             Tool::Dividers => "DIVIDERS",
+            Tool::Ruler => "RULER",
             Tool::ParallelRule => "PARALLEL RULE",
             Tool::Pencil => "PENCIL",
             Tool::Rubber => "RUBBER",
@@ -93,6 +104,7 @@ impl Tool {
     pub fn hint(&self) -> &'static str {
         match self {
             Tool::Dividers => "drag across the chart: miles, and the bearing both ways",
+            Tool::Ruler => "drag between two points: the leg, in pencil, with its bearing",
             Tool::ParallelRule => {
                 "drag from a mark: a position line through it, at the bearing you drag"
             }
@@ -105,8 +117,9 @@ impl Tool {
 /// The instruments, in the order a hand reaches for them. One list, because the palette
 /// is drawn from it and the click targets are worked out from it, and those two being
 /// two lists is how a button ends up somewhere other than where it looks.
-pub const TOOLS: [Tool; 4] = [
+pub const TOOLS: [Tool; 5] = [
     Tool::Dividers,
+    Tool::Ruler,
     Tool::ParallelRule,
     Tool::Pencil,
     Tool::Rubber,
@@ -121,6 +134,10 @@ pub enum Plotted {
     Line { through: glam::DVec2, bearing: f64 },
     /// A cross: an estimated position, a danger, a place to come back to.
     Cross { at: glam::DVec2 },
+    /// A ruled line between two points: a leg, an edge, a transit. Ends where it was
+    /// drawn to end, which is the whole difference between it and a position line —
+    /// a position line has no ends, and this is a line *from here to there*.
+    Rule { from: glam::DVec2, to: glam::DVec2 },
 }
 
 impl Default for Chart {
@@ -652,7 +669,7 @@ pub fn draw(
             // table works: the dividers measure, the rule plots, the pencil marks and
             // the rubber takes it off again.
             match chart.tool {
-                Tool::Dividers | Tool::ParallelRule => {
+                Tool::Dividers | Tool::ParallelRule | Tool::Ruler => {
                     if response.drag_started() && !on_furniture {
                         if let Some(at) = response.interact_pointer_pos() {
                             set_dividers = Some((to_water(at), to_water(at)));
@@ -666,10 +683,12 @@ pub fn draw(
                     } else if response.drag_stopped() {
                         // The rule leaves its line on the chart; the dividers leave
                         // nothing, because dividers are for reading and not for drawing.
-                        if chart.tool == Tool::ParallelRule {
-                            if let Some((from, to)) = chart.dividers {
-                                let off = to - from;
-                                if off.length() > 1.0 {
+                        if let Some((from, to)) = chart.dividers {
+                            let off = to - from;
+                            // A twitch of the hand is not a line. Below a tenth of an
+                            // inch of paper it was meant as a click.
+                            if off.length() > chart.range as f64 * 0.01 {
+                                if chart.tool == Tool::ParallelRule {
                                     draw_on = Some(Plotted::Line {
                                         through: from,
                                         bearing: off
@@ -677,6 +696,8 @@ pub fn draw(
                                             .atan2(off.y)
                                             .rem_euclid(std::f64::consts::TAU),
                                     });
+                                } else if chart.tool == Tool::Ruler {
+                                    draw_on = Some(Plotted::Rule { from, to });
                                 }
                             }
                         }
@@ -747,6 +768,39 @@ pub fn draw(
                                 egui::Stroke::new(1.3, ink::PENCIL),
                             );
                         }
+                    }
+                    Plotted::Rule { from, to } => {
+                        // A ruled leg, with the two things written along it that a
+                        // navigator writes along one: the course to steer and how far it
+                        // is. Written once, above the line, which is where it goes on
+                        // paper — the distance goes underneath on a passage chart, but
+                        // one label on a screen this size is already two lines of type.
+                        let (a, b) = (to_screen(from), to_screen(to));
+                        p.line_segment([a, b], egui::Stroke::new(1.2, ink::PENCIL));
+                        let off = to - from;
+                        let bearing = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
+                        // The ends, marked the way a pencil leaves them: a short tick
+                        // across the line so you can see where it was meant to stop.
+                        let along = (b - a).normalized();
+                        let across = egui::vec2(-along.y, along.x) * 4.0;
+                        for end in [a, b] {
+                            p.line_segment(
+                                [end + across, end - across],
+                                egui::Stroke::new(1.2, ink::PENCIL),
+                            );
+                        }
+                        p.text(
+                            egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)
+                                + egui::vec2(6.0, -6.0),
+                            egui::Align2::LEFT_BOTTOM,
+                            format!(
+                                "{:03.0}   {:.2} M",
+                                bearing.to_degrees(),
+                                off.length() / 1_852.0
+                            ),
+                            egui::FontId::monospace(10.0),
+                            ink::PENCIL,
+                        );
                     }
                 }
             }
@@ -1057,6 +1111,17 @@ pub fn draw(
                     let along = glam::DVec2::new(bearing.sin(), bearing.cos());
                     let off = at - through;
                     (off - along * off.dot(along)).length()
+                }
+                // A ruled line has ends, so the rubber has to respect them: nearest
+                // point *on the segment*, not on the infinite line it lies along.
+                Plotted::Rule { from, to } => {
+                    let span = to - from;
+                    let t = if span.length_squared() > 1.0 {
+                        ((at - from).dot(span) / span.length_squared()).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    (at - (from + span * t)).length()
                 }
             };
             if d < reach && nearest.is_none_or(|(_, best)| d < best) {

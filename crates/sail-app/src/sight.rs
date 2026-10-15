@@ -548,6 +548,7 @@ fn line_mark(item: &crate::chart::Plotted) -> glam::DVec2 {
     match item {
         crate::chart::Plotted::Line { through, .. } => *through,
         crate::chart::Plotted::Cross { at } => *at,
+        crate::chart::Plotted::Rule { from, .. } => *from,
     }
 }
 
