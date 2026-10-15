@@ -222,6 +222,13 @@ impl ViewAim {
 
 /// How far round you can look, radians. Most of the way, but not through your own neck.
 const AIM_YAW: f32 = 2.6;
+/// And how far round with an instrument at the eye, which is further.
+///
+/// A hundred and seventy-five degrees: all but straight astern. The neck's limit is the
+/// right one for a glance over your shoulder, but a man taking a bearing turns his whole
+/// body and steps round the mainsheet to do it — nobody has ever failed to shoot a mark
+/// because it was behind them. Asked for from the deck along with the view itself.
+const AIM_AROUND: f32 = 3.05;
 const AIM_PITCH_UP: f32 = 1.15;
 const AIM_PITCH_DOWN: f32 = 0.65;
 /// Radians per pixel of mouse.
@@ -257,7 +264,12 @@ pub fn aim(
 ) {
     aim.since_hand += time.delta_secs();
     if buttons.pressed(MouseButton::Right) {
-        aim.yaw = (aim.yaw - motion.delta.x * AIM_RATE).clamp(-AIM_YAW, AIM_YAW);
+        let reach = if sighting.up || sighting.glasses {
+            AIM_AROUND
+        } else {
+            AIM_YAW
+        };
+        aim.yaw = (aim.yaw - motion.delta.x * AIM_RATE).clamp(-reach, reach);
         aim.pitch = (aim.pitch - motion.delta.y * AIM_RATE).clamp(-AIM_PITCH_DOWN, AIM_PITCH_UP);
         aim.since_hand = 0.0;
         // And whatever the gear wanted you to look at, it does not want it any more.
@@ -322,7 +334,8 @@ pub fn aim(
     let want_pitch = (st.pitch_rate as f32 * 0.20 + st.heave_rate as f32 * 0.010
         - st.heel.abs() as f32 * 0.05)
         * gain;
-    aim.yaw = (aim.yaw + want_yaw - aim.hand_yaw).clamp(-AIM_YAW, AIM_YAW);
+    let reach = if holding { AIM_AROUND } else { AIM_YAW };
+    aim.yaw = (aim.yaw + want_yaw - aim.hand_yaw).clamp(-reach, reach);
     aim.pitch = (aim.pitch + want_pitch - aim.hand_pitch).clamp(-AIM_PITCH_DOWN, AIM_PITCH_UP);
     aim.hand_yaw = want_yaw;
     aim.hand_pitch = want_pitch;

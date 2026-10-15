@@ -33,6 +33,11 @@ pub struct Sighting {
     /// binoculars comes up in about a third of a second and the picture does not jump.
     pub glasses: bool,
     pub lens: f32,
+    /// Where she was looking from before an instrument came out, so it can be given
+    /// back. There are no instruments outside the cockpit — the glasses and the compass
+    /// are in your hands and your hands are on the boat — so picking one up puts you at
+    /// the helm, and putting it down leaves you where you were.
+    was_viewing: Option<crate::camera::View>,
     /// What the notch is on at the moment, if anything: its name, what it is, and how
     /// far off. Worked out once a frame so the drawing and the taking agree.
     pub on: Option<(String, Mark, f64)>,
@@ -65,6 +70,7 @@ const NOTCH: f64 = 0.044;
 #[allow(clippy::too_many_arguments)]
 pub fn aim(
     keys: Res<ButtonInput<KeyCode>>,
+    mut view: ResMut<crate::camera::View>,
     buttons: Res<ButtonInput<MouseButton>>,
     sim: Res<Sim>,
     camera: Query<&GlobalTransform, With<crate::camera::MainCamera>>,
@@ -97,6 +103,26 @@ pub fn aim(
         if !sighting.up {
             sighting.on = None;
         }
+    }
+    // **An instrument puts you in the cockpit**, because there are no instruments
+    // anywhere else: the glasses and the compass are in your hands, and your hands are
+    // on the boat rather than fifteen metres astern of her watching her sail. Asked for
+    // from the deck, and it is also the only view the gesture makes sense from — you
+    // cannot put a notch on a lighthouse from a camera that is not aboard.
+    //
+    // Where she was looking is given back when the instrument goes down, so a glance
+    // through the glasses does not cost you the view you had set up.
+    let holding = sighting.up || sighting.glasses;
+    if holding && sighting.was_viewing.is_none() {
+        sighting.was_viewing = Some(*view);
+        *view = crate::camera::View::Cockpit;
+    }
+    if !holding {
+        if let Some(back) = sighting.was_viewing.take() {
+            *view = back;
+        }
+    }
+    if keys.just_pressed(KeyCode::KeyN) && shifted {
         return;
     }
     if !sighting.up {
