@@ -74,13 +74,13 @@ pub mod paint {
 /// the number they belong to.
 pub mod letter {
     /// The three you steer by.
-    pub const PRIMARY: f32 = 23.0;
+    pub const PRIMARY: f32 = 30.0;
     /// Anything you look at on purpose.
-    pub const VALUE: f32 = 13.0;
+    pub const VALUE: f32 = 17.0;
     /// What it is called.
-    pub const LABEL: f32 = 9.0;
+    pub const LABEL: f32 = 12.0;
     /// And what it is in. Always smaller than the figure, always dimmer.
-    pub const UNIT: f32 = 8.0;
+    pub const UNIT: f32 = 11.0;
 }
 
 /// A name engraved on an ivory plate and screwed to the case.
@@ -159,6 +159,60 @@ pub fn primary(ui: &mut egui::Ui, figures: [(String, &str, &str); 3]) {
 pub struct Console {
     /// Hidden with H, for a clean look at the water.
     pub hidden: bool,
+    /// Which page of the console is open.
+    pub deck: Deck,
+}
+
+/// The pages of the console, in the order a hand reaches for them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Deck {
+    /// What she is sailed with: the helm, the card, and the two sheets.
+    #[default]
+    Helm,
+    /// The seven control lines, on one winch.
+    Lines,
+    /// Who is steering, and on what.
+    Pilot,
+    /// What is set and what is stowed — the wardrobe, the staysail, the ground
+    /// tackle when she has any, and the hook.
+    Gear,
+    /// The ship's own switches, which are not sailing at all.
+    Ship,
+}
+
+impl Deck {
+    pub const ALL: [(Deck, &'static str); 5] = [
+        (Deck::Helm, "HELM & SAILS"),
+        (Deck::Lines, "LINES"),
+        (Deck::Pilot, "PILOT"),
+        (Deck::Gear, "GEAR"),
+        (Deck::Ship, "SHIP"),
+    ];
+}
+
+/// A page tab: the same engraved plate as every other name on the case, raised when it
+/// is the page you are on.
+fn tab(ui: &mut egui::Ui, name: &str, on: bool) -> egui::Response {
+    let spaced: String = name
+        .chars()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    ui.add(
+        egui::Button::new(
+            egui::RichText::new(spaced)
+                .monospace()
+                .size(letter::LABEL)
+                .color(paint::INK),
+        )
+        .fill(if on { paint::LIVE } else { paint::PLATE })
+        .stroke(egui::Stroke::new(
+            if on { 1.5 } else { 1.0 },
+            if on { paint::FACE } else { paint::BEZEL },
+        ))
+        .corner_radius(2.0)
+        .min_size(egui::vec2(0.0, 26.0)),
+    )
 }
 
 pub fn setup(mut commands: Commands) {
@@ -425,380 +479,393 @@ pub fn draw(
                 // A fixed width makes the second pass land on top of the first, which is
                 // what a discarded pass should look like.
                 ui.set_min_width(CONSOLE_WIDTH);
-                ui.horizontal_top(|ui| {
-                    // Helm. A tiller is a position your hand holds, so it is a bar you
-                    // drag and it stays where you leave it.
-                    ui.vertical(|ui| {
-                        let max = cfg.max_rudder_angle;
-                        let mut rudder = sim.controls.rudder;
-                        if tiller(ui, &mut rudder, max) {
-                            sim.controls.rudder = rudder;
-                            pilot.disengage();
+                // **The bar is a set of pages now.**
+                //
+                // Everything she has was on one strip: helm, sheets, seven control
+                // lines, the wardrobe, the pilot and the ship's own switches, in sixty
+                // points of height, which is why every one of them had to be small. A
+                // boat's cockpit is not laid out that way either — the winches are where
+                // you stand to use them and the chart table is below, and you go to the
+                // one you are working with.
+                //
+                // So: a page at a time, each with room to be read, and the tabs
+                // themselves are engraved plates like everything else on the case.
+                ui.horizontal(|ui| {
+                    for (which, name) in Deck::ALL {
+                        let on = console.deck == which;
+                        if tab(ui, name, on).clicked() {
+                            console.deck = which;
                         }
-                        // What the blade has left, and why. A rudder on the centreline
-                        // is a metre under the transom and the water is not glass, so
-                        // none of the three things that take its grip away can be seen
-                        // from on deck. On a real boat you read them through the tiller;
-                        // here there is no tiller in your hand, so they are printed.
-                        readout(ui, "BITE", &bite_words(&telemetry));
-                        ui.horizontal(|ui| {
+                    }
+                });
+                ui.add_space(6.0);
+                ui.horizontal_top(|ui| match console.deck {
+                    Deck::Helm => {
+                        // **The binnacle**: the card above and the rudder under it, in one
+                        // column, because they are one instrument. The card says where she
+                        // is going and the blade is the argument you are having with it,
+                        // and reading one while looking for the other across the bar was
+                        // the arrangement of a form rather than of a boat.
+                        ui.vertical(|ui| {
+                            plate(ui, "HELM");
+                            compass_repeater(
+                                ui,
+                                heading,
+                                match course.leg {
+                                    Leg::Carrying => Some(course.to_target(sim.sim.state.pos).1),
+                                    Leg::Idle => None,
+                                },
+                            );
+                            let max = cfg.max_rudder_angle;
+                            let mut rudder = sim.controls.rudder;
+                            if tiller(ui, &mut rudder, max) {
+                                sim.controls.rudder = rudder;
+                                pilot.disengage();
+                            }
+                            // What the blade has left, and why. A rudder on the centreline
+                            // is a metre under the transom and the water is not glass, so
+                            // none of the three things that take its grip away can be seen
+                            // from on deck.
+                            readout(ui, "BITE", &bite_words(&telemetry));
                             if small_button(ui, "AMIDSHIPS").clicked() {
                                 sim.controls.rudder = 0.0;
                                 pilot.disengage();
                             }
                         });
-                    });
 
-                    ui.add_space(8.0);
-                    // The compass next to the helm, because the two are one instrument:
-                    // the card tells you where she is going and the tiller is how you
-                    // argue with it.
-                    compass_repeater(
-                        ui,
-                        heading,
-                        match course.leg {
-                            Leg::Carrying => Some(course.to_target(sim.sim.state.pos).1),
-                            Leg::Idle => None,
-                        },
-                    );
+                        ui.add_space(18.0);
 
-                    ui.add_space(7.0);
-                    separator(ui);
-                    ui.add_space(7.0);
-
-                    // Sheets, on their own winches, continuously trimmed.
-                    let want_main = cfg
-                        .main
-                        .profile
-                        .optimal_sheet(telemetry.awa, telemetry.main.camber);
-                    let want_jib = cfg
-                        .genoa
-                        .profile
-                        .optimal_sheet(telemetry.awa, telemetry.jib.camber);
-                    let mut main_sheet = sim.controls.main_sheet;
-                    let mut jib_sheet = sim.controls.jib_sheet;
-                    // The two sheets. Trimming for you has no switch here and is the
-                    // one thing on the boat that does not: it stands for a crew doing
-                    // it, which is a different kind of act from putting your own hand
-                    // on a winch, and a button for it sat on the console inviting
-                    // itself to be pressed instead of the levers beside it. `T`.
-                    ui.horizontal_top(|ui| {
-                        if lever(
-                            ui,
-                            "MAIN",
-                            &mut main_sheet,
-                            Some(want_main),
-                            sail_state(&telemetry.main, 1.0 - sim.controls.reef * cfg.max_reef),
-                        ) {
-                            sim.controls.main_sheet = main_sheet;
-                        }
-                        if lever(
-                            ui,
-                            "GENOA",
-                            &mut jib_sheet,
-                            Some(want_jib),
-                            sail_state(&telemetry.jib, 1.0 - sim.controls.furl),
-                        ) {
-                            sim.controls.jib_sheet = jib_sheet;
-                        }
-                        // The preventer, beside the mainsheet because that is whose line
-                        // it is: it goes on the end of the same spar. A light rather than
-                        // a slider — it is on or it is off — and it sat in the headsail
-                        // column at first, which is both the wrong place and, in a column
-                        // that narrow, invisible. Reported as not being in the console at
-                        // all, which from where anybody was looking it was not.
-                        ui.vertical(|ui| {
-                            ui.add_space(2.0);
-                            plate(ui, "BOOM");
-                            ui.add_space(4.0);
-                            let rigged = sim.controls.preventer;
-                            if ui
-                                .selectable_label(
-                                    rigged,
-                                    egui::RichText::new(if rigged {
-                                        "PREVENTED"
-                                    } else {
-                                        "free (F)"
-                                    })
-                                    .monospace()
-                                    .size(10.0)
-                                    .color(if rigged {
-                                        egui::Color32::from_rgb(20, 20, 20)
-                                    } else {
-                                        egui::Color32::from_rgb(150, 150, 130)
-                                    }),
-                                )
-                                .on_hover_text("a line forward from the boom end: she cannot gybe")
-                                .clicked()
-                            {
-                                sim.controls.preventer = !rigged;
+                        // Sheets, on their own winches, continuously trimmed.
+                        let want_main = cfg
+                            .main
+                            .profile
+                            .optimal_sheet(telemetry.awa, telemetry.main.camber);
+                        let want_jib = cfg
+                            .genoa
+                            .profile
+                            .optimal_sheet(telemetry.awa, telemetry.jib.camber);
+                        let mut main_sheet = sim.controls.main_sheet;
+                        let mut jib_sheet = sim.controls.jib_sheet;
+                        // The two sheets. Trimming for you has no switch here and is the
+                        // one thing on the boat that does not: it stands for a crew doing
+                        // it, which is a different kind of act from putting your own hand
+                        // on a winch, and a button for it sat on the console inviting
+                        // itself to be pressed instead of the levers beside it. `T`.
+                        ui.horizontal_top(|ui| {
+                            if lever(
+                                ui,
+                                "MAIN",
+                                &mut main_sheet,
+                                Some(want_main),
+                                sail_state(&telemetry.main, 1.0 - sim.controls.reef * cfg.max_reef),
+                            ) {
+                                sim.controls.main_sheet = main_sheet;
                             }
-                        });
-                    });
-
-                    ui.add_space(7.0);
-                    separator(ui);
-                    ui.add_space(7.0);
-
-                    // The clutch bank: one winch, one line at a time.
-                    ui.vertical(|ui| {
-                        plate(ui, "CLUTCHES");
-                        ui.horizontal(|ui| {
-                            for (i, line) in BANK.iter().enumerate() {
-                                let mut value = line.get(&sim.controls);
-                                let selected = i == bank.selected;
-                                // A line that leads nowhere on the sail that is up gets
-                                // its name bracketed rather than hidden: the clutch is
-                                // still on the coachroof, it just has nothing on the
-                                // other end of it at the moment.
-                                let rigged = line.rigged_for(&sim.controls);
-                                // The short name on the plate; the long one is said
-                                // under the rack where there is a line for it.
-                                let name = if rigged {
-                                    line.tag(&sim.controls).to_string()
-                                } else {
-                                    format!("({})", line.tag(&sim.controls))
-                                };
-                                let stops = line.detents(&sim.controls);
-                                let position = line.position(&sim.controls);
-                                let (clicked, dragged) =
-                                    clutch(ui, &name, &mut value, selected, stops, position);
-                                if clicked {
-                                    bank.selected = i;
-                                    bank.since_change = 0.0;
+                            if lever(
+                                ui,
+                                "GENOA",
+                                &mut jib_sheet,
+                                Some(want_jib),
+                                sail_state(&telemetry.jib, 1.0 - sim.controls.furl),
+                            ) {
+                                sim.controls.jib_sheet = jib_sheet;
+                            }
+                            // The preventer, beside the mainsheet because that is whose line
+                            // it is: it goes on the end of the same spar. A light rather than
+                            // a slider — it is on or it is off — and it sat in the headsail
+                            // column at first, which is both the wrong place and, in a column
+                            // that narrow, invisible. Reported as not being in the console at
+                            // all, which from where anybody was looking it was not.
+                            ui.vertical(|ui| {
+                                ui.add_space(2.0);
+                                plate(ui, "BOOM");
+                                ui.add_space(4.0);
+                                let rigged = sim.controls.preventer;
+                                if ui
+                                    .selectable_label(
+                                        rigged,
+                                        egui::RichText::new(if rigged {
+                                            "PREVENTED"
+                                        } else {
+                                            "free (F)"
+                                        })
+                                        .monospace()
+                                        .size(10.0)
+                                        .color(
+                                            if rigged {
+                                                egui::Color32::from_rgb(20, 20, 20)
+                                            } else {
+                                                egui::Color32::from_rgb(150, 150, 130)
+                                            },
+                                        ),
+                                    )
+                                    .on_hover_text(
+                                        "a line forward from the boom end: she cannot gybe",
+                                    )
+                                    .clicked()
+                                {
+                                    sim.controls.preventer = !rigged;
                                 }
-                                if dragged {
-                                    bank.selected = i;
-                                    // A detented line cannot be dragged to anywhere
-                                    // between its stops; the hand on the lever picks
-                                    // the nearest one and the line runs there.
-                                    if let Some(stops) = line.detents(&sim.controls) {
-                                        let nearest = stops
-                                            .iter()
-                                            .copied()
-                                            .min_by(|a, b| {
-                                                (a - value)
-                                                    .abs()
-                                                    .partial_cmp(&(b - value).abs())
-                                                    .unwrap()
-                                            })
-                                            .unwrap_or(0.0);
-                                        bank.target[i] = Some(nearest);
+                            });
+                        });
+                    }
+                    Deck::Lines => {
+                        // The clutch bank: one winch, one line at a time.
+                        ui.vertical(|ui| {
+                            plate(ui, "CLUTCHES");
+                            ui.horizontal(|ui| {
+                                for (i, line) in BANK.iter().enumerate() {
+                                    let mut value = line.get(&sim.controls);
+                                    let selected = i == bank.selected;
+                                    // A line that leads nowhere on the sail that is up gets
+                                    // its name bracketed rather than hidden: the clutch is
+                                    // still on the coachroof, it just has nothing on the
+                                    // other end of it at the moment.
+                                    let rigged = line.rigged_for(&sim.controls);
+                                    // The short name on the plate; the long one is said
+                                    // under the rack where there is a line for it.
+                                    let name = if rigged {
+                                        line.tag(&sim.controls).to_string()
                                     } else {
-                                        line.set_from_ui(&mut sim.controls, value);
+                                        format!("({})", line.tag(&sim.controls))
+                                    };
+                                    let stops = line.detents(&sim.controls);
+                                    let position = line.position(&sim.controls);
+                                    let (clicked, dragged) =
+                                        clutch(ui, &name, &mut value, selected, stops, position);
+                                    if clicked {
+                                        bank.selected = i;
+                                        bank.since_change = 0.0;
+                                    }
+                                    if dragged {
+                                        bank.selected = i;
+                                        // A detented line cannot be dragged to anywhere
+                                        // between its stops; the hand on the lever picks
+                                        // the nearest one and the line runs there.
+                                        if let Some(stops) = line.detents(&sim.controls) {
+                                            let nearest = stops
+                                                .iter()
+                                                .copied()
+                                                .min_by(|a, b| {
+                                                    (a - value)
+                                                        .abs()
+                                                        .partial_cmp(&(b - value).abs())
+                                                        .unwrap()
+                                                })
+                                                .unwrap_or(0.0);
+                                            bank.target[i] = Some(nearest);
+                                        } else {
+                                            line.set_from_ui(&mut sim.controls, value);
+                                        }
                                     }
                                 }
-                            }
-                        });
-                        ui.label(
-                            egui::RichText::new(fit(
-                                // The long name belongs on this line and not on the
-                                // plate: a nameplate is a label, and the sentence that
-                                // explains it is a different object.
-                                &if bank.line().rigged_for(&sim.controls) {
-                                    format!(
-                                        "{} — hauling in {}",
-                                        bank.line().name_now(&sim.controls),
-                                        bank.line().hauled_now(&sim.controls)
-                                    )
-                                } else {
-                                    format!("{} is not led to this sail", bank.line().name())
-                                },
-                                44,
-                            ))
-                            .color(paint::LABEL)
-                            .monospace()
-                            .size(9.0),
-                        );
-                    });
-
-                    ui.add_space(7.0);
-                    separator(ui);
-                    ui.add_space(7.0);
-
-                    // The sail wardrobe, and the pilot.
-                    ui.vertical(|ui| {
-                        plate(ui, "HEADSAIL");
-                        ui.add_space(4.0);
-                        let rolled = sim.controls.furl > 0.9;
-                        for sail in [
-                            Headsail::Genoa,
-                            Headsail::Code0,
-                            Headsail::Gennaker,
-                            Headsail::Spinnaker,
-                        ] {
-                            let up = sim.controls.headsail == sail;
-                            let label = egui::RichText::new(sail.name().to_uppercase())
-                                .monospace()
-                                .size(10.0)
-                                .color(if up {
-                                    egui::Color32::BLACK
-                                } else if rolled {
-                                    paint::LABEL
-                                } else {
-                                    egui::Color32::from_gray(90)
-                                });
-                            let button = egui::Button::new(label).fill(if up {
-                                paint::LIVE
-                            } else {
-                                egui::Color32::from_gray(26)
                             });
-                            // Only with the sail rolled away: you furl, change, and set.
-                            if ui.add_enabled(rolled, button).clicked() {
-                                sim.controls.headsail = sail;
-                            }
-                        }
-                        if !rolled {
                             ui.label(
-                                egui::RichText::new("roll it away first")
-                                    .monospace()
-                                    .size(10.0)
-                                    .color(egui::Color32::from_gray(90)),
+                                egui::RichText::new(fit(
+                                    // The long name belongs on this line and not on the
+                                    // plate: a nameplate is a label, and the sentence that
+                                    // explains it is a different object.
+                                    &if bank.line().rigged_for(&sim.controls) {
+                                        format!(
+                                            "{} — hauling in {}",
+                                            bank.line().name_now(&sim.controls),
+                                            bank.line().hauled_now(&sim.controls)
+                                        )
+                                    } else {
+                                        format!("{} is not led to this sail", bank.line().name())
+                                    },
+                                    44,
+                                ))
+                                .color(paint::LABEL)
+                                .monospace()
+                                .size(9.0),
                             );
-                        }
-                    });
-
-                    ui.add_space(8.0);
-                    ui.vertical(|ui| {
-                        plate(ui, "PILOT");
-                        // Why it last let go, for half a minute after it did. The
-                        // diagnostic panel has carried this since it was written, which
-                        // is the wrong place: the question "why did it switch off?" is
-                        // asked by somebody who was not watching, and they are looking
-                        // at the console because that is what is on the screen.
-                        // Why it last let go, for half a minute after it did — and the
-                        // vane saying it is beaten, which it has to do here because there
-                        // is no alarm to sound and no relay to click.
-                        //
-                        // **One line of space, always.** These two used to appear and
-                        // disappear, and a line appearing in the middle of a column of
-                        // buttons moves every button under it — including the one the
-                        // mouse is on its way to. Toggling the pilot did it twice in two
-                        // seconds, which is how this was found. The slot is reserved now
-                        // and the console cannot change height for a message.
-                        let note = if pilot.engaged() {
-                            if pilot.struggling() && !pilot.can_let_go() {
-                                Some("the vane is not coping")
-                            } else {
-                                None
-                            }
-                        } else {
-                            pilot.last_reason.filter(|_| pilot.since_reason < 30.0)
-                        };
-                        ui.label(
-                            egui::RichText::new(fit(note.unwrap_or(" "), 30))
-                                .color(if note.is_some() {
-                                    paint::BAD
+                        });
+                    }
+                    Deck::Pilot => {
+                        ui.vertical(|ui| {
+                            plate(ui, "PILOT");
+                            // Why it last let go, for half a minute after it did. The
+                            // diagnostic panel has carried this since it was written, which
+                            // is the wrong place: the question "why did it switch off?" is
+                            // asked by somebody who was not watching, and they are looking
+                            // at the console because that is what is on the screen.
+                            // Why it last let go, for half a minute after it did — and the
+                            // vane saying it is beaten, which it has to do here because there
+                            // is no alarm to sound and no relay to click.
+                            //
+                            // **One line of space, always.** These two used to appear and
+                            // disappear, and a line appearing in the middle of a column of
+                            // buttons moves every button under it — including the one the
+                            // mouse is on its way to. Toggling the pilot did it twice in two
+                            // seconds, which is how this was found. The slot is reserved now
+                            // and the console cannot change height for a message.
+                            let note = if pilot.engaged() {
+                                if pilot.struggling() && !pilot.can_let_go() {
+                                    Some("the vane is not coping")
                                 } else {
-                                    egui::Color32::TRANSPARENT
+                                    None
+                                }
+                            } else {
+                                pilot.last_reason.filter(|_| pilot.since_reason < 30.0)
+                            };
+                            ui.label(
+                                egui::RichText::new(fit(note.unwrap_or(" "), 30))
+                                    .color(if note.is_some() {
+                                        paint::BAD
+                                    } else {
+                                        egui::Color32::TRANSPARENT
+                                    })
+                                    .monospace()
+                                    .size(10.0),
+                            );
+                            let engaged = pilot.engaged();
+                            if lamp_button(ui, if engaged { "ENGAGED" } else { "STANDBY" }, engaged)
+                                .clicked()
+                            {
+                                if engaged {
+                                    pilot.disengage();
+                                } else {
+                                    let state = sim.sim.state;
+                                    pilot.hold_heading(&state);
+                                }
+                            }
+                            let wind_mode = matches!(pilot.mode, PilotMode::ApparentWind { .. });
+                            if lamp_button(
+                                ui,
+                                if wind_mode { "WIND VANE" } else { "COMPASS" },
+                                wind_mode,
+                            )
+                            .clicked()
+                                && pilot.engaged()
+                            {
+                                if wind_mode {
+                                    let state = sim.sim.state;
+                                    pilot.hold_heading(&state);
+                                } else {
+                                    pilot.hold_wind(&telemetry);
+                                }
+                            }
+                            // What it is actually holding, which the console did not say.
+                            //
+                            // Two lamps told you *which* instrument was steering and the
+                            // arrows moved its target, and nowhere was the target itself — so
+                            // the one question a person has about an autopilot, "what is it
+                            // trying to do", had to be answered by watching the compass and
+                            // guessing. A course in degrees, or an apparent wind angle with
+                            // the tack in its sign, which is how a vane is set and read.
+                            ui.label(
+                                egui::RichText::new(match pilot.mode {
+                                    PilotMode::Standby => "   —".to_string(),
+                                    PilotMode::Heading(h) => format!("{:03.0}", deg(h)),
+                                    PilotMode::ApparentWind { awa: a, .. } => {
+                                        format!("{:+.0} awa", deg(a))
+                                    }
                                 })
                                 .monospace()
-                                .size(10.0),
-                        );
-                        let engaged = pilot.engaged();
-                        if lamp_button(ui, if engaged { "ENGAGED" } else { "STANDBY" }, engaged)
-                            .clicked()
-                        {
-                            if engaged {
-                                pilot.disengage();
-                            } else {
-                                let state = sim.sim.state;
-                                pilot.hold_heading(&state);
-                            }
-                        }
-                        let wind_mode = matches!(pilot.mode, PilotMode::ApparentWind { .. });
-                        if lamp_button(
-                            ui,
-                            if wind_mode { "WIND VANE" } else { "COMPASS" },
-                            wind_mode,
-                        )
-                        .clicked()
-                            && pilot.engaged()
-                        {
-                            if wind_mode {
-                                let state = sim.sim.state;
-                                pilot.hold_heading(&state);
-                            } else {
-                                pilot.hold_wind(&telemetry);
-                            }
-                        }
-                        // What it is actually holding, which the console did not say.
-                        //
-                        // Two lamps told you *which* instrument was steering and the
-                        // arrows moved its target, and nowhere was the target itself — so
-                        // the one question a person has about an autopilot, "what is it
-                        // trying to do", had to be answered by watching the compass and
-                        // guessing. A course in degrees, or an apparent wind angle with
-                        // the tack in its sign, which is how a vane is set and read.
-                        ui.label(
-                            egui::RichText::new(match pilot.mode {
-                                PilotMode::Standby => "   —".to_string(),
-                                PilotMode::Heading(h) => format!("{:03.0}", deg(h)),
-                                PilotMode::ApparentWind { awa: a, .. } => {
-                                    format!("{:+.0} awa", deg(a))
+                                .size(13.0)
+                                .color(if pilot.engaged() {
+                                    paint::LIVE
+                                } else {
+                                    egui::Color32::from_rgb(110, 115, 120)
+                                }),
+                            );
+                            // The same two steps the keys use, from the same constants, and
+                            // the doubled arrow is the coarse one in every piece of marine
+                            // electronics ever built.
+                            ui.horizontal(|ui| {
+                                for (label, delta) in [
+                                    ("<<", -crate::input::PILOT_STEP),
+                                    ("<", -crate::input::PILOT_FINE),
+                                    (">", crate::input::PILOT_FINE),
+                                    (">>", crate::input::PILOT_STEP),
+                                ] {
+                                    if nudge_button(ui, label).clicked() {
+                                        pilot.adjust(delta);
+                                    }
                                 }
-                            })
-                            .monospace()
-                            .size(13.0)
-                            .color(if pilot.engaged() {
-                                paint::LIVE
-                            } else {
-                                egui::Color32::from_rgb(110, 115, 120)
-                            }),
-                        );
-                        // The same two steps the keys use, from the same constants, and
-                        // the doubled arrow is the coarse one in every piece of marine
-                        // electronics ever built.
-                        ui.horizontal(|ui| {
-                            for (label, delta) in [
-                                ("<<", -crate::input::PILOT_STEP),
-                                ("<", -crate::input::PILOT_FINE),
-                                (">", crate::input::PILOT_FINE),
-                                (">>", crate::input::PILOT_STEP),
+                            });
+                        });
+                    }
+                    Deck::Gear => {
+                        // The sail wardrobe, and the pilot.
+                        ui.vertical(|ui| {
+                            plate(ui, "HEADSAIL");
+                            ui.add_space(4.0);
+                            let rolled = sim.controls.furl > 0.9;
+                            for sail in [
+                                Headsail::Genoa,
+                                Headsail::Code0,
+                                Headsail::Gennaker,
+                                Headsail::Spinnaker,
                             ] {
-                                if nudge_button(ui, label).clicked() {
-                                    pilot.adjust(delta);
+                                let up = sim.controls.headsail == sail;
+                                let label = egui::RichText::new(sail.name().to_uppercase())
+                                    .monospace()
+                                    .size(10.0)
+                                    .color(if up {
+                                        egui::Color32::BLACK
+                                    } else if rolled {
+                                        paint::LABEL
+                                    } else {
+                                        egui::Color32::from_gray(90)
+                                    });
+                                let button = egui::Button::new(label).fill(if up {
+                                    paint::LIVE
+                                } else {
+                                    egui::Color32::from_gray(26)
+                                });
+                                // Only with the sail rolled away: you furl, change, and set.
+                                if ui.add_enabled(rolled, button).clicked() {
+                                    sim.controls.headsail = sail;
                                 }
+                            }
+                            if !rolled {
+                                ui.label(
+                                    egui::RichText::new("roll it away first")
+                                        .monospace()
+                                        .size(10.0)
+                                        .color(egui::Color32::from_gray(90)),
+                                );
                             }
                         });
-                    });
 
-                    ui.add_space(7.0);
-                    separator(ui);
-                    ui.add_space(7.0);
-
-                    // What is left when everything that is a *setting* has gone to the
-                    // settings panel.
-                    //
-                    // The console's rule is that everything the keyboard can do the
-                    // mouse can do, and it was being read as though it also said
-                    // everything the mouse can do must be on the bar. It does not. The
-                    // sound switch was the mute key and the mute button in the menu and
-                    // a third copy here; the view and the diagnostic panel are a
-                    // preference and a microscope. Three switches came off the bar, and
-                    // in exchange the ink drawing and the resolution — which were keys
-                    // and nothing else, so the rule was being broken in the direction
-                    // that matters — can now be reached with a mouse at all.
-                    ui.vertical(|ui| {
-                        plate(ui, "SHIP");
-                        if small_button(ui, "SETTINGS  ESC").clicked() {
-                            settings.open = !settings.open;
-                        }
-                        // The third of the keyboard-only three, and the one with
-                        // consequences, so it says what it will cost rather than
-                        // sitting there as a word.
-                        if small_button(
-                            ui,
-                            match course.leg {
-                                Leg::Idle => "TAKE A JOB",
-                                Leg::Carrying => "GIVE UP, NEW JOB",
-                            },
-                        )
-                        .clicked()
-                        {
-                            course.wants_new = true;
-                        }
-                    });
+                        ui.add_space(8.0);
+                    }
+                    Deck::Ship => {
+                        // What is left when everything that is a *setting* has gone to the
+                        // settings panel.
+                        //
+                        // The console's rule is that everything the keyboard can do the
+                        // mouse can do, and it was being read as though it also said
+                        // everything the mouse can do must be on the bar. It does not. The
+                        // sound switch was the mute key and the mute button in the menu and
+                        // a third copy here; the view and the diagnostic panel are a
+                        // preference and a microscope. Three switches came off the bar, and
+                        // in exchange the ink drawing and the resolution — which were keys
+                        // and nothing else, so the rule was being broken in the direction
+                        // that matters — can now be reached with a mouse at all.
+                        ui.vertical(|ui| {
+                            plate(ui, "SHIP");
+                            if small_button(ui, "SETTINGS  ESC").clicked() {
+                                settings.open = !settings.open;
+                            }
+                            // The third of the keyboard-only three, and the one with
+                            // consequences, so it says what it will cost rather than
+                            // sitting there as a word.
+                            if small_button(
+                                ui,
+                                match course.leg {
+                                    Leg::Idle => "TAKE A JOB",
+                                    Leg::Carrying => "GIVE UP, NEW JOB",
+                                },
+                            )
+                            .clicked()
+                            {
+                                course.wants_new = true;
+                            }
+                        });
+                    }
                 });
             });
         });
@@ -934,12 +1001,6 @@ fn sail_state(f: &sail_core::sail::SailForces, set: f64) -> (&'static str, egui:
 /// Its height is a fixed number and that made it the floor under the whole bar: a
 /// hundred and thirty-two pixels of hairline held the console open even after every
 /// widget in it had been brought down. Eighty-four is the tallest column plus its label,
-/// which is what a rule between columns is for.
-fn separator(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, 84.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, paint::BEZEL);
-}
-
 /// The wind dial: the one instrument a sailor looks at more than the water.
 fn wind_dial(ui: &mut egui::Ui, awa: f64, twa: f64) {
     let size = egui::vec2(84.0, 84.0);
@@ -1338,8 +1399,9 @@ fn outlook_words(building: f64, turning: f64) -> String {
 /// steering to a number and steering to a card are different skills, and the second one
 /// is the one that works when she is being thrown about.
 fn compass_repeater(ui: &mut egui::Ui, heading: f64, mark: Option<f64>) {
-    plate(ui, "COMPASS");
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(74.0, 74.0), egui::Sense::hover());
+    // The same width as the rudder indicator under it: they are one column on one
+    // pillar, and two instruments that differ by a few points read as a mistake.
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(128.0, 112.0), egui::Sense::hover());
     let p = ui.painter();
     let c = rect.center();
     let r = rect.width() * 0.42;
@@ -1428,23 +1490,16 @@ fn compass_repeater(ui: &mut egui::Ui, heading: f64, mark: Option<f64>) {
 /// its stock, port to the left, starboard to the right, with the degrees engraved on the
 /// face. Dragging it puts the helm over.
 fn tiller(ui: &mut egui::Ui, rudder: &mut f64, max: f64) -> bool {
-    plate(ui, "HELM");
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(108.0, 74.0), egui::Sense::click_and_drag());
-    let p = ui.painter();
+        ui.allocate_exact_size(egui::vec2(128.0, 96.0), egui::Sense::click_and_drag());
+    // Clipped to its own rectangle, so the card cannot escape the instrument: the same
+    // fault the clinometer had, which is worth only ever learning once.
+    let p = ui.painter().with_clip_rect(rect);
     // The face: a half-round card sunk into the case, pivot at the top where the stock
     // is, so the blade hangs down into the dial the way it hangs under the boat.
-    let pivot = egui::pos2(rect.center().x, rect.top() + 8.0);
-    let reach = 52.0_f32;
+    let pivot = egui::pos2(rect.center().x, rect.top() + 4.0);
+    let reach = 58.0_f32;
     p.circle_filled(pivot, reach, paint::FACE);
-    p.rect_filled(
-        egui::Rect::from_min_max(
-            egui::pos2(rect.left(), pivot.y - reach - 2.0),
-            egui::pos2(rect.right(), pivot.y),
-        ),
-        0.0,
-        paint::CASE,
-    );
     p.circle_stroke(pivot, reach, egui::Stroke::new(1.2, paint::BEZEL));
 
     let changed = if response.dragged() {
@@ -1504,7 +1559,7 @@ fn tiller(ui: &mut egui::Ui, rudder: &mut f64, max: f64) -> bool {
     // Which way is which, in the words a helm order is given in.
     for (side, name) in [(-1.0_f32, "PORT"), (1.0, "STBD")] {
         p.text(
-            egui::pos2(pivot.x + side * (reach - 12.0), rect.bottom() - 6.0),
+            egui::pos2(pivot.x + side * (reach - 6.0), rect.bottom() - 8.0),
             egui::Align2::CENTER_CENTER,
             name,
             egui::FontId::monospace(letter::UNIT),
@@ -1512,7 +1567,7 @@ fn tiller(ui: &mut egui::Ui, rudder: &mut f64, max: f64) -> bool {
         );
     }
     p.text(
-        egui::pos2(pivot.x, rect.bottom() - 20.0),
+        egui::pos2(pivot.x, rect.bottom() - 24.0),
         egui::Align2::CENTER_CENTER,
         format!("{:+.0}°", deg(*rudder)),
         egui::FontId::monospace(letter::VALUE),
@@ -1637,8 +1692,11 @@ fn lever(
     state: (&'static str, egui::Color32),
 ) -> bool {
     ui.vertical(|ui| {
+        // **Long, because a sheet is long.** The travel is the thing your hand is
+        // setting, and an inch of it was asking for a trim to be judged in sixths of a
+        // millimetre. There is a page to itself now, so it can have the room.
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(52.0, 104.0), egui::Sense::click_and_drag());
+            ui.allocate_exact_size(egui::vec2(66.0, 208.0), egui::Sense::click_and_drag());
         let p = ui.painter();
         p.rect_filled(rect, 3.0, paint::CASE);
         p.rect_stroke(
@@ -1648,10 +1706,13 @@ fn lever(
             egui::StrokeKind::Inside,
         );
         let face = egui::Rect::from_min_max(
-            rect.left_top() + egui::vec2(0.0, 13.0),
-            rect.right_bottom() - egui::vec2(0.0, 24.0),
+            rect.left_top() + egui::vec2(0.0, 17.0),
+            rect.right_bottom() - egui::vec2(0.0, 28.0),
         );
-        let changed = if response.dragged() {
+        // A click *is* a trim: put the rope where you touched. Dragging is the same
+        // act continued, which is how a winch handle behaves and not how a scrollbar
+        // does — there is nothing here to grab hold of first.
+        let changed = if response.dragged() || response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
                 let f = ((face.bottom() - 8.0 - pos.y) / (face.height() - 16.0)).clamp(0.0, 1.0);
                 // Up is hauled in, so the lever reads the way the rope moves.
@@ -1667,14 +1728,14 @@ fn lever(
         tag(
             p,
             egui::Rect::from_min_size(
-                rect.left_top() + egui::vec2(3.0, 2.0),
-                egui::vec2(rect.width() - 6.0, 11.0),
+                rect.left_top() + egui::vec2(3.0, 3.0),
+                egui::vec2(rect.width() - 6.0, 14.0),
             ),
             label,
             false,
         );
         p.text(
-            egui::pos2(rect.center().x, rect.bottom() - 11.0),
+            egui::pos2(rect.center().x, rect.bottom() - 13.0),
             egui::Align2::CENTER_CENTER,
             state.0,
             egui::FontId::monospace(letter::UNIT),
@@ -1703,7 +1764,7 @@ fn clutch(
 ) -> (bool, bool) {
     ui.vertical(|ui| {
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(58.0, 104.0), egui::Sense::click_and_drag());
+            ui.allocate_exact_size(egui::vec2(72.0, 208.0), egui::Sense::click_and_drag());
         let p = ui.painter();
         p.rect_filled(rect, 3.0, paint::CASE);
         p.rect_stroke(
@@ -1716,8 +1777,8 @@ fn clutch(
             egui::StrokeKind::Inside,
         );
         let face = egui::Rect::from_min_max(
-            rect.left_top() + egui::vec2(0.0, 13.0),
-            rect.right_bottom() - egui::vec2(0.0, 13.0),
+            rect.left_top() + egui::vec2(0.0, 17.0),
+            rect.right_bottom() - egui::vec2(0.0, 18.0),
         );
         let dragged = response.dragged();
         if dragged {
@@ -1730,14 +1791,14 @@ fn clutch(
         tag(
             p,
             egui::Rect::from_min_size(
-                rect.left_top() + egui::vec2(3.0, 2.0),
-                egui::vec2(rect.width() - 6.0, 11.0),
+                rect.left_top() + egui::vec2(3.0, 3.0),
+                egui::vec2(rect.width() - 6.0, 14.0),
             ),
             label,
             selected,
         );
         p.text(
-            egui::pos2(rect.center().x, rect.bottom() - 6.0),
+            egui::pos2(rect.center().x, rect.bottom() - 9.0),
             egui::Align2::CENTER_CENTER,
             match position {
                 Some(said) => said.to_string(),
