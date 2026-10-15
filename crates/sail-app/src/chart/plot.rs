@@ -894,6 +894,31 @@ pub(crate) fn the_cocked_hat(
             ink::BOAT,
         );
     }
+    // **And why there is no fix, when there is no fix.**
+    //
+    // A greyed button that does not say what it is waiting for is a broken key. The
+    // three reasons are three different mistakes and each has a different answer: no
+    // lines on the paper means the book is full of bearings nobody has laid on, one line
+    // is not a position, and two lines that do not cross are almost always two bearings
+    // on the same mark with nothing run between them — which is the one case that *looks*
+    // like it ought to work and is the thing a running fix exists to fix.
+    if got.is_none() {
+        let waiting = match nav.sights.len() {
+            0 => "no lines on the chart — lay a bearing on from the book",
+            1 => "one line is not a position — lay a second bearing on",
+            _ => {
+                "these lines do not cross: two bearings on one mark need a run \
+                  between them"
+            }
+        };
+        t.p.text(
+            buttons.0.left_bottom() + egui::vec2(0.0, 5.0),
+            egui::Align2::LEFT_TOP,
+            waiting,
+            egui::FontId::monospace(9.0),
+            ink::BOAT,
+        );
+    }
     let (chart_button, log_button) = buttons;
     let mut asked = None;
     for (slot, said, live) in [

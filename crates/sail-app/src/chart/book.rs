@@ -40,8 +40,13 @@ pub enum Wrote {
         bearing: f64,
         taken: glam::DVec2,
     },
-    /// Something identified through the glasses.
-    Sighted { name: String },
+    /// What one look through the glasses made out.
+    ///
+    /// **A sweep of a coast is one act and one line.** Naming them one to a line put ten
+    /// entries on the page at the same minute and pushed the bearings off it — and a
+    /// page that has to be read past is a page nobody reads. It is also what a navigator
+    /// writes: *made out Nordvik, Sandvoe and the Fuglhavn light*, once, in the book.
+    Sighted { names: Vec<String> },
     /// A speed read off the log, with how good the reading was.
     Speed { knots: f64, slip: f64 },
     /// A course she settled on.
@@ -73,17 +78,38 @@ impl DeckLog {
     /// Identifications are written once: looking at the same headland for the third time
     /// is not three entries, and a page that filled with them would bury the bearings.
     pub fn write(&mut self, hour: f32, wrote: Wrote) {
-        if let Wrote::Sighted { name } = &wrote {
-            let had = self.lines.iter().any(|l| match &l.wrote {
-                Wrote::Sighted { name: seen } => seen == name,
-                _ => false,
-            });
-            if had {
+        if let Wrote::Sighted { names } = &wrote {
+            // Nothing already in the book goes in it twice: looking at the same headland
+            // for the third time is not a third entry.
+            let fresh: Vec<String> = names
+                .iter()
+                .filter(|name| !self.already(name))
+                .cloned()
+                .collect();
+            if fresh.is_empty() {
                 return;
             }
+            self.lines.push(Line {
+                hour,
+                wrote: Wrote::Sighted { names: fresh },
+            });
+            self.trim();
+            return;
         }
         self.lines.push(Line { hour, wrote });
-        if self.lines.len() > PAGE {
+        self.trim();
+    }
+
+    /// Whether a mark has already been written down as made out.
+    fn already(&self, name: &str) -> bool {
+        self.lines.iter().any(|line| match &line.wrote {
+            Wrote::Sighted { names } => names.iter().any(|seen| seen == name),
+            _ => false,
+        })
+    }
+
+    fn trim(&mut self) {
+        while self.lines.len() > PAGE {
             self.lines.remove(0);
         }
     }
@@ -95,7 +121,11 @@ fn reads(wrote: &Wrote) -> String {
         Wrote::Bearing { name, bearing, .. } => {
             format!("{name} {:03.0}", bearing.to_degrees().rem_euclid(360.0))
         }
-        Wrote::Sighted { name } => format!("made out {name}"),
+        Wrote::Sighted { names } => match names.split_first() {
+            Some((first, [])) => format!("made out {first}"),
+            Some((first, rest)) => format!("made out {first} and {} more", rest.len()),
+            None => "made out nothing".to_string(),
+        },
         Wrote::Speed { knots, slip } => format!("log {knots:.1} kn  ±{:.0}%", slip * 100.0),
         Wrote::Altered { course } => {
             format!("altered to {:03.0}", course.to_degrees().rem_euclid(360.0))
@@ -125,7 +155,7 @@ pub(crate) fn on_the_chart(wrote: &Wrote, nav: &crate::navigation::Navigation) -
             .sights
             .iter()
             .any(|s| (s.mark - *mark).length() < 1.0 && (s.bearing - *bearing).abs() < 1e-9),
-        Wrote::Sighted { name } => nav.on_the_paper.contains(name),
+        Wrote::Sighted { names } => names.iter().all(|name| nav.on_the_paper.contains(name)),
         _ => false,
     }
 }
@@ -179,7 +209,9 @@ pub(crate) fn the_book(
         knows: true,
         why: false,
     };
-    t.p.rect_filled(page, 2.0, ink::PAPER.gamma_multiply(0.75));
+    // Opaque. It is a book on a table, not a pane of glass: the sea showing through the
+    // lines made them hard to read and made the page look like something half-drawn.
+    t.p.rect_filled(page, 2.0, ink::PAPER);
     t.p.rect_stroke(
         page,
         2.0,
@@ -220,9 +252,9 @@ pub(crate) fn the_book(
             t.p.text(
                 page.left_top() + egui::vec2(8.0, 26.0),
                 egui::Align2::LEFT_TOP,
-                "click a line to lay it on the chart",
-                egui::FontId::monospace(8.0),
-                ink::COAST.gamma_multiply(0.8),
+                "+  click a line to lay it on the chart",
+                egui::FontId::monospace(9.0),
+                ink::BOAT,
             );
             for (i, line) in log.lines.iter().enumerate() {
                 let y = page.top() + 42.0 + i as f32 * 14.0;
@@ -407,11 +439,18 @@ pub(crate) fn lay_it_on_the_chart(
                 }
             }
         }
-        Wrote::Sighted { name } => {
-            // The name goes on the paper. She knew it already — the glasses told her on
+        Wrote::Sighted { names } => {
+            // The names go on the paper. She knew them already — the glasses told her on
             // deck — and this is the pencil, which is a different act and a later one.
-            if !nav.on_the_paper.contains(name) {
-                nav.on_the_paper.push(name.clone());
+            // All of them at once, because one look was one act.
+            if drawn {
+                nav.on_the_paper.retain(|had| !names.contains(had));
+            } else {
+                for name in names {
+                    if !nav.on_the_paper.contains(name) {
+                        nav.on_the_paper.push(name.clone());
+                    }
+                }
             }
         }
         // An entry is already on the paper; pressing it puts the paper over it, which is
@@ -443,7 +482,7 @@ mod the_page {
         log.write(
             6.5,
             Wrote::Sighted {
-                name: "Bergskerry Spire".to_string(),
+                names: vec!["Bergskerry Spire".to_string()],
             },
         );
         assert!(
@@ -463,6 +502,35 @@ mod the_page {
         );
     }
 
+    /// **One look at a coast is one line**, however many rocks it names.
+    ///
+    /// Written one to a line, a sweep of an archipelago put ten entries on the page at
+    /// the same minute and pushed the bearings off it — and a page that has to be read
+    /// past is a page nobody reads.
+    #[test]
+    fn a_sweep_of_the_coast_is_one_line() {
+        let mut log = DeckLog::default();
+        log.write(
+            6.5,
+            Wrote::Sighted {
+                names: vec!["Nordvik".into(), "Sandvoe".into(), "Fuglhavn".into()],
+            },
+        );
+        assert_eq!(log.lines.len(), 1);
+        // And the next look only writes what is new.
+        log.write(
+            6.6,
+            Wrote::Sighted {
+                names: vec!["Sandvoe".into(), "Kirkvoe".into()],
+            },
+        );
+        assert_eq!(log.lines.len(), 2);
+        let Wrote::Sighted { names } = &log.lines[1].wrote else {
+            panic!("a line of made-out marks")
+        };
+        assert_eq!(names, &["Kirkvoe".to_string()], "Sandvoe was already in it");
+    }
+
     /// Looking at the same headland three times is one line in the book.
     #[test]
     fn an_identification_is_written_once() {
@@ -471,7 +539,7 @@ mod the_page {
             log.write(
                 6.5,
                 Wrote::Sighted {
-                    name: "Fuglvoe".to_string(),
+                    names: vec!["Fuglvoe".to_string()],
                 },
             );
         }

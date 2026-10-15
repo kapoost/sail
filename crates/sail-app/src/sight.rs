@@ -744,20 +744,20 @@ pub fn recognise(
         .collect();
     if !readable.is_empty() {
         let mut fresh: Vec<String> = Vec::new();
+        // One look, one line in the book: see `Wrote::Sighted`.
+        let mut made_out: Vec<String> = Vec::new();
         for m in &readable {
             if !nav.recognised.contains(&m.name) {
                 // **She knows it now** — the glasses have just told her, and the hand
                 // bearing compass can be put on it this minute. Writing the name on the
                 // chart is the other half, and it happens at the table.
                 nav.recognised.push(m.name.clone());
-                log.write(
-                    hour,
-                    crate::chart::Wrote::Sighted {
-                        name: m.name.clone(),
-                    },
-                );
+                made_out.push(m.name.clone());
                 fresh.push(format!("{} {}", m.name, m.kind.abbreviation()));
             }
+        }
+        if !made_out.is_empty() {
+            log.write(hour, crate::chart::Wrote::Sighted { names: made_out });
         }
         nav.reading = Some(if fresh.is_empty() {
             format!(
@@ -822,11 +822,15 @@ pub fn recognise(
     match best {
         Some((out_by, group)) if out_by < RECOGNISED_WITHIN => {
             let named: Vec<String> = group.iter().map(|m| m.name.clone()).collect();
+            let mut made_out: Vec<String> = Vec::new();
             for name in &named {
                 if !nav.recognised.contains(name) {
                     nav.recognised.push(name.clone());
-                    log.write(hour, crate::chart::Wrote::Sighted { name: name.clone() });
+                    made_out.push(name.clone());
                 }
+            }
+            if !made_out.is_empty() {
+                log.write(hour, crate::chart::Wrote::Sighted { names: made_out });
             }
             nav.reading = Some(format!(
                 "that is {} — {} and {} beyond it. You can shoot them now; the names \
