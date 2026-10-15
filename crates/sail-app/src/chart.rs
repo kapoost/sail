@@ -53,6 +53,15 @@ pub struct Chart {
     /// she is it follows her again, because then it is a plotter and that is what a
     /// plotter is for.
     pub laid_at: Option<glam::DVec2>,
+    /// A leg being timed: where she was when the log was streamed, and when.
+    pub streaming: Option<(glam::DVec2, f64)>,
+    /// Which ruled line is being moved, and by which end.
+    ///
+    /// A line you cannot move is a line you have to rub out and draw again, which is
+    /// what a rubber is for and is not what a straight edge is for: on paper you put the
+    /// edge down, look at it, and shift it a quarter of an inch. Asked for from the deck
+    /// in exactly those terms.
+    pub moving: Option<(usize, Grab)>,
     /// A fix the navigator has just said he believes. Taken by `navigation` the same
     /// frame, which is what decides whether it was worth believing.
     pub accepted: Option<glam::DVec2>,
@@ -87,6 +96,21 @@ pub enum Tool {
     Pencil,
     /// And the rubber that rubs it out.
     Rubber,
+    /// The log. Click once at the start of a leg and again at the end of it, and what
+    /// goes on the paper is what she actually did between those two moments: the course
+    /// made good, the distance run and the speed it comes to.
+    ///
+    /// **Which is not the same number as the one on the instruments**, and that is the
+    /// whole reason for it. The log on the console reads speed *through the water*; two
+    /// marks on a chart and a time between them give speed *over the ground*, and the
+    /// difference between them is the tide, the leeway and whatever else has been
+    /// quietly moving the boat. Nobody can measure that from inside the boat; you
+    /// measure it by writing down where she was, waiting, and writing down where she is.
+    ///
+    /// Bounded by the hand rather than by a tack the program detects, because the thing
+    /// being measured is *a leg you chose* — from the moment you settled on this board
+    /// to the moment you put the helm down.
+    Log,
     /// The watch. Not a drawing instrument at all — it writes the *time* where you put
     /// it, which is the one thing on a chart that cannot be worked out afterwards.
     ///
@@ -106,6 +130,7 @@ impl Tool {
             Tool::Pencil => "PENCIL",
             Tool::Rubber => "RUBBER",
             Tool::Watch => "WATCH",
+            Tool::Log => "LOG",
         }
     }
 
@@ -120,6 +145,10 @@ impl Tool {
             Tool::Pencil => "click: a cross where you think you are",
             Tool::Rubber => "click a line or a cross to take it off the chart",
             Tool::Watch => "click: the time, written on the chart where you put it",
+            Tool::Log => {
+                "click to start a leg and again to end it: course, distance and speed \
+                 made good"
+            }
         }
     }
 }
@@ -127,14 +156,26 @@ impl Tool {
 /// The instruments, in the order a hand reaches for them. One list, because the palette
 /// is drawn from it and the click targets are worked out from it, and those two being
 /// two lists is how a button ends up somewhere other than where it looks.
-pub const TOOLS: [Tool; 6] = [
+pub const TOOLS: [Tool; 7] = [
     Tool::Dividers,
     Tool::Ruler,
     Tool::ParallelRule,
     Tool::Pencil,
     Tool::Watch,
+    Tool::Log,
     Tool::Rubber,
 ];
+
+/// Which part of a ruled line a hand has hold of.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Grab {
+    /// One end, which moves on its own: this is how a leg is adjusted to land on a mark.
+    From,
+    To,
+    /// The whole of it, carrying the offset from where it was taken hold of, so the line
+    /// does not jump to the cursor the moment it is picked up.
+    Whole(glam::DVec2),
+}
 
 /// Something drawn on the chart in pencil.
 #[derive(Clone, Copy, Debug)]
@@ -152,6 +193,15 @@ pub enum Plotted {
     /// A time written on the paper: ship's time, in the four figures a deck log is kept
     /// in, with a tick under it to say which mark it belongs to.
     Stamp { at: glam::DVec2, hour: f32 },
+    /// A leg that was actually sailed: where she was, where she got to, and how long it
+    /// took her. The course, the distance and the speed are worked out from those three
+    /// rather than stored, because a number written down beside the two points it came
+    /// from is a number that can disagree with them.
+    Run {
+        from: glam::DVec2,
+        to: glam::DVec2,
+        minutes: f64,
+    },
 }
 
 impl Default for Chart {
@@ -163,6 +213,8 @@ impl Default for Chart {
             tool: Tool::Dividers,
             plot: Vec::new(),
             laid_at: None,
+            moving: None,
+            streaming: None,
             accepted: None,
             // Two and a half miles each way: far enough to see the next island and the
             // one after it, close enough that a shoal is a shape rather than a dot.
@@ -314,6 +366,10 @@ pub fn draw(
     let mut pick: Option<Tool> = None;
     let mut accept: Option<glam::DVec2> = None;
     let mut lay_at: Option<glam::DVec2> = None;
+    let mut take_hold: Option<(usize, Grab)> = None;
+    let mut shift: Option<(usize, Grab, glam::DVec2)> = None;
+    let mut let_go = false;
+    let mut stream: Option<bool> = None;
     let area = if spread {
         egui::Area::new("chart".into()).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
     } else {
@@ -731,7 +787,47 @@ pub fn draw(
             // the rubber takes it off again.
             match chart.tool {
                 Tool::Dividers | Tool::ParallelRule | Tool::Ruler => {
-                    if response.drag_started() && !on_furniture {
+                    // **Taking hold of a line that is already there.**
+                    //
+                    // With the straight edge in hand, a drag that starts on an existing
+                    // ruled line moves it rather than drawing a second one across it: an
+                    // end on its own, so a leg can be walked onto a mark, or the whole of
+                    // it if the hand lands somewhere along it. Which is what a straight
+                    // edge is for — you put it down, look at it, and shift it a quarter
+                    // of an inch — and the alternative is rubbing it out and drawing it
+                    // again, which is what the rubber is for and is not the same job.
+                    if chart.tool == Tool::Ruler && response.drag_started() && !on_furniture {
+                        if let Some(at) = response.interact_pointer_pos() {
+                            let water = to_water(at);
+                            // A finger's width on the paper, so a line can be caught
+                            // without the pointer having to be on the pencil mark.
+                            let near = (12.0 / scale) as f64;
+                            take_hold = chart.plot.iter().enumerate().find_map(|(i, item)| {
+                                let Plotted::Rule { from, to } = item else {
+                                    return None;
+                                };
+                                if (water - *from).length() < near {
+                                    Some((i, Grab::From))
+                                } else if (water - *to).length() < near {
+                                    Some((i, Grab::To))
+                                } else if on_the_line(*from, *to, water) < near {
+                                    Some((i, Grab::Whole(water - *from)))
+                                } else {
+                                    None
+                                }
+                            });
+                        }
+                    }
+                    if let (Some((i, grab)), Some(at)) =
+                        (chart.moving, response.interact_pointer_pos())
+                    {
+                        if response.dragged() {
+                            shift = Some((i, grab, to_water(at)));
+                        }
+                        if response.drag_stopped() {
+                            let_go = true;
+                        }
+                    } else if response.drag_started() && !on_furniture {
                         if let Some(at) = response.interact_pointer_pos() {
                             set_dividers = Some((to_water(at), to_water(at)));
                         }
@@ -744,6 +840,28 @@ pub fn draw(
                     } else if response.drag_stopped() {
                         // The rule leaves its line on the chart; the dividers leave
                         // nothing, because dividers are for reading and not for drawing.
+                        // The leg being timed, while it is being timed: a line from where the log
+                        // was streamed to where she is now, with the figures running. Without it the
+                        // tool is a button that appears to do nothing for ten minutes.
+                        if let Some((was, when)) = chart.streaming {
+                            let (a, b) = (to_screen(was), to_screen(st.pos));
+                            p.line_segment([a, b], egui::Stroke::new(1.0, ink::MARK));
+                            let off = st.pos - was;
+                            let minutes = (st.time - when) / 60.0;
+                            let miles = off.length() / 1_852.0;
+                            p.text(
+                                b + egui::vec2(8.0, 10.0),
+                                egui::Align2::LEFT_TOP,
+                                format!(
+                                    "log streamed — {:.2} M, {:.0} min, {:.1} kn",
+                                    miles,
+                                    minutes,
+                                    miles / (minutes / 60.0).max(1e-6)
+                                ),
+                                egui::FontId::monospace(10.0),
+                                ink::MARK,
+                            );
+                        }
                         if let Some((from, to)) = chart.dividers {
                             let off = to - from;
                             // A twitch of the hand is not a line. Below a tenth of an
@@ -791,6 +909,31 @@ pub fn draw(
                         }
                     }
                 }
+                // Streaming the log and hauling it in again. Where on the paper the
+                // click lands does not matter at all — what is being marked is *her*
+                // position and the time, which is why this is the one tool that is not
+                // about the point under the cursor.
+                Tool::Log => {
+                    if response.clicked() && !on_furniture {
+                        match chart.streaming {
+                            None => stream = Some(true),
+                            Some((was, when)) => {
+                                stream = Some(false);
+                                let minutes = (st.time - when) / 60.0;
+                                // A leg of a few seconds is a slipped finger rather than
+                                // a measurement: at half a minute the distance run is
+                                // inside the width of the pencil.
+                                if minutes > 0.5 {
+                                    draw_on = Some(Plotted::Run {
+                                        from: was,
+                                        to: st.pos,
+                                        minutes,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Where the lines cross, if they do — worked out before they are drawn, so
@@ -802,7 +945,7 @@ pub fn draw(
             // On the table only. The folded chart is a glance — *where am I, what is
             // ahead* — and a plot on it is a thicket of pencil over a picture two inches
             // square. Working belongs where there is room to work.
-            for item in &chart.plot {
+            for (i, item) in chart.plot.iter().enumerate() {
                 match *item {
                     Plotted::Line { through, bearing } => {
                         // Drawn the length a navigator draws one, which is not across the
@@ -840,6 +983,47 @@ pub fn draw(
                             );
                         }
                     }
+                    // A leg that was sailed, drawn the way a course made good is drawn:
+                    // one arrow along it, the course over the line and what she did
+                    // under it. Two figures rather than three, because the distance is
+                    // the one you can measure off the paper with the dividers and the
+                    // speed is the one you cannot.
+                    Plotted::Run { from, to, minutes } => {
+                        let (a, b) = (to_screen(from), to_screen(to));
+                        p.line_segment([a, b], egui::Stroke::new(1.3, ink::TRACK));
+                        let off = to - from;
+                        let miles = off.length() / 1_852.0;
+                        let course = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
+                        // The arrowhead, at the far end and pointing the way she went.
+                        let along = (b - a).normalized();
+                        let across = egui::vec2(-along.y, along.x);
+                        for side in [-1.0, 1.0] {
+                            p.line_segment(
+                                [b, b - along * 9.0 + across * 4.0 * side],
+                                egui::Stroke::new(1.3, ink::TRACK),
+                            );
+                        }
+                        let middle = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+                        p.text(
+                            middle + egui::vec2(6.0, -4.0),
+                            egui::Align2::LEFT_BOTTOM,
+                            format!("{:03.0}", course.to_degrees()),
+                            egui::FontId::monospace(10.0),
+                            ink::TRACK,
+                        );
+                        p.text(
+                            middle + egui::vec2(6.0, 4.0),
+                            egui::Align2::LEFT_TOP,
+                            format!(
+                                "{:.2} M in {:.0} min — {:.1} kn",
+                                miles,
+                                minutes,
+                                miles / (minutes / 60.0).max(1e-6)
+                            ),
+                            egui::FontId::monospace(10.0),
+                            ink::TRACK,
+                        );
+                    }
                     Plotted::Stamp { at, hour } => {
                         // Four figures and a tick under them, which is how a time is
                         // written beside a mark: no colon, because a deck log has never
@@ -869,18 +1053,34 @@ pub fn draw(
                         // paper — the distance goes underneath on a passage chart, but
                         // one label on a screen this size is already two lines of type.
                         let (a, b) = (to_screen(from), to_screen(to));
-                        p.line_segment([a, b], egui::Stroke::new(1.2, ink::PENCIL));
+                        // Darker while it is in your hand, which is the only feedback a
+                        // straight edge needs: you can see that you have hold of this
+                        // one rather than of the chart.
+                        let in_hand = chart.moving.is_some_and(|(held, _)| held == i);
+                        p.line_segment(
+                            [a, b],
+                            egui::Stroke::new(if in_hand { 2.0 } else { 1.2 }, ink::PENCIL),
+                        );
                         let off = to - from;
                         let bearing = off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU);
-                        // The ends, marked the way a pencil leaves them: a short tick
-                        // across the line so you can see where it was meant to stop.
-                        let along = (b - a).normalized();
-                        let across = egui::vec2(-along.y, along.x) * 4.0;
+                        // **The ends say which point they mean.**
+                        //
+                        // A tick across the line says *the line stops here*, which is
+                        // not the same thing and was what was drawn: at a glance you
+                        // could not tell whether the leg ended at the tick, at the
+                        // middle of it, or somewhere under the pencil. A small upright
+                        // cross with a dot at its centre says a point and nothing else,
+                        // which is how a position is marked on paper and why a cocked
+                        // hat has a dot in the middle of it. Asked for from the deck as
+                        // ends that point at something exactly and unambiguously.
                         for end in [a, b] {
-                            p.line_segment(
-                                [end + across, end - across],
-                                egui::Stroke::new(1.2, ink::PENCIL),
-                            );
+                            for (dx, dy) in [(5.0, 0.0), (0.0, 5.0)] {
+                                p.line_segment(
+                                    [end + egui::vec2(dx, dy), end - egui::vec2(dx, dy)],
+                                    egui::Stroke::new(1.0, ink::PENCIL),
+                                );
+                            }
+                            p.circle_filled(end, 1.4, ink::PENCIL);
                         }
                         p.text(
                             egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)
@@ -1208,15 +1408,8 @@ pub fn draw(
                 }
                 // A ruled line has ends, so the rubber has to respect them: nearest
                 // point *on the segment*, not on the infinite line it lies along.
-                Plotted::Rule { from, to } => {
-                    let span = to - from;
-                    let t = if span.length_squared() > 1.0 {
-                        ((at - from).dot(span) / span.length_squared()).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
-                    (at - (from + span * t)).length()
-                }
+                Plotted::Rule { from, to } => on_the_line(from, to, at),
+                Plotted::Run { from, to, .. } => on_the_line(from, to, at),
             };
             if d < reach && nearest.is_none_or(|(_, best)| d < best) {
                 nearest = Some((i, d));
@@ -1225,6 +1418,33 @@ pub fn draw(
         if let Some((i, _)) = nearest {
             chart.plot.remove(i);
         }
+    }
+    if let Some(held) = take_hold {
+        chart.moving = Some(held);
+        // Nothing is being measured while something is being moved: the dividers and the
+        // hand are the same hand.
+        chart.dividers = None;
+    }
+    if let Some((i, grab, to)) = shift {
+        if let Some(Plotted::Rule { from, to: end }) = chart.plot.get_mut(i) {
+            match grab {
+                Grab::From => *from = to,
+                Grab::To => *end = to,
+                Grab::Whole(offset) => {
+                    let span = *end - *from;
+                    *from = to - offset;
+                    *end = *from + span;
+                }
+            }
+        }
+    }
+    if let_go {
+        chart.moving = None;
+    }
+    match stream {
+        Some(true) => chart.streaming = Some((sim.sim.state.pos, sim.sim.state.time)),
+        Some(false) => chart.streaming = None,
+        None => {}
     }
     if let Some(tool) = pick {
         chart.tool = tool;
@@ -1311,6 +1531,21 @@ fn stream_arrow(p: &egui::Painter, from: egui::Pos2, to: egui::Pos2, colour: egu
     for side in [1.0_f32, -1.0] {
         p.line_segment([to, to - along * 6.0 + across * (4.0 * side)], stroke);
     }
+}
+
+/// How far a point is from a segment, in whatever units the points are in.
+///
+/// One function because three places ask it — the rubber, taking hold of a ruled line,
+/// and the test below — and because "near a line" computed two ways is a line you can
+/// rub out but not pick up.
+pub fn on_the_line(from: glam::DVec2, to: glam::DVec2, at: glam::DVec2) -> f64 {
+    let span = to - from;
+    let t = if span.length_squared() > 1e-9 {
+        ((at - from).dot(span) / span.length_squared()).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (at - (from + span * t)).length()
 }
 
 #[cfg(test)]

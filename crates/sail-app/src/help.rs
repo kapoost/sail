@@ -114,7 +114,7 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             (
                 "Shift M",
                 "the chart on the table: dividers, ruler, parallel rule, pencil, \
-                 watch, rubber, and the fix",
+                 watch, log, rubber, and the fix",
             ),
             (
                 " ",

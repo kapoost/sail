@@ -377,6 +377,7 @@ pub fn lost_at_sea(
 /// like close enough to go between two rocks on.
 pub fn enter_in_the_log(
     sim: Res<Sim>,
+    sky: Res<crate::sky::Sky>,
     coast: Res<crate::marks::Coast>,
     mut nav: ResMut<Navigation>,
     mut chart: ResMut<crate::chart::Chart>,
@@ -384,6 +385,7 @@ pub fn enter_in_the_log(
     let Some(said) = chart.accepted.take() else {
         return;
     };
+    let hour = sky.hour;
     let truth = sim.sim.state.pos;
     let out_by = (said - truth).length();
     // Which marks it was taken on, kept so that the position can hold for as long as
@@ -425,6 +427,17 @@ pub fn enter_in_the_log(
         // a cross, and the time beside it, so an hour later you can see what you were
         // working from.
         chart.plot.push(crate::chart::Plotted::Cross { at: said });
+        // **And the time beside it, without being asked.**
+        //
+        // A fix with no time against it is a fix you cannot run on — run on from when? —
+        // and writing the time is the half of the job that gets forgotten, on paper and
+        // here. The watch tool exists for marking anything else; a fix stamps itself,
+        // because there is exactly one moment it can mean.
+        let below = DVec2::new(0.0, -(chart.range as f64) * 0.012);
+        chart.plot.push(crate::chart::Plotted::Stamp {
+            at: said + below,
+            hour,
+        });
         info!(
             "fix entered: {:.0} m from where she is — the chart knows her again for six \
              minutes",
