@@ -82,7 +82,19 @@ From source:
 cargo run -p sail-app --release      # the game
 cargo test -p sail-core              # the validation suite
 cargo run -p sail-core --release --example polar   # the speed polar
+cargo run -p sail-bios --release     # the setup screen, for working on it
 ```
+
+The last one is a development tool and looks like the screen that used to come up when
+you held Delete: every environment knob the game reads as a row you can change with the
+cursor keys, the relay's state in the corner, and start, restart and stop for it —
+locally, and over ssh on the server if `SAIL_REMOTE` names one. Working on this game
+means doing the same four things forty times an afternoon, and all four of them were a
+shell line somebody had to remember.
+
+`cargo test -p sail-net` is worth knowing about separately: it runs the real server
+binary and two real clients over real sockets, including the door and what happens when
+the server restarts underneath somebody.
 
 The polar is the most useful instrument here. One screen says whether the physics is
 sane; run it after touching `sail.rs`, `hull.rs` or `boat.rs`.

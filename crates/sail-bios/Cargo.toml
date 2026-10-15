@@ -1,0 +1,13 @@
+[package]
+name = "sail-bios"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# The one dependency, and it is a terminal rather than a framework: raw mode, cursor
+# moves and colours. Everything above that — the layout, the fields, the help pane — is
+# in `main.rs`, because a BIOS screen is six boxes and a highlighted row and a widget
+# library for that would be more code than the thing it drew.
+[dependencies]
+crossterm = "0.29"
