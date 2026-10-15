@@ -14,7 +14,18 @@
 //! sail-server                 # a game on the default port, a seed from the clock
 //! sail-server --seed 42       # the same archipelago every time
 //! sail-server --port 7800
+//! sail-server --word-file /etc/sail-server.word    # and a door
 //! ```
+//!
+//! **On a public address, give it a seed and a word.** The seed because without one the
+//! archipelago comes from the clock, so a restart — which is what a service unit does
+//! for a living — puts everybody in a different sea. The word because otherwise the
+//! first port scan that reaches you is a boat in your game.
+//!
+//! The word is read from a file or from `SAIL_WORD` in the environment, and never from
+//! an argument: `/proc/<pid>/cmdline` is readable by every user on the machine, so a
+//! secret on a command line is a secret printed on the wall. It is not printed here
+//! either, at any log level.
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -22,12 +33,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 use sail_core::wind::{SyntheticWind, WindField};
 use sail_net::{
-    decode, encode, BoatId, Drawn, Sky, Squall, ToClient, ToServer, World, PORT, PROTOCOL,
+    decode, encode, on_our_own_network, BoatId, Drawn, Sky, Squall, ToClient, ToServer, World,
+    FORGOTTEN, PORT, PROTOCOL,
 };
-
-/// Nothing heard for this long and she is gone. Six seconds is ninety missed snapshots:
-/// not a dropped packet, a closed window.
-const FORGOTTEN: Duration = Duration::from_secs(6);
 
 struct Aboard {
     id: BoatId,
@@ -42,18 +50,44 @@ fn main() -> std::io::Result<()> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(1);
+    // The word, if there is one: from the environment, or from a file whose *name* is
+    // the thing on the command line. Trimmed, because a file written with an editor has
+    // a newline on the end of it and nobody would ever find that.
+    let mut word = std::env::var("SAIL_WORD")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--port" => port = args.next().and_then(|v| v.parse().ok()).unwrap_or(PORT),
             "--seed" => seed = args.next().and_then(|v| v.parse().ok()).unwrap_or(seed),
+            "--word-file" => {
+                let path = args.next().unwrap_or_default();
+                match std::fs::read_to_string(&path) {
+                    Ok(text) => word = text.trim().to_string(),
+                    // Loud and fatal. A door that silently fails open is worse than no
+                    // door, because you believe you have one.
+                    Err(e) => {
+                        eprintln!("cannot read the word from {path}: {e}");
+                        std::process::exit(2);
+                    }
+                }
+            }
             other => eprintln!("ignoring {other}"),
         }
     }
 
     let socket = UdpSocket::bind(("0.0.0.0", port))?;
     socket.set_read_timeout(Some(Duration::from_millis(20)))?;
-    println!("sail-server on {port}, seed {seed}");
+    println!(
+        "sail-server on {port}, seed {seed}, {}",
+        if word.is_empty() {
+            "no word — anybody who can reach this port can join"
+        } else {
+            "a word is set"
+        }
+    );
 
     // The sea everybody will be in. The archipelago is a pure function of this, so it is
     // the whole of what a new arrival needs to be sailing the same water.
@@ -85,6 +119,19 @@ fn main() -> std::io::Result<()> {
     // one divergence that would actually spoil this.
     let mut wind = SyntheticWind::new(world.wind_from as f64, world.tws as f64, seed ^ 0x5A11);
 
+    // **How many refusals a second this will say out loud.**
+    //
+    // A "no" is bigger than the "hello" that provokes it, so answering every one of them
+    // is a small amplifier of exactly the kind the beacon used to be. A whole-server
+    // budget rather than one per address, because per-address means a table keyed by
+    // whatever a flood claims to be from, which is a memory leak with a stranger holding
+    // the tap. Five a second is more than enough for the real case — somebody typing
+    // the word wrong, once a second, and reading what came back — and nothing at all for
+    // anybody sweeping the port.
+    const REFUSALS_A_SECOND: u32 = 5;
+    let mut refused = 0u32;
+    let mut refusals_since = Instant::now();
+
     let mut fleet: HashMap<SocketAddr, Aboard> = HashMap::new();
     let mut next_id: BoatId = 1;
     let mut buf = [0u8; 2048];
@@ -105,7 +152,31 @@ fn main() -> std::io::Result<()> {
                 continue;
             };
             match msg {
-                ToServer::Hello { protocol, name } => {
+                ToServer::Hello {
+                    protocol,
+                    name,
+                    word: said,
+                } => {
+                    // The door. Checked before the protocol version, because a stranger
+                    // has no business learning which build this is.
+                    //
+                    // Already aboard and the word stops mattering: a boat that is in the
+                    // fleet got in through the door, and re-knocking is what a client
+                    // does when it has heard nothing for six seconds.
+                    if !word.is_empty() && said != word && !fleet.contains_key(&from) {
+                        if refusals_since.elapsed() >= Duration::from_secs(1) {
+                            refusals_since = Instant::now();
+                            refused = 0;
+                        }
+                        if refused < REFUSALS_A_SECOND {
+                            refused += 1;
+                            let no = encode(&ToClient::No {
+                                because: "wrong word".into(),
+                            });
+                            let _ = socket.send_to(&no, from);
+                        }
+                        continue;
+                    }
                     if protocol != PROTOCOL {
                         let no = encode(&ToClient::No {
                             because: format!(
@@ -145,6 +216,18 @@ fn main() -> std::io::Result<()> {
                     let _ = socket.send_to(&welcome, from);
                 }
                 ToServer::WhoIsThere => {
+                    // **Only to the network we are on.** One byte in, thirty out, to
+                    // whatever address the shout claims to come from: on a public
+                    // address that is a reflector with a thirty-times gain, and the
+                    // first thing it costs is the provider null-routing the machine —
+                    // with everything else on it. See `on_our_own_network`.
+                    //
+                    // Nothing is lost by it. Discovery exists so a game on the wifi
+                    // turns up in a list without anybody typing an address, and a
+                    // broadcast has never crossed a router in its life.
+                    if !on_our_own_network(from.ip()) {
+                        continue;
+                    }
                     // Answered unicast, straight back to whoever shouted. The name is
                     // the machine's, because in a list of games on a home network that is
                     // the only thing anybody will recognise.

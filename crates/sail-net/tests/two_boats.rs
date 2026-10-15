@@ -47,8 +47,8 @@ fn two_boats_can_see_each_other() {
     );
     let at = format!("127.0.0.1:{port}");
 
-    let mut alice = Link::join(&at, "alice").expect("a socket");
-    let mut bob = Link::join(&at, "bob").expect("a socket");
+    let mut alice = Link::join(&at, "alice", "").expect("a socket");
+    let mut bob = Link::join(&at, "bob", "").expect("a socket");
 
     // The handshake. Five seconds is generous — the hello repeats once a second and the
     // server is up in milliseconds — but a test that fails on a loaded machine teaches
@@ -154,4 +154,101 @@ fn a_server_says_it_is_there() {
     let (game, seed) = found.expect("a server that will not say it exists cannot be found");
     assert_eq!(seed, 99, "the beacon carries the sea it is offering");
     assert!(!game.is_empty(), "and something a person can recognise");
+}
+
+/// **The door**, and the two things it has to get right.
+///
+/// A game with a word on it lets in whoever says it and refuses whoever does not — and
+/// the refusal has to arrive, because a door that silently drops the knock is
+/// indistinguishable from a server that is not running, and somebody will spend an
+/// evening on their firewall over it.
+#[test]
+fn a_word_keeps_strangers_out_and_friends_in() {
+    // A port of its own: 7791 and 7792 are taken by the tests above, and two tests on
+    // one port is how the one above started failing for reasons that had nothing to do
+    // with it — it heard this server's beacon and reported this server's seed.
+    let port = 7794;
+    let word = std::env::temp_dir().join("sail-test-word");
+    std::fs::write(&word, "two bells\n").expect("a writable temp dir");
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_sail-server"))
+            .args([
+                "--port",
+                &port.to_string(),
+                "--seed",
+                "42",
+                "--word-file",
+                word.to_str().expect("a sane temp path"),
+            ])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("the server binary"),
+    );
+    let at = format!("127.0.0.1:{port}");
+
+    // The word is trimmed at both ends, so the newline an editor leaves on the file does
+    // not lock the owner out of his own game.
+    let mut friend = Link::join(&at, "friend", "two bells").expect("a socket");
+    assert!(
+        wait_for(&mut friend, 5.0, |e| matches!(e, Event::Joined { .. })),
+        "the word was right and the game did not let her in"
+    );
+
+    let mut stranger = Link::join(&at, "stranger", "three bells").expect("a socket");
+    assert!(
+        wait_for(&mut stranger, 5.0, |e| matches!(e, Event::Lost(_))),
+        "a stranger with the wrong word was not told no"
+    );
+    assert!(
+        stranger.id.is_none(),
+        "a stranger with the wrong word got an id"
+    );
+    let _ = std::fs::remove_file(&word);
+}
+
+/// And the client knocks again when the server comes back.
+///
+/// The failure this is about is quiet, which is why it needs a test rather than an eye:
+/// the server restarts, the client goes on sending snapshots with an id that no longer
+/// exists, and the only symptom is that the other boats are gone. It was the reason a
+/// service unit with `Restart=always` on it was a trap rather than a safety net.
+#[test]
+fn a_client_finds_its_way_back_after_the_server_restarts() {
+    let port = 7795;
+    let start = || {
+        Server(
+            Command::new(env!("CARGO_BIN_EXE_sail-server"))
+                .args(["--port", &port.to_string(), "--seed", "42"])
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .expect("the server binary"),
+        )
+    };
+    let first = start();
+    let at = format!("127.0.0.1:{port}");
+    let mut boat = Link::join(&at, "boat", "").expect("a socket");
+    assert!(
+        wait_for(&mut boat, 5.0, |e| matches!(e, Event::Joined { .. })),
+        "never got in to begin with"
+    );
+    let was = boat.id;
+
+    drop(first);
+    // Six seconds of silence is what both ends are waiting for, and then the knocking
+    // starts again. Ten is that plus room for a loaded machine.
+    assert!(
+        wait_for(&mut boat, 10.0, |e| matches!(e, Event::Quiet)),
+        "the client did not notice the game had gone quiet"
+    );
+    let _second = start();
+    assert!(
+        wait_for(&mut boat, 15.0, |e| matches!(e, Event::Joined { .. })),
+        "the server came back and the client never knocked again"
+    );
+    // And it is holding an id the new server actually issued. Which may be the same
+    // number as the old one — a server that has just started numbers from one, and the
+    // boat that rejoins first gets one again — so what is checked is that there is an
+    // id at all, by the handshake above rather than by the number.
+    assert!(boat.id.is_some(), "rejoined without an id");
+    let _ = was;
 }

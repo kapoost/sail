@@ -75,8 +75,42 @@ jobs:
             out/Sail.exe
             out/sail-server.exe
 
+  # The relay for a Linux box, which is where it actually lives: a four-euro VPS, or a
+  # machine somebody already rents for something else. Statically linked against musl so
+  # that one file runs on Debian, Ubuntu, Alpine and whatever the provider's image is —
+  # a glibc build made on the newest Ubuntu refuses to start on a two-year-old Debian,
+  # and finding that out over ssh is a bad evening.
+  #
+  # No Bevy in this tree, so the whole job is a couple of minutes.
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      # rust-lld rather than a cross toolchain from apt: there is no C in this crate's
+      # tree, so the linker that comes with rustup is enough and the job needs nothing
+      # installed.
+      - run: cargo build --release -p sail-net --bin sail-server --target x86_64-unknown-linux-musl
+      - run: cargo build --release -p sail-net --bin sail-server --target aarch64-unknown-linux-musl
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: -C linker=rust-lld
+      - run: |
+          mkdir -p out
+          cp target/x86_64-unknown-linux-musl/release/sail-server out/sail-server
+          cp target/aarch64-unknown-linux-musl/release/sail-server out/sail-server-arm64
+          ls -l out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            out/sail-server
+            out/sail-server-arm64
+
   publish:
-    needs: [macos, windows]
+    needs: [macos, windows, linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,6 +124,8 @@ jobs:
             artifacts/macos/Sail-macos.zip
             artifacts/windows/Sail.exe
             artifacts/windows/sail-server.exe
+            artifacts/linux/sail-server
+            artifacts/linux/sail-server-arm64
             assets/ATTRIBUTION.md
             assets/VT323-OFL.txt
           body: |
@@ -172,6 +208,20 @@ jobs:
             ```
             sail-server --seed 42
             ```
+
+            **On a server of your own**, so the game is there when you are not, there is
+            a Linux build in the files below — `sail-server` for an ordinary machine and
+            `sail-server-arm64` for an ARM one, both static, nothing to install. One
+            line puts it there as a service:
+
+            ```
+            curl -fsSL https://raw.githubusercontent.com/kapoost/sail/main/dist/install-server.sh | sudo sh
+            ```
+
+            It writes a word into `/etc/sail-server.env` and prints it. Everybody who is
+            sailing types the address and that word into the **TOGETHER** page. Without a
+            word anybody who finds the port can join, which is fine on your own wifi and
+            not on a public address.
 
             Everybody else presses **Esc** in the game and opens the **TOGETHER**
             page: a game on the same network is in the list and joining is one click.

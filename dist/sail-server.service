@@ -1,0 +1,47 @@
+# The relay, as a service. Installed by dist/install-server.sh.
+#
+# Written for a machine that is doing other things, which is the usual case and the one
+# worth being careful about: it runs as a user that does not exist until it starts, it
+# cannot see anything on the disk, and it cannot become anybody. If this unit is wrong
+# the worst it can do is not run.
+
+[Unit]
+Description=sail — the relay, the clock and the lobby
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# The seed, the port and the word live here. The file is 0600 and owned by root, and the
+# word never reaches the command line — /proc/<pid>/cmdline is readable by every user on
+# the machine, so an argument is a secret printed on the wall.
+EnvironmentFile=/etc/sail-server.env
+ExecStart=/usr/local/bin/sail-server --port ${SAIL_PORT} --seed ${SAIL_SEED}
+Restart=always
+RestartSec=2
+
+# A user invented at start and forgotten at stop. No account to log into, no home, no
+# password, nothing left behind on the disk.
+DynamicUser=yes
+
+# It needs a UDP socket and nothing else whatever.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+# Thirty-two megabytes is twenty times what it has ever used — measured at 1.6 MB with a
+# fleet aboard — so this is a ceiling against a fault rather than a budget.
+MemoryMax=32M
+TasksMax=16
+
+[Install]
+WantedBy=multi-user.target

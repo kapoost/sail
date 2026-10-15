@@ -34,6 +34,10 @@ pub struct Net {
     /// Where the panel will knock, and what to call yourself when it does.
     pub address: String,
     pub name: String,
+    /// The word the far end wants, if it wants one. A doorbell rather than a password —
+    /// it travels in the clear — so it is kept with the address rather than treated as
+    /// a credential, and it is never written to the log.
+    pub word: String,
     /// Looking for games on this network, while the panel's page is open. Dropping it
     /// stops the thread.
     pub scan: Option<sail_net::discovery::Scan>,
@@ -49,7 +53,9 @@ pub fn setup(mut commands: Commands) {
     if let Ok(server) = std::env::var("SAIL_JOIN") {
         let name = net.name.clone();
         net.address = server.clone();
-        match Link::join(&server, &name) {
+        net.word = std::env::var("SAIL_WORD").unwrap_or_default();
+        let word = net.word.clone();
+        match Link::join(&server, &name, &word) {
             Ok(link) => {
                 info!("knocking on {server} as {name}");
                 net.link = Some(link);
@@ -147,6 +153,7 @@ pub fn exchange(
         match event {
             Event::Joined { id, world, sky } => {
                 net.joined = true;
+                net.trouble.clear();
                 info!("joined as boat {id}");
                 // The day as that machine drew it. The trends the weather wanders on are
                 // measured against this base, so without taking it over, following the
@@ -231,6 +238,15 @@ pub fn exchange(
                         squalls.iter().map(|s| s.into_core()).collect(),
                     );
                 }
+            }
+            // Six seconds of silence, and the link is knocking again rather than
+            // giving up. Said out loud because the boats are about to vanish off the
+            // water and a person watching that happen deserves to know it is being
+            // dealt with — this is what a server restarting looks like from here.
+            Event::Quiet => {
+                info!("nothing from the game for six seconds — knocking again");
+                net.joined = false;
+                net.trouble = "the game went quiet — knocking again".into();
             }
             Event::Lost(why) => {
                 warn!("network: {why}");

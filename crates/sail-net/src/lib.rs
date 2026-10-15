@@ -30,7 +30,46 @@ use serde::{Deserialize, Serialize};
 /// Bumped whenever a message changes shape. Two versions that disagree refuse each other
 /// at the handshake rather than at the first malformed snapshot, because "my friend's
 /// boat is in the sky" is a much worse afternoon than "you are both on different builds".
-pub const PROTOCOL: u16 = 1;
+pub const PROTOCOL: u16 = 2;
+
+/// Whether an address is on the same network as us, for the things that only make
+/// sense there.
+///
+/// **Discovery is one of them, and getting it wrong is a hazard rather than an
+/// untidiness.** `WhoIsThere` is one byte and the beacon that answers it is about
+/// thirty, sent straight back to whatever address the shout claims to be from — which,
+/// on a public address and with a forged source, is a thirty-times amplifier pointed at
+/// a stranger. That is what a UDP reflector is, and it is how a hobby server gets its
+/// provider's abuse desk involved and its address null-routed: on a machine that is
+/// doing other work, that takes everything else down with it.
+///
+/// So the beacon answers the local network and nobody else. Nothing is lost: discovery
+/// exists so that a game on the wifi appears in a list without anybody typing an
+/// address, and a broadcast has never crossed a router in its life.
+pub fn on_our_own_network(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_broadcast()
+        }
+        // Loopback, link-local, and the unique-local block fc00::/7 — which is what a
+        // ZeroTier or Tailscale address is, and those are the two ways this game is
+        // meant to cross the internet.
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+        }
+    }
+}
+
+/// Nothing heard for this long and she is gone.
+///
+/// Six seconds is ninety missed snapshots and six missed weather reports: not a dropped
+/// packet, a closed window. Here rather than in the server because **both ends need the
+/// same number** — the server forgets a boat after it, and the client starts knocking
+/// again after it, so the two notice the same silence at the same moment and begin
+/// again together instead of one of them talking to somebody who is no longer listening.
+pub const FORGOTTEN: std::time::Duration = std::time::Duration::from_secs(6);
 
 /// The port the server listens on and the one discovery broadcasts to. Fixed rather than
 /// configurable: everybody on this network is a friend, and a port number nobody has to
@@ -255,6 +294,15 @@ pub enum ToServer {
     Hello {
         protocol: u16,
         name: String,
+        /// The word, when the game has one. Empty on a home network, where the door is
+        /// the front door and everybody on the wifi is a friend.
+        ///
+        /// It is not a password and it is not encryption: it travels in the clear, in a
+        /// UDP datagram, over a protocol with no secrecy anywhere in it. It is a
+        /// *doorbell* — the thing that stops a port scanner's packet turning into a boat
+        /// in your archipelago — and that is the whole of what a game of this size
+        /// needs. Anybody who wants it can have it; they are welcome to come sailing.
+        word: String,
     },
     /// Shouted at the whole network rather than sent to anybody: is there a game here?
     ///

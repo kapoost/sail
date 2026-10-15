@@ -16,7 +16,7 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use crate::{decode, encode, BoatId, Drawn, ToClient, ToServer, PROTOCOL};
+use crate::{decode, encode, BoatId, Drawn, ToClient, ToServer, FORGOTTEN, PROTOCOL};
 
 /// What the game needs to know about the state of its connection, in the order it
 /// happens.
@@ -39,6 +39,10 @@ pub enum Event {
         sky: crate::Sky,
         squalls: Vec<crate::Squall>,
     },
+    /// Nothing from the far end for six seconds, so we are knocking again. Not the same
+    /// thing as being lost: the link is still there and a `Joined` usually follows within
+    /// a second or two, which is what a server restart looks like from here.
+    Quiet,
     /// The far end said no, or there is nobody there. Carries something a person can
     /// read, because "it does not work" is the least useful sentence in networking.
     Lost(String),
@@ -61,7 +65,7 @@ impl Link {
     /// Does not block: the handshake happens on the thread, and the game finds out it is
     /// in when a `Joined` arrives. A game that cannot start until the network is up is a
     /// game that cannot be played alone, and sailing alone is the whole of this one.
-    pub fn join(server: &str, name: &str) -> std::io::Result<Self> {
+    pub fn join(server: &str, name: &str, word: &str) -> std::io::Result<Self> {
         let server: SocketAddr = server
             .to_socket_addrs()?
             .next()
@@ -73,9 +77,10 @@ impl Link {
         let (out_tx, out_rx) = channel::<Drawn>();
         let (in_tx, in_rx) = channel::<Event>();
         let name = name.to_string();
+        let word = word.trim().to_string();
         std::thread::Builder::new()
             .name("sail-net".into())
-            .spawn(move || run(socket, server, name, out_rx, in_tx))?;
+            .spawn(move || run(socket, server, name, word, out_rx, in_tx))?;
         Ok(Self {
             outgoing: out_tx,
             incoming: Mutex::new(in_rx),
@@ -118,6 +123,7 @@ fn run(
     socket: UdpSocket,
     server: SocketAddr,
     name: String,
+    word: String,
     outgoing: Receiver<Drawn>,
     incoming: Sender<Event>,
 ) {
@@ -126,6 +132,7 @@ fn run(
     let mut buf = [0u8; 2048];
     let mut knocked = Instant::now() - Duration::from_secs(9);
     let mut sent = Instant::now();
+    let mut heard = Instant::now();
     let every = Duration::from_secs_f32(1.0 / crate::SNAPSHOT_HZ);
     let mut latest: Option<Drawn> = None;
     loop {
@@ -148,6 +155,25 @@ fn run(
             }
         }
 
+        // **And knock again if the far end goes quiet.**
+        //
+        // The handshake used to happen once, for ever: welcomed, the client never said
+        // hello again. So a server that restarted — which on a machine with a
+        // `Restart=always` unit on it is a thing that happens by design — left everybody
+        // sending snapshots with an id it had never issued, which it quietly dropped on
+        // the floor. The boats went off the water one by one and nothing anywhere said
+        // why, and the only way back was to leave the game and join it again by hand.
+        //
+        // Six seconds of silence is ninety missed snapshots plus six missed weather
+        // reports: not a dropped packet, something that has stopped. The same number the
+        // server forgets a boat after, which is the point — by the time we notice it has
+        // gone, it has already forgotten us, so both ends start again together.
+        if id.is_some() && heard.elapsed() >= FORGOTTEN {
+            id = None;
+            knocked = Instant::now() - Duration::from_secs(9);
+            let _ = incoming.send(Event::Quiet);
+        }
+
         // Say hello until somebody says welcome, once a second. A server that is not up
         // yet is the commonest reason this fails and the commonest fix is to wait four
         // seconds while somebody finds the window.
@@ -156,6 +182,7 @@ fn run(
             let hello = encode(&ToServer::Hello {
                 protocol: PROTOCOL,
                 name: name.clone(),
+                word: word.clone(),
             });
             if socket.send_to(&hello, server).is_err() {
                 let _ = incoming.send(Event::Lost("cannot reach that address".into()));
@@ -177,6 +204,7 @@ fn run(
             if from.ip() != server.ip() {
                 continue;
             }
+            heard = Instant::now();
             let Some(msg) = decode::<ToClient>(&buf[..n]) else {
                 continue;
             };
@@ -196,6 +224,7 @@ fn run(
                     }
                     if id.is_none() {
                         id = Some(your_id);
+                        heard = Instant::now();
                         let _ = incoming.send(Event::Joined {
                             id: your_id,
                             world,

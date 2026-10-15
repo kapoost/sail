@@ -682,6 +682,31 @@ fn together(
                     join(net);
                 }
             });
+            // And the word, for a game that is not on this network.
+            //
+            // A game on the wifi has no door and needs none; a game on a public address
+            // has one, or the first port scan that reaches it is somebody's boat in your
+            // archipelago. It is a doorbell and not a password — it goes over the wire in
+            // the clear, like everything else here — so it is typed in a plain box
+            // beside the address rather than dressed up as a credential.
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("word")
+                        .color(egui::Color32::from_rgb(150, 150, 130))
+                        .monospace()
+                        .size(11.0),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut net.word)
+                        .desired_width(150.0)
+                        .hint_text("only if the game has one")
+                        .font(egui::TextStyle::Monospace),
+                )
+                .on_hover_text(
+                    "whoever is hosting will tell you this; a game on your own network \
+                     will not have one",
+                );
+            });
         }
     }
 
@@ -708,7 +733,7 @@ fn join(net: &mut crate::net::Net) {
         format!("{}:{}", net.address.trim(), sail_net::PORT)
     };
     net.trouble.clear();
-    match sail_net::link::Link::join(&address, &net.name) {
+    match sail_net::link::Link::join(&address, &net.name, &net.word.clone()) {
         Ok(link) => {
             net.link = Some(link);
             // Nothing to look for while we are in one.
@@ -875,7 +900,7 @@ mod tests {
         // the other end: a link is a socket and a thread, and it knocks into the dark
         // quite happily.
         let mut net = Net {
-            link: Some(sail_net::link::Link::join("127.0.0.1:1", "test").expect("a socket")),
+            link: Some(sail_net::link::Link::join("127.0.0.1:1", "test", "").expect("a socket")),
             joined: true,
             ..Default::default()
         };
