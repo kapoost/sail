@@ -58,7 +58,55 @@ pub struct Navigation {
     pub recognised: Vec<String>,
     /// What the glasses last made of what they are looking at, for the player to read.
     pub reading: Option<String>,
+    /// When she was last put somewhere with no idea where, and which of the cards was
+    /// drawn for it. `None` once it has been read.
+    pub adrift: Option<(f64, usize)>,
 }
+
+/// What the screen says when the world has just been taken away from underneath her.
+///
+/// **A joke, and it is doing a job.** Being dropped somewhere unknown is the one event
+/// in this game that arrives with no warning and no explanation — the screen simply
+/// changes — and the first thing a player needs is to be told that this was on purpose.
+/// A straight sentence would do it and would read like an error message, which is the
+/// one thing it must not; the drill is meant to be *enjoyable*, and a navigator who has
+/// lost the plot is the oldest joke at sea and the one every sailor has been the subject
+/// of.
+///
+/// So: the voice of the watch below, who is not sorry. The second line is the one that
+/// is actually useful, which is the other half of the trick — nobody reads instructions
+/// and everybody reads a punchline.
+const CARDS: [(&str, &str); 6] = [
+    (
+        "WHERE ARE WE",
+        "the chart is correct. the chart is always correct.",
+    ),
+    (
+        "GOOD MORNING",
+        "the watch below has left you a cold kettle and no position",
+    ),
+    (
+        "POSITION: AT SEA",
+        "accurate, unhelpful, and the honest answer until you take a bearing",
+    ),
+    (
+        "NOBODY MOVED THE ISLANDS",
+        "they are all exactly where the chart says. one of them is to starboard.",
+    ),
+    (
+        "THE LOG IS BLANK",
+        "which is either a quiet night or a navigator with his head down",
+    ),
+    (
+        "FORTY METRES OF WATER",
+        "and every fathom of it looks the same as the last",
+    ),
+];
+
+/// How long the card stays up, seconds. Long enough to read twice and short enough that
+/// nobody has to dismiss it — a drill that opens with a key press is a drill with a
+/// doorstep.
+const READ_IT: f64 = 7.0;
 
 impl Navigation {
     /// Whether the chart may show where she is.
@@ -96,7 +144,10 @@ pub fn cast_adrift(
     nav: &mut Navigation,
     chart: &mut crate::chart::Chart,
     track: &mut crate::chart::Track,
+    now: f64,
 ) {
+    // Which card, drawn from the clock so the same joke does not open every exercise.
+    nav.adrift = Some((now, (now * 7.0) as usize));
     // The log starts here: a track drawn from before the exercise is a line pointing
     // straight at the answer.
     nav.lost = true;
@@ -113,6 +164,84 @@ pub fn cast_adrift(
     chart.laid_at = Some(DVec2::ZERO);
     chart.plot.clear();
     track.clear();
+}
+
+/// The card, which is drawn for a few seconds and then is not.
+pub fn adrift_card(
+    mut contexts: bevy_egui::EguiContexts,
+    mut nav: ResMut<Navigation>,
+    sim: Res<Sim>,
+) -> Result {
+    let Some((since, which)) = nav.adrift else {
+        return Ok(());
+    };
+    let age = sim.sim.state.time - since;
+    if age > READ_IT {
+        nav.adrift = None;
+        return Ok(());
+    }
+    // Up at once and gone slowly, which is the way round that lets somebody look up from
+    // the tiller and still catch it.
+    let alpha = (1.0 - ((age - (READ_IT - 2.0)) / 2.0).max(0.0)).clamp(0.0, 1.0) as f32;
+    let ctx = contexts.ctx_mut()?;
+    let (words, under) = CARDS[which % CARDS.len()];
+    let fade = |c: bevy_egui::egui::Color32| {
+        bevy_egui::egui::Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (alpha * 255.0) as u8)
+    };
+    // Letter-spaced, like the shouts in the drill: it is the same voice at a different
+    // volume, and the spacing is what makes a line of monospace read as a *sign*.
+    let spaced: String = words
+        .chars()
+        .map(|c| {
+            if c == ' ' {
+                "   ".into()
+            } else {
+                format!("{c} ")
+            }
+        })
+        .collect();
+    use bevy_egui::egui;
+    egui::Area::new("adrift".into())
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -60.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgba_unmultiplied(
+                    6,
+                    7,
+                    9,
+                    (150.0 * alpha) as u8,
+                ))
+                .inner_margin(egui::Margin::symmetric(40, 16))
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            egui::RichText::new(spaced.trim_end())
+                                .color(fade(egui::Color32::from_rgb(232, 214, 150)))
+                                .monospace()
+                                .size(34.0),
+                        );
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new(under)
+                                .color(fade(egui::Color32::from_rgb(198, 202, 208)))
+                                .monospace()
+                                .size(13.0),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Shift B the glasses — name three marks, then Shift N and \
+                                 cross them",
+                            )
+                            .color(fade(egui::Color32::from_rgb(150, 200, 150)))
+                            .monospace()
+                            .size(11.0),
+                        );
+                    });
+                });
+        });
+    Ok(())
 }
 
 /// Somewhere at sea, sails set, position unknown.
@@ -221,7 +350,8 @@ pub fn lost_at_sea(
     sim.controls.main_sheet = main;
     sim.controls.jib_sheet = jib;
 
-    cast_adrift(&mut nav, &mut chart, &mut track);
+    let now = sim.sim.state.time;
+    cast_adrift(&mut nav, &mut chart, &mut track, now);
     pilot.disengage();
 
     info!(

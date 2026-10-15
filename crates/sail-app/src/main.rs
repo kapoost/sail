@@ -400,6 +400,7 @@ fn main() {
                 hud::draw,
                 tutorial::draw,
                 sight::draw,
+                navigation::adrift_card,
                 boathook::draw,
             )
                 .chain(),

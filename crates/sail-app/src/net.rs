@@ -162,7 +162,8 @@ pub fn rebuild(
     // the game from the launcher a thing worth doing to a fleet rather than an
     // inconvenience. The boat has already been put somewhere by the new simulation
     // above; this is the half that happens to the paper. See `navigation::cast_adrift`.
-    crate::navigation::cast_adrift(&mut nav_state, &mut chart, &mut track);
+    let now = sim.sim.state.time;
+    crate::navigation::cast_adrift(&mut nav_state, &mut chart, &mut track, now);
     info!(
         "sailing in seed {} now — and nobody knows where they are",
         world.seed
