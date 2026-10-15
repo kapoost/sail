@@ -533,17 +533,26 @@ impl BoatConfig {
         let main_luff = packet::MAIN_LUFF;
         // How far the boom can be eased before it lies on the cap shroud.
         //
-        // Not a round number and not a guess: worked out from this boat's own rig.
-        // The shroud runs from the masthead at 16.0 m to the rail at 0.45 of the beam,
-        // so at boom height it stands 1.33 m outboard and 0.35 m abaft the mast —
-        // which from the gooseneck is a bearing of 75 degrees at 1.38 m along the
-        // boom. Past that the spar is through the wire.
+        // Not a round number and not a guess: worked out from this boat's own rig. The
+        // shroud runs from the masthead at 16.0 m to the chainplate, which stands just
+        // inboard of the toerail at the station it is on — 1.22 m off the centreline,
+        // 0.40 m abaft the mast — so at boom height it is 1.01 m outboard and 0.33 m
+        // aft, which from the gooseneck is a bearing of **72 degrees at 1.07 m along
+        // the boom**. Past that the spar is through the wire.
+        //
+        // **It was 75, and the three degrees are a correction rather than a retune.**
+        // The old figure put the chainplate at 0.45 of her *greatest* beam, and her
+        // greatest beam is abaft amidships while the chainplates are forward of it: that
+        // is a quarter of a metre outboard of the deck she actually has at that station,
+        // which is where the shrouds were landing until the drawing caught it. One
+        // station, one number, and both ends of the boat now use the same one.
         //
         // It matters because it is the reason you cannot square a main off on a run,
         // the reason a preventer exists, and the reason a boat of this rig sails deep
-        // angles worse than the polar alone suggests. Ninety degrees — what this was —
-        // is a boom that has swung through its own standing rigging.
-        let boom_against_shrouds = rad(75.0);
+        // angles worse than the polar alone suggests. Ninety degrees — what this was
+        // before either figure — is a boom that has swung through its own standing
+        // rigging.
+        let boom_against_shrouds = rad(72.0);
         let genoa_area = packet::GENOA_AREA;
         let genoa_luff = packet::GENOA_LUFF;
 

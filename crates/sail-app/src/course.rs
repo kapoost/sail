@@ -375,17 +375,15 @@ pub fn update(
 
 /// Give up on this consignment and take another from where you are.
 pub fn restart(
-    keys: Res<ButtonInput<KeyCode>>,
     mut sim: ResMut<Sim>,
     mut course: ResMut<Course>,
     mut marks: Query<&mut Floating, With<Destination>>,
 ) {
-    // Either the key or the button on the console. This was `L` and nothing else, which
-    // made it one of the three things on the boat a mouse could not reach at all.
-    // Shift and L is a different thing entirely — it puts her somewhere at sea with no
-    // idea where — so a consignment is only asked for by the bare key.
-    let shifted = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    let asked = (keys.just_pressed(KeyCode::KeyL) && !shifted) || course.wants_new;
+    // **No key.** Asking for a new consignment is not a thing you do with a thumb in a
+    // hurry: it throws away the passage you are on. It lives on a button in the console
+    // and on the settings page, where pressing it is a decision rather than a neighbour
+    // of the key you meant. Taken off the keyboard from the deck.
+    let asked = course.wants_new;
     course.wants_new = false;
     if !asked {
         return;

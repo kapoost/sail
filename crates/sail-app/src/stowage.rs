@@ -555,7 +555,6 @@ pub fn setup(
         perceptual_roughness: 0.9,
         ..default()
     });
-    let chock = meshes.add(Cuboid::new(0.10, 0.09, 0.07));
     let lashing = meshes.add(Torus::new(0.026, 0.034));
     commands.entity(root).with_children(|b| {
         // **In chocks, like the boathook and for the same reason.** A six-foot spar
@@ -596,14 +595,18 @@ pub fn setup(
             );
         });
         for along in [-club * 0.3, club * 0.3] {
+            // **Each cradle is as tall as the gap it has to fill.** The deck runs uphill
+            // towards the bow and the spar lies level, so a pair of chocks of one height
+            // has the spar sitting on the forward one with daylight under the after one
+            // — reported from the deck as not touching one of them. The spar's underside
+            // is a line; the deck under it is not; the chock is the difference.
+            let under = club_end(club_z) - 0.040;
+            let stands_on = crate::deck::deck_height(club_z + along);
+            let tall = (under - stands_on).max(0.02);
             b.spawn((
-                Mesh3d(chock.clone()),
+                Mesh3d(meshes.add(Cuboid::new(0.10, tall, 0.07))),
                 MeshMaterial3d(teak.clone()),
-                Transform::from_xyz(
-                    CLUB_X,
-                    crate::deck::deck_height(club_z + along) + 0.03,
-                    club_z + along,
-                ),
+                Transform::from_xyz(CLUB_X, stands_on + tall * 0.5, club_z + along),
             ));
             b.spawn((
                 Mesh3d(lashing.clone()),

@@ -206,15 +206,16 @@ pub fn spawn(b: &mut ChildSpawnerCommands, w: &mut Workshop) {
     for starboard in [false, true] {
         let side = if starboard { 1.0 } else { -1.0 };
         let (_, foot) = crate::boat::shroud(w.beam, starboard);
-        // A metre up the wire, where the hand that lights it can reach and where the
-        // light is clear of the rail. The shroud leans in as it goes up, so the lamp
-        // follows it rather than hanging off into the air beside it.
-        let up = 0.95;
-        let lean = 1.0 - up / 12.0;
+        chainplate(w, b, foot, side);
+        // **On the chainplate**, which is where a lamp goes on a boat with no pulpit
+        // rails to hang one from: bolted to the same plate the shroud is, at the height
+        // a hand reaches to light it and clear of a sheet sweeping the deck. It was a
+        // metre up the wire before, which is a lamp hanging off a rigging wire by
+        // nothing — and the wire moves.
         navigation_lamp(
             w,
             b,
-            Vec3::new(foot.x * lean - side * 0.02, foot.y + up, foot.z),
+            Vec3::new(foot.x - side * 0.015, foot.y + 0.17, foot.z - 0.11),
             if starboard {
                 Color::srgb(0.08, 0.62, 0.20)
             } else {
@@ -1298,4 +1299,91 @@ pub fn spar_end(
             ));
         }
     }
+}
+
+/// The chainplate: what a shroud is actually made fast to.
+///
+/// A wire that stops above the deck is a wire a sailor cannot believe in, and this is
+/// the fitting that was missing under it: a steel strap through the deck edge, bolted to
+/// a frame below, with a rigging screw standing on top of it and a toggle at the head of
+/// that where the wire is pinned. Every part of it is there because the load has to get
+/// from the wire into the hull, and the screw is there because standing rigging is
+/// *tuned* — which is why one wound all the way in is a thing a surveyor writes down.
+///
+/// `foot` is where the wire ends, which is the top of the screw, so everything here is
+/// built downwards from it to the deck.
+fn chainplate(w: &mut Workshop, b: &mut ChildSpawnerCommands, foot: Vec3, side: f32) {
+    let steel = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.62, 0.64, 0.67),
+        perceptual_roughness: 0.34,
+        metallic: 0.9,
+        ..default()
+    });
+    let bronze = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.58, 0.44, 0.22),
+        perceptual_roughness: 0.4,
+        metallic: 0.8,
+        ..default()
+    });
+    let deck = foot.y - crate::boat::CHAINPLATE_HEIGHT;
+    let flat = std::f32::consts::FRAC_PI_2;
+
+    // The strap, standing a hand's breadth out of the deck and leaning the way the wire
+    // pulls — a chainplate is always in line with its shroud, because a strap loaded
+    // across its own flat bends.
+    let plate = w.meshes.add(Cuboid::new(0.012, 0.22, 0.055));
+    b.spawn((
+        Mesh3d(plate),
+        MeshMaterial3d(steel.clone()),
+        Transform::from_xyz(foot.x, deck + 0.06, foot.z)
+            .with_rotation(Quat::from_rotation_z(-side * 0.06)),
+    ));
+    // Three bolts through it, which is what takes the load into the frame below.
+    let bolt = w.meshes.add(Cylinder::new(0.009, 0.02));
+    for (up, fore) in [(0.02, -0.016), (0.055, 0.0), (0.09, 0.016)] {
+        b.spawn((
+            Mesh3d(bolt.clone()),
+            MeshMaterial3d(bronze.clone()),
+            Transform::from_xyz(foot.x - side * 0.008, deck + up, foot.z + fore)
+                .with_rotation(Quat::from_rotation_z(flat)),
+        ));
+    }
+    // The rigging screw: a body with a thread showing above and below it, which is the
+    // whole of what one looks like and the only part anybody checks.
+    let body = w.meshes.add(Cylinder::new(0.018, 0.12));
+    let thread = w.meshes.add(Cylinder::new(0.009, 0.06));
+    b.spawn((
+        Mesh3d(body),
+        MeshMaterial3d(steel.clone()),
+        Transform::from_xyz(foot.x, deck + 0.17, foot.z),
+    ));
+    for up in [0.10, 0.245] {
+        b.spawn((
+            Mesh3d(thread.clone()),
+            MeshMaterial3d(steel.clone()),
+            Transform::from_xyz(foot.x, deck + up, foot.z),
+        ));
+    }
+    // The toggle at the head of it, which is the joint that lets the wire lie the way it
+    // wants: two cheeks and a pin, and a split pin through the pin, because the one
+    // fitting on a boat that must never undo itself is this one.
+    for cheek in [-1.0, 1.0] {
+        b.spawn((
+            Mesh3d(w.meshes.add(Cuboid::new(0.007, 0.05, 0.022))),
+            MeshMaterial3d(steel.clone()),
+            Transform::from_xyz(foot.x + cheek * 0.012, foot.y - 0.015, foot.z),
+        ));
+    }
+    b.spawn((
+        Mesh3d(w.meshes.add(Cylinder::new(0.005, 0.034))),
+        MeshMaterial3d(steel.clone()),
+        Transform::from_xyz(foot.x, foot.y - 0.028, foot.z)
+            .with_rotation(Quat::from_rotation_z(flat)),
+    ));
+    b.spawn((
+        Mesh3d(w.meshes.add(Torus::new(0.0025, 0.009))),
+        MeshMaterial3d(bronze),
+        Transform::from_xyz(foot.x + 0.018, foot.y - 0.028, foot.z)
+            .with_rotation(Quat::from_rotation_z(flat)),
+    ));
 }

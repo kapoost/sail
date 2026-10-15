@@ -688,7 +688,7 @@ pub fn draw(
                         if small_button(
                             ui,
                             match course.leg {
-                                Leg::Idle => "TAKE A JOB  L",
+                                Leg::Idle => "TAKE A JOB",
                                 Leg::Carrying => "GIVE UP, NEW JOB",
                             },
                         )

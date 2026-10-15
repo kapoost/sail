@@ -40,6 +40,8 @@ pub enum Tab {
     Sound,
     Picture,
     Weather,
+    /// The consignment: what she is carrying and how to be rid of it.
+    Passage,
     Network,
     /// Practice: the man-overboard drill, which is the one manoeuvre worth a page of its
     /// own because it is the one nobody has practised.
@@ -154,6 +156,7 @@ pub fn draw(
     mut net: ResMut<crate::net::Net>,
     fleet: Res<crate::fleet::Fleet>,
     mut lesson: ResMut<crate::tutorial::Tutorial>,
+    mut course: ResMut<crate::course::Course>,
 ) -> Result {
     if !settings.open {
         net.scan = None;
@@ -428,6 +431,9 @@ pub fn draw(
                     });
                 }
 
+                if settings.tab == Tab::Passage {
+                    passage(ui, &mut course);
+                }
                 if settings.tab == Tab::Drill {
                     drill(ui, &mut lesson);
                 }
@@ -457,6 +463,43 @@ pub fn draw(
 
 /// The drill page: start it, stop it, and what it is for.
 ///
+/// The passage: what she is carrying, and the one way out of it.
+///
+/// **A page rather than a key.** Asking for a new consignment used to be `L`, which put
+/// a thing that throws away the passage you are on next to the keys that trim the boat —
+/// and `L` is a neighbour of nothing in particular, which is exactly the problem: a key
+/// with no reason to be that key is a key somebody presses by mistake. Taken off the
+/// keyboard from the deck. It is here and on the console button, both of which take a
+/// deliberate hand.
+fn passage(ui: &mut egui::Ui, course: &mut crate::course::Course) {
+    use crate::course::Leg;
+    heading(ui, "THE PASSAGE");
+    ui.label(
+        egui::RichText::new(match course.leg {
+            Leg::Carrying => "carrying a consignment",
+            Leg::Idle => "nothing aboard — the yard has work whenever you want it",
+        })
+        .color(egui::Color32::from_rgb(176, 182, 190))
+        .monospace()
+        .size(11.0),
+    );
+    ui.add_space(8.0);
+    if ui
+        .button(
+            egui::RichText::new(match course.leg {
+                Leg::Carrying => "GIVE UP THIS ONE, TAKE ANOTHER",
+                Leg::Idle => "TAKE A JOB",
+            })
+            .monospace()
+            .size(12.0),
+        )
+        .on_hover_text("the same button as the one on the console")
+        .clicked()
+    {
+        course.wants_new = true;
+    }
+}
+
 /// A page rather than a key, because starting a man-overboard drill by accident in the
 /// middle of a delivery would be a poor joke, and because this is where somebody who has
 /// just opened the game looks for the thing that teaches them to sail it.
@@ -525,10 +568,11 @@ pub fn tabs(ui: &mut egui::Ui, current: &mut Tab) {
 
 /// In the order they are read, which is the order they were added in and also the order
 /// of how often anybody touches them.
-pub const PAGES: [(Tab, &str); 5] = [
+pub const PAGES: [(Tab, &str); 6] = [
     (Tab::Sound, "SOUND"),
     (Tab::Picture, "PICTURE"),
     (Tab::Weather, "WEATHER"),
+    (Tab::Passage, "PASSAGE"),
     (Tab::Network, "TOGETHER"),
     (Tab::Drill, "DRILL"),
 ];

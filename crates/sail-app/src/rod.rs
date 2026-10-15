@@ -406,6 +406,18 @@ pub fn setup(
     });
 }
 
+/// Where the foot of the holder is bolted to the deck, for anything that has to be made
+/// fast to it.
+///
+/// Which turns out to be the creel: a basket over the side needs its line tied to
+/// *something*, and the nearest something on that quarter is the holder's own base. One
+/// function because the two must agree — a rope ending near a fitting rather than on it
+/// is the thing that reads as unfinished from two metres away.
+pub fn holder_foot() -> Vec3 {
+    let at = butt();
+    Vec3::new(at.x, crate::deck::deck_height(HOLDER_Z) + 0.03, at.z)
+}
+
 /// Where the butt of the rod sits, in boat coordinates.
 fn butt() -> Vec3 {
     Vec3::new(

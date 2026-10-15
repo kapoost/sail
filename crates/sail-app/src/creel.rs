@@ -225,6 +225,42 @@ pub fn setup(
     let fish = meshes.add(Sphere::new(0.5).mesh().ico(2).expect("a fish"));
 
     commands.entity(root).with_children(|b| {
+        // **The standing part**, from the rod holder's foot to where the rope bears on
+        // the rail.
+        //
+        // The swinging part hangs from the rail, which is right — that is where the
+        // weight is taken and where the pendulum pivots — but a rope that *begins* at
+        // the rail begins nowhere, and from two metres away it reads as a basket hanging
+        // off the air. A line is made fast to something, and the something on this
+        // quarter is the foot of the rod holder, a foot and a half forward. Reported
+        // from the deck with a picture of it.
+        //
+        // Static rather than part of the swing: this length of it is bar-taut between
+        // two fittings and does not move. See `rod::holder_foot`.
+        let from = crate::rod::holder_foot();
+        let to = cleat();
+        let span = to - from;
+        b.spawn((
+            Mesh3d(meshes.add(Cylinder::new(0.006, span.length()))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.76, 0.70, 0.54),
+                perceptual_roughness: 0.95,
+                ..default()
+            })),
+            Transform::from_translation(from + span * 0.5)
+                .with_rotation(Quat::from_rotation_arc(Vec3::Y, span.normalize())),
+        ));
+        // And a turn round the holder's foot where it is made fast, which is what the
+        // eye looks for to believe the knot.
+        b.spawn((
+            Mesh3d(meshes.add(Torus::new(0.006, 0.028))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.76, 0.70, 0.54),
+                perceptual_roughness: 0.95,
+                ..default()
+            })),
+            Transform::from_translation(from),
+        ));
         // The hanging point is the cleat; everything below swings about it, which is why
         // the lanyard and the basket are children of one entity rotating there rather
         // than two things kept in step.

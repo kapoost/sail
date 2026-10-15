@@ -227,7 +227,6 @@ pub fn setup(
     let shaft = meshes.add(Cylinder::new(0.022, SHAFT));
     // The cradles: a block each side of the shaft rather than a bar under it, which is
     // what a chock is — the spar drops into the notch between them.
-    let w_chock = meshes.add(Cuboid::new(0.10, 0.09, 0.07));
     let w_cord = meshes.add(Torus::new(0.030, 0.038));
     let teak = materials.add(StandardMaterial {
         base_color: Color::srgb(0.46, 0.34, 0.20),
@@ -301,10 +300,15 @@ pub fn setup(
         .with_children(&head);
         // The cradles it sits in, and the cord over the top of it.
         for along in [-0.62, 0.42] {
+            // As tall as the gap it fills: the deck runs uphill towards the bow and the
+            // spar lies level, so one height for both cradles leaves daylight under one
+            // of them. The same fault the club's chocks had.
+            let stands_on = crate::deck::deck_height(CHOCKS_Z + along);
+            let tall = (rests_at - 0.022 - stands_on).max(0.02);
             b.spawn((
-                Mesh3d(w_chock.clone()),
+                Mesh3d(meshes.add(Cuboid::new(0.10, tall, 0.07))),
                 MeshMaterial3d(teak.clone()),
-                Transform::from_xyz(out, deck + 0.045, CHOCKS_Z + along),
+                Transform::from_xyz(out, stands_on + tall * 0.5, CHOCKS_Z + along),
             ));
             b.spawn((
                 Mesh3d(w_cord.clone()),

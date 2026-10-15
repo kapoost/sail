@@ -184,7 +184,6 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             ("Tab", "the diagnostic panel"),
             ("H", "hide the console"),
             ("K", "mute"),
-            ("L", "ask for a new consignment"),
             ("Esc", "settings — sound, music, weather, sea"),
         ],
     ),
@@ -241,6 +240,8 @@ pub const DOCUMENTED: [KeyCode; 44] = [
     KeyCode::Tab,
     KeyCode::KeyH,
     KeyCode::KeyK,
+    // Still here with the bare key gone: Shift and L is somewhere at sea, which is a
+    // different thing and is listed under finding out where you are.
     KeyCode::KeyL,
     KeyCode::Escape,
     // The hand bearing compass.

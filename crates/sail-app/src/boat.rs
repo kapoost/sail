@@ -1576,11 +1576,38 @@ fn foot_for_area(area: f32, luff: Vec3, foot_dir: Vec3, cloth_over_triangle: f32
 /// somewhere else is worse than no constraint at all.
 pub fn shroud(beam: f32, starboard: bool) -> (Vec3, Vec3) {
     let side = if starboard { 1.0 } else { -1.0 };
+    let _ = beam;
+    let z = MAST_FOOT_Z + 0.4;
     (
         Vec3::new(0.0, crate::rig::MAST_HEAD, MAST_FOOT_Z),
-        Vec3::new(side * beam * 0.45, DECK, MAST_FOOT_Z + 0.4),
+        // **On the deck she actually has, not on her widest beam.**
+        //
+        // This was `beam * 0.45` and `DECK`, which are two numbers about the boat as a
+        // whole used at a station where neither holds: her greatest beam is abaft
+        // amidships and the chainplates are forward of it, so 0.45 of the maximum put
+        // the foot of the wire *a quarter of a metre outboard of the deck edge*, and the
+        // flat deck constant put it nineteen centimetres above the deck it is bolted to.
+        // The wire ended in mid-air beside the boat. Reported from the deck as the
+        // shrouds not reaching it, which was exactly right.
+        //
+        // Now it is the same two functions the deck is drawn from, at the station the
+        // chainplate is on: just inboard of the toerail, and up at the top of the
+        // rigging screw, which is where a wire ends on a real boat — the screw and the
+        // plate below it are the fitting, and they are drawn in `fittings`.
+        Vec3::new(
+            side * (crate::deck::inside_the_rail(z) - 0.045),
+            crate::deck::deck_height(z) + CHAINPLATE_HEIGHT,
+            z,
+        ),
     )
 }
+
+/// How far above the deck the wire ends: the plate, the screw and the toggle.
+///
+/// Three hundred millimetres is a rigging screw on a boat this size with a little of
+/// its thread showing, which is what a surveyor wants to see — one wound all the way in
+/// has nothing left to tune with.
+pub const CHAINPLATE_HEIGHT: f32 = 0.30;
 
 /// The leeward shroud as the rigging actually draws it, sagged and all.
 ///

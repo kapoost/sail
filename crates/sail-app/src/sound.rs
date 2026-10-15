@@ -72,6 +72,7 @@ impl Default for SeaParams {
             bell: AtomicU32::default(),
             water_level: AtomicU32::default(),
             sea_surge: AtomicU32::default(),
+            sea_slam: AtomicU32::default(),
             water_cutoff: AtomicU32::default(),
             flog_level: AtomicU32::default(),
             flog_hz: AtomicU32::default(),
@@ -113,6 +114,17 @@ pub struct SeaParams {
     bell: AtomicU32,
     water_level: AtomicU32,
     water_cutoff: AtomicU32,
+    /// A wave arriving: how hard she was hit, 0 to 1, taken rather than read.
+    ///
+    /// **A wave against a hull is an event with a shape**, and the swelling hiss on its
+    /// own has no front to it. What you hear from inside a boat is a *blow* and then the
+    /// water running off her: the impact is low and over in a moment, the run-off is
+    /// bright and takes a second to die away. Modelling only the second of those is the
+    /// difference between a sea and a tap running.
+    ///
+    /// One shot per wave rather than a level, because that is what it is — and because
+    /// a level cannot have an attack.
+    sea_slam: AtomicU32,
     /// How hard the sea is working on the hull just now, 0 to 1.
     ///
     /// **The sound of a wave is an event and the water voice had none in it.** What was
@@ -645,6 +657,11 @@ pub struct SeaStream {
     wind_b: OnePole,
     water_lp: OnePole,
     water_hp: OnePole,
+    /// The blow of a wave, which is low and has no pitch in it.
+    slam_lp: OnePole,
+    /// The two decays whose difference is the envelope of one: see the water voice.
+    slam_slow: f32,
+    slam_fast: f32,
     rain_lp: OnePole,
     rope_lp: OnePole,
     /// Canvas has a body to it. See the flogging block.
@@ -723,6 +740,9 @@ impl SeaStream {
             wind_a: OnePole::default(),
             wind_b: OnePole::default(),
             water_lp: OnePole::default(),
+            slam_lp: OnePole::default(),
+            slam_slow: 0.0,
+            slam_fast: 0.0,
             water_hp: OnePole::default(),
             rain_lp: OnePole::default(),
             rope_lp: OnePole::default(),
@@ -778,6 +798,7 @@ impl Iterator for SeaStream {
             t_water,
             t_water_cut,
             t_surge,
+            slam,
             t_flog,
             flog_hz,
             t_rain,
@@ -801,6 +822,8 @@ impl Iterator for SeaStream {
                 load(&p.water_level),
                 load(&p.water_cutoff),
                 load(&p.sea_surge),
+                // Taken, not read: swapping zero in is what makes a one-shot fire once.
+                f32::from_bits(p.sea_slam.swap(0, Ordering::Relaxed)),
                 load(&p.flog_level),
                 load(&p.flog_hz),
                 load(&p.rain_level),
@@ -894,11 +917,31 @@ impl Iterator for SeaStream {
         // The little half-hertz wobble that used to be here is gone with it. It was a
         // frequency somebody chose, it never agreed with a single wave on the screen,
         // and what it bought was the *impression* of a sea in a game that now has one.
-        let surge = 0.74 + 0.9 * self.smooth.sea_surge;
+        // The blow, when one arrives. Two decays subtracted from each other, which is
+        // the cheapest envelope there is and the only shape that has a front on it: the
+        // fast one climbs out of the slow one in twenty milliseconds and then the slow
+        // one is left, dying over about a second. Twenty milliseconds is a hull being
+        // hit; a second is the water finding its way back off her.
+        if slam > 0.0 {
+            self.slam_slow = (self.slam_slow + slam).min(1.6);
+            self.slam_fast = (self.slam_fast + slam).min(1.6);
+        }
+        self.slam_slow *= 0.99993;
+        self.slam_fast *= 0.9986;
+        let blow = (self.slam_slow - self.slam_fast).max(0.0);
+        let surge = 0.74 + 0.9 * self.smooth.sea_surge + 1.5 * blow;
         let n2 = self.noise();
-        let low = self.water_lp.run(n2, self.smooth.water_cutoff);
+        // Brighter while the water is running off her, which is what the hiss of a wave
+        // draining is: the same noise with the top let through.
+        let cutoff = self.smooth.water_cutoff + 1_100.0 * blow;
+        let low = self.water_lp.run(n2, cutoff);
         let dc = self.water_hp.run(low, 110.0);
         let water = (low - dc) * self.smooth.water * surge * 3.4;
+        // And the blow itself, which is not a hiss at all: a solid body of water against
+        // a hull is low, broad and short, and it is the sound you feel in your feet
+        // rather than hear. Squared, so the big ones are the ones that thump.
+        let n3 = self.noise();
+        let thump = self.slam_lp.run(n3, 150.0) * blow * blow * 9.0;
 
         // --- Rain on the deck ------------------------------------------------------
         //
@@ -1163,7 +1206,7 @@ impl Iterator for SeaStream {
         // which by the reel's own design is exactly "line is going out"; winching a sheet
         // in does not duck anything.
         let duck = 1.0 / (1.0 + 3.0 * (self.smooth.gear - 1.0).max(0.0));
-        let mix = ((wind + water + rain) * t_sea + (rig + flog + gear + bell) * t_boat)
+        let mix = ((wind + water + thump + rain) * t_sea + (rig + flog + gear + bell) * t_boat)
             * MASTER
             * t_master
             + song * t_music * t_master * duck
@@ -1232,6 +1275,11 @@ pub struct Worked {
     line_out: f64,
     lines: [f64; 6],
     boom: f64,
+    /// Her vertical rate and its rate of change, for finding the moment a wave hits
+    /// rather than the fact that one is about. See the slam above.
+    heave_rate: f64,
+    accel: f32,
+    since_slam: f32,
     started: bool,
 }
 
@@ -1309,6 +1357,31 @@ pub fn update(
     // `the_sea_voice` below, which is also where the three conditions are printed.
     let lift = (sim.sim.state.heave_rate.abs() as f32 - 0.25).max(0.0) / 0.75;
     store(&p.sea_surge, lift.clamp(0.0, 1.0).powf(0.85));
+
+    // **And the blow at the front of it.**
+    //
+    // A wave does not fade in. She falls, the water stops her, and what you hear is a
+    // thump followed by a second of it running off her — so the event is the moment the
+    // hull is *decelerated*, which is her vertical acceleration and nothing else.
+    //
+    // The threshold is measured rather than chosen: in a metre of coastal sea this
+    // boat's vertical acceleration is a tenth of a metre a second squared half the time,
+    // one and three tenths at the ninetieth, and three at the worst of it. One and two
+    // tenths therefore picks out the top tenth of them, which is what "a wave hit her"
+    // means — the rest of the sea is the swelling hiss above and does not need a bang.
+    //
+    // One per wave and not one per frame: it fires on the way *up* through the
+    // threshold and then holds off for a third of a second, which is shorter than any
+    // wave and longer than the ringing of one.
+    let step = time.delta_secs().max(0.004);
+    let accel = (sim.sim.state.heave_rate - was.heave_rate) as f32 / step;
+    was.heave_rate = sim.sim.state.heave_rate;
+    was.since_slam += step;
+    if accel > 1.2 && was.accel <= 1.2 && was.since_slam > 0.33 {
+        was.since_slam = 0.0;
+        store(&p.sea_slam, ((accel - 1.2) / 1.8).clamp(0.08, 1.0));
+    }
+    was.accel = accel;
 
     // Flogging: the worse-behaved of the two sails, and faster in more wind.
     let luffing = t
@@ -2039,6 +2112,36 @@ mod the_sea_voice {
             loud as f64 / all as f64 * 100.0,
         );
         println!("the sea speaks {heard:.0}% of the time, and is loud {loud:.0}%");
+        {
+            // Jak mocne są pionowe przyspieszenia — na razie pomiar, nie asercja.
+            let mut sim2 = Simulation::new(
+                sail_core::boat::BoatConfig::charter_sloop_34(),
+                BoatState::at_rest(0.0),
+                Box::new(sail_core::wind::SteadyWind::new(0.0, breeze)),
+            )
+            .with_water(Box::new(sail_core::water::WindSea::new(
+                breeze, 20_000.0, 0.0, 11,
+            )));
+            let mut prev = 0.0f64;
+            let mut peaks: Vec<f64> = Vec::new();
+            for step in 0..(180.0 / SUBSTEP) as u32 {
+                sim2.run(SUBSTEP, &controls);
+                let a = (sim2.state.heave_rate - prev) / SUBSTEP;
+                prev = sim2.state.heave_rate;
+                if (step as f64) * SUBSTEP > 30.0 {
+                    peaks.push(a);
+                }
+            }
+            peaks.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let at = |q: f64| peaks[(peaks.len() as f64 * q) as usize];
+            println!(
+                "pionowe przyspieszenie m/s2: p50 {:.2}  p90 {:.2}  p99 {:.2}  max {:.2}",
+                at(0.5),
+                at(0.9),
+                at(0.99),
+                peaks[peaks.len() - 1]
+            );
+        }
         // And what the level under it comes to, in the three conditions that matter.
         for (name, stw_kn, hs, tws_kn) in [
             ("ghosting on a millpond", 6.0_f32, 0.0_f32, 5.0_f32),
