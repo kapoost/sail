@@ -245,10 +245,6 @@ pub fn draw(
     };
     let ctx = contexts.ctx_mut()?;
     let st = &sim.sim.state;
-    // Where the middle of the paper is: her position when the chart is following her,
-    // and wherever it was laid down when it is not.
-    let middle_of_paper = chart.laid_at.unwrap_or(st.pos);
-
     let screen = ctx.viewport_rect();
     let spread = chart.spread;
     // Whether the chart may say where she is.
@@ -259,6 +255,23 @@ pub fn draw(
     // you are lost — and what goes is the boat, her track, and the line to the place she
     // is bound, which between them give the position away three times over.
     let knows = nav.shows_position(sim.sim.state.time);
+    // Where the middle of the paper is.
+    //
+    // **The one in the corner is always under the boat** when the boat is a thing the
+    // chart may draw, which is what a glance at a corner is for: you are not reading it,
+    // you are checking the water ahead, and a window that has quietly been left behind
+    // five miles astern is worse than no window. Reported from the deck after a fix went
+    // in and the corner stayed where the fix was.
+    //
+    // Lost, it cannot follow her — the middle of the window would say where she is as
+    // plainly as drawing her on it — so it stays on the paper as laid. And the chart on
+    // the table always stays where it was put, because that is what a chart on a table
+    // does: you lay it over the bit of coast you are working on and it waits there.
+    let middle_of_paper = if knows && !spread {
+        st.pos
+    } else {
+        chart.laid_at.unwrap_or(st.pos)
+    };
     // Set inside the closure and applied after it: the painter borrows the chart.
     let mut set_dividers: Option<(glam::DVec2, glam::DVec2)> = None;
     let mut clear_dividers = false;

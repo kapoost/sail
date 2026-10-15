@@ -91,6 +91,41 @@ pub struct TillerPilot {
     /// sustains itself. Every real pilot has an off-course alarm for exactly this,
     /// and the right response is to hand the helm back rather than keep pulling.
     saturated_for: f64,
+    effort: Effort,
+}
+
+/// What the ram was asked for and what it managed, last step.
+///
+/// Here because "the pilot is not holding the course" has three quite different causes
+/// that look identical from the deck and identical in the rudder angle: the loop asking
+/// for too little, the loop asking for more helm than the ram can hold against the
+/// load, and the loop asking for helm faster than the ram can swing it. The first is
+/// tuning, the second is too much sail, and the third is a seaway. Telling them apart
+/// needs the ask and the answer side by side, which is all this is.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Effort {
+    /// What the loop wanted, radians, before any limit.
+    pub asked: f64,
+    /// What the helm actually got.
+    pub gave: f64,
+    /// The most helm the ram can hold against the load it is under.
+    pub reach: f64,
+    /// And how far it can swing in this step.
+    pub step: f64,
+}
+
+impl Effort {
+    /// The ram has not got the strength: the loop wants more helm than it can hold.
+    pub fn on_the_stops(&self) -> bool {
+        self.asked.abs() > self.reach + 1e-9
+    }
+
+    /// The ram has not got the speed: it is going as fast as it can and the ask is
+    /// still ahead of it. Which is *not* the same fault and does not mean the same
+    /// thing about the sail she is carrying.
+    pub fn too_slow(&self) -> bool {
+        (self.asked.clamp(-self.reach, self.reach) - self.gave).abs() > 1e-9
+    }
 }
 
 impl TillerPilot {
@@ -151,28 +186,67 @@ impl TillerPilot {
         /// How fast the ram swings the helm with nothing against it, rad/s.
         const RAM_RATE: f64 = 0.55;
 
+        /// How far off course it has to be before being on the stops means it is beaten.
+        ///
+        /// Ten degrees. The number matters because without it the pilot reports itself
+        /// beaten while it is steering perfectly: measured on the bench at twenty knots
+        /// on a beam reach, reefed, the ram sat on its limit four per cent of the time
+        /// and held the course to one degree — and dropped out with an alarm anyway,
+        /// because the old test for "beaten" was the rudder position alone. The rudder
+        /// being at its limit is not a failure. *Being at its limit and not getting her
+        /// back* is, and a real pilot's alarm is an off-course alarm for that reason.
+        const OFF_COURSE: f64 = 10.0 * std::f64::consts::PI / 180.0;
+
         let capacity = 1.0 - smoothstep(EASY, OVERWHELMED, load.abs());
         let (kp, ki, kd) = cfg.pilot_gains();
         let raw = kp * error + ki * self.integral - kd * yaw_rate;
         // What it can hold, and what it can hold it at.
         let reach = cfg.max_rudder_angle * (0.28 + 0.72 * capacity);
-        let clamped = raw.clamp(-reach, reach);
+        let held = raw.clamp(-reach, reach);
         // And how fast it gets there: a loaded motor is a slow motor.
         let step = RAM_RATE * (0.35 + 0.65 * capacity) * dt;
-        let clamped = if (clamped - self.last).abs() <= step {
-            clamped
+        let clamped = if (held - self.last).abs() <= step {
+            held
         } else {
-            self.last + step * (clamped - self.last).signum()
+            self.last + step * (held - self.last).signum()
         };
         self.last = clamped;
-        // Anti-windup: stop integrating once the rudder is on the stops, otherwise the
-        // integral runs away while the boat is overpowered and cannot answer anyway.
-        if (raw - clamped).abs() < 1e-6 {
+        self.effort = Effort {
+            asked: raw,
+            gave: clamped,
+            reach,
+            step,
+        };
+        // **The two limits are not the same fault and are no longer treated as one.**
+        //
+        // The ram has a strength and it has a speed. Running out of strength means the
+        // loop wants more helm than the motor can hold against the load, and that is
+        // the overpowered boat the whole model is about. Running out of speed means it
+        // is swinging flat out and the ask moved again first, which is what a seaway
+        // does to any ram at all and is not a fault in anything. The old code could not
+        // tell them apart — it compared the ask with the output *after* the rate limit
+        // — so a boat being thrown about by a short sea registered as a pilot on the
+        // stops, with the dropout and the alarm that go with it.
+        let on_the_stops = (raw - held).abs() > 1e-9;
+        // Anti-windup, on the stops only: a rate limit is a moment's lag and integrating
+        // through it is right, while a rudder that cannot go further is a rudder the
+        // integral must not keep pushing against.
+        //
+        // With one exception, which is the difference between anti-windup and a lock:
+        // integration that would *unwind* the term is always allowed. Without it the
+        // integral freezes at whatever it held when she went on the stops and can never
+        // come back down, so a single hard gust leaves the pilot demanding full helm
+        // for the rest of the afternoon.
+        if !on_the_stops || error * raw < 0.0 {
             self.integral += error * dt;
             self.integral = self.integral.clamp(-6.0, 6.0);
-            self.saturated_for = 0.0;
-        } else {
+        }
+        // And whether it is *beaten*, which is the thing the alarm is for: on the stops
+        // and off the course, together. Either one alone is a pilot doing its job.
+        if on_the_stops && error.abs() > OFF_COURSE {
             self.saturated_for += dt;
+        } else {
+            self.saturated_for = 0.0;
         }
         clamped
     }
@@ -180,6 +254,11 @@ impl TillerPilot {
     /// Seconds the rudder has been hard over without the boat answering.
     pub fn saturated_for(&self) -> f64 {
         self.saturated_for
+    }
+
+    /// What the ram was asked for and what it managed, last step.
+    pub fn effort(&self) -> Effort {
+        self.effort
     }
 
     /// Forget the accumulated correction. Call on engaging, or the pilot starts by
@@ -578,6 +657,11 @@ impl Autopilot {
     /// How long the rudder has been hard over, for diagnostics.
     pub fn saturated_seconds(&self) -> f64 {
         self.loop_.saturated_for()
+    }
+
+    /// What the ram was asked for and what it managed, last step.
+    pub fn effort(&self) -> Effort {
+        self.loop_.effort()
     }
 
     /// Hold the course the boat is on right now.
