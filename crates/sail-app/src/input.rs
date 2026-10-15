@@ -395,15 +395,27 @@ pub fn gather(
     // simulator could get into and not out of.
     if keys.just_pressed(KeyCode::KeyG) || pad.is_some_and(|p| p.just_pressed(GamepadButton::East))
     {
-        sim.controls.headsail_aback = !sim.controls.headsail_aback;
-        info!(
-            "{}",
-            if sim.controls.headsail_aback {
-                "headsail backed — she will pay off"
-            } else {
-                "headsail sheeted across"
-            }
-        );
+        // **Only the genoa**, because it is the only sail aboard with a clew, a sheet
+        // and a side deck to hold it against. The sails set flying are tacked out on
+        // the sprit ahead of everything with nothing to back them onto, and the
+        // staysail's club boom goes across whatever anybody wants. The engine already
+        // ignores the flag for those — this is so that pressing the key says why
+        // instead of appearing to do something.
+        if sim.controls.headsail != sail_core::state::Headsail::Genoa {
+            info!("only the genoa can be backed — the rest are set flying");
+        } else if sim.controls.furl > 0.9 {
+            info!("the genoa is rolled away — there is nothing to back");
+        } else {
+            sim.controls.headsail_aback = !sim.controls.headsail_aback;
+            info!(
+                "{}",
+                if sim.controls.headsail_aback {
+                    "genoa backed — the clew is against the rail and she will pay off"
+                } else {
+                    "genoa sheeted across"
+                }
+            );
+        }
     }
 
     // --- Dump: the other half of the sheet, and the one you need in a hurry ---------

@@ -591,7 +591,29 @@ impl Simulation {
         } else {
             twist_for_lead(controls.genoa_car)
         };
-        let jib_chord = head.profile.chord_angle(controls.jib_sheet);
+        // **Only a genoa can be held aback, and only as far as the rail.**
+        //
+        // Both halves were asked for from the deck and both are geometry rather than
+        // rule-making. A genoa has a clew with a sheet on it and a side deck to lie
+        // against, so a hand can hold it to windward; the sails set flying — the code
+        // zero, the gennaker, the kite — are tacked out on the sprit ahead of
+        // everything with nothing to back them against, and a self-tacking staysail has
+        // a club boom that swings across whatever anybody wants. The staysail already
+        // could not be backed, because its forces never asked the question; the flying
+        // sails could, and should not have been able to.
+        //
+        // And the clew stops at the rail. Before this the backed sail took its chord
+        // from wherever the sheet was, so an eased sheet put it out at forty degrees to
+        // windward — a place nothing aboard can hold it. See `backed_clew_angle`.
+        let backing = controls.headsail_aback && controls.headsail == crate::state::Headsail::Genoa;
+        let jib_sheet = if backing {
+            controls
+                .jib_sheet
+                .min(head.profile.sheet_for_chord_angle(cfg.backed_clew_angle()))
+        } else {
+            controls.jib_sheet
+        };
+        let jib_chord = head.profile.chord_angle(jib_sheet);
         let jib_upper_sheet = head
             .profile
             .sheet_for_chord_angle(jib_chord + jib_twist * crate::sail::UPPER_SECTION_TWIST);
@@ -675,12 +697,12 @@ impl Simulation {
         let thrashing = (1.0 - (2.0 * st.jib_across - 1.0).abs()).clamp(0.0, 1.0);
         let crossing_fill = 1.0 - 0.8 * thrashing;
         // And on the wrong side of the boat for the first half of it.
-        let jib_aback = controls.headsail_aback || st.jib_across < 0.5;
+        let jib_aback = backing || st.jib_across < 0.5;
         let jib = crate::sail::sail_forces_in_slot(
             &head.profile,
             jib_awa,
             jib_aws,
-            controls.jib_sheet,
+            jib_sheet,
             jib_lower_area * fill * crossing_fill,
             st.heel,
             shadow,
@@ -1487,7 +1509,9 @@ impl Simulation {
             // streaming down the middle halfway through, hard on the new one at the end.
             // And held to windward for as long as somebody is holding it there, which is
             // a different thing from being caught there by a tack.
-            jib_side: if controls.headsail_aback {
+            jib_side: if controls.headsail_aback
+                && controls.headsail == crate::state::Headsail::Genoa
+            {
                 self.wind_side
             } else if controls.headsail == crate::state::Headsail::Spinnaker {
                 // A symmetric kite's clew is on the same side as the boom, because both

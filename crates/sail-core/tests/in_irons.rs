@@ -133,6 +133,85 @@ fn what_gets_her_out_and_what_does_not() {
         c.furl = 0.0;
         c.headsail_aback = true;
     });
+    // The same with the sheet eased right off, which is the case the rail limit is
+    // about: the clew cannot go further out than the side deck whatever the sheet says,
+    // so this should land in the same place as the one above rather than somewhere
+    // better.
+    try_to_fall_off("genoa backed, sheet eased right off", 120.0, |c, _| {
+        c.rudder = -rad(20.0);
+        c.main_sheet = 1.0;
+        c.furl = 0.0;
+        c.jib_sheet = 1.0;
+        c.headsail_aback = true;
+    });
+    // And a sail set flying, which cannot be backed at all: tacked out on the sprit
+    // ahead of everything, with nothing to hold it against.
+    try_to_fall_off("code zero backed — it cannot be", 120.0, |c, _| {
+        c.rudder = -rad(20.0);
+        c.main_sheet = 1.0;
+        c.furl = 0.0;
+        c.headsail = Headsail::Code0;
+        c.headsail_aback = true;
+    });
+}
+
+/// **The clew stops at the rail**, so easing the sheet does not buy a bigger lever.
+///
+/// Asked for from the deck in one line — *how far the clew goes to the side and not
+/// past it* — and it is the difference between a backed sail and a sail standing out to
+/// windward on nothing. With the sheet hauled flat the clew is inboard of the rail and
+/// the sheet is what holds it; eased, the sail blows across until it is against the
+/// shrouds and the side deck and there it stops. The two therefore end up in much the
+/// same place, where before the limit the eased one had half again the chord angle
+/// anything aboard could hold it at.
+#[test]
+fn the_clew_stops_at_the_rail() {
+    let (flat, _) = try_to_fall_off("backed, sheet flat", 60.0, |c, _| {
+        c.rudder = -rad(20.0);
+        c.main_sheet = 1.0;
+        c.furl = 0.0;
+        c.headsail_aback = true;
+    });
+    let (eased, _) = try_to_fall_off("backed, sheet eased", 60.0, |c, _| {
+        c.rudder = -rad(20.0);
+        c.main_sheet = 1.0;
+        c.furl = 0.0;
+        c.jib_sheet = 1.0;
+        c.headsail_aback = true;
+    });
+    assert!(
+        (eased - flat).abs() < 20.0,
+        "the sheet is still setting how far the clew goes to windward: {flat:.0} degrees \
+         off with it flat against {eased:.0} with it eased"
+    );
+}
+
+/// And only a genoa can be backed.
+///
+/// A sail set flying is tacked out on the sprit ahead of everything with nothing to
+/// hold it against, and a self-tacking staysail has a club boom that goes across
+/// whatever anybody wants. Asked for from the deck, and the test is that backing one
+/// makes no difference at all rather than that it is refused somewhere.
+#[test]
+fn only_a_genoa_can_be_backed() {
+    let (alone, _) = try_to_fall_off("code zero, not backed", 60.0, |c, _| {
+        c.rudder = -rad(20.0);
+        c.main_sheet = 1.0;
+        c.furl = 0.0;
+        c.headsail = Headsail::Code0;
+    });
+    let (backed, _) = try_to_fall_off("code zero, backed", 60.0, |c, _| {
+        c.rudder = -rad(20.0);
+        c.main_sheet = 1.0;
+        c.furl = 0.0;
+        c.headsail = Headsail::Code0;
+        c.headsail_aback = true;
+    });
+    assert!(
+        (backed - alone).abs() < 1.0,
+        "backing a sail set flying did something: {backed:.0} degrees off against \
+         {alone:.0} without it"
+    );
 }
 
 /// **Backing a sail gets her out of irons.** If this fails, the way out does not exist.

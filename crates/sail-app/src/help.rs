@@ -67,7 +67,8 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             ("R", "dump: hold it and the sheets run until she stands up"),
             (
                 "G",
-                "back the headsail: it stays there until you say otherwise",
+                "back the genoa — the only sail that can be: it stays there until you \
+                 say otherwise",
             ),
         ],
     ),

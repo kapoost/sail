@@ -803,6 +803,32 @@ impl BoatConfig {
         (kp, ki, kd)
     }
 
+    /// How far a backed headsail's clew can go to windward, as a chord angle.
+    ///
+    /// **The clew goes to the rail and stops**, which is the thing that was missing: a
+    /// backed sail was taking its angle from wherever the sheet happened to be, so a
+    /// genoa with the sheet eased was modelled as a sail standing out at forty degrees
+    /// to windward — a position nothing on the boat can hold it in. What actually
+    /// happens is that the wind blows the sail across until the clew is against the
+    /// windward shrouds and the side deck, and there it stays with a man leaning on it.
+    ///
+    /// The arithmetic, from this boat's own rig and in the same spirit as
+    /// `boom_against_shrouds`: the sheet lead and the cap shroud are abreast each other
+    /// on the side deck, 0.45 of the beam out from the centreline, and the stemhead
+    /// where the genoa is tacked is about 0.38 of her length forward of them. A clew
+    /// held against the rail is therefore a chord angle of `atan(0.45 b / 0.38 L)` —
+    /// twenty-one degrees on the thirty-four footer, and within a degree of that on
+    /// every boat in the file, because the proportion is what a rig *is* rather than
+    /// a fact about one of them.
+    ///
+    /// Twenty-one degrees of chord with the flow on the front of the sail is still an
+    /// angle of attack of fifty-odd head to wind, which is a plate, which is what gets
+    /// her bow off. The limit takes away the part that was never real, not the part
+    /// that does the work.
+    pub fn backed_clew_angle(&self) -> f64 {
+        (0.45 * self.beam / (0.38 * self.loa)).atan()
+    }
+
     /// Classic hull-speed ceiling for this waterline, m/s.
     pub fn hull_speed(&self) -> f64 {
         crate::units::hull_speed(self.lwl)
