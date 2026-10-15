@@ -355,6 +355,20 @@ pub fn draw(
             if !rect.contains(at) {
                 continue;
             }
+            // **Nothing is on the chart until she has recognised it.**
+            //
+            // Which is a decision about what this chart *is*. A printed chart carries
+            // every mark on the coast whether you know which is which or not — but the
+            // exercise is not about reading a printed chart, it is about building one:
+            // you look at a group through the glasses, you work out what it is, and
+            // *then* it goes on the paper with its name. Asked for from the deck in
+            // exactly those terms.
+            //
+            // The coast itself stays. Land does not need identifying — it is there, you
+            // can see it, and the shape of it is what you recognise the marks by.
+            if nav.lost && !nav.recognised.contains(&mark.name) {
+                continue;
+            }
             match mark.kind {
                 Mark::Lighthouse => {
                     // The magenta flare: a dot with a teardrop out of it, which is
@@ -420,8 +434,10 @@ pub fn draw(
             // are — but the names belong to marks she has recognised through the
             // glasses. A chart that names everything is a chart that has told you where
             // you are.
-            let named = !nav.lost || nav.recognised.contains(&mark.name) || knows;
-            if room && named && (spread || mark.kind == Mark::Lighthouse) {
+            // Anything that is drawn at all has been recognised, so it carries its
+            // name: there is no such thing here as a mark on the chart that she cannot
+            // name.
+            if room && (spread || mark.kind == Mark::Lighthouse || nav.lost) {
                 let label = if mark.kind.lit() {
                     format!(
                         "{}  {}",
@@ -445,8 +461,10 @@ pub fn draw(
             }
         }
 
-        // Anchorages, with the one in hand picked out.
-        for (i, h) in course.harbours.iter().enumerate() {
+        // Anchorages, with the one in hand picked out — and not at all while she is
+        // lost. A harbour is a navigation object like any other: four of them named on
+        // the chart is a position given away to anybody who can count islands.
+        for (i, h) in course.harbours.iter().enumerate().filter(|_| !nav.lost) {
             let at = to_screen(h.at);
             let bound = i == course.to;
             p.circle(
