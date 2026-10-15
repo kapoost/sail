@@ -460,6 +460,7 @@ pub fn draw(
     let mut stream: Option<bool> = None;
     let mut press_the_watch = false;
     let mut timed: Option<(f64, f64)> = None;
+    let mut out_by: Option<f64> = None;
     let area = if spread {
         egui::Area::new("chart".into()).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
     } else {
@@ -856,8 +857,25 @@ pub fn draw(
                 egui::pos2(rect.left() + 24.0, rect.top() + 66.0),
                 egui::vec2(188.0, 22.0),
             );
+            // The stopwatch is furniture too, and this is the same fault as the one
+            // found in review before it: the instruments are drawn *on* the chart and
+            // the chart is one widget, so a press on the watch was also a press on the
+            // water under it — start the watch with the pencil in hand and it left a
+            // cross under the dial. Worked out here with the rest of the furniture so
+            // that what you can press and what you can see are the same rectangles.
+            let watch_face = egui::Rect::from_center_size(
+                egui::pos2(rect.right() - 62.0, rect.top() + 62.0),
+                egui::vec2(74.0, 74.0),
+            );
+            let watch_button = egui::Rect::from_center_size(
+                egui::pos2(rect.right() - 62.0, rect.top() + 110.0),
+                egui::vec2(74.0, 18.0),
+            );
             let on_furniture = response.interact_pointer_pos().is_some_and(|at| {
-                furniture.iter().any(|slot| slot.contains(at)) || log_button.contains(at)
+                furniture.iter().any(|slot| slot.contains(at))
+                    || log_button.contains(at)
+                    || watch_face.contains(at)
+                    || watch_button.contains(at)
             });
 
             // Moving the paper. The right button drags the chart about under the
@@ -1013,6 +1031,22 @@ pub fn draw(
                                             to: st.pos,
                                             minutes,
                                         });
+                                        // **And the two numbers together are the set.**
+                                        //
+                                        // Through the water from the log, over the
+                                        // ground from the chart, over the same leg: what
+                                        // is left when you take one from the other is
+                                        // the water moving, and that is the figure the
+                                        // circle of uncertainty grows at. Measuring it
+                                        // here rather than waiting for the next fix is
+                                        // the whole of *frequent measurements are worth
+                                        // more than careful ones* — a navigator who
+                                        // times a leg has just told the chart how wrong
+                                        // its reckoning is about to be.
+                                        let over_ground = (st.pos - was).length() / 1_852.0;
+                                        out_by = Some(sail_core::units::kn_to_ms(
+                                            (over_ground - ran).abs() / (minutes / 60.0),
+                                        ));
                                     }
                                 }
                             }
@@ -1431,7 +1465,7 @@ pub fn draw(
             if response.clicked()
                 && response
                     .interact_pointer_pos()
-                    .is_some_and(|q| button.contains(q) || (q - face).length() < 34.0)
+                    .is_some_and(|q| watch_button.contains(q) || (q - face).length() < 34.0)
             {
                 press_the_watch = true;
             }
@@ -1462,8 +1496,7 @@ pub fn draw(
                 let left = |when: f64, good_for: f64| {
                     (1.0 - ((st.time - when) / good_for).clamp(0.0, 1.0)) as f32
                 };
-                if let Some(at) = nav.fixed_at {
-                    let _ = at;
+                if nav.fixed_at.is_some() {
                     lines.push((
                         format!(
                             "fix     {:>5.0} min ago",
@@ -1893,6 +1926,11 @@ pub fn draw(
     }
     if let Some(measured) = timed {
         nav.measured = Some(measured);
+    }
+    if let Some(set) = out_by {
+        // The same smoothing a fix uses, because it is the same measurement arrived at
+        // from a different direction. See `navigation::KEEPS`.
+        nav.learn_the_set(set);
     }
     match stream {
         Some(true) => {

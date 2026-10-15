@@ -224,6 +224,16 @@ impl Default for Navigation {
 }
 
 impl Navigation {
+    /// Take one more measurement of how fast the water is moving her about.
+    ///
+    /// Two things measure it and they must fold it in the same way, or the circle grows
+    /// at a different rate depending on which instrument happened to notice: a fix
+    /// landing on a reckoning, and a leg timed between two positions with the log
+    /// running. One method, one constant.
+    pub fn learn_the_set(&mut self, measured: f64) {
+        self.unexplained = self.unexplained * KEEPS + measured * (1.0 - KEEPS);
+    }
+
     /// Whether the chart may show where she is.
     ///
     /// Two things, and the first is the real one: the marks the fix was taken on are
@@ -548,7 +558,7 @@ pub fn enter_in_the_log(
         if let Some(run) = nav.reckoning {
             let ran_for = (now - run.since).max(1.0);
             let out = (run.at - said).length() / ran_for;
-            nav.unexplained = nav.unexplained * KEEPS + out * (1.0 - KEEPS);
+            nav.learn_the_set(out);
             info!(
                 "the reckoning was {:.0} m out over {:.0} min — call it {:.2} kn of set",
                 (run.at - said).length(),
