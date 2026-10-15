@@ -345,6 +345,7 @@ pub(crate) fn plotted(t: &Table, chart: &Chart, crossing_at: Option<glam::DVec2>
             Plotted::Cross { at, fix } => a_mark(t, at, fix),
             Plotted::Run { from, to, minutes } => the_log_leg(t, from, to, minutes),
             Plotted::Stamp { at, hour } => the_time(t, at, hour),
+            Plotted::Entry(entry) => an_entry(t, &entry),
             // Darker while it is in your hand, which is the only feedback a straight
             // edge needs: you can see that you have hold of this one rather than of the
             // chart.
@@ -709,7 +710,7 @@ pub(crate) fn her_own_place(
         // another fix is a minute's work and she is not lost in any sense that
         // matters. The clock behind it is only a backstop.
         t.p.text(
-            egui::pos2(t.rect.left() + 24.0, t.rect.top() + 84.0),
+            egui::pos2(t.rect.left() + 24.0, t.rect.top() + 114.0),
             egui::Align2::LEFT_CENTER,
             format!(
                 "{} of {} marks still in sight",
@@ -725,7 +726,7 @@ pub(crate) fn her_own_place(
         );
         let left = nav.fix_left(sim.sim.state.time);
         let bar = egui::Rect::from_min_size(
-            egui::pos2(t.rect.left() + 24.0, t.rect.top() + 66.0),
+            egui::pos2(t.rect.left() + 24.0, t.rect.top() + 96.0),
             egui::vec2(188.0, 7.0),
         );
         t.p.rect_filled(bar, 1.0, ink::PAPER);
@@ -843,21 +844,35 @@ pub(crate) fn her_own_place(
 /// becomes what the boat is working from and the moment it can be wrong. So this returns
 /// the point only when the button was pressed; believing it is a decision and decisions
 /// have a button.
+/// What the button under the fix is asking for this frame.
+pub(crate) enum Wrote {
+    /// A crossing the navigator says he believes.
+    Fix(glam::DVec2),
+    /// No crossing, and he wants the line written anyway — with whatever is known.
+    WhatSheKnows,
+}
+
+/// Where the lines cross, the triangle they make, and the button that writes the log.
+///
+/// **Both parts of the fix are drawn**: the crossing because it is the answer and the
+/// triangle because it is the confidence — a cocked hat is the navigator's own report on
+/// how carefully he just did it, and a fix with none round it is a fix nobody has
+/// checked. A fix is not a position until somebody writes it in the book, which is the
+/// moment it becomes what the boat works from and the moment it can be wrong, so
+/// believing it is a decision and decisions have a button.
+///
+/// **And the button is there with no bearings at all.** Writing up the log is not the
+/// same act as fixing: most lines in a deck log have no fix in them, they have a time, a
+/// course, the glass and what was set. Asked for from the deck, and it is right — the
+/// book is kept every watch and the sky is only sometimes clear.
 pub(crate) fn the_cocked_hat(
     t: &Table,
     nav: &crate::navigation::Navigation,
     log_button: egui::Rect,
     pressed: Option<egui::Pos2>,
-) -> Option<glam::DVec2> {
-    let mut accept = None;
-    // --- The fix -----------------------------------------------------
-    //
-    // Two position lines cross at a point and three cross in a triangle, and the
-    // triangle is the navigator's own report on how carefully he just did it.
-    // Both are drawn: the crossing because it is the answer, the triangle because
-    // it is the confidence, and a fix with no cocked hat round it is a fix
-    // nobody has checked.
-    if let Some(got) = sail_core::fix::plot(&nav.sights) {
+) -> Option<Wrote> {
+    let got = sail_core::fix::plot(&nav.sights);
+    if let Some(got) = got {
         let at = t.to_screen(got.at);
         t.p.circle(
             at,
@@ -878,29 +893,33 @@ pub(crate) fn the_cocked_hat(
             egui::FontId::monospace(11.0),
             ink::BOAT,
         );
-        // And the button that says you believe it. A fix is not a measurement
-        // until somebody writes it in the log, which is the moment it becomes the
-        // position the boat is working from — and the moment it can be wrong.
-        let slot = log_button;
-        t.p.rect_filled(slot, 2.0, ink::PAPER);
-        t.p.rect_stroke(
-            slot,
-            2.0,
-            egui::Stroke::new(1.0, ink::COAST),
-            egui::StrokeKind::Inside,
-        );
-        t.p.text(
-            slot.center(),
-            egui::Align2::CENTER_CENTER,
-            "ENTER IT IN THE LOG",
-            egui::FontId::monospace(11.0),
-            ink::COAST,
-        );
-        if pressed.is_some_and(|q| slot.contains(q)) {
-            accept = Some(got.at);
-        }
     }
-    accept
+    let slot = log_button;
+    t.p.rect_filled(slot, 2.0, ink::PAPER);
+    t.p.rect_stroke(
+        slot,
+        2.0,
+        egui::Stroke::new(1.0, ink::COAST),
+        egui::StrokeKind::Inside,
+    );
+    t.p.text(
+        slot.center(),
+        egui::Align2::CENTER_CENTER,
+        if got.is_some() {
+            "ENTER THE FIX IN THE LOG"
+        } else {
+            "WRITE UP THE LOG"
+        },
+        egui::FontId::monospace(11.0),
+        ink::COAST,
+    );
+    if !pressed.is_some_and(|q| slot.contains(q)) {
+        return None;
+    }
+    Some(match got {
+        Some(got) => Wrote::Fix(got.at),
+        None => Wrote::WhatSheKnows,
+    })
 }
 
 /// The position lines: the sights themselves, drawn where they now apply.
@@ -1021,5 +1040,155 @@ pub(crate) fn the_sights(
             },
             ink::PENCIL,
         );
+    }
+}
+
+/// A line of the deck log, written on the paper where it happened.
+///
+/// Four figures and a tick, like any other time on a chart, and then what a skipper
+/// actually writes: the course if he has just altered, what the log said, the glass and
+/// which way it is going, the wind and the sea — and what was set, drawn rather than
+/// spelled, because a sail plan is the one thing in a log book that has always been a
+/// picture.
+pub(crate) fn an_entry(t: &Table, e: &Entry) {
+    let c = t.to_screen(e.at);
+    t.p.line_segment(
+        [c + egui::vec2(0.0, -3.0), c + egui::vec2(0.0, 3.0)],
+        egui::Stroke::new(1.2, ink::PENCIL),
+    );
+    let mut line = c + egui::vec2(7.0, -6.0);
+    let mut write = |what: String, size: f32| {
+        t.p.text(
+            line,
+            egui::Align2::LEFT_TOP,
+            what,
+            egui::FontId::monospace(size),
+            ink::PENCIL,
+        );
+        line += egui::vec2(0.0, size + 2.0);
+    };
+    let mut first = format!(
+        "{:02.0}{:02.0}",
+        e.hour.floor(),
+        (e.hour.fract() * 60.0).floor()
+    );
+    if let Some(course) = e.course {
+        first += &format!("  co {:03.0}", course.to_degrees().rem_euclid(360.0));
+    }
+    if let Some(knots) = e.speed {
+        first += &format!("  {knots:.1} kn");
+    }
+    // The sounding on the same line as the time, because the two of them together are a
+    // position line even when nothing else is: *at 0648 there were twenty-three metres
+    // under her*, and an hour later that sentence is still worth something.
+    first += &format!("   {:.0} m", e.sounding);
+    write(first, 11.0);
+    // The glass first, because that is the order a skipper writes them in: the barometer
+    // is about the next six hours and everything else on this line is about now.
+    let way = if e.tendency.abs() < 0.5 {
+        "steady"
+    } else if e.tendency < 0.0 {
+        "falling"
+    } else {
+        "rising"
+    };
+    write(
+        format!(
+            "{:.0} {way}   {} {:.0} kn   sea {:.1} m",
+            e.glass,
+            sail_core::units::point(e.wind_from),
+            sail_core::units::ms_to_kn(e.wind),
+            e.sea
+        ),
+        9.0,
+    );
+    // **How much to believe the line**, when there is anything to say about it. The
+    // set is what the water has been doing to her and the circle is how far out the
+    // reckoning may be — the two figures that say whether the position on this line is
+    // a position or a hope.
+    if e.set.is_some() || e.within.is_some() {
+        let mut said = String::new();
+        if let Some(set) = e.set {
+            said += &format!("set {:.2} kn", sail_core::units::ms_to_kn(set));
+        }
+        if let Some(within) = e.within {
+            if !said.is_empty() {
+                said += "   ";
+            }
+            said += &format!("within {:.2} M", within / 1_852.0);
+        }
+        write(said, 9.0);
+    }
+    sail_plan(t, line + egui::vec2(2.0, 2.0), e);
+}
+
+/// What was set, drawn the way a log book draws it.
+///
+/// The main with a bar across the foot for every reef in her, and the headsail as the
+/// triangle that is actually up — rolled away, it is drawn narrower, because that is
+/// what a furling genoa *is* and a log that wrote "genoa" for a hand's width of cloth
+/// would be a log that lied about the morning.
+pub(crate) fn sail_plan(t: &Table, at: egui::Pos2, e: &Entry) {
+    let ink = ink::PENCIL;
+    let (tall, foot) = (16.0, 9.0);
+    let mast = at + egui::vec2(0.0, tall);
+    // The main: luff up the mast, foot aft along the boom.
+    t.p.line_segment([at, mast], egui::Stroke::new(1.0, ink));
+    t.p.line_segment(
+        [mast, mast + egui::vec2(foot, 0.0)],
+        egui::Stroke::new(1.0, ink),
+    );
+    t.p.line_segment(
+        [at, mast + egui::vec2(foot, 0.0)],
+        egui::Stroke::new(1.0, ink),
+    );
+    // A bar across the foot for each slab she has in.
+    let reefs = (e.reef * 3.0).round() as i32;
+    for slab in 1..=reefs {
+        let up = tall * (1.0 - 0.17 * slab as f32);
+        let across = foot * (1.0 - 0.17 * slab as f32);
+        let y = at.y + up;
+        t.p.line_segment(
+            [egui::pos2(at.x, y), egui::pos2(at.x + across, y)],
+            egui::Stroke::new(0.9, ink),
+        );
+    }
+    // The headsail, forward of the mast and as wide as what is left of it.
+    let set = (1.0 - e.furl as f32).clamp(0.0, 1.0);
+    if set > 0.02 {
+        let head = at + egui::vec2(-2.0, 0.0);
+        let tack = head + egui::vec2(-foot * set, tall);
+        let clew = head + egui::vec2(0.0, tall);
+        t.p.line_segment([head, tack], egui::Stroke::new(1.0, ink));
+        t.p.line_segment([tack, clew], egui::Stroke::new(1.0, ink));
+        t.p.line_segment([head, clew], egui::Stroke::new(1.0, ink));
+    }
+    let what = match e.headsail {
+        sail_core::state::Headsail::Genoa => "gen",
+        sail_core::state::Headsail::Code0 => "C0",
+        sail_core::state::Headsail::Gennaker => "gnk",
+        sail_core::state::Headsail::Spinnaker => "kite",
+    };
+    let said = match (reefs, set > 0.02) {
+        (0, true) => format!("full main + {what}"),
+        (0, false) => "full main, headsail in".to_string(),
+        (n, true) if set < 0.75 => format!("{n} reef{} + {what} rolled", plural(n)),
+        (n, true) => format!("{n} reef{} + {what}", plural(n)),
+        (n, false) => format!("{n} reef{}, headsail in", plural(n)),
+    };
+    t.p.text(
+        at + egui::vec2(foot + 6.0, tall * 0.5),
+        egui::Align2::LEFT_CENTER,
+        said,
+        egui::FontId::monospace(9.0),
+        ink,
+    );
+}
+
+fn plural(n: i32) -> &'static str {
+    if n == 1 {
+        ""
+    } else {
+        "s"
     }
 }

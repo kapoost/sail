@@ -265,10 +265,10 @@ impl Reckoning {
     /// Costs nothing and changes nothing when there is nothing to write, so it can be
     /// called on every frame the chart is open: *being at the chart table* is the
     /// condition, not pressing anything.
-    pub fn write_up(&mut self, now: f64) {
+    pub fn write_up(&mut self, now: f64) -> Option<(DVec2, f64, f64)> {
         self.written_up = now;
         if self.unwritten.len() < 2 {
-            return;
+            return None;
         }
         let legs = std::mem::take(&mut self.unwritten);
         let mut here = self.written();
@@ -286,7 +286,112 @@ impl Reckoning {
         if let Some(last) = legs.last() {
             self.unwritten = vec![*last];
         }
+        // **And the course she is on now, with the time she settled on it.** One line,
+        // not one per tack: a skipper beating up a sound does not write twenty
+        // alterations in the book, he writes the course he is on when he next looks at
+        // the chart. The corner it happened at is where the line belongs on the paper.
+        self.altered
+            .last()
+            .zip(self.unwritten.first())
+            .map(|((at, when), (course, _, _))| (*at, *when, *course))
     }
+}
+
+/// A line of the log, made of what she can see at this moment.
+///
+/// **The weather in it is the weather when it is written, not when it happened.** A
+/// skipper who comes below an hour after the alteration writes the time he altered and
+/// the glass he is looking at — which is one of the reasons a log written up late is a
+/// worse log, and is a thing this one is allowed to be.
+fn note(
+    sim: &Sim,
+    nav: &Navigation,
+    hour: f32,
+    at: DVec2,
+    course: Option<f64>,
+) -> crate::chart::Entry {
+    let (glass, tendency) = sim.sim.wind.barometer();
+    crate::chart::Entry {
+        at,
+        hour,
+        course,
+        // Only a reading still worth something. A speed measured an hour ago is not
+        // what she is doing, and every figure on a log line is a statement about the
+        // moment beside it.
+        speed: nav
+            .measured
+            .filter(|(_, when)| sim.sim.state.time - when < 900.0)
+            .map(|(knots, _)| knots),
+        glass,
+        tendency,
+        sounding: sim.sim.telemetry.depth,
+        // Only once it has been measured: the figure the passage *starts* with is an
+        // assumption, and an assumption written into a log book becomes a measurement
+        // the moment somebody reads it back.
+        set: nav.set_measured.then_some(nav.unexplained),
+        within: nav
+            .reckoning
+            .as_ref()
+            .filter(|run| run.spread > 1.0)
+            .map(|run| run.spread),
+        wind_from: sim.sim.telemetry.twd,
+        wind: sim.sim.telemetry.tws,
+        sea: sim.sim.telemetry.significant_height,
+        reef: sim.controls.reef,
+        headsail: sim.controls.headsail,
+        furl: sim.controls.furl,
+    }
+}
+
+/// **Write up the log with whatever is known**, which is most of what a log book is.
+///
+/// A deck log is kept every watch and the sky is only sometimes clear: most lines in one
+/// have no fix in them at all, they have a time, a course, the glass, the sounding and
+/// what was set. So the button writes a line whether or not two bearings have crossed —
+/// asked for from the deck in exactly those words, *even with no bearings, fill it in
+/// from what she knows*.
+///
+/// Where the line goes on the paper is the one judgement here: against her position if
+/// the chart may say it, against the reckoning if it may not, and against whatever the
+/// paper is laid over if she has neither — because a line in a book still has to be
+/// written somewhere, and a reckoning you have not started is not a place.
+pub fn write_up_the_log(
+    sim: Res<Sim>,
+    sky: Res<crate::sky::Sky>,
+    mut nav: ResMut<Navigation>,
+    mut chart: ResMut<crate::chart::Chart>,
+) {
+    if !std::mem::take(&mut chart.writing_up) {
+        return;
+    }
+    let now = sim.sim.state.time;
+    let at = if nav.shows_position(now) {
+        Some(sim.sim.state.pos)
+    } else {
+        nav.reckoning
+            .as_ref()
+            .map(|run| run.plotted_at())
+            .or(chart.laid_at)
+    };
+    let Some(at) = at else {
+        info!("nothing to write the log against yet — take a fix, or stream the log");
+        return;
+    };
+    // Writing the log up is being at the chart table, so the alterations come in with
+    // it and the course on the line is the one she is actually on.
+    let course = nav
+        .reckoning
+        .as_mut()
+        .and_then(|run| run.write_up(now))
+        .map(|(_, _, course)| course)
+        .or_else(|| nav.reckoning.as_ref().map(|run| run.steering));
+    let line = note(&sim, &nav, sky.hour, at, course);
+    chart.pencil(crate::chart::Plotted::Entry(line));
+    info!(
+        "log written up at {:02.0}{:02.0}",
+        sky.hour.floor(),
+        (sky.hour.fract() * 60.0).floor()
+    );
 }
 
 /// The set and leeway a passage is assumed to have before it has measured any.
@@ -349,7 +454,8 @@ const CORNERS: usize = 24;
 pub fn reckon(
     sim: Res<Sim>,
     coast: Res<crate::marks::Coast>,
-    chart: Res<crate::chart::Chart>,
+    sky: Res<crate::sky::Sky>,
+    mut chart: ResMut<crate::chart::Chart>,
     mut nav: ResMut<Navigation>,
     time: Res<Time>,
 ) {
@@ -415,8 +521,19 @@ pub fn reckon(
     // order — because that is the work, and it is work you do sitting at the table with
     // the compass you have been reading all along. Glance at the folded corner of it
     // instead and you are looking at a plot that has not been told you tacked.
-    if chart.spread {
-        run.write_up(st.time);
+    let altered = if chart.spread {
+        run.write_up(st.time)
+    } else {
+        None
+    };
+    // **And one line in the book for it**, which is what a skipper does when he comes
+    // below: the course he is on, at the corner where he settled on it, with the glass
+    // and the sail plan beside it. Not one line per tack — a beat up a sound is twenty
+    // alterations and one entry.
+    if let Some((at, when, course)) = altered {
+        let hour = (sky.hour - ((st.time - when) / 3_600.0) as f32).rem_euclid(24.0);
+        let line = note(&sim, &nav, hour, at, Some(course));
+        chart.pencil(crate::chart::Plotted::Entry(line));
     }
 }
 
@@ -908,10 +1025,7 @@ pub fn enter_in_the_log(
         // because there is exactly one moment it can mean.
         let below = DVec2::new(0.0, -(chart.range as f64) * 0.012);
         chart.write_down(
-            crate::chart::Plotted::Stamp {
-                at: said + below,
-                hour,
-            },
+            crate::chart::Plotted::Entry(note(&sim, &nav, hour, said + below, None)),
             nav.shows_position(now),
         );
         info!(

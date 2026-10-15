@@ -40,6 +40,12 @@ pub struct Chart {
     /// are. A chart on a table is an instrument: you put a straight edge on it and work
     /// something out. They are different objects and this is the switch between them.
     pub spread: bool,
+    /// Somebody pressed the button that writes the log up.
+    ///
+    /// A flag rather than the writing itself, because the chart cannot see the glass,
+    /// the sails or the sounder — the log line is made where those live and this is the
+    /// chart asking for it.
+    pub writing_up: bool,
     /// Whether each line on the paper says what it is and why.
     pub explain: bool,
     /// Half-width of what is shown, metres.
@@ -266,6 +272,55 @@ pub enum Plotted {
         to: glam::DVec2,
         minutes: f64,
     },
+    /// A line of the deck log, written on the chart where it happened.
+    Entry(Entry),
+}
+
+/// What a skipper writes down when he writes anything down.
+///
+/// **A fix is not a dot, it is a line in the log**, and the line is the useful part: the
+/// position is where she was, and everything beside it is what she was *doing* and what
+/// the day was doing to her. A week later the dot tells you nothing and the line tells
+/// you the glass was falling, you were down to the second reef, and you were still
+/// making four and a half — which is how a passage is read afterwards and why the book
+/// is kept at all.
+///
+/// Written at the two moments a skipper writes: when he fixes, and when he alters.
+#[derive(Clone, Copy, Debug)]
+pub struct Entry {
+    pub at: glam::DVec2,
+    /// Ship's time, in hours.
+    pub hour: f32,
+    /// The course she settled on, when the entry is an alteration.
+    pub course: Option<f64>,
+    /// What the log said, if it had been read recently enough to be worth writing down.
+    pub speed: Option<f64>,
+    /// The glass, and how fast it is going which way — the number a skipper writes
+    /// before he writes anything else, because it is the only one that is about the
+    /// next six hours rather than this minute.
+    pub glass: f64,
+    pub tendency: f64,
+    /// What was under her when she wrote it.
+    ///
+    /// **A sounding is a position line.** It is the oldest one there is — you are
+    /// somewhere on the twenty-metre contour — and it is the only instrument on this
+    /// boat that goes on reading when the fog comes down and the marks and the sun and
+    /// the horizon have all gone. A log line without it is a log line missing the one
+    /// number that was still available.
+    pub sounding: f64,
+    /// What he could see: where the wind was from and how hard, and the sea with it.
+    pub wind_from: f64,
+    pub wind: f64,
+    pub sea: f64,
+    /// The set she has measured, if she has measured any, and how far out the
+    /// reckoning may be. The two halves of *how much to believe this line* — and the
+    /// only two figures here that are about the navigator rather than the weather.
+    pub set: Option<f64>,
+    pub within: Option<f64>,
+    /// And what was set when he wrote it.
+    pub reef: f64,
+    pub headsail: sail_core::state::Headsail,
+    pub furl: f64,
 }
 
 /// How much pencil a chart carries before it stops being a plot.
@@ -309,6 +364,7 @@ impl Default for Chart {
         Self {
             open: true,
             spread: false,
+            writing_up: false,
             explain: false,
             dividers: None,
             tool: Tool::Dividers,
@@ -748,6 +804,7 @@ pub fn draw(
     let mut pick: Option<Tool> = None;
     let mut explain: Option<bool> = None;
     let mut accept: Option<glam::DVec2> = None;
+    let mut writing_up = false;
     let mut lay_at: Option<glam::DVec2> = None;
     let mut press_the_watch = false;
     let area = if spread {
@@ -935,8 +992,10 @@ pub fn draw(
                 explain = explained;
             }
 
-            if let Some(at) = the_cocked_hat(&table, &nav, log_button, pressed) {
-                accept = Some(at);
+            match the_cocked_hat(&table, &nav, log_button, pressed) {
+                Some(Wrote::Fix(at)) => accept = Some(at),
+                Some(Wrote::WhatSheKnows) => writing_up = true,
+                None => {}
             }
 
             compass_rose(&table);
@@ -1002,6 +1061,7 @@ pub fn draw(
             let d = match *item {
                 Plotted::Cross { at: c, .. } => (c - at).length(),
                 Plotted::Stamp { at: c, .. } => (c - at).length(),
+                Plotted::Entry(e) => (e.at - at).length(),
                 Plotted::Line {
                     through, bearing, ..
                 } => {

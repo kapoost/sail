@@ -70,3 +70,39 @@ pub fn hull_speed(lwl_m: f64) -> f64 {
 pub fn froude(speed_ms: f64, lwl_m: f64) -> f64 {
     speed_ms.abs() / (GRAVITY * lwl_m).sqrt()
 }
+
+/// A direction in points of the compass, the way it is written in a log.
+///
+/// **A log says "SW 5", not "237° 19.4 knots".** Figures are what an instrument reads;
+/// points are what a person writes and what another person can picture a week later.
+/// Sixteen of them, which is as fine as anybody writes a wind — the thirty-two-point
+/// card is for steering, not for the book.
+pub fn point(bearing: f64) -> &'static str {
+    const POINTS: [&str; 16] = [
+        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW",
+        "NW", "NNW",
+    ];
+    let turns = bearing.rem_euclid(std::f64::consts::TAU) / std::f64::consts::TAU;
+    POINTS[((turns * 16.0).round() as usize) % 16]
+}
+
+#[cfg(test)]
+mod the_card {
+    use super::*;
+
+    /// Every point names itself, and the rounding falls where a card says it does.
+    #[test]
+    fn the_sixteen_points_are_where_they_should_be() {
+        assert_eq!(point(0.0), "N");
+        assert_eq!(point(rad(90.0)), "E");
+        assert_eq!(point(rad(180.0)), "S");
+        assert_eq!(point(rad(270.0)), "W");
+        assert_eq!(point(rad(225.0)), "SW");
+        assert_eq!(point(rad(360.0)), "N", "a full turn is north again");
+        assert_eq!(point(rad(-45.0)), "NW", "and so is going the other way round");
+        // Half a point either side of north is still north; a whole one is not.
+        assert_eq!(point(rad(11.0)), "N");
+        assert_eq!(point(rad(23.0)), "NNE");
+    }
+}
+
