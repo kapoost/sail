@@ -442,6 +442,258 @@ pub fn record(
     }
 }
 
+/// The leg being timed, while it is being timed.
+///
+/// A line from where the log was streamed to where she is now, with the figures
+/// running. Without it the tool is a button that appears to do nothing for ten minutes
+/// — which is how it came to be reported as unusable from the deck: a leg takes minutes
+/// to become visible and a button has to answer in the same second.
+pub(crate) fn the_cast(
+    t: &Table,
+    streaming: Option<(glam::DVec2, f64, f64)>,
+    now: f64,
+    pos: glam::DVec2,
+    hour: f32,
+) {
+    // The leg being timed, while it is being timed: a line from where the log
+    // was streamed to where she is now, with the figures running. Without it the
+    // tool is a button that appears to do nothing for ten minutes.
+    if let Some((was, when, _)) = streaming.filter(|_| t.knows) {
+        let (a, b) = (t.to_screen(was), t.to_screen(pos));
+        t.p.line_segment([a, b], egui::Stroke::new(1.0, ink::MARK));
+        // Where it was streamed, marked the moment it is streamed. Without this
+        // the first click put a line of zero length on the paper and looked like
+        // nothing happening at all, which is how the tool came to be reported as
+        // unusable: a leg takes minutes to become visible and a button has to
+        // answer in the same second.
+        t.p.circle(
+            a,
+            4.0,
+            egui::Color32::TRANSPARENT,
+            egui::Stroke::new(1.2, ink::MARK),
+        );
+        t.p.circle_filled(a, 1.3, ink::MARK);
+        t.p.text(
+            a + egui::vec2(7.0, -6.0),
+            egui::Align2::LEFT_BOTTOM,
+            format!(
+                "log {:02.0}{:02.0}",
+                hour.floor(),
+                (hour.fract() * 60.0).floor()
+            ),
+            egui::FontId::monospace(10.0),
+            ink::MARK,
+        );
+        let off = pos - was;
+        let minutes = (now - when) / 60.0;
+        let miles = off.length() / 1_852.0;
+        t.p.text(
+            b + egui::vec2(8.0, 10.0),
+            egui::Align2::LEFT_TOP,
+            format!(
+                "log streamed — {:.2} M, {:.0} min, {:.1} kn",
+                miles,
+                minutes,
+                miles / (minutes / 60.0).max(1e-6)
+            ),
+            egui::FontId::monospace(10.0),
+            ink::MARK,
+        );
+    }
+}
+
+/// What the hand on the chart asked for this frame — and nothing done about it yet.
+///
+/// **The chart is one widget.** Eight instruments, the buttons and the water all come
+/// through the same press, so a tool that acted the moment it decided something was a
+/// tool that could act twice, or act on a click that belonged to a button drawn over it
+/// — which is how picking up the rubber came to rub something out. So the tool in hand
+/// says what it *would* do and `draw` does it afterwards, in one place, in an order you
+/// can read.
+#[derive(Default)]
+pub(crate) struct Asked {
+    pub dividers: Option<(glam::DVec2, glam::DVec2)>,
+    pub clear_dividers: bool,
+    pub draw_on: Option<Plotted>,
+    pub rub_out: Option<glam::DVec2>,
+    pub take_hold: Option<(usize, Grab)>,
+    pub shift: Option<(usize, Grab, glam::DVec2)>,
+    pub let_go: bool,
+    pub stream: Option<bool>,
+    pub protractor: Option<Option<glam::DVec2>>,
+    pub slip: Option<f64>,
+    pub timed: Option<(f64, f64)>,
+    pub out_by: Option<f64>,
+}
+
+/// What a drag means depends on what is in your hand, which is how a chart table works:
+/// the dividers measure, the rule plots, the pencil marks and the rubber takes it off
+/// again.
+pub(crate) fn in_hand(
+    t: &Table,
+    chart: &Chart,
+    nav: &crate::navigation::Navigation,
+    response: &egui::Response,
+    on_furniture: bool,
+    sim: &Sim,
+    hour: f32,
+) -> Asked {
+    // Where she is and what the clock says: what the log needs to stamp a leg with, and
+    // the only two things in here that are about the boat rather than about the hand.
+    let (now, pos) = (sim.sim.state.time, sim.sim.state.pos);
+    let mut asked = Asked::default();
+    // What a drag means depends on what is in your hand, which is how a chart
+    // table works: the dividers measure, the rule plots, the pencil marks and
+    // the rubber takes it off again.
+    match chart.tool {
+        // Two clicks: the rose down, then the bearing.
+        Tool::Protractor => {
+            if response.clicked() && !on_furniture {
+                if let Some(at) = response.interact_pointer_pos() {
+                    let water = t.to_water(at);
+                    match chart.protractor {
+                        None => asked.protractor = Some(Some(water)),
+                        Some(centre) => {
+                            let off = water - centre;
+                            if off.length() > chart.range as f64 * 0.01 {
+                                asked.draw_on = Some(Plotted::Line {
+                                    through: centre,
+                                    bearing: off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU),
+                                    speed: nav.measured.map(|(knots, _)| knots),
+                                });
+                            }
+                            asked.protractor = Some(None);
+                        }
+                    }
+                }
+            }
+        }
+        Tool::Dividers | Tool::ParallelRule | Tool::Ruler => {
+            // **Taking hold of a line that is already there.**
+            //
+            // With the straight edge in hand, a drag that starts on an existing
+            // ruled line moves it rather than drawing a second one across it: an
+            // end on its own, so a leg can be walked onto a mark, or the whole of
+            // it if the hand lands somewhere along it. Which is what a straight
+            // edge is for — you put it down, look at it, and shift it a quarter
+            // of an inch — and the alternative is rubbing it out and drawing it
+            // again, which is what the rubber is for and is not the same job.
+            if chart.tool == Tool::Ruler && response.drag_started() && !on_furniture {
+                if let Some(at) = response.interact_pointer_pos() {
+                    let water = t.to_water(at);
+                    // A finger's width on the paper, so a line can be caught
+                    // without the pointer having to be on the pencil mark.
+                    let near = (12.0 / t.scale) as f64;
+                    asked.take_hold = chart.plot.iter().enumerate().find_map(|(i, item)| {
+                        let Plotted::Rule { from, to } = item else {
+                            return None;
+                        };
+                        if (water - *from).length() < near {
+                            Some((i, Grab::From))
+                        } else if (water - *to).length() < near {
+                            Some((i, Grab::To))
+                        } else if on_the_line(*from, *to, water) < near {
+                            Some((i, Grab::Whole(water - *from)))
+                        } else {
+                            None
+                        }
+                    });
+                }
+            }
+            if let (Some((i, grab)), Some(at)) = (chart.moving, response.interact_pointer_pos()) {
+                if response.dragged() {
+                    asked.shift = Some((i, grab, t.to_water(at)));
+                }
+                if response.drag_stopped() {
+                    asked.let_go = true;
+                }
+            } else if response.drag_started() && !on_furniture {
+                if let Some(at) = response.interact_pointer_pos() {
+                    asked.dividers = Some((t.to_water(at), t.to_water(at)));
+                }
+            } else if response.dragged() {
+                if let (Some(at), Some((from, _))) =
+                    (response.interact_pointer_pos(), chart.dividers)
+                {
+                    asked.dividers = Some((from, t.to_water(at)));
+                }
+            } else if response.drag_stopped() {
+                // The rule leaves its line on the chart; the dividers leave
+                // nothing, because dividers are for reading and not for drawing.
+                if let Some((from, to)) = chart.dividers {
+                    let off = to - from;
+                    // A twitch of the hand is not a line. Below a tenth of an
+                    // inch of paper it was meant as a click.
+                    if off.length() > chart.range as f64 * 0.01 {
+                        if chart.tool == Tool::ParallelRule {
+                            asked.draw_on = Some(Plotted::Line {
+                                through: from,
+                                bearing: off.x.atan2(off.y).rem_euclid(std::f64::consts::TAU),
+                                speed: nav.measured.map(|(knots, _)| knots),
+                            });
+                        } else if chart.tool == Tool::Ruler {
+                            asked.draw_on = Some(Plotted::Rule { from, to });
+                        }
+                    }
+                }
+                asked.clear_dividers = true;
+            } else if response.clicked() {
+                asked.clear_dividers = true;
+            }
+        }
+        Tool::Pencil => {
+            if response.clicked() && !on_furniture {
+                if let Some(at) = response.interact_pointer_pos() {
+                    asked.draw_on = Some(Plotted::Cross {
+                        at: t.to_water(at),
+                        fix: false,
+                    });
+                }
+            }
+        }
+        Tool::Rubber => {
+            if response.clicked() && !on_furniture {
+                if let Some(at) = response.interact_pointer_pos() {
+                    asked.rub_out = Some(t.to_water(at));
+                }
+            }
+        }
+        Tool::Watch => {
+            if response.clicked() && !on_furniture {
+                if let Some(at) = response.interact_pointer_pos() {
+                    asked.draw_on = Some(Plotted::Stamp {
+                        at: t.to_water(at),
+                        hour,
+                    });
+                }
+            }
+        }
+        // Streaming the log and hauling it in again. Where on the paper the
+        // click lands does not matter at all — what is being marked is *her*
+        // position and the time, which is why this is the one tool that is not
+        // about the point under the cursor.
+        Tool::Log => {
+            if response.clicked() && !on_furniture {
+                match chart.streaming {
+                    None => asked.stream = Some(true),
+                    Some(_) => {
+                        asked.stream = Some(false);
+                        let (line, speed, set) =
+                            the_leg(chart.streaming, now, pos, nav.through_water, t.knows);
+                        asked.draw_on = line;
+                        asked.timed = speed;
+                        asked.out_by = set;
+                        if let Some((_, when, _)) = chart.streaming {
+                            asked.slip = Some(((now - when) - CAST).abs() / CAST);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    asked
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
@@ -490,23 +742,14 @@ pub fn draw(
         chart.laid_at.unwrap_or(st.pos)
     };
     // Set inside the closure and applied after it: the painter borrows the chart.
-    let mut set_dividers: Option<(glam::DVec2, glam::DVec2)> = None;
-    let mut clear_dividers = false;
-    let mut draw_on: Option<Plotted> = None;
-    let mut rub_out: Option<glam::DVec2> = None;
+    // Everything the hand on the paper asked for, which is applied once, below, after
+    // the chart has been drawn.
+    let mut asked = Asked::default();
     let mut pick: Option<Tool> = None;
     let mut explain: Option<bool> = None;
     let mut accept: Option<glam::DVec2> = None;
     let mut lay_at: Option<glam::DVec2> = None;
-    let mut take_hold: Option<(usize, Grab)> = None;
-    let mut shift: Option<(usize, Grab, glam::DVec2)> = None;
-    let mut let_go = false;
-    let mut stream: Option<bool> = None;
     let mut press_the_watch = false;
-    let mut timed: Option<(f64, f64)> = None;
-    let mut set_protractor: Option<Option<glam::DVec2>> = None;
-    let mut slip: Option<f64> = None;
-    let mut out_by: Option<f64> = None;
     let area = if spread {
         egui::Area::new("chart".into()).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
     } else {
@@ -526,25 +769,13 @@ pub fn draw(
         let p = ui.painter_at(rect);
         p.rect_filled(rect, 4.0, ink::DEEP);
 
-        let centre = rect.center();
         let scale = rect.width() * 0.5 / chart.range;
-        // Sim north is +y; on paper north is up, so the screen's y runs the other
-        // way. Getting this backwards puts every island on the wrong side of you,
-        // which is the one mistake a chart must never make.
-        let to_water = |s: egui::Pos2| -> glam::DVec2 {
-            middle_of_paper
-                + glam::DVec2::new(
-                    ((s.x - centre.x) / scale) as f64,
-                    ((centre.y - s.y) / scale) as f64,
-                )
-        };
-        let to_screen = |w: glam::DVec2| -> egui::Pos2 {
-            let d = w - middle_of_paper;
-            egui::pos2(centre.x + d.x as f32 * scale, centre.y - d.y as f32 * scale)
-        };
-        // The same paper, as a thing that can be handed to a function. The closures
-        // above stay for the sections not yet lifted out; everything lifted takes this,
-        // and the two cannot disagree because both come from here.
+        // **The paper, as a thing that can be handed to a function.**
+        //
+        // There were two closures here doing the conversion between water and screen,
+        // and every piece of drawing that had not been lifted out yet used them. They
+        // are gone: nothing in `draw` draws any more, so there is one conversion, on the
+        // table, and no way for a second one to drift away from it.
         // Where a press landed, if this frame had one. Worked out once: every
         // instrument asks the same question and they must all get the same answer.
         let pressed = response
@@ -637,220 +868,23 @@ pub fn draw(
                         + glam::DVec2::new((-moved.x / scale) as f64, (moved.y / scale) as f64),
                 );
             }
-
-            // What a drag means depends on what is in your hand, which is how a chart
-            // table works: the dividers measure, the rule plots, the pencil marks and
-            // the rubber takes it off again.
-            match chart.tool {
-                // Two clicks: the rose down, then the bearing.
-                Tool::Protractor => {
-                    if response.clicked() && !on_furniture {
-                        if let Some(at) = response.interact_pointer_pos() {
-                            let water = to_water(at);
-                            match chart.protractor {
-                                None => set_protractor = Some(Some(water)),
-                                Some(centre) => {
-                                    let off = water - centre;
-                                    if off.length() > chart.range as f64 * 0.01 {
-                                        draw_on = Some(Plotted::Line {
-                                            through: centre,
-                                            bearing: off
-                                                .x
-                                                .atan2(off.y)
-                                                .rem_euclid(std::f64::consts::TAU),
-                                            speed: nav.measured.map(|(knots, _)| knots),
-                                        });
-                                    }
-                                    set_protractor = Some(None);
-                                }
-                            }
-                        }
-                    }
-                }
-                Tool::Dividers | Tool::ParallelRule | Tool::Ruler => {
-                    // **Taking hold of a line that is already there.**
-                    //
-                    // With the straight edge in hand, a drag that starts on an existing
-                    // ruled line moves it rather than drawing a second one across it: an
-                    // end on its own, so a leg can be walked onto a mark, or the whole of
-                    // it if the hand lands somewhere along it. Which is what a straight
-                    // edge is for — you put it down, look at it, and shift it a quarter
-                    // of an inch — and the alternative is rubbing it out and drawing it
-                    // again, which is what the rubber is for and is not the same job.
-                    if chart.tool == Tool::Ruler && response.drag_started() && !on_furniture {
-                        if let Some(at) = response.interact_pointer_pos() {
-                            let water = to_water(at);
-                            // A finger's width on the paper, so a line can be caught
-                            // without the pointer having to be on the pencil mark.
-                            let near = (12.0 / scale) as f64;
-                            take_hold = chart.plot.iter().enumerate().find_map(|(i, item)| {
-                                let Plotted::Rule { from, to } = item else {
-                                    return None;
-                                };
-                                if (water - *from).length() < near {
-                                    Some((i, Grab::From))
-                                } else if (water - *to).length() < near {
-                                    Some((i, Grab::To))
-                                } else if on_the_line(*from, *to, water) < near {
-                                    Some((i, Grab::Whole(water - *from)))
-                                } else {
-                                    None
-                                }
-                            });
-                        }
-                    }
-                    if let (Some((i, grab)), Some(at)) =
-                        (chart.moving, response.interact_pointer_pos())
-                    {
-                        if response.dragged() {
-                            shift = Some((i, grab, to_water(at)));
-                        }
-                        if response.drag_stopped() {
-                            let_go = true;
-                        }
-                    } else if response.drag_started() && !on_furniture {
-                        if let Some(at) = response.interact_pointer_pos() {
-                            set_dividers = Some((to_water(at), to_water(at)));
-                        }
-                    } else if response.dragged() {
-                        if let (Some(at), Some((from, _))) =
-                            (response.interact_pointer_pos(), chart.dividers)
-                        {
-                            set_dividers = Some((from, to_water(at)));
-                        }
-                    } else if response.drag_stopped() {
-                        // The rule leaves its line on the chart; the dividers leave
-                        // nothing, because dividers are for reading and not for drawing.
-                        if let Some((from, to)) = chart.dividers {
-                            let off = to - from;
-                            // A twitch of the hand is not a line. Below a tenth of an
-                            // inch of paper it was meant as a click.
-                            if off.length() > chart.range as f64 * 0.01 {
-                                if chart.tool == Tool::ParallelRule {
-                                    draw_on = Some(Plotted::Line {
-                                        through: from,
-                                        bearing: off
-                                            .x
-                                            .atan2(off.y)
-                                            .rem_euclid(std::f64::consts::TAU),
-                                        speed: nav.measured.map(|(knots, _)| knots),
-                                    });
-                                } else if chart.tool == Tool::Ruler {
-                                    draw_on = Some(Plotted::Rule { from, to });
-                                }
-                            }
-                        }
-                        clear_dividers = true;
-                    } else if response.clicked() {
-                        clear_dividers = true;
-                    }
-                }
-                Tool::Pencil => {
-                    if response.clicked() && !on_furniture {
-                        if let Some(at) = response.interact_pointer_pos() {
-                            draw_on = Some(Plotted::Cross {
-                                at: to_water(at),
-                                fix: false,
-                            });
-                        }
-                    }
-                }
-                Tool::Rubber => {
-                    if response.clicked() && !on_furniture {
-                        if let Some(at) = response.interact_pointer_pos() {
-                            rub_out = Some(to_water(at));
-                        }
-                    }
-                }
-                Tool::Watch => {
-                    if response.clicked() && !on_furniture {
-                        if let Some(at) = response.interact_pointer_pos() {
-                            draw_on = Some(Plotted::Stamp {
-                                at: to_water(at),
-                                hour: sky.hour,
-                            });
-                        }
-                    }
-                }
-                // Streaming the log and hauling it in again. Where on the paper the
-                // click lands does not matter at all — what is being marked is *her*
-                // position and the time, which is why this is the one tool that is not
-                // about the point under the cursor.
-                Tool::Log => {
-                    if response.clicked() && !on_furniture {
-                        match chart.streaming {
-                            None => stream = Some(true),
-                            Some(_) => {
-                                stream = Some(false);
-                                let (line, speed, set) = the_leg(
-                                    chart.streaming,
-                                    st.time,
-                                    st.pos,
-                                    nav.through_water,
-                                    knows,
-                                );
-                                draw_on = line;
-                                timed = speed;
-                                out_by = set;
-                                if let Some((_, when, _)) = chart.streaming {
-                                    slip = Some(((st.time - when) - CAST).abs() / CAST);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            asked = in_hand(
+                &table,
+                &chart,
+                &nav,
+                &response,
+                on_furniture,
+                &sim,
+                sky.hour,
+            );
 
             // Where the lines cross, if they do — worked out before they are drawn, so
             // that each of them can be drawn the length that reaches the crossing.
             let crossing_at = sail_core::fix::plot(&nav.sights).map(|f| f.at);
 
-            // The leg being timed, while it is being timed: a line from where the log
-            // was streamed to where she is now, with the figures running. Without it the
-            // tool is a button that appears to do nothing for ten minutes.
-            if let Some((was, when, _)) = chart.streaming.filter(|_| knows) {
-                let (a, b) = (to_screen(was), to_screen(st.pos));
-                p.line_segment([a, b], egui::Stroke::new(1.0, ink::MARK));
-                // Where it was streamed, marked the moment it is streamed. Without this
-                // the first click put a line of zero length on the paper and looked like
-                // nothing happening at all, which is how the tool came to be reported as
-                // unusable: a leg takes minutes to become visible and a button has to
-                // answer in the same second.
-                p.circle(
-                    a,
-                    4.0,
-                    egui::Color32::TRANSPARENT,
-                    egui::Stroke::new(1.2, ink::MARK),
-                );
-                p.circle_filled(a, 1.3, ink::MARK);
-                p.text(
-                    a + egui::vec2(7.0, -6.0),
-                    egui::Align2::LEFT_BOTTOM,
-                    format!(
-                        "log {:02.0}{:02.0}",
-                        sky.hour.floor(),
-                        (sky.hour.fract() * 60.0).floor()
-                    ),
-                    egui::FontId::monospace(10.0),
-                    ink::MARK,
-                );
-                let off = st.pos - was;
-                let minutes = (st.time - when) / 60.0;
-                let miles = off.length() / 1_852.0;
-                p.text(
-                    b + egui::vec2(8.0, 10.0),
-                    egui::Align2::LEFT_TOP,
-                    format!(
-                        "log streamed — {:.2} M, {:.0} min, {:.1} kn",
-                        miles,
-                        minutes,
-                        miles / (minutes / 60.0).max(1e-6)
-                    ),
-                    egui::FontId::monospace(10.0),
-                    ink::MARK,
-                );
-            }
+            the_cast(&table, chart.streaming, st.time, st.pos, sky.hour);
 
+            the_track_made_good(&table, &nav);
             reckoning(&table, &nav, st.time);
 
             the_sights(
@@ -950,16 +984,16 @@ pub fn draw(
             ink::COAST,
         );
     });
-    if let Some(set) = set_dividers {
+    if let Some(set) = asked.dividers {
         chart.dividers = Some(set);
     }
-    if clear_dividers {
+    if asked.clear_dividers {
         chart.dividers = None;
     }
-    if let Some(item) = draw_on {
+    if let Some(item) = asked.draw_on {
         chart.pencil(item);
     }
-    if let Some(at) = rub_out {
+    if let Some(at) = asked.rub_out {
         // Whatever is nearest, within a reasonable reach — which is what a rubber does:
         // you put it on the thing you meant.
         let reach = chart.range as f64 * 0.04;
@@ -988,13 +1022,13 @@ pub fn draw(
             chart.plot.remove(i);
         }
     }
-    if let Some(held) = take_hold {
+    if let Some(held) = asked.take_hold {
         chart.moving = Some(held);
         // Nothing is being measured while something is being moved: the dividers and the
         // hand are the same hand.
         chart.dividers = None;
     }
-    if let Some((i, grab, to)) = shift {
+    if let Some((i, grab, to)) = asked.shift {
         if let Some(Plotted::Rule { from, to: end }) = chart.plot.get_mut(i) {
             match grab {
                 Grab::From => *from = to,
@@ -1007,7 +1041,7 @@ pub fn draw(
             }
         }
     }
-    if let_go {
+    if asked.let_go {
         chart.moving = None;
     }
     // **Start, stop, zero**, in that order and round again, which is the whole of a
@@ -1016,25 +1050,25 @@ pub fn draw(
     if press_the_watch {
         work_the_watch(&mut chart, &mut nav, &sim, knows);
     }
-    if let Some(measured) = timed {
+    if let Some(measured) = asked.timed {
         nav.measured = Some(measured);
     }
-    if let Some(slip) = slip {
+    if let Some(slip) = asked.slip {
         nav.log_slip = slip;
     }
-    if let Some(set) = out_by {
+    if let Some(set) = asked.out_by {
         // The same smoothing a fix uses, because it is the same measurement arrived at
         // from a different direction. See `navigation::KEEPS`.
         nav.learn_the_set(set);
     }
-    match stream {
+    match asked.stream {
         Some(true) => {
             chart.streaming = Some((sim.sim.state.pos, sim.sim.state.time, nav.through_water))
         }
         Some(false) => chart.streaming = None,
         None => {}
     }
-    if let Some(where_) = set_protractor {
+    if let Some(where_) = asked.protractor {
         chart.protractor = where_;
     }
     if let Some(up) = explain {

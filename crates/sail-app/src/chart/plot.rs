@@ -14,17 +14,13 @@ use crate::sim::Sim;
 ///
 /// Drawn whether or not the chart may say where she is, because none of it *is* where
 /// she is: it is what she worked out, which is hers to have.
-pub(crate) fn reckoning(t: &Table, nav: &crate::navigation::Navigation, when: f64) {
-    // --- The reckoning ------------------------------------------------
-    //
-    // **The three lines a navigator draws between fixes**, and they are drawn
-    // whether or not the chart is allowed to say where she is — because none of
-    // them is where she is. They are what she worked out, which is hers to have.
-    //
-    // The track made good, solid, from fix to fix: the one line on this paper
-    // that is not an estimate. The speed on it is distance over time between two
-    // positions she established, which is speed over the ground and the number
-    // the instruments cannot give her.
+/// The track made good: fix to fix, the one line on this paper that is not an estimate.
+///
+/// Drawn whether or not the chart may say where she is, because it is not where she is
+/// — it is where she *was*, twice, and both of those she established herself. The speed
+/// on it is distance over time between two positions she worked, which is speed over
+/// the ground and the number no instrument aboard can give her.
+pub(crate) fn the_track_made_good(t: &Table, nav: &crate::navigation::Navigation) {
     for pair in nav.fixes.windows(2) {
         let (one, then) = (pair[0], pair[1]);
         let (a, b) = (t.to_screen(one.0), t.to_screen(then.0));
@@ -44,6 +40,13 @@ pub(crate) fn reckoning(t: &Table, nav: &crate::navigation::Navigation, when: f6
             ink::TRACK,
         );
     }
+}
+
+/// The reckoning and the circle she is somewhere in.
+///
+/// Drawn whether or not the chart may say where she is, because none of it *is* where
+/// she is: it is what she worked out, which is hers to have.
+pub(crate) fn reckoning(t: &Table, nav: &crate::navigation::Navigation, when: f64) {
     // **The reckoning is the half of navigation the fix cannot do — so it is drawn
     // when the fix cannot do it.**
     //
