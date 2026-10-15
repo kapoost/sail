@@ -844,31 +844,31 @@ pub(crate) fn her_own_place(
 /// becomes what the boat is working from and the moment it can be wrong. So this returns
 /// the point only when the button was pressed; believing it is a decision and decisions
 /// have a button.
-/// What the button under the fix is asking for this frame.
+/// What the buttons under the fix are asking for.
 pub(crate) enum Pressed {
-    /// A crossing the navigator says he believes.
-    Fix(glam::DVec2),
-    /// No crossing, and he wants the line written anyway — with whatever is known.
-    WhatSheKnows,
+    /// Put the position on the paper.
+    OnTheChart(glam::DVec2),
+    /// Write the line in the book.
+    InTheLog,
 }
 
-/// Where the lines cross, the triangle they make, and the button that writes the log.
+/// Where the lines cross, the triangle they make, and the two buttons under them.
 ///
 /// **Both parts of the fix are drawn**: the crossing because it is the answer and the
 /// triangle because it is the confidence — a cocked hat is the navigator's own report on
 /// how carefully he just did it, and a fix with none round it is a fix nobody has
-/// checked. A fix is not a position until somebody writes it in the book, which is the
-/// moment it becomes what the boat works from and the moment it can be wrong, so
-/// believing it is a decision and decisions have a button.
+/// checked.
 ///
-/// **And the button is there with no bearings at all.** Writing up the log is not the
-/// same act as fixing: most lines in a deck log have no fix in them, they have a time, a
-/// course, the glass and what was set. Asked for from the deck, and it is right — the
-/// book is kept every watch and the sky is only sometimes clear.
+/// **And the two buttons are two acts.** Marking the paper and writing the book are not
+/// the same thing and never were: most lines in a deck log have no fix in them — a time,
+/// a course, the glass, what was set — and a position pencilled on a chart is a
+/// statement about *where*, which is the one thing a page of a book cannot show you.
+/// Asked for from the deck as two buttons, and splitting them makes each one say exactly
+/// what it did.
 pub(crate) fn the_cocked_hat(
     t: &Table,
     nav: &crate::navigation::Navigation,
-    log_button: egui::Rect,
+    buttons: (egui::Rect, egui::Rect),
     pressed: Option<egui::Pos2>,
 ) -> Option<Pressed> {
     let got = sail_core::fix::plot(&nav.sights);
@@ -894,32 +894,40 @@ pub(crate) fn the_cocked_hat(
             ink::BOAT,
         );
     }
-    let slot = log_button;
-    t.p.rect_filled(slot, 2.0, ink::PAPER);
-    t.p.rect_stroke(
-        slot,
-        2.0,
-        egui::Stroke::new(1.0, ink::COAST),
-        egui::StrokeKind::Inside,
-    );
-    t.p.text(
-        slot.center(),
-        egui::Align2::CENTER_CENTER,
-        if got.is_some() {
-            "ENTER THE FIX IN THE LOG"
-        } else {
-            "WRITE UP THE LOG"
-        },
-        egui::FontId::monospace(11.0),
-        ink::COAST,
-    );
-    if !pressed.is_some_and(|q| slot.contains(q)) {
-        return None;
+    let (chart_button, log_button) = buttons;
+    let mut asked = None;
+    for (slot, said, live) in [
+        ("ON THE CHART", chart_button, got.is_some()),
+        ("IN THE LOG", log_button, true),
+    ]
+    .map(|(name, rect, live)| (rect, name, live))
+    {
+        t.p.rect_filled(
+            slot,
+            2.0,
+            ink::PAPER.gamma_multiply(if live { 1.0 } else { 0.5 }),
+        );
+        t.p.rect_stroke(
+            slot,
+            2.0,
+            egui::Stroke::new(1.0, ink::COAST.gamma_multiply(if live { 1.0 } else { 0.5 })),
+            egui::StrokeKind::Inside,
+        );
+        t.p.text(
+            slot.center(),
+            egui::Align2::CENTER_CENTER,
+            said,
+            egui::FontId::monospace(10.0),
+            ink::COAST.gamma_multiply(if live { 1.0 } else { 0.5 }),
+        );
+        if live && pressed.is_some_and(|q| slot.contains(q)) {
+            asked = Some(match (said, got) {
+                ("ON THE CHART", Some(got)) => Pressed::OnTheChart(got.at),
+                _ => Pressed::InTheLog,
+            });
+        }
     }
-    Some(match got {
-        Some(got) => Pressed::Fix(got.at),
-        None => Pressed::WhatSheKnows,
-    })
+    asked
 }
 
 /// The position lines: the sights themselves, drawn where they now apply.

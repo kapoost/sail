@@ -39,7 +39,9 @@ use crate::sim::Sim;
 #[derive(Resource, Default)]
 pub struct Coast {
     pub marks: Vec<sail_core::land::Landmark>,
-    from: Option<std::sync::Arc<sail_core::land::Archipelago>>,
+    /// Which archipelago these were read off, so they are rebuilt when it changes and
+    /// not before. Public only so that a scenario can stand a coast up without one.
+    pub from: Option<std::sync::Arc<sail_core::land::Archipelago>>,
 }
 
 /// Keep it in step with the water she is actually in.

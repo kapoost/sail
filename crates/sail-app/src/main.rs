@@ -40,6 +40,7 @@ mod retro;
 mod rig;
 mod rod;
 mod sail_texture;
+mod scenarios;
 mod sea_texture;
 mod settings;
 mod sight;

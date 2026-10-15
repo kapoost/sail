@@ -405,8 +405,10 @@ pub fn write_up_the_log(
         .and_then(|run| run.write_up(now))
         .map(|(_, _, course)| course)
         .or_else(|| nav.reckoning.as_ref().map(|run| run.steering));
+    // In the book and nowhere else: pencilling it as well would put a second copy of
+    // every line on the paper, which is the clutter that took the weather off the chart
+    // in the first place.
     let line = note(&sim, &nav, sky.hour, at, course);
-    chart.pencil(crate::chart::Plotted::Entry(line));
     log.write(sky.hour, crate::chart::Wrote::Entered(line));
     info!(
         "log written up at {:02.0}{:02.0}",

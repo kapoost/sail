@@ -157,18 +157,28 @@ pub(crate) enum Turned {
 /// before anybody wrote any of this down, because a column of headings you fill in is
 /// the only format that makes a missing figure obvious.
 ///
-/// Returns what was pressed, and takes the page rectangle so that a press on it is not
-/// also a press on the water underneath — the oldest bug on this chart and the one that
-/// keeps coming back wearing different clothes.
+/// **Beside the chart and not on it.** It began as a rectangle painted on the paper,
+/// which meant every press on a line was also a press on the water underneath and had to
+/// be excluded by hand — the oldest bug on this chart, and one that keeps coming back
+/// wearing different clothes. A book is a separate object on the table. So it is a
+/// separate widget, with its own rows that are clicked because egui was asked whether
+/// they were clicked, rather than because a point was tested against a rectangle.
 pub(crate) fn the_book(
-    t: &Table,
+    ui: &mut egui::Ui,
     log: &DeckLog,
     nav: &crate::navigation::Navigation,
-    page: egui::Rect,
     showing: (Page, Option<usize>),
-    pressed: Option<egui::Pos2>,
 ) -> Option<Turned> {
     let (open, chosen) = showing;
+    let (page, _) = ui.allocate_exact_size(egui::vec2(312.0, 420.0), egui::Sense::hover());
+    let t = &Table {
+        p: ui.painter_at(page),
+        rect: page,
+        scale: 1.0,
+        middle: glam::DVec2::ZERO,
+        knows: true,
+        why: false,
+    };
     t.p.rect_filled(page, 2.0, ink::PAPER.gamma_multiply(0.75));
     t.p.rect_stroke(
         page,
@@ -197,7 +207,10 @@ pub(crate) fn the_book(
             egui::FontId::monospace(9.0),
             ink::COAST,
         );
-        if pressed.is_some_and(|at| tab.contains(at)) {
+        if ui
+            .interact(tab, ui.id().with(("tab", name)), egui::Sense::click())
+            .clicked()
+        {
             turned = Some(Turned::To(which));
         }
         x += 84.0;
@@ -220,7 +233,10 @@ pub(crate) fn the_book(
                     egui::pos2(page.left() + 4.0, y - 1.0),
                     egui::vec2(page.width() - 8.0, 13.0),
                 );
-                if pressed.is_some_and(|at| row.contains(at)) {
+                if ui
+                    .interact(row, ui.id().with(("line", i)), egui::Sense::click())
+                    .clicked()
+                {
                     turned = Some(Turned::Line(i));
                 }
                 let drawn = on_the_chart(&line.wrote, nav);

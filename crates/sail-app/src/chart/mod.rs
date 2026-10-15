@@ -898,9 +898,14 @@ pub fn draw(
             // looking at.
             let why_button =
                 egui::Rect::from_min_size(egui::pos2(x, rect.top() + 14.0), egui::vec2(48.0, 20.0));
-            let log_button = egui::Rect::from_min_size(
+            // Two of them, side by side: the paper and the book.
+            let chart_button = egui::Rect::from_min_size(
                 egui::pos2(rect.left() + 24.0, rect.top() + 66.0),
-                egui::vec2(188.0, 22.0),
+                egui::vec2(108.0, 22.0),
+            );
+            let log_button = egui::Rect::from_min_size(
+                egui::pos2(rect.left() + 138.0, rect.top() + 66.0),
+                egui::vec2(100.0, 22.0),
             );
             // The stopwatch is furniture too, and this is the same fault as the one
             // found in review before it: the instruments are drawn *on* the chart and
@@ -916,17 +921,10 @@ pub fn draw(
                 egui::pos2(rect.right() - 62.0, rect.top() + 110.0),
                 egui::vec2(74.0, 18.0),
             );
-            // The book lies open beside the chart, down the right-hand side where
-            // there is paper to spare. Its rectangle joins the furniture, because a
-            // press on a page is not a press on the water under it.
-            let page = egui::Rect::from_min_max(
-                egui::pos2(rect.right() - 320.0, rect.top() + 140.0),
-                egui::pos2(rect.right() - 14.0, rect.bottom() - 150.0),
-            );
             let on_furniture = response.interact_pointer_pos().is_some_and(|at| {
-                page.contains(at)
-                    || furniture.iter().any(|slot| slot.contains(at))
+                furniture.iter().any(|slot| slot.contains(at))
                     || why_button.contains(at)
+                    || chart_button.contains(at)
                     || log_button.contains(at)
                     || watch_face.contains(at)
                     || watch_button.contains(at)
@@ -1010,22 +1008,9 @@ pub fn draw(
                 explain = explained;
             }
 
-            match the_book(
-                &table,
-                &log,
-                &nav,
-                page,
-                (chart.page, chart.showing),
-                pressed,
-            ) {
-                Some(Turned::Line(line)) => laid = Some(line),
-                Some(Turned::To(which)) => turn_to = Some(which),
-                None => {}
-            }
-
-            match the_cocked_hat(&table, &nav, log_button, pressed) {
-                Some(Pressed::Fix(at)) => accept = Some(at),
-                Some(Pressed::WhatSheKnows) => writing_up = true,
+            match the_cocked_hat(&table, &nav, (chart_button, log_button), pressed) {
+                Some(Pressed::OnTheChart(at)) => accept = Some(at),
+                Some(Pressed::InTheLog) => writing_up = true,
                 None => {}
             }
 
@@ -1074,6 +1059,21 @@ pub fn draw(
             ink::COAST,
         );
     });
+    // **The book lies on the table beside the chart**, in its own area with a hand's
+    // breadth of gap: it is a separate object, it is read while the chart is being
+    // worked on, and a page drawn over the water was a page whose every press had to be
+    // kept from reaching the sea underneath.
+    if spread {
+        egui::Area::new("deck log".into())
+            .anchor(egui::Align2::RIGHT_CENTER, egui::vec2(-16.0, 0.0))
+            .show(ctx, |ui| {
+                match the_book(ui, &log, &nav, (chart.page, chart.showing)) {
+                    Some(Turned::Line(line)) => laid = Some(line),
+                    Some(Turned::To(which)) => turn_to = Some(which),
+                    None => {}
+                }
+            });
+    }
     if let Some(set) = asked.dividers {
         chart.dividers = Some(set);
     }
