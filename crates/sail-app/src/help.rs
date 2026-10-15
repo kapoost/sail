@@ -88,13 +88,17 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
                 "the hand bearing compass in your hand; aim with the right button held",
             ),
             (
+                " ",
+                "one instrument at a time, and either one puts you in the cockpit",
+            ),
+            (
                 "N",
                 "and shoot: hold the notch *on* it, and it says whether it caught",
             ),
             (
                 "Shift M",
                 "the chart on the table: dividers, ruler, parallel rule, pencil, \
-                 rubber, and the fix",
+                 watch, rubber, and the fix",
             ),
             (
                 " ",

@@ -167,6 +167,45 @@ fn on_the_lanyard() -> crate::swing::Hung {
     }
 }
 
+/// The coil of line that goes with the ring, metres.
+///
+/// Twenty, which is what was asked for and is also about right: a throwing line on a
+/// thirty-four footer is fifteen to thirty metres of floating polypropylene, long
+/// enough to reach somebody who has just gone over the side and short enough that a
+/// person on the foredeck can throw the bight of it.
+///
+/// It decides how big the coil is drawn, and the arithmetic is worth writing down
+/// because a coil the size of a dinner plate and a coil the size of a tractor tyre are
+/// both "a coil" to whoever is modelling it. Eight-millimetre line is fifty square
+/// millimetres in section; twenty metres of it is a thousand square centimetres of rope
+/// to put somewhere. Coiled on a bight of three hundred millimetres across, each turn
+/// is nine hundred and forty millimetres round, so it is one and twenty turns — and
+/// twenty-one turns packed at the seven tenths a hand-made coil manages wants a bundle
+/// about forty-five millimetres thick. Which is what is drawn: a hank three hundred
+/// across made of rope a wrist thick, and it is the size of a dinner plate after all.
+const COIL_LINE: f32 = 20.0;
+/// Across the bight of the coil, metres: where the turns lie.
+const COIL_BIGHT: f32 = 0.15;
+/// The line itself: eight millimetres, which is what a throwing line is.
+const COIL_DIAMETER: f32 = 0.008;
+/// And how thick the bundle of turns is, worked out rather than chosen — so that
+/// changing the length of line changes the size of the coil, which is the only way the
+/// two can go on agreeing.
+fn coil_tube() -> f32 {
+    let turns = COIL_LINE / (std::f32::consts::TAU * COIL_BIGHT);
+    let rope = std::f32::consts::PI * COIL_DIAMETER * COIL_DIAMETER * 0.25;
+    // Seven tenths, which is about what a coil made up by hand packs to: rope is not
+    // stacked, it is laid on, and there is air in a hank.
+    (turns * rope / 0.7 / std::f32::consts::PI).sqrt()
+}
+/// How far forward of the ring the coil hangs.
+///
+/// The ring swings athwartships on its strop — it hangs in its own plane along her side
+/// — so anything a bight's width forward of it is clear of the swing for good, and this
+/// is a hand's reach from the ring, which is where the two things that go over together
+/// have to be.
+const COIL_FORWARD: f32 = 0.46;
+
 /// Where the ring has got to, swinging on its lanyard.
 #[derive(Resource, Default)]
 pub struct Hanging(crate::swing::Swing);
@@ -384,6 +423,21 @@ pub fn setup(
         perceptual_roughness: 0.5,
         ..default()
     });
+    // Floating line, which is what a throwing line is made of and why it is this
+    // colour: polypropylene is sold in orange and yellow because it has to be found on
+    // the water, and it is the one rope on the boat that is not white or blue.
+    let line = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.93, 0.74, 0.16),
+        perceptual_roughness: 0.92,
+        ..default()
+    });
+    // And the bag: heavy orange PVC, because a grab bag that cannot be seen in the
+    // water is a grab bag you dropped.
+    let canvas = w.materials.add(StandardMaterial {
+        base_color: Color::srgb(0.86, 0.33, 0.10),
+        perceptual_roughness: 0.88,
+        ..default()
+    });
 
     // Before anything that can return: a world with no boat in it still has a drill
     // resource, or every system that reads one fails on every frame for ever instead of
@@ -442,6 +496,103 @@ pub fn setup(
                     .with_scale(Vec3::new(1.06, 1.0, 0.94)),
             ));
         });
+
+        // **Twenty metres of line in a coil, made fast to the cleat.**
+        //
+        // Asked for from the deck, and it is the half of this gear that does the work. A
+        // ring thrown to somebody in the water is a ring you then have to go back for,
+        // under sail, in whatever the weather is — which is the whole of why the drill is
+        // hard. A ring on a line is a ring you can *pull*, and twenty metres of floating
+        // line is the difference between a recovery and another approach.
+        //
+        // It hangs on the same cleat, a bight's width forward of the ring so the swing
+        // never reaches it, and it is a hank rather than a tidy doughnut because a coil
+        // made up by hand on a quarter never is: two turns of its own end round the
+        // middle hold it, and the turns are what stop it being a rubber ring.
+        let coil_z = RACK_Z - COIL_FORWARD;
+        let coil_y = deck - 0.26;
+        b.spawn((
+            Mesh3d(w.meshes.add(Torus::new(
+                COIL_BIGHT - coil_tube(),
+                COIL_BIGHT + coil_tube(),
+            ))),
+            MeshMaterial3d(line.clone()),
+            Transform::from_xyz(gunwale - 0.015, coil_y, coil_z)
+                // In its own plane along her side, like the ring, because that is the
+                // only way anything this size hangs on topsides without standing off
+                // them like a shelf.
+                .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2))
+                .with_scale(Vec3::new(1.0, 1.0, 0.88)),
+        ));
+        // The two turns that hold the hank together.
+        for at in [-0.5, 0.5] {
+            b.spawn((
+                Mesh3d(w.meshes.add(Cuboid::new(0.055, 0.016, 0.016))),
+                MeshMaterial3d(line.clone()),
+                Transform::from_xyz(
+                    gunwale - 0.015,
+                    coil_y + COIL_BIGHT * at * 1.9,
+                    coil_z + COIL_BIGHT * 0.1,
+                ),
+            ));
+        }
+        // And the standing part: up from the coil to the cleat, in two lengths so it
+        // hangs in a bight rather than standing like a wire. A line made fast is the
+        // reason the coil is up there at all, and a coil hanging beside a cleat with
+        // nothing going to it is a prop.
+        let tie =
+            |b: &mut ChildSpawnerCommands, from: Vec3, to: Vec3, meshes: &mut Assets<Mesh>| {
+                let span = to - from;
+                b.spawn((
+                    Mesh3d(meshes.add(Cylinder::new(0.006, span.length()))),
+                    MeshMaterial3d(line.clone()),
+                    Transform::from_translation(from + span * 0.5)
+                        .with_rotation(Quat::from_rotation_arc(Vec3::Y, span.normalize())),
+                ));
+            };
+        let on_the_cleat = Vec3::new(gunwale - 0.03, deck + 0.02, RACK_Z);
+        let top_of_coil = Vec3::new(gunwale - 0.015, coil_y + COIL_BIGHT, coil_z);
+        let sag = Vec3::new(
+            gunwale - 0.02,
+            (on_the_cleat.y + top_of_coil.y) * 0.5 - 0.055,
+            (on_the_cleat.z + top_of_coil.z) * 0.5,
+        );
+        tie(b, on_the_cleat, sag, w.meshes);
+        tie(b, sag, top_of_coil, w.meshes);
+
+        // **The grab bag**, beside it on the quarter deck.
+        //
+        // The one piece of gear on a small boat that is packed for the day nobody plans
+        // for: flares, a hand-held VHF, water, a torch, the ship's papers, and whatever
+        // else you would want in a liferaft or on a rock. It lives where a hand can take
+        // it without going below, which on a boat this size means lashed on deck aft, and
+        // next to the lifebuoy is exactly where it belongs — the two things you take with
+        // you are kept together.
+        //
+        // On deck rather than over the side: the cockpit opening has closed by this
+        // station, so the quarter here is solid deck a foot and a half wide inboard of
+        // the rail, and that is clear of the tiller, which sweeps forward of its stock.
+        let bag_z = RACK_Z + 0.18;
+        let bag_deck = crate::deck::deck_height(bag_z);
+        b.spawn((
+            Mesh3d(w.meshes.add(Cuboid::new(0.24, 0.30, 0.20))),
+            MeshMaterial3d(canvas.clone()),
+            Transform::from_xyz(0.33, bag_deck + 0.15, bag_z),
+        ));
+        // The rolled top of a dry bag, which is how one is closed and is the only part
+        // of it anybody would recognise.
+        b.spawn((
+            Mesh3d(w.meshes.add(Cuboid::new(0.24, 0.07, 0.09))),
+            MeshMaterial3d(canvas.clone()),
+            Transform::from_xyz(0.33, bag_deck + 0.33, bag_z),
+        ));
+        // And the lashing across it, because anything on deck that is not tied down is
+        // over the side by the second gybe.
+        b.spawn((
+            Mesh3d(w.meshes.add(Cuboid::new(0.27, 0.02, 0.03))),
+            MeshMaterial3d(line.clone()),
+            Transform::from_xyz(0.33, bag_deck + 0.17, bag_z),
+        ));
     });
 
     // The man in the water, hidden until there is one. A head, a pair of shoulders, an

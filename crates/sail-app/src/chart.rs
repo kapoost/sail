@@ -87,6 +87,14 @@ pub enum Tool {
     Pencil,
     /// And the rubber that rubs it out.
     Rubber,
+    /// The watch. Not a drawing instrument at all — it writes the *time* where you put
+    /// it, which is the one thing on a chart that cannot be worked out afterwards.
+    ///
+    /// Every mark a navigator makes carries a time beside it and the whole of dead
+    /// reckoning is built on them: a fix with no time against it is a fix you cannot run
+    /// on, because run on from *when*. Asked for from the deck, and it is the oldest
+    /// habit in chartwork — the time goes on the paper as the pencil leaves it.
+    Watch,
 }
 
 impl Tool {
@@ -97,6 +105,7 @@ impl Tool {
             Tool::ParallelRule => "PARALLEL RULE",
             Tool::Pencil => "PENCIL",
             Tool::Rubber => "RUBBER",
+            Tool::Watch => "WATCH",
         }
     }
 
@@ -110,6 +119,7 @@ impl Tool {
             }
             Tool::Pencil => "click: a cross where you think you are",
             Tool::Rubber => "click a line or a cross to take it off the chart",
+            Tool::Watch => "click: the time, written on the chart where you put it",
         }
     }
 }
@@ -117,11 +127,12 @@ impl Tool {
 /// The instruments, in the order a hand reaches for them. One list, because the palette
 /// is drawn from it and the click targets are worked out from it, and those two being
 /// two lists is how a button ends up somewhere other than where it looks.
-pub const TOOLS: [Tool; 5] = [
+pub const TOOLS: [Tool; 6] = [
     Tool::Dividers,
     Tool::Ruler,
     Tool::ParallelRule,
     Tool::Pencil,
+    Tool::Watch,
     Tool::Rubber,
 ];
 
@@ -138,6 +149,9 @@ pub enum Plotted {
     /// drawn to end, which is the whole difference between it and a position line —
     /// a position line has no ends, and this is a line *from here to there*.
     Rule { from: glam::DVec2, to: glam::DVec2 },
+    /// A time written on the paper: ship's time, in the four figures a deck log is kept
+    /// in, with a tick under it to say which mark it belongs to.
+    Stamp { at: glam::DVec2, hour: f32 },
 }
 
 impl Default for Chart {
@@ -245,6 +259,7 @@ pub fn record(sim: Res<Sim>, time: Res<Time>, mut track: ResMut<Track>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
     mut chart: ResMut<Chart>,
@@ -253,6 +268,7 @@ pub fn draw(
     track: Res<Track>,
     nav: Res<crate::navigation::Navigation>,
     coast: Res<crate::marks::Coast>,
+    sky: Res<crate::sky::Sky>,
 ) -> Result {
     if !chart.open {
         return Ok(());
@@ -720,6 +736,16 @@ pub fn draw(
                         }
                     }
                 }
+                Tool::Watch => {
+                    if response.clicked() && !on_furniture {
+                        if let Some(at) = response.interact_pointer_pos() {
+                            draw_on = Some(Plotted::Stamp {
+                                at: to_water(at),
+                                hour: sky.hour,
+                            });
+                        }
+                    }
+                }
             }
 
             // Where the lines cross, if they do — worked out before they are drawn, so
@@ -768,6 +794,28 @@ pub fn draw(
                                 egui::Stroke::new(1.3, ink::PENCIL),
                             );
                         }
+                    }
+                    Plotted::Stamp { at, hour } => {
+                        // Four figures and a tick under them, which is how a time is
+                        // written beside a mark: no colon, because a deck log has never
+                        // used one, and the tick so that a page with six times on it
+                        // still says which is which.
+                        let c = to_screen(at);
+                        p.line_segment(
+                            [c + egui::vec2(0.0, -3.0), c + egui::vec2(0.0, 3.0)],
+                            egui::Stroke::new(1.2, ink::PENCIL),
+                        );
+                        p.text(
+                            c + egui::vec2(5.0, -4.0),
+                            egui::Align2::LEFT_BOTTOM,
+                            format!(
+                                "{:02.0}{:02.0}",
+                                hour.floor(),
+                                (hour.fract() * 60.0).floor()
+                            ),
+                            egui::FontId::monospace(11.0),
+                            ink::PENCIL,
+                        );
                     }
                     Plotted::Rule { from, to } => {
                         // A ruled leg, with the two things written along it that a
@@ -1107,6 +1155,7 @@ pub fn draw(
         for (i, item) in chart.plot.iter().enumerate() {
             let d = match *item {
                 Plotted::Cross { at: c } => (c - at).length(),
+                Plotted::Stamp { at: c, .. } => (c - at).length(),
                 Plotted::Line { through, bearing } => {
                     let along = glam::DVec2::new(bearing.sin(), bearing.cos());
                     let off = at - through;

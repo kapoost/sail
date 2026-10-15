@@ -68,6 +68,31 @@ pub struct Sighting {
 const MAGNIFIES: f32 = 3.1;
 pub const GLASSES_REACH: f64 = 2.2;
 
+/// How far off a mark can be told apart from the others, metres.
+///
+/// The honest rule is identification range — a bearing on "a white tower" is a line
+/// through nothing, and which tower it is is the whole difficulty of coastal
+/// navigation. The exception is a mark she has already **recognised** through the
+/// glasses, which can be shot as far as it can be seen: that is not a concession, it is
+/// what identification *is*. You worked out which tower that is from the shape of the
+/// coast, and knowing which tower it is does not wear off at four miles.
+///
+/// It also has to be this way now that the glasses and the compass cannot be held at
+/// once. The old rule handed the compass the glasses' reach while both were up, so the
+/// reach came from the glass rather than from the knowing — and with one instrument in
+/// the hand at a time that would simply have taken two miles of range away.
+///
+/// One function because two places ask it and they must agree: the instrument that
+/// decides whether the bearing may be taken, and the plot that decides whether the fix
+/// taken from it still holds.
+pub fn nameable_from(mark: &sail_core::land::Landmark, recognised: &[String]) -> f64 {
+    if recognised.contains(&mark.name) {
+        mark.visible_from(2.0)
+    } else {
+        mark.kind.identified_from().min(mark.visible_from(2.0))
+    }
+}
+
 /// How near the notch has to be before you can say you are on it, radians.
 ///
 /// **One degree and a quarter**, and it was two and a half. Narrowed because a notch
@@ -113,14 +138,29 @@ pub fn aim(
     // a mouse.
     let shifted = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     // The glasses, which are a different instrument from the compass and are used with
-    // the other hand: Shift and B puts them up. You can have both — you find the thing
-    // with the glasses and then shoot it with the compass, which is exactly the order a
-    // navigator does it in.
+    // the other hand: Shift and B puts them up.
+    //
+    // **One at a time**, which was asked for from the deck and is simply true: you have
+    // two hands and one of them is holding on. A pair of seven-by-fifties is a
+    // two-handed instrument on a moving boat and a hand bearing compass is held out at
+    // arm's length and kept level — nobody has ever done both at once, and the order a
+    // navigator works in is one then the other: find the thing in the glasses, put them
+    // down, pick up the compass, shoot it.
+    //
+    // Picking one up therefore puts the other down, rather than refusing the key. A
+    // button that does nothing is a button you press twice.
     if keys.just_pressed(KeyCode::KeyB) && shifted {
         sighting.glasses = !sighting.glasses;
+        if sighting.glasses {
+            sighting.up = false;
+            sighting.on = None;
+        }
     }
     if keys.just_pressed(KeyCode::KeyN) && shifted {
         sighting.up = !sighting.up;
+        if sighting.up {
+            sighting.glasses = false;
+        }
         if !sighting.up {
             sighting.on = None;
         }
@@ -191,10 +231,7 @@ pub fn aim(
     for mark in &coast.marks {
         let off = mark.at - here;
         let range = off.length();
-        // Through the glasses a mark can be named from about twice as far, which is what
-        // they are for.
-        let reach = if sighting.glasses { GLASSES_REACH } else { 1.0 };
-        if range > (mark.kind.identified_from() * reach).min(mark.visible_from(2.0)) {
+        if range > nameable_from(mark, &nav.recognised) {
             continue;
         }
         let to_it = wrap_tau(off.x.atan2(off.y));
@@ -549,6 +586,7 @@ fn line_mark(item: &crate::chart::Plotted) -> glam::DVec2 {
         crate::chart::Plotted::Line { through, .. } => *through,
         crate::chart::Plotted::Cross { at } => *at,
         crate::chart::Plotted::Rule { from, .. } => *from,
+        crate::chart::Plotted::Stamp { at, .. } => *at,
     }
 }
 

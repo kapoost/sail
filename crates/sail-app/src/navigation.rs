@@ -302,7 +302,7 @@ pub fn enter_in_the_log(
 /// When the second one goes — round a headland, into the rain, over the horizon — the
 /// chart stops saying. That is the moment a navigator starts keeping a dead-reckoning
 /// plot, and it arrives by itself rather than on a timer.
-pub fn the_fix_holds(sim: Res<Sim>, mut nav: ResMut<Navigation>) {
+pub fn the_fix_holds(sim: Res<Sim>, coast: Res<crate::marks::Coast>, mut nav: ResMut<Navigation>) {
     if !nav.lost || nav.fixed_on.is_empty() {
         if !nav.lost {
             nav.still_in_sight = usize::MAX;
@@ -315,9 +315,23 @@ pub fn the_fix_holds(sim: Res<Sim>, mut nav: ResMut<Navigation>) {
     // first is the one that decides.
     let murk = sim.sim.wind.squall_at(here).clamp(0.0, 1.0);
     let through_it = 1.0 - 0.75 * murk;
+    // The same rule the compass uses, asked of the same marks: a fix lasts as long as
+    // the marks it was taken on could be shot again, because that is what makes it worth
+    // believing — another one is a minute's work whenever she wants it. Asked through
+    // `sight::nameable_from` rather than written out a second time, which is how the two
+    // came to disagree in the first place.
     nav.still_in_sight = nav
         .fixed_on
         .iter()
-        .filter(|(at, kind)| (*at - here).length() < kind.identified_from() * through_it)
+        .filter(|(at, kind)| {
+            let range = (*at - here).length();
+            let reach = match coast.marks.iter().find(|m| (m.at - *at).length() < 1.0) {
+                Some(mark) => crate::sight::nameable_from(mark, &nav.recognised),
+                // A mark that is no longer on the coast at all — a world rebuilt under
+                // the fix — cannot be re-shot, and the old rule is the safe answer.
+                None => kind.identified_from(),
+            };
+            range < reach * through_it
+        })
         .count();
 }
