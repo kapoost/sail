@@ -178,6 +178,24 @@ pub fn aim(
     // live and one press of it put the glasses fifteen metres astern of the boat — which
     // is what came back from the deck. An instrument in your hand is a place you are
     // standing, not a camera angle you chose.
+    // **And the chart table is not a place you can sight from.**
+    //
+    // With the chart spread, the card and the notch are not drawn — you cannot put a
+    // notch on a lighthouse through a chart table, and one of the two is what you are
+    // looking at. But the key still *worked*, so a press of N over the spread chart
+    // took a bearing with no card, no notch and no word back, and a left click on a
+    // tool button did the same. An instrument that acts where it cannot be seen is
+    // worse than one that is switched off, because the player has no way to find out
+    // what happened — which is exactly how "I have one bearing and nothing is on the
+    // chart" gets reported with no fault anywhere in the plotting.
+    //
+    // So spreading the chart puts the instrument down, the way picking up one of them
+    // puts the other down. You work on the paper or you work on the horizon.
+    if chart.spread && (sighting.up || sighting.glasses) {
+        sighting.up = false;
+        sighting.glasses = false;
+        sighting.on = None;
+    }
     let holding = sighting.up || sighting.glasses;
     if holding {
         if sighting.was_viewing.is_none() {
@@ -287,6 +305,7 @@ pub fn aim(
                 ),
                 None => ("nothing in the notch".to_string(), false),
             };
+            info!("sight missed: {word}");
             sighting.said = Some((word, good));
             sighting.said_until = sim.sim.state.time + 4.0;
             sound.0.strike_damped(196.0, 0.16, 0.9);
@@ -352,6 +371,20 @@ pub fn aim(
                 ));
                 sighting.said_until = sim.sim.state.time + 4.0;
                 sound.0.strike_damped(784.0, 0.2, 0.85);
+                // In the log as well as on the paper. A bearing is the one thing in this
+                // game that can be taken and then not be where it was expected, and
+                // without a line in the log there is no telling a sight that was never
+                // taken from a line that was drawn somewhere nobody looked.
+                info!(
+                    "sight taken: {name} {:03.0}, {:.2} M off — {} on the chart",
+                    sail_core::units::deg(took).rem_euclid(360.0),
+                    off.length() / 1_852.0,
+                    chart
+                        .plot
+                        .iter()
+                        .filter(|i| matches!(i, crate::chart::Plotted::Line { .. }))
+                        .count()
+                );
             }
         }
     }

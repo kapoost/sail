@@ -101,7 +101,12 @@ fn hold_at(twa_deg: f64, tws_kn: f64, sea: Sea, gusty: bool, reef: f64, pilot_hz
     };
     let mut sim = Simulation::new(cfg, state, wind);
     if let Sea::Fetch(km) = sea {
-        sim = sim.with_water(Box::new(WindSea::new(kn_to_ms(tws_kn), km * 1_000.0, 0.0, 11)));
+        sim = sim.with_water(Box::new(WindSea::new(
+            kn_to_ms(tws_kn),
+            km * 1_000.0,
+            0.0,
+            11,
+        )));
     }
     let mut controls = Controls {
         outhaul: 0.5,

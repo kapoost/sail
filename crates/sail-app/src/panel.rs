@@ -70,6 +70,9 @@ pub fn draw(
     time: Res<Time>,
     // How long the screen has been up, so it can surface rather than appear.
     mut dying: Local<f32>,
+    // And how long she has been stopped head to wind, which is a state rather than a
+    // moment: every tack goes through it and only one tack in twenty stays there.
+    mut irons_for: Local<f32>,
 ) -> Result {
     if keys.just_pressed(KeyCode::KeyH) {
         console.hidden = !console.hidden;
@@ -197,6 +200,42 @@ pub fn draw(
                             .color(paint::BAD)
                             .monospace()
                             .size(11.0),
+                    );
+                }
+                // **And the state nobody recognises from inside it.**
+                //
+                // Reported from the deck in a gale: head to wind, a knot and a half of
+                // way on, the helm hard over, neither the pilot nor the vane able to do
+                // anything, and the question *what is blocking me*. Nothing was: she was
+                // in irons, which is a place a boat gets to and does not leave by
+                // steering, and the one thing on the screen about it — the helm reading
+                // one per cent and the word "stalled" — is a symptom rather than a name.
+                //
+                // Measured on the bench afterwards (`sail-core/tests/in_irons.rs`): with
+                // the main sheeted in she sits twenty degrees off the wind whatever the
+                // helm does, and with it eased right out or a sail backed she is a
+                // hundred degrees off inside two minutes. So the instrument says the
+                // name of the state and the two things that end it, and nothing else —
+                // it is not a tutorial, it is the word a crew says out loud.
+                if in_irons(&telemetry) {
+                    *irons_for += time.delta_secs();
+                } else {
+                    *irons_for = 0.0;
+                }
+                // Six seconds, because every tack passes through this and a tack is over
+                // in four. A boat that is *still* here after six is not tacking.
+                if *irons_for > 6.0 {
+                    ui.label(
+                        egui::RichText::new("IN IRONS")
+                            .color(paint::BAD)
+                            .monospace()
+                            .size(12.0),
+                    );
+                    ui.label(
+                        egui::RichText::new("main right out, back the headsail (G)")
+                            .color(paint::LIVE)
+                            .monospace()
+                            .size(10.0),
                     );
                 }
 
@@ -1064,6 +1103,17 @@ fn bite_words(t: &sail_core::state::Telemetry) -> String {
         "no way on"
     };
     format!("{:.0}% {worst}", bite * 100.0)
+}
+
+/// Stopped head to wind, with no way on to steer by.
+///
+/// Thirty degrees and two knots, together. Either alone is ordinary — thirty degrees
+/// with way on is a boat pinching, two knots with the wind on the beam is a boat in a
+/// calm — and it is the pair of them that is the state with no way out through the
+/// helm. The rudder has nothing going over it and the sails are all luffing, so nothing
+/// aboard is doing anything at all.
+fn in_irons(tm: &sail_core::state::Telemetry) -> bool {
+    deg(tm.twa).abs() < 30.0 && ms_to_kn(tm.stw) < 2.0
 }
 
 /// The nearest squall, if one is near enough to matter.
