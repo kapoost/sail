@@ -1157,10 +1157,9 @@ mod the_reckoning {
     fn a_long_beat_does_not_walk_the_plot_off_the_chart() {
         let mut run = Reckoning::from_a_fix(DVec2::ZERO, rad(45.0), 0.0);
         let mut truth = DVec2::ZERO;
-        let mut now = 0.0;
         for tack in 0..30 {
             let course = if tack % 2 == 0 { rad(-45.0) } else { rad(45.0) };
-            now = tack_to(&mut run, course, 120.0);
+            let now = tack_to(&mut run, course, 120.0);
             run.write_up(now);
             // What she actually went through the water, laid off the same way a
             // navigator would: the course she settled on, for the minutes she held it.
