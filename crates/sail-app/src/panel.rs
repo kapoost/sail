@@ -65,6 +65,7 @@ pub fn draw(
     mut console: ResMut<Console>,
     mut settings: ResMut<crate::settings::Settings>,
     mut course: ResMut<Course>,
+    nav: Res<crate::navigation::Navigation>,
     mut fishing: ResMut<crate::fishing::Fishing>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -83,6 +84,8 @@ pub fn draw(
     let ctx = contexts.ctx_mut()?;
     let cfg = sim.config();
     let telemetry = sim.sim.telemetry;
+    // Whether the instruments may work out anything that needs a position.
+    let knows = nav.shows_position(sim.sim.state.time);
     let heading = sim.sim.state.heading;
 
     let frame = egui::Frame::new()
@@ -273,8 +276,34 @@ pub fn draw(
                 );
                 readout_pair(
                     ui,
-                    ("RANGE", &format!("{:.2} nm", distance / 1852.0)),
-                    ("BRG", &format!("{:03.0}", deg(bearing))),
+                    // **Only what she can know.**
+                    //
+                    // A range and a bearing to a harbour are worked out *from her
+                    // position*, so a boat that does not know where she is cannot have
+                    // them — and this panel was handing both over in figures while the
+                    // chart beside it refused to draw her. That is the whole exercise
+                    // given away by an instrument that was never asked whether it
+                    // should be speaking. Reported from the deck in one line: do not
+                    // show what the player does not know.
+                    //
+                    // The name of the place stays. Where you are bound is a thing you
+                    // decided in harbour and have not forgotten.
+                    (
+                        "RANGE",
+                        &if knows {
+                            format!("{:.2} nm", distance / 1852.0)
+                        } else {
+                            "—".to_string()
+                        },
+                    ),
+                    (
+                        "BRG",
+                        &if knows {
+                            format!("{:03.0}", deg(bearing))
+                        } else {
+                            "—".to_string()
+                        },
+                    ),
                 );
                 readout_pair(
                     ui,

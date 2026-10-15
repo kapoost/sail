@@ -71,6 +71,13 @@ pub struct Navigation {
     /// rotator on the end of it counts water going past, and it goes on counting whether
     /// or not anybody knows which water.
     pub through_water: f64,
+    /// How far out the hand was on the last cast of the log, as a fraction of the
+    /// interval: nought is a hand that stopped on the mark, a tenth is six seconds late
+    /// on a minute.
+    ///
+    /// Kept because it is what the reading is *worth*, and a measurement whose accuracy
+    /// is not recorded beside it is a measurement that will be believed too far.
+    pub log_slip: f64,
     /// The last speed measured by hand off the log, and when — knots, and the clock.
     ///
     /// Kept apart from the instrument's own reading because it is a different kind of
@@ -78,6 +85,13 @@ pub struct Navigation {
     /// averaged over a leg somebody chose to time. It is the figure a reckoning should
     /// be run at.
     pub measured: Option<(f64, f64)>,
+    /// Whether the set has ever been *measured* rather than assumed.
+    ///
+    /// The circle has to grow at something from the first minute, so the figure starts
+    /// at an assumption — but an assumption is not knowledge, and a card that prints it
+    /// beside things she worked out is a card that lies about where it got them. Until
+    /// a fix or a timed leg has taught it, the line is simply not there.
+    pub set_measured: bool,
     /// Metres a second of movement the reckoning does not account for, learned from how
     /// far out the last run was.
     ///
@@ -138,10 +152,43 @@ const KEEPS: f64 = 0.75;
 /// a navigator has: not the boat's true track over the ground, which is the answer and
 /// would make the exercise a formality. The difference between the two is exactly the
 /// thing the circle is about.
-pub fn reckon(sim: Res<Sim>, mut nav: ResMut<Navigation>, time: Res<Time>) {
+pub fn reckon(
+    sim: Res<Sim>,
+    coast: Res<crate::marks::Coast>,
+    mut nav: ResMut<Navigation>,
+    time: Res<Time>,
+) {
     let dt = time.delta_secs_f64();
-    let now = sim.sim.state.time;
-    let unexplained = nav.unexplained;
+    // **Steering at something she can see costs her nothing across the track.**
+    //
+    // Most of what the circle is made of is not the stream, it is the helmsman: a
+    // course held to five degrees over an hour is a mile out sideways before the water
+    // has done anything at all. Steering *on a mark* — the tower kept on the stem, or a
+    // pair of marks held in line — takes that away entirely, because any wander shows
+    // up immediately as the mark moving off the bow and is corrected before it becomes
+    // distance. It is the oldest trick in pilotage and the reason a transit is worth
+    // more than a bearing.
+    //
+    // So: a recognised mark within a few degrees of her head, and close enough to be
+    // told apart, and the doubt grows at a third of the rate. It is not a reward for
+    // pressing anything — it is what the geometry actually does.
+    let here = sim.sim.state.pos;
+    let heading = sim.sim.state.heading;
+    let steering_on_something = coast.marks.iter().any(|m| {
+        if !nav.recognised.contains(&m.name) && nav.lost {
+            return false;
+        }
+        let off = m.at - here;
+        let range = off.length();
+        if range > crate::sight::nameable_from(m, &nav.recognised) {
+            return false;
+        }
+        sail_core::units::wrap_pi(off.x.atan2(off.y) - heading)
+            .abs()
+            .to_degrees()
+            < 4.0
+    });
+    let unexplained = nav.unexplained * if steering_on_something { 0.33 } else { 1.0 };
     // The log counts whatever happens. Here rather than in the reckoning below because
     // it goes on counting when there is no reckoning to run.
     nav.through_water += sim.sim.telemetry.stw.abs() * dt;
@@ -152,7 +199,10 @@ pub fn reckon(sim: Res<Sim>, mut nav: ResMut<Navigation>, time: Res<Time>) {
     // Her head, and her speed through the water: the two numbers on the bulkhead.
     let along = DVec2::new(st.heading.sin(), st.heading.cos());
     run.at += along * sim.sim.telemetry.stw * dt;
-    run.spread = unexplained * (now - run.since).max(0.0);
+    // Accumulated rather than worked out from the clock, so that a stretch spent
+    // steering on a mark stays bought: the circle you did not grow while the tower was
+    // on the stem is a circle you do not grow later either.
+    run.spread += unexplained * dt;
 }
 
 /// What the screen says when the world has just been taken away from underneath her.
@@ -215,6 +265,8 @@ impl Default for Navigation {
             fixes: Vec::new(),
             through_water: 0.0,
             measured: None,
+            log_slip: 0.0,
+            set_measured: false,
             adrift: None,
             // Not nought. A circle of uncertainty that starts at nothing tells a
             // beginner that dead reckoning is exact, which is the one thing it is not.
@@ -232,6 +284,7 @@ impl Navigation {
     /// running. One method, one constant.
     pub fn learn_the_set(&mut self, measured: f64) {
         self.unexplained = self.unexplained * KEEPS + measured * (1.0 - KEEPS);
+        self.set_measured = true;
     }
 
     /// Whether the chart may show where she is.
@@ -294,6 +347,18 @@ pub fn cast_adrift(
     chart.laid_at = Some(DVec2::ZERO);
     chart.plot.clear();
     track.clear();
+    // **And whatever was being measured is over.**
+    //
+    // A cast of the log that began before she was moved would be read against water she
+    // is no longer in, and the leg it drew would be a line between two places that have
+    // nothing to do with each other — which would then teach the circle a set that was
+    // never there. Everything that was in hand is put down: the log, the watch, and the
+    // speed from the last cast.
+    chart.streaming = None;
+    chart.watch = crate::chart::Stopwatch::default();
+    nav.measured = None;
+    nav.log_slip = 0.0;
+    nav.set_measured = false;
 }
 
 /// The card, which is drawn for a few seconds and then is not.

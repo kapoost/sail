@@ -191,7 +191,10 @@ pub fn aim(
     //
     // So spreading the chart puts the instrument down, the way picking up one of them
     // puts the other down. You work on the paper or you work on the horizon.
-    if chart.spread && (sighting.up || sighting.glasses) {
+    // `chart.open` as well as `chart.spread`, which is belt and braces after the two
+    // disagreed once: a chart that is not on the screen cannot be what your hands are
+    // on, whatever the other field says.
+    if chart.spread && chart.open && (sighting.up || sighting.glasses) {
         sighting.up = false;
         sighting.glasses = false;
         sighting.on = None;

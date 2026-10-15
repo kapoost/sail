@@ -375,6 +375,7 @@ fn main() {
                     ),
                     chart::toggle,
                     chart::stopwatch,
+                    chart::by_hand,
                     retro::stress.run_if(|| std::env::var("SAIL_RETRO_STRESS").is_ok()),
                     music::compose,
                     world::apply_ink,
@@ -402,6 +403,7 @@ fn main() {
                 tutorial::draw,
                 sight::draw,
                 navigation::adrift_card,
+                chart::glass,
                 boathook::draw,
             )
                 .chain(),
