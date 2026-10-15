@@ -74,18 +74,26 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
     (
         "FINDING OUT WHERE YOU ARE",
         &[
-            ("N", "the hand bearing compass: put the notch on a mark"),
             (
-                " ",
-                "click to take the bearing — it goes on the chart as a line",
+                "Shift B",
+                "the glasses: they name the place, not the thing — three marks spread \
+                 out and it tells you which coast you are on",
+            ),
+            (
+                "Shift N",
+                "the hand bearing compass in your hand; aim with the right button held",
+            ),
+            (
+                "N",
+                "and shoot what is in the notch — the line goes on the chart",
             ),
             (
                 "Shift M",
-                "the chart on the table: dividers, rule, pencil, rubber",
+                "the chart on the table: dividers, rule, pencil, rubber, and the fix",
             ),
             (
                 "Shift L",
-                "and somewhere at sea with the sails set and no idea where",
+                "somewhere at sea with the sails set and no idea where",
             ),
         ],
     ),
@@ -138,15 +146,7 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
         "LOOKING AT IT",
         &[
             ("C", "view: behind her, ahead, down the wake, under it"),
-            ("M", "the chart, and [ ] to zoom it"),
-            (
-                "Shift M",
-                "spread it on the table: marks, their names, and a mile scale",
-            ),
-            (
-                " ",
-                "drag across it to measure — miles, and the bearing both ways",
-            ),
+            ("M", "the chart in the corner, and [ ] to zoom it"),
             ("Tab", "the diagnostic panel"),
             ("H", "hide the console"),
             ("K", "mute"),
