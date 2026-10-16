@@ -25,10 +25,19 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
 1. **The engine stays a reversible decision.** Bevy, Fyrox and Godot-via-gdext are all
    still on the table; the presentation layer is a few days of work on top of this
    crate, not a rewrite.
-2. **The physics is testable without opening a window.** 128 tests in the core assert
-   against figures a sailor knows from the water — 248 across the workspace. When one
+2. **The physics is testable without opening a window.** 140 tests in the core assert
+   against figures a sailor knows from the water — 291 across the workspace. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
+
+The third kind of test is newer and came out of a week in which every fault reported
+from the deck lived in the *wiring* rather than in the arithmetic: a key read twice by a
+block that had been pasted twice, a fix that asked a counter another system had not
+written yet, an identification that reached the chart table but not the hand holding the
+compass. None of those is findable by reading, and all of them are one assertion wide.
+`scenarios.rs` runs the game headless — a Bevy `App` with `MinimalPlugins`, the resources
+a system needs, and `update()` for a frame — and asks the questions those faults should
+have been asked. No renderer, no window, no new dependency, four hundredths of a second.
 
 ## The core loop
 
@@ -105,6 +114,8 @@ sane; run it after touching `sail.rs`, `hull.rs` or `boat.rs`.
 |---|---|
 | Rigid body | 4 DOF — surge, sway, roll, yaw — with added mass. Heave and pitch arrive with waves. |
 | Sail forces | Hazen decomposition, with coefficients blending into flat-plate behaviour past separation |
+| The slot | Each sail bends the other's wind — the headsail downwashes the main, the main upwashes the headsail — scaled by how much of the sail doing the bending is actually *set*. Without that last part a main rolled up on the boom went on turning the genoa's wind by four degrees, and the boom had to be trimmed as though the main were there. |
+| Reefing | Three slabs and then she is handed: full, one, two, three, down. Each slab takes a sixth of her off, and the step from the second reef to no mainsail at all is the one you need in the forties. |
 | Frictional resistance | ITTC-57 line plus roughness allowance. Not an approximation. |
 | Wave-making resistance | **Calibrated** curve shaped like the Delft series, with the hull-speed wall. The full DSYHS regression needs a dozen hull coefficients nobody publishes for a production cruiser; `residuary_resistance` is the seam where it drops in. |
 | Induced resistance | Classic, with effective span below draft because of the free surface |
@@ -253,8 +264,8 @@ game in its own right — the oldest one there is, and the one a chart plotter d
 one is a glance: where am I, what is ahead, and it stays under the boat. The one on the
 table is an instrument, and it has the instruments a chart table has — dividers for
 distance and bearing, a plain ruler for a leg with two ends, a parallel rule that plots a
-position line through a mark, a pencil, a watch that writes the time where you put it,
-and a rubber. The coast on it is read off the same signed-distance field the boat runs
+position line through a mark, a protractor, a pencil, a stopwatch with a bell at the end
+of the minute, a hand log read against the glass, and a rubber. The coast on it is read off the same signed-distance field the boat runs
 aground on, so the chart cannot lie about the depths: there is only one set of them.
 
 **The instruments are in your hands, and you get one hand.** `Shift B` is a pair of
@@ -280,12 +291,97 @@ The number carries the error a card in a bowl actually has — two or three degr
 seaway — which is why a fix is a triangle rather than a point, why a fine cut is a bad
 fix, and why the third line is worth taking.
 
+**The book, and the paper.** A chart is not where a navigator writes things down — the
+book is. Every bearing, every mark made out through the glasses, every reading off the
+log goes on the page beside the paper with the time against it, and the line goes on the
+chart as it is taken. What the book is *for* is the record and the rubber: one press
+takes a doubtful line off the paper and another puts it back where it now belongs,
+because the usual reason a fix will not close is a line you should not have believed.
+
+**One mark, two bearings and the run between them are a position.** A position line is a
+statement about where she was when the bearing was taken, and she does not stay there —
+so every line carries the distance she has run through the water since it was shot and is
+drawn through the mark *plus that run*. Fresh, it passes through the mark; twenty minutes
+later it is a hand's breadth off it, dashed, with the run drawn in from the mark. That is
+a transferred position line, and crossing it with a fresh bearing is the running fix: the
+oldest trick on a coast with a single light. The transfer is through the water, because
+the compass and the log are what she has, which is also its honest limit — a knot of tide
+nobody has measured goes into the transfer and comes out as position.
+
+**Two buttons, because marking the paper and writing the book are two acts.** ON THE
+CHART puts the position on the paper and is dead until two lines cross, which is the only
+thing it can mean. IN THE LOG writes the line and is live always: most entries in a deck
+log have no fix in them at all — a time, a course, the glass, the sounding, and what was
+set, drawn as a sail plan with a bar across the foot for every reef in her.
+
+**The reckoning is a sequence of courses, not a line**, and the plot is as old as your
+last visit to the chart table. She knows perfectly well that she tacked — the compass is
+on the bulkhead — but the *paper* does not, so it goes on laying off the course it was
+last told with the miles off the log, and the pencil position walks away from her.
+Spreading the chart writes the log up: every alteration since you were last there laid
+off in order, the corners appearing where they belong. Ten minutes of unwritten log after
+a ninety-degree tack is a mile and a half of pencil error, measured.
+
+**WHY**, on the end of the row of instruments, makes every line on the paper say what it
+is and why it is there — position line, transferred, ruled by hand, log leg, reckoning,
+track made good. A plot is six kinds of line in two colours with no legend, and telling
+them apart is most of the subject.
+
 **`Shift L` puts you somewhere at sea with no idea where.** The sails are set for the
 wind she is in and nothing else is made difficult; the chart stops following her, the
 names come off the marks, and getting them back is the exercise. Three bearings, crossed,
 entered in the log — and the scoring is the honest one: a fix is good if it is near where
 she actually is, not if the cocked hat was small. A tight triangle on two misidentified
 marks is a confident lie and the classic way to put a boat on a rock.
+
+## The instruments
+
+Rebuilt in a day against four words from the deck — analogue, engineering typography,
+aviation's way with information, and 1900s — and the result is a case rather than a
+screen.
+
+**A palette of materials.** Japanned black for the case, brass for bezels and for
+whatever is live, ivory for dial faces and for the nameplates with the names engraved on
+them, vermilion for a pointer. Every surface on a boat of this age is a material and
+materials have a temperature; four greys do not. Four type sizes, each with a job, so
+that the figures you act on are not *found* among the ones you look up.
+
+**One glass, in the corner, in every view.** The top half is the compass card as you see
+it looking down into the bowl, with a window at the lubber line; the bottom half is the
+sea, cut as a segment of the same glass so that however far she lies over the water stays
+inside the bowl; the boss in the middle is the wind she is actually in, apparent on the
+needle with the true behind it.
+
+**And the bezel is the part that is navigation.** On it: where the wind is from, the
+shaded water she cannot sail into, and the two headings that bound it — which is what a
+beat consists of. *Can I lay it on this tack* is read straight off the ring instead of
+being worked out from three numbers, and the angle comes from her own polar rather than
+from a book, so it narrows when she is reefed and opens when she is footing.
+
+**Each view gets the tools its job needs.** At the helm you are working the sheets, the
+preventer and the pilot, and the rack of seven control lines is pinned in the middle,
+because seven lines on one winch is cockpit work. From astern you are watching her sail
+and thinking about what is set. Under the water you are fishing, and there is nothing on
+this boat you could adjust from down there. A bar that showed everything everywhere
+showed the wrong thing three times out of four.
+
+**Nothing is printed beside the drawing of itself.** Her head is the card, the apparent
+wind is the needle, her heel is the line across the bottom half of the bowl — so those
+three figures are not also set in type next to them, which is the oldest way to make an
+instrument panel unreadable. What is printed is everything the glass cannot show: the
+log, the strength of both winds, what she is making good, the water under her, and what
+the barometer is doing.
+
+**She can photograph herself**, on `F12` or on a timer:
+
+```sh
+SAIL_SHOT=/tmp/deck.png SAIL_SHOT_AFTER=3 SAIL_SHOT_EXIT=1 sail
+```
+
+Nothing about a head-up display can be asserted in a test — it is read by eye or it is
+not read at all — so the next best thing is to make looking cheap. That loop is how the
+panel above got rebuilt, and it paid for itself in the first hour by finding a clinometer
+drawing a green line across the whole console.
 
 ## Man overboard
 
@@ -599,7 +695,8 @@ because a view that corrects itself while you are still looking at the thing you
 see is a view that argues with you.
 
 **They live in the program.** Press `?` or `F1`, or click the mark in the bottom-right
-corner. This list used to be here as well, and three of the keys in it were wrong — a
+corner. `F12` takes a picture of the screen into your Pictures folder, which is the
+answer to *it did something odd and I cannot describe it*. This list used to be here as well, and three of the keys in it were wrong — a
 key list in a README is a list that rots the first time somebody rearranges the console,
 and nobody notices because the person who changed the key does not read the README.
 
