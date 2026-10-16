@@ -6,6 +6,7 @@
 //! a replaceable component, and it is why choosing Bevy here is a decision that can be
 //! revisited for the cost of rewriting this one crate.
 
+mod barrels;
 mod boat;
 mod boathook;
 mod camera;
@@ -233,6 +234,7 @@ fn main() {
     .init_resource::<chart::Chart>()
     .init_resource::<chart::Track>()
     .init_resource::<chart::DeckLog>()
+    .init_resource::<barrels::Flotsam>()
     .init_resource::<world::SurfaceDrift>()
     .init_resource::<camera::ChaseState>()
     // The gear is drawn against the same seed as the weather, so a day worth
@@ -367,6 +369,13 @@ fn main() {
                 (
                     course::restart,
                     shot::on_a_key,
+                    (
+                        barrels::scatter,
+                        barrels::drift,
+                        barrels::dress,
+                        barrels::float,
+                    )
+                        .chain(),
                     navigation::lost_at_sea,
                     navigation::enter_in_the_log,
                     navigation::write_up_the_log,

@@ -63,6 +63,9 @@ pub enum Quarry {
     Person,
     /// The lifebuoy, floating where it was thrown. Worth having back.
     Ring,
+    /// A cask adrift. Nobody's life depends on it, which is the whole charm: the
+    /// manoeuvre is the same one, practised for the price of a barrel.
+    Cask,
 }
 
 impl Quarry {
@@ -70,6 +73,7 @@ impl Quarry {
         match self {
             Quarry::Person => "him",
             Quarry::Ring => "the lifebuoy",
+            Quarry::Cask => "the cask",
         }
     }
 }
@@ -105,7 +109,11 @@ impl Boathook {
 /// One function because the drawing, the prompt and the catch all have to agree about
 /// what the hook is on — and because "the thing on screen and the thing the test used
 /// were two different measurements" is this repository's oldest fault.
-fn within_reach(sim: &Sim, over: &crate::mob::Overboard) -> Option<(Quarry, glam::DVec2)> {
+fn within_reach(
+    sim: &Sim,
+    over: &crate::mob::Overboard,
+    flotsam: &crate::barrels::Flotsam,
+) -> Option<(Quarry, glam::DVec2)> {
     let mut best: Option<(Quarry, glam::DVec2, f64)> = None;
     let mut look = |what: Quarry, at: glam::DVec2| {
         let off = crate::mob::off_the_rail(sim, at);
@@ -119,6 +127,12 @@ fn within_reach(sim: &Sim, over: &crate::mob::Overboard) -> Option<(Quarry, glam
     if let Some(ring) = over.ring_afloat() {
         look(Quarry::Ring, ring);
     }
+    // And whatever is floating past. A man and a lifebuoy outrank a barrel by being
+    // listed first and by the nearest-wins rule underneath: with somebody in the water
+    // alongside, the hook does not go for the cargo.
+    if let Some(cask) = flotsam.nearest(sim.sim.state.pos) {
+        look(Quarry::Cask, cask);
+    }
     best.map(|(what, at, _)| (what, at))
 }
 
@@ -127,6 +141,7 @@ pub fn reach(
     keys: Res<ButtonInput<KeyCode>>,
     sim: Res<Sim>,
     mut over: ResMut<crate::mob::Overboard>,
+    mut flotsam: ResMut<crate::barrels::Flotsam>,
     mut hook: ResMut<Boathook>,
     time: Res<Time>,
     sound: Res<crate::sound::SoundHandle>,
@@ -139,7 +154,7 @@ pub fn reach(
     let found = if now < hook.busy_until || !slow {
         None
     } else {
-        within_reach(&sim, &over)
+        within_reach(&sim, &over, &flotsam)
     };
     hook.on = found;
 
@@ -167,8 +182,15 @@ pub fn reach(
         hook.said = Some((format!("got {} — on the rise, and held", what.what()), true));
         hook.said_until = now + 4.0;
         sound.0.strike_damped(660.0, 0.22, 0.8);
-        if what == Quarry::Ring {
-            over.ring_recovered();
+        match what {
+            Quarry::Ring => over.ring_recovered(),
+            // On the painter, astern of whatever is already there.
+            Quarry::Cask => {
+                if let Some((_, at)) = hook.on {
+                    flotsam.hooked(at);
+                }
+            }
+            Quarry::Person => {}
         }
     } else {
         let dropping = sim.sim.state.heave_rate < 0.0;
