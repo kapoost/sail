@@ -779,7 +779,12 @@ pub fn draw(
         .show(ctx, |ui| {
             ui.horizontal_top(|ui| {
                 // The tools for the job in hand, which is what the view says it is.
-                frame.show(ui, |ui| {
+                // Dropped to the same bottom edge as the glass: the sheets are a shade
+                // shorter than the binnacle and hanging them from the top left a step in
+                // the skyline.
+                ui.vertical(|ui| {
+                    ui.add_space(16.0);
+                    frame.show(ui, |ui| {
                     ui.horizontal_top(|ui| {
                         // Sized to its contents now. The fixed width was what kept a
                         // centre-anchored bar from sliding about as the contents
@@ -882,6 +887,7 @@ pub fn draw(
                         });
                     });
                 });
+                });
                 // **The rack of lines, under every camera.** Seven lines on one winch is
                 // cockpit work, but the cockpit is where you are standing whichever way
                 // the camera is pointing — and a control you can reach is a control that
@@ -894,6 +900,14 @@ pub fn draw(
                     console.rack = !console.rack;
                 }
                 if console.rack {
+                    // **Low and compact.** A rack of winch buttons is a third of a glass
+                    // and it used to be as tall as one: three hundred points of case for
+                    // seven ropes. It is dropped to the bottom edge by hand, because a
+                    // row that bottom-aligns its children in egui stretches them to the
+                    // tallest instead — which is how the short panel came out the height
+                    // of the binnacle with everything bunched at its top.
+                    ui.vertical(|ui| {
+                        ui.add_space(GLASS.y - 128.0);
                     frame.show(ui, |ui| {
                         ui.horizontal_top(|ui| {
                             // **Each view gets the tools its job needs.**
@@ -1006,14 +1020,21 @@ pub fn draw(
                                         };
                                         let stops = line.detents(&sim.controls);
                                         let position = line.position(&sim.controls);
-                                        let (clicked, dragged) = clutch(
-                                            ui, &name, &mut value, selected, stops, position,
+                                        let (clicked, worked) = clutch(
+                                            ui,
+                                            &name,
+                                            &mut value,
+                                            selected,
+                                            stops,
+                                            position,
+                                            line.rate(&sim.controls),
+                                            time.delta_secs_f64(),
                                         );
                                         if clicked {
                                             bank.selected = i;
                                             bank.since_change = 0.0;
                                         }
-                                        if dragged {
+                                        if worked {
                                             bank.selected = i;
                                             // A detented line cannot be dragged to anywhere
                                             // between its stops; the hand on the lever picks
@@ -1061,6 +1082,7 @@ pub fn draw(
                                 );
                             });
                         });
+                    });
                     });
                 }
                 frame.show(ui, |ui| {
@@ -1814,7 +1836,18 @@ fn lever(
 /// done — so a detented line gets notches engraved beside its slot and the name of the
 /// position it is at, while a line that stops wherever you stop it gets a scale and a
 /// figure. The difference between *how much* and *which*, which an instrument can say
-/// without a word of explanation.
+/// One clutch on the coachroof: press to put it on the winch, hold a button to work it.
+///
+/// **A rope is wound, not dragged.** The lever was a tall slot you had to catch and pull
+/// through its travel, which is three hundred points of case for a thing your hand does
+/// by turning a handle — and it asked for a drag *inside the control*, which is the one
+/// gesture a moving deck makes hard. Hold ▲ and the line comes in at its own rate; hold
+/// ▼ and it goes out. Exactly what the keys do, and the same rates, so the mouse and the
+/// keyboard are the same winch.
+///
+/// A line with stops shows them as notches along the travel and says which one it is at;
+/// a line without shows a bar and a figure. The difference between *which* and *how
+/// much*, which an instrument can say without a word of explanation.
 fn clutch(
     ui: &mut egui::Ui,
     label: &str,
@@ -1822,10 +1855,12 @@ fn clutch(
     selected: bool,
     stops: Option<&[f64]>,
     position: Option<&str>,
+    rate: f64,
+    dt: f64,
 ) -> (bool, bool) {
     ui.vertical(|ui| {
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(72.0, 282.0), egui::Sense::click_and_drag());
+            ui.allocate_exact_size(egui::vec2(78.0, 104.0), egui::Sense::click());
         let p = ui.painter();
         p.rect_filled(rect, 3.0, paint::CASE);
         p.rect_stroke(
@@ -1837,18 +1872,6 @@ fn clutch(
             ),
             egui::StrokeKind::Inside,
         );
-        let face = egui::Rect::from_min_max(
-            rect.left_top() + egui::vec2(0.0, 17.0),
-            rect.right_bottom() - egui::vec2(0.0, 18.0),
-        );
-        let dragged = response.dragged();
-        if dragged {
-            if let Some(pos) = response.interact_pointer_pos() {
-                let f = ((face.bottom() - 8.0 - pos.y) / (face.height() - 16.0)).clamp(0.0, 1.0);
-                *value = f as f64;
-            }
-        }
-        lever_face(p, face, *value, None, stops, selected);
         tag(
             p,
             egui::Rect::from_min_size(
@@ -1858,8 +1881,33 @@ fn clutch(
             label,
             selected,
         );
+        // Where the rope is, along the width of the plate: a recess with the travel in
+        // it, and the stops engraved across it when the line has any.
+        let slot = egui::Rect::from_min_size(
+            rect.left_top() + egui::vec2(6.0, 21.0),
+            egui::vec2(rect.width() - 12.0, 9.0),
+        );
+        p.rect_filled(slot, 2.0, paint::TRACK);
+        let x_of = |v: f64| slot.left() + slot.width() * v as f32;
+        if let Some(stops) = stops {
+            for stop in stops {
+                let x = x_of(*stop);
+                let near = (stop - *value).abs() < 0.02;
+                p.line_segment(
+                    [egui::pos2(x, slot.top()), egui::pos2(x, slot.bottom())],
+                    egui::Stroke::new(
+                        if near { 2.2 } else { 1.0 },
+                        if near { paint::FACE } else { paint::LABEL },
+                    ),
+                );
+            }
+        } else {
+            let mut run = slot;
+            run.set_right(x_of(*value));
+            p.rect_filled(run, 2.0, if selected { paint::LIVE } else { paint::LABEL });
+        }
         p.text(
-            egui::pos2(rect.center().x, rect.bottom() - 9.0),
+            egui::pos2(rect.center().x, rect.top() + 40.0),
             egui::Align2::CENTER_CENTER,
             match position {
                 Some(said) => said.to_string(),
@@ -1868,7 +1916,43 @@ fn clutch(
             egui::FontId::monospace(letter::UNIT),
             paint::FACE,
         );
-        (response.clicked(), dragged)
+        // And the two halves of the winch. Held rather than clicked, because that is
+        // what grinding is: the line runs while your hand is on the handle.
+        let mut worked = false;
+        for (which, legend) in [(1.0_f64, "HAUL"), (-1.0, "EASE")] {
+            let at = egui::Rect::from_min_size(
+                egui::pos2(
+                    rect.left() + 6.0,
+                    rect.top() + if which > 0.0 { 50.0 } else { 76.0 },
+                ),
+                egui::vec2(rect.width() - 12.0, 24.0),
+            );
+            let hit = ui.interact(
+                at,
+                ui.id().with((label, legend)),
+                egui::Sense::click_and_drag(),
+            );
+            let down = hit.is_pointer_button_down_on();
+            p.rect_filled(at, 2.0, if down { paint::LIVE } else { paint::TRACK });
+            p.rect_stroke(
+                at,
+                2.0,
+                egui::Stroke::new(1.0, paint::BEZEL),
+                egui::StrokeKind::Inside,
+            );
+            p.text(
+                at.center(),
+                egui::Align2::CENTER_CENTER,
+                legend,
+                egui::FontId::monospace(letter::UNIT),
+                if down { paint::INK } else { paint::FACE },
+            );
+            if down {
+                *value = (*value + which * rate * dt).clamp(0.0, 1.0);
+                worked = true;
+            }
+        }
+        (response.clicked() || worked, worked)
     })
     .inner
 }

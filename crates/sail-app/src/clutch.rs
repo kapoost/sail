@@ -214,7 +214,7 @@ impl Line {
     /// up, drop the halyard, hook the tack, winch the clew down. It takes time, and if
     /// it did not then reefing early would cost nothing and the decision would carry
     /// no weight at all.
-    fn rate(self, c: &Controls) -> f64 {
+    pub fn rate(self, c: &Controls) -> f64 {
         match self {
             // A reef pennant takes the whole load of the foot and comes in on a winch,
             // where an outhaul is a light tackle you pull by hand.
