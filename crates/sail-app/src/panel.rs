@@ -120,41 +120,6 @@ pub fn plate(ui: &mut egui::Ui, name: &str) {
 /// on are large, in a fixed place, and in a fixed order, so that reading them is not
 /// *finding* them. On a yacht that is her speed, her head and the wind she is in —
 /// everything else on this panel is a thing you look up, and these three are things you
-/// glance at a hundred times an hour.
-pub fn primary(ui: &mut egui::Ui, figures: [(String, &str, &str); 3]) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        let each = ui.available_width() / 3.0;
-        for (value, name, unit) in figures {
-            ui.vertical(|ui| {
-                ui.set_width(each);
-                ui.spacing_mut().item_spacing.y = 0.0;
-                ui.label(
-                    egui::RichText::new(value)
-                        .color(paint::FACE)
-                        .monospace()
-                        .size(letter::PRIMARY),
-                );
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 3.0;
-                    ui.label(
-                        egui::RichText::new(name)
-                            .color(paint::LABEL)
-                            .monospace()
-                            .size(letter::LABEL),
-                    );
-                    ui.label(
-                        egui::RichText::new(unit)
-                            .color(paint::LABEL.gamma_multiply(0.75))
-                            .monospace()
-                            .size(letter::UNIT),
-                    );
-                });
-            });
-        }
-    });
-}
-
 #[derive(Resource, Default)]
 pub struct Console {
     /// Hidden with H, for a clean look at the water.
@@ -646,65 +611,6 @@ pub fn draw(
                 // **The three she is steered by**, in the size they deserve, in a
                 // fixed order, in a fixed place. Everything under them is a thing you
                 // look up; these are things you glance at a hundred times an hour.
-                primary(
-                    ui,
-                    [
-                        (format!("{:.1}", ms_to_kn(telemetry.stw)), "LOG", "kn"),
-                        (format!("{:03.0}", deg(heading)), "HDG", "°"),
-                        (format!("{:+.0}", deg(telemetry.awa)), "AWA", "°"),
-                    ],
-                );
-                ui.add_space(2.0);
-                // The dial, which is the one piece of this panel that is *shape* rather
-                // than figures: the apparent wind where it actually is, with the true
-                // wind behind it. A number tells you the angle; a needle tells you the
-                // angle without being read.
-                ui.horizontal(|ui| {
-                    wind_dial(ui, telemetry.awa, telemetry.twa);
-                    ui.add_space(5.0);
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 3.0;
-                        readout(ui, "AWS", &format!("{:.1} kn", ms_to_kn(telemetry.aws)));
-                        readout(ui, "TWS", &format!("{:.0} kn", ms_to_kn(telemetry.tws)));
-                        readout(ui, "TWA", &format!("{:+.0}°", deg(telemetry.twa)));
-                        readout(ui, "VMG", &format!("{:.1} kn", ms_to_kn(telemetry.vmg)));
-                    });
-                });
-                ui.add_space(3.0);
-                // The water: what is under her and what it is doing to her.
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 3.0;
-                    // The sea as it *is*, not as it was drawn: knowing whether the
-                    // slamming is a metre or two is the difference between carrying on
-                    // and bearing away.
-                    gauge(ui, "SEA", telemetry.significant_height, 0.0, 4.0, "m");
-                    // The sounder, which turns a shoal from an ambush into a decision.
-                    // Scaled to ten metres, not forty: a sounder reading thirty is a
-                    // sounder with nothing to say.
-                    gauge_alarmed(
-                        ui,
-                        "DEPTH",
-                        telemetry.depth,
-                        0.0,
-                        10.0,
-                        "m",
-                        telemetry.under_keel < 1.5,
-                    );
-                });
-
-                heel_scale(ui, telemetry.heel);
-
-                // The glass. Nobody acts on a pressure; everybody acts on a pressure and
-                // a tendency — *1008 and falling three* is a gale warning written on a
-                // dial, and 1008 steady is a Tuesday.
-                let (glass, tendency) = sim.sim.wind.barometer();
-                readout(
-                    ui,
-                    "BARO",
-                    &format!("{glass:.0} {}", tendency_words(tendency)),
-                );
-                let (building, turning) = sim.sim.wind.outlook();
-                readout(ui, "OUTLOOK", &outlook_words(building, turning));
                 // Which belt she is in, when the world has belts. Words rather than a
                 // number, because "the trades" is a thing you plan a passage round and
                 // a phase angle is not — and only when there are any, like the squall
@@ -943,6 +849,69 @@ pub fn draw(
         .show(ctx, |ui| {
             frame.show(ui, |ui| {
                 ui.horizontal_top(|ui| {
+                    // **What is not already on the glass.**
+                    //
+                    // Her head is the card, the apparent wind is the needle on the
+                    // boss, and her heel is the line across the bottom half of the
+                    // bowl: three of the readings that used to be printed in the
+                    // corner of the screen are now *drawn*, and printing them again
+                    // beside the drawing is the oldest way to make an instrument
+                    // panel unreadable. What is left is everything the glass cannot
+                    // show — the log, the wind's strength, what she is making good,
+                    // the water under her and what the glass is doing.
+                    ui.vertical(|ui| {
+                        ui.set_width(168.0);
+                        // Tight, because the column has to finish inside the same case
+                        // as the bowl beside it: at four points between rows the last
+                        // line went over the bottom edge.
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        ui.label(
+                            egui::RichText::new(format!("{:.1}", ms_to_kn(telemetry.stw)))
+                                .color(paint::FACE)
+                                .monospace()
+                                .size(letter::PRIMARY),
+                        );
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 3.0;
+                            ui.label(
+                                egui::RichText::new("LOG")
+                                    .color(paint::LABEL)
+                                    .monospace()
+                                    .size(letter::LABEL),
+                            );
+                            ui.label(
+                                egui::RichText::new("kn")
+                                    .color(paint::LABEL.gamma_multiply(0.75))
+                                    .monospace()
+                                    .size(letter::UNIT),
+                            );
+                        });
+                        readout(ui, "AWS", &format!("{:.1} kn", ms_to_kn(telemetry.aws)));
+                        readout(ui, "TWS", &format!("{:.0} kn", ms_to_kn(telemetry.tws)));
+                        readout(ui, "TWA", &format!("{:+.0}°", deg(telemetry.twa)));
+                        readout(ui, "VMG", &format!("{:.1} kn", ms_to_kn(telemetry.vmg)));
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 3.0;
+                            gauge(ui, "SEA", telemetry.significant_height, 0.0, 4.0, "m");
+                            gauge_alarmed(
+                                ui,
+                                "DEPTH",
+                                telemetry.depth,
+                                0.0,
+                                10.0,
+                                "m",
+                                telemetry.under_keel < 1.5,
+                            );
+                        });
+                        let (glass, tendency) = sim.sim.wind.barometer();
+                        readout(
+                            ui,
+                            "BARO",
+                            &format!("{glass:.0} {}", tendency_words(tendency)),
+                        );
+                        let (building, turning) = sim.sim.wind.outlook();
+                        readout(ui, "OUTLOOK", &fit(&outlook_words(building, turning), 16));
+                    });
                     // **The pilot belongs beside the glass.** The course it is holding
                     // is read against the course she is making, which is one glance and
                     // not two — and an autopilot is reached for from wherever you happen
@@ -1341,63 +1310,6 @@ fn sail_state(f: &sail_core::sail::SailForces, set: f64) -> (&'static str, egui:
 ///
 /// Its height is a fixed number and that made it the floor under the whole bar: a
 /// hundred and thirty-two pixels of hairline held the console open even after every
-/// widget in it had been brought down. Eighty-four is the tallest column plus its label,
-/// The wind dial: the one instrument a sailor looks at more than the water.
-fn wind_dial(ui: &mut egui::Ui, awa: f64, twa: f64) {
-    let size = egui::vec2(84.0, 84.0);
-    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    let p = ui.painter();
-    let c = rect.center();
-    let r = size.x * 0.46;
-
-    p.circle_filled(c, r + 3.0, paint::BEZEL);
-    p.circle_filled(c, r, paint::FACE);
-
-    // Graduations every ten degrees, long ones every thirty.
-    for i in 0..36 {
-        let a = i as f32 * std::f32::consts::TAU / 36.0;
-        let long = i % 3 == 0;
-        let inner = r - if long { 10.0 } else { 5.0 };
-        let dir = egui::vec2(a.sin(), -a.cos());
-        p.line_segment(
-            [c + dir * inner, c + dir * r],
-            egui::Stroke::new(if long { 1.6 } else { 0.8 }, paint::INK),
-        );
-    }
-    // The close-hauled sector, which is the part of the dial anyone actually uses.
-    for side in [-1.0_f32, 1.0] {
-        for a in [25.0_f32, 45.0] {
-            let rad = side * a.to_radians();
-            let dir = egui::vec2(rad.sin(), -rad.cos());
-            p.line_segment(
-                [c + dir * (r - 16.0), c + dir * r],
-                egui::Stroke::new(2.0, paint::GOOD),
-            );
-        }
-    }
-
-    // True wind as a thin ghost behind the apparent, because seeing them apart is
-    // how you understand what the boat's own speed is doing to the wind you feel.
-    needle(p, c, r * 0.82, twa as f32, 2.0, paint::LABEL);
-    needle(p, c, r * 0.90, awa as f32, 3.2, paint::NEEDLE);
-    p.circle_filled(c, 4.0, paint::INK);
-    p.text(
-        c + egui::vec2(0.0, r * 0.52),
-        egui::Align2::CENTER_CENTER,
-        format!("{:.0}", deg(awa).abs()),
-        egui::FontId::monospace(12.0),
-        paint::INK,
-    );
-}
-
-fn needle(p: &egui::Painter, c: egui::Pos2, len: f32, angle: f32, width: f32, col: egui::Color32) {
-    let dir = egui::vec2(angle.sin(), -angle.cos());
-    p.line_segment(
-        [c - dir * 8.0, c + dir * len],
-        egui::Stroke::new(width, col),
-    );
-}
-
 /// A linear gauge: a bar against its scale, which reads faster than a number.
 /// A gauge that can sound an alarm.
 ///
@@ -1486,63 +1398,6 @@ fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &st
 ///
 /// Rebuilt as the instrument a boat of this age actually carries: a brass pendulum
 /// swinging in a degree arc, with the figures engraved on ivory. It cannot leave the
-/// face because the face is a circle and the pendulum is a radius of it.
-fn heel_scale(ui: &mut egui::Ui, heel: f64) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(168.0, 40.0), egui::Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(rect, 2.0, paint::TRACK);
-    // The arc is drawn from a pivot above the strip, so only the bottom of the swing
-    // shows: which is exactly what you see of a real one through its window.
-    let pivot = egui::pos2(rect.center().x, rect.top() - 26.0);
-    let reach = 58.0_f32;
-    p.with_clip_rect(rect)
-        .circle_filled(pivot, reach, paint::FACE);
-    let face = p.with_clip_rect(rect);
-    for mark in [-40.0_f32, -30.0, -20.0, -10.0, 0.0, 10.0, 20.0, 30.0, 40.0] {
-        let a = mark.to_radians();
-        let dir = egui::vec2(a.sin(), a.cos());
-        let long = mark as i32 % 20 == 0;
-        face.line_segment(
-            [
-                pivot + dir * (reach - if long { 12.0 } else { 7.0 }),
-                pivot + dir * (reach - 2.0),
-            ],
-            egui::Stroke::new(if mark == 0.0 { 1.8 } else { 1.0 }, paint::INK),
-        );
-        if long && mark != 0.0 {
-            face.text(
-                pivot + dir * (reach - 20.0),
-                egui::Align2::CENTER_CENTER,
-                format!("{:.0}", mark.abs()),
-                egui::FontId::monospace(letter::UNIT),
-                paint::INK,
-            );
-        }
-    }
-    // The pendulum hangs *down*, so she leans and it stays with gravity: the face moves
-    // under the pointer, which is why a clinometer reads the way round it does.
-    let a = (deg(heel) as f32).clamp(-45.0, 45.0).to_radians();
-    let dir = egui::vec2(a.sin(), a.cos());
-    face.line_segment(
-        [pivot + dir * 18.0, pivot + dir * (reach - 3.0)],
-        egui::Stroke::new(2.4, paint::NEEDLE),
-    );
-    p.text(
-        rect.left_bottom() + egui::vec2(5.0, -3.0),
-        egui::Align2::LEFT_BOTTOM,
-        "HEEL",
-        egui::FontId::monospace(letter::LABEL),
-        paint::LABEL,
-    );
-    p.text(
-        rect.right_bottom() + egui::vec2(-5.0, -2.0),
-        egui::Align2::RIGHT_BOTTOM,
-        format!("{:.0}°", deg(heel).abs()),
-        egui::FontId::monospace(letter::VALUE),
-        paint::FACE,
-    );
-}
-
 /// What the glass has done, in the words a forecast uses.
 ///
 /// The thresholds are the Met Office's own barometric tendency bands, because they are
