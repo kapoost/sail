@@ -224,46 +224,56 @@ impl Deck {
 /// an autopilot is reached for in exactly those moments. It is four buttons and two
 /// lines of type; it fits beside the card, where the course it is holding can be read
 /// against the course she is making.
-fn the_pilot(ui: &mut egui::Ui, pilot: &mut Pilot, sim: &Sim) {
+fn the_pilot(
+    ui: &mut egui::Ui,
+    pilot: &mut Pilot,
+    sim: &Sim,
+    // How far in from the left this row must start, given its own width: the curve of
+    // the bowl it is fitted against.
+    inset: &dyn Fn(f32, f32) -> f32,
+) {
     let telemetry = sim.sim.telemetry;
-
-    ui.vertical(|ui| {
-        plate(ui, "PILOT");
-        // Why it last let go, for half a minute after it did. The
-        // diagnostic panel has carried this since it was written, which
-        // is the wrong place: the question "why did it switch off?" is
-        // asked by somebody who was not watching, and they are looking
-        // at the console because that is what is on the screen.
-        // Why it last let go, for half a minute after it did — and the
-        // vane saying it is beaten, which it has to do here because there
-        // is no alarm to sound and no relay to click.
-        //
-        // **One line of space, always.** These two used to appear and
-        // disappear, and a line appearing in the middle of a column of
-        // buttons moves every button under it — including the one the
-        // mouse is on its way to. Toggling the pilot did it twice in two
-        // seconds, which is how this was found. The slot is reserved now
-        // and the console cannot change height for a message.
-        let note = if pilot.engaged() {
-            if pilot.struggling() && !pilot.can_let_go() {
-                Some("the vane is not coping")
-            } else {
-                None
-            }
+    // Why it last let go, for half a minute after it did — and the vane saying it is
+    // beaten, which it has to do here because there is no alarm to sound and no relay to
+    // click. **One line of space, always**: a line that appears in the middle of a
+    // column of buttons moves every button under it, including the one the mouse is on
+    // its way to.
+    let note = if pilot.engaged() {
+        if pilot.struggling() && !pilot.can_let_go() {
+            Some("the vane is not coping")
         } else {
-            pilot.last_reason.filter(|_| pilot.since_reason < 30.0)
-        };
+            None
+        }
+    } else {
+        pilot.last_reason.filter(|_| pilot.since_reason < 30.0)
+    };
+    // **One width for every row.** Set against a curve, rows of different widths give a
+    // staircase — each one correct and the block ragged — so they are all the width of
+    // the widest control and the column's two edges are both the arc of the bowl.
+    const WIDE: f32 = 104.0;
+    let row = |ui: &mut egui::Ui| {
+        ui.add_space(inset(ui.cursor().top() + 13.0, WIDE));
+    };
+    ui.horizontal(|ui| {
+        row(ui);
+        plate(ui, "PILOT");
+    });
+    ui.horizontal(|ui| {
+        row(ui);
         ui.label(
-            egui::RichText::new(fit(note.unwrap_or(" "), 30))
+            egui::RichText::new(fit(note.unwrap_or(" "), 24))
                 .color(if note.is_some() {
                     paint::BAD
                 } else {
                     egui::Color32::TRANSPARENT
                 })
                 .monospace()
-                .size(10.0),
+                .size(letter::UNIT),
         );
-        let engaged = pilot.engaged();
+    });
+    let engaged = pilot.engaged();
+    ui.horizontal(|ui| {
+        row(ui);
         if lamp_button(ui, if engaged { "ENGAGED" } else { "STANDBY" }, engaged).clicked() {
             if engaged {
                 pilot.disengage();
@@ -272,7 +282,10 @@ fn the_pilot(ui: &mut egui::Ui, pilot: &mut Pilot, sim: &Sim) {
                 pilot.hold_heading(&state);
             }
         }
-        let wind_mode = matches!(pilot.mode, PilotMode::ApparentWind { .. });
+    });
+    let wind_mode = matches!(pilot.mode, PilotMode::ApparentWind { .. });
+    ui.horizontal(|ui| {
+        row(ui);
         if lamp_button(
             ui,
             if wind_mode { "WIND VANE" } else { "COMPASS" },
@@ -288,46 +301,70 @@ fn the_pilot(ui: &mut egui::Ui, pilot: &mut Pilot, sim: &Sim) {
                 pilot.hold_wind(&telemetry);
             }
         }
-        // What it is actually holding, which the console did not say.
-        //
-        // Two lamps told you *which* instrument was steering and the
-        // arrows moved its target, and nowhere was the target itself — so
-        // the one question a person has about an autopilot, "what is it
-        // trying to do", had to be answered by watching the compass and
-        // guessing. A course in degrees, or an apparent wind angle with
-        // the tack in its sign, which is how a vane is set and read.
+    });
+    // What it is actually holding. Two lamps told you *which* instrument was steering
+    // and the arrows moved its target, and nowhere was the target itself — so the one
+    // question a person has about an autopilot, *what is it trying to do*, had to be
+    // answered by watching the compass and guessing.
+    ui.horizontal(|ui| {
+        row(ui);
         ui.label(
             egui::RichText::new(match pilot.mode {
                 PilotMode::Standby => "   —".to_string(),
                 PilotMode::Heading(h) => format!("{:03.0}", deg(h)),
-                PilotMode::ApparentWind { awa: a, .. } => {
-                    format!("{:+.0} awa", deg(a))
-                }
+                PilotMode::ApparentWind { awa: a, .. } => format!("{:+.0} awa", deg(a)),
             })
             .monospace()
-            .size(13.0)
+            .size(letter::VALUE)
             .color(if pilot.engaged() {
                 paint::LIVE
             } else {
                 egui::Color32::from_rgb(110, 115, 120)
             }),
         );
-        // The same two steps the keys use, from the same constants, and
-        // the doubled arrow is the coarse one in every piece of marine
-        // electronics ever built.
-        ui.horizontal(|ui| {
-            for (label, delta) in [
-                ("<<", -crate::input::PILOT_STEP),
-                ("<", -crate::input::PILOT_FINE),
-                (">", crate::input::PILOT_FINE),
-                (">>", crate::input::PILOT_STEP),
-            ] {
-                if nudge_button(ui, label).clicked() {
-                    pilot.adjust(delta);
-                }
-            }
-        });
     });
+    // The same two steps the keys use, from the same constants, and the doubled arrow is
+    // the coarse one in every piece of marine electronics ever built.
+    ui.horizontal(|ui| {
+        row(ui);
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for (label, delta) in [
+            ("<<", -crate::input::PILOT_STEP),
+            ("<", -crate::input::PILOT_FINE),
+            (">", crate::input::PILOT_FINE),
+            (">>", crate::input::PILOT_STEP),
+        ] {
+            if nudge_button(ui, label).clicked() {
+                pilot.adjust(delta);
+            }
+        }
+    });
+}
+
+/// **The bowl's own measurements**, so that everything fitted round it asks instead of
+/// guessing. The case is square and the glass is round, and the corners of steel either
+/// side of it are where the small controls go — which only works if they know where the
+/// curve actually is.
+/// **The box the glass is allocated**, which is narrower than the bowl it holds. The
+/// bowl overflows it by a thumb's width each side and the columns beside it step round
+/// the curve: at the shoulders they tuck into the corners where there is no glass at
+/// all, and only the middle rows give way. That is what buys the width back — eighty
+/// points of case that was holding nothing but the corners of a circle.
+pub const GLASS: egui::Vec2 = egui::vec2(150.0, 284.0);
+/// How far below the middle of its box the bowl sits: the lubber window is above it.
+pub const GLASS_DROP: f32 = 18.0;
+/// And the rim.
+pub const GLASS_R: f32 = 104.0;
+
+/// How far the bowl reaches out at a given height — the thing text does round a picture.
+///
+/// Asked for from the deck as *flowing round it like a word processor*, and it is the
+/// right instinct: a straight column beside a circle leaves a crescent of empty case
+/// that belongs to neither, while a column that follows the curve puts every button as
+/// close to the glass as that row can be.
+fn bulge(centre: egui::Pos2, r: f32, y: f32) -> f32 {
+    let dy = ((y - centre.y).abs()).min(r);
+    (r * r - dy * dy).sqrt()
 }
 
 /// Everything the glass shows, in one parcel.
@@ -349,10 +386,10 @@ fn binnacle(ui: &mut egui::Ui, g: &Glass) {
     // Taller than it is wide, because the lubber window sits above the bowl and a
     // square box put it outside the case altogether — over whatever happened to be
     // behind the bar.
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(246.0, 284.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(GLASS, egui::Sense::hover());
     let p = ui.painter();
-    let c = rect.center() + egui::vec2(0.0, 18.0);
-    let r = 104.0_f32;
+    let c = rect.center() + egui::vec2(0.0, GLASS_DROP);
+    let r = GLASS_R;
     // Where a bearing sits on the glass: her head is at the top, so everything else is
     // relative to it — which is what a card does when the boat turns under it.
     let screen = |bearing: f64| -> f32 { (bearing - g.heading) as f32 };
@@ -409,9 +446,13 @@ fn binnacle(ui: &mut egui::Ui, g: &Glass) {
     }
 
     // --- The upper half: the card, seen from above ---------------------------------
+    // Clipped to the *bowl*, not to the box it was allocated: the box is narrower than
+    // the glass on purpose, so that the columns beside it can tuck into the corners —
+    // and clipping to it cut the card and the sea off at the shoulders.
+    let bowl = egui::Rect::from_center_size(c, egui::vec2(r * 2.0 + 40.0, r * 2.0 + 40.0));
     let card = p.with_clip_rect(egui::Rect::from_min_max(
-        egui::pos2(rect.left(), rect.top()),
-        egui::pos2(rect.right(), c.y),
+        bowl.left_top(),
+        egui::pos2(bowl.right(), c.y),
     ));
     for ten in 0..36 {
         let bearing = sail_core::units::rad(ten as f64 * 10.0);
@@ -480,8 +521,8 @@ fn binnacle(ui: &mut egui::Ui, g: &Glass) {
 
     // --- The lower half: the sea, standing still -----------------------------------
     let sea = p.with_clip_rect(egui::Rect::from_min_max(
-        egui::pos2(rect.left(), c.y),
-        egui::pos2(rect.right(), rect.bottom()),
+        egui::pos2(bowl.left(), c.y),
+        bowl.right_bottom(),
     ));
     let tilt = -(g.heel as f32);
     let along = egui::vec2(tilt.cos(), tilt.sin());
@@ -598,15 +639,16 @@ fn binnacle(ui: &mut egui::Ui, g: &Glass) {
 
 /// A page tab: the same engraved plate as every other name on the case, raised when it
 /// is the page you are on.
-fn tab(ui: &mut egui::Ui, name: &str, on: bool) -> egui::Response {
-    let spaced: String = name
-        .chars()
-        .map(|c| c.to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
-    ui.add(
+///
+/// Placed at a rectangle rather than flowed into a column, because these are fitted
+/// round the bowl — and a space added inside a row *takes the width from the row*, so
+/// the button wrapped its legend one letter to a line and grew the case to fit. A thing
+/// positioned by geometry should be positioned by geometry.
+fn tab(ui: &mut egui::Ui, name: &str, on: bool, at: egui::Rect) -> egui::Response {
+    ui.put(
+        at,
         egui::Button::new(
-            egui::RichText::new(spaced)
+            egui::RichText::new(spread(name))
                 .monospace()
                 .size(letter::LABEL)
                 .color(paint::INK),
@@ -617,11 +659,16 @@ fn tab(ui: &mut egui::Ui, name: &str, on: bool) -> egui::Response {
             if on { paint::FACE } else { paint::BEZEL },
         ))
         .corner_radius(2.0)
-        // Each as wide as its own name. A squared-off column looked tidier and cost
-        // thirty points of case to do it — and the thing that actually wants the room
-        // is the bowl, which everything on this bar is arranged around.
-        .min_size(egui::vec2(0.0, 26.0)),
+        .wrap_mode(egui::TextWrapMode::Extend),
     )
+}
+
+/// A name with its letters set apart, the way an engraver sets them.
+fn spread(name: &str) -> String {
+    name.chars()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub fn setup(mut commands: Commands) {
@@ -907,7 +954,7 @@ pub fn draw(
                         // bar whichever page is open and whatever is on it.
                         // Half the case, less the glass and the pilot's column, so the
                         // glass still falls on the middle line of the bar.
-                        ui.set_width(CONSOLE_WIDTH - 246.0 - 130.0 - 118.0);
+                        ui.set_width(CONSOLE_WIDTH - GLASS.x - 136.0 - 146.0);
                         match deck {
                             Deck::Helm => {
                                 // Sheets, on their own winches, continuously trimmed.
@@ -1161,29 +1208,28 @@ pub fn draw(
                     // you reach for without looking, and a column of buttons floating in
                     // the middle of the case is a column you have to find first.
                     ui.scope(|ui| {
-                        // **In the pocket beside the lower half of the glass.** The
-                        // bowl is round and the case is square, so there is a corner of
-                        // empty steel under each shoulder of it: that is where a thing
-                        // you reach for without looking belongs, and it costs the bar
-                        // nothing because the space was already there.
-                        //
-                        // Sized rather than laid out bottom-up: a bottom-up layout with
-                        // nothing to measure against takes the height of the window.
-                        ui.set_width(130.0);
-                        ui.set_height(284.0);
-                        // A vertical layout to drop it into the pocket: the parent here
-                        // is a row, and `add_space` in a row is a space *across*, which
-                        // is a quiet way to move a column sideways and wonder why it did
-                        // not move down.
-                        // Low in the pocket and hard against the bowl: right-aligned, so
-                        // the buttons sit under the glass's shoulder rather than out in
-                        // the middle of the case.
-                        ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
-                            // Far enough down that the last row of buttons sits on the
-                            // same line as the helm reading under the glass: two
-                            // columns either side of the bowl, ending together.
-                            ui.add_space(160.0);
-                            the_pilot(ui, &mut pilot, &sim);
+                        // **In the crescent beside the glass, and following its curve.**
+                        // The case is square and the bowl is round, so the steel either
+                        // side of it is a pair of crescents; a straight column standing
+                        // in one leaves a gap that belongs to neither. Each row is set
+                        // out to where the glass actually reaches at *that* height,
+                        // which is what text does round a picture.
+                        ui.set_width(136.0);
+                        ui.set_height(GLASS.y);
+                        let left = ui.cursor().left();
+                        let top = ui.cursor().top();
+                        // Where the bowl will be: it is drawn next in this row, so its
+                        // middle is this column's right edge plus half a glass.
+                        let bowl = egui::pos2(
+                            left + 136.0 + GLASS.x * 0.5,
+                            top + GLASS.y * 0.5 + GLASS_DROP,
+                        );
+                        ui.vertical(|ui| {
+                            ui.add_space(150.0);
+                            the_pilot(ui, &mut pilot, &sim, &|y: f32, wide: f32| {
+                                (bowl.x - bulge(bowl, GLASS_R + 11.0, y) - 8.0 - wide - left)
+                                    .max(0.0)
+                            });
                         });
                     });
                     ui.vertical(|ui| {
@@ -1217,16 +1263,32 @@ pub fn draw(
                     });
                     // And the pages themselves, down the right-hand side where a thumb
                     // on the coaming lands.
-                    ui.vertical(|ui| {
-                        ui.add_space(4.0);
-                        for (which, name) in Deck::ALL {
-                            let on = console.deck == which;
-                            if tab(ui, name, on).clicked() {
+                    // **The pages, fitted round the bowl.** One width for all of them,
+                    // so the column has an edge — and that edge is the curve: the tab
+                    // beside the widest part of the glass stands furthest out and the
+                    // ones at the shoulders come in to meet it, which is what text does
+                    // round a picture and what the case is shaped like anyway.
+                    {
+                        let (col, _) = ui
+                            .allocate_exact_size(egui::vec2(146.0, GLASS.y), egui::Sense::hover());
+                        let bowl = egui::pos2(
+                            col.left() - GLASS.x * 0.5,
+                            col.top() + GLASS.y * 0.5 + GLASS_DROP,
+                        );
+                        for (i, (which, name)) in Deck::ALL.into_iter().enumerate() {
+                            let y = col.top() + 34.0 + i as f32 * 32.0;
+                            let indent = (bowl.x + bulge(bowl, GLASS_R + 13.0, y + 13.0) + 9.0
+                                - col.left())
+                            .max(0.0);
+                            let at = egui::Rect::from_min_size(
+                                egui::pos2(col.left() + indent, y),
+                                egui::vec2(84.0, 26.0),
+                            );
+                            if tab(ui, name, console.deck == which, at).clicked() {
                                 console.deck = which;
                             }
-                            ui.add_space(3.0);
                         }
-                    });
+                    }
                 });
             });
         });
@@ -1316,7 +1378,7 @@ pub fn draw(
 /// The number is the rack of seven lines plus the glass, the pilot and the tabs: packed
 /// down from 1180, which was the old bar's width and had a hand's breadth of empty case
 /// in it on every page but one.
-const CONSOLE_WIDTH: f32 = 1046.0;
+const CONSOLE_WIDTH: f32 = 984.0;
 
 /// A gauge: wide enough for a label, a number and a unit, and no taller than it has to
 /// be. Two of them side by side are the width of the column.
@@ -2077,7 +2139,7 @@ fn nudge_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
         .fill(paint::TRACK)
         .stroke(egui::Stroke::new(1.0, paint::BEZEL))
         .corner_radius(2.0)
-        .min_size(egui::vec2(28.0, 26.0)),
+        .min_size(egui::vec2(24.0, 26.0)),
     )
 }
 
