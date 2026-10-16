@@ -311,13 +311,17 @@ fn tab_edge(ui: &mut egui::Ui, open: bool) -> bool {
         egui::Stroke::new(1.0, paint::BEZEL),
         egui::StrokeKind::Inside,
     );
-    for (i, c) in "LINES".chars().enumerate() {
-        p.text(
-            egui::pos2(rect.center().x, rect.top() + 14.0 + i as f32 * 16.0),
-            egui::Align2::CENTER_CENTER,
-            c,
-            egui::FontId::monospace(letter::UNIT),
-            if open { paint::FACE } else { paint::INK },
+    // Three knurls down it and no legend. A tab on the edge of a locker does not say
+    // *locker*, and seven plates with rope names engraved on them do not need a plate
+    // over them saying CLUTCHES: a rack is recognised by being a rack.
+    for knurl in 0..3 {
+        let y = rect.center().y + (knurl as f32 - 1.0) * 9.0;
+        p.line_segment(
+            [
+                egui::pos2(rect.left() + 4.0, y),
+                egui::pos2(rect.right() - 4.0, y),
+            ],
+            egui::Stroke::new(1.2, if open { paint::FACE } else { paint::INK }),
         );
     }
     response.clicked()
@@ -1111,7 +1115,6 @@ pub fn draw(
 
                             // The clutch bank: one winch, one line at a time.
                             ui.vertical(|ui| {
-                                plate(ui, "CLUTCHES");
                                 ui.horizontal(|ui| {
                                     for (i, line) in BANK.iter().enumerate() {
                                         let mut value = line.get(&sim.controls);
