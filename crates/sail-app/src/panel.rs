@@ -280,12 +280,15 @@ fn the_pilot(ui: &mut egui::Ui, pilot: &mut Pilot, sim: &Sim) {
 /// guessing. The case is square and the glass is round, and the corners of steel either
 /// side of it are where the small controls go — which only works if they know where the
 /// curve actually is.
-/// **The box the glass is allocated**, which is narrower than the bowl it holds. The
-/// bowl overflows it by a thumb's width each side and the columns beside it step round
-/// the curve: at the shoulders they tuck into the corners where there is no glass at
-/// all, and only the middle rows give way. That is what buys the width back — eighty
-/// points of case that was holding nothing but the corners of a circle.
-pub const GLASS: egui::Vec2 = egui::vec2(150.0, 284.0);
+/// **The box the glass is allocated**, with room in it for the whole instrument.
+///
+/// It was made narrower than the bowl on purpose once, so that the columns beside it
+/// could tuck into the corners — and that was right while the glass stood in the middle
+/// of the bar with things either side of it. Screwed into the corner of the case on its
+/// own, the same trick clipped the bowl against the edge of its own frame: the laylines,
+/// the wind barb and half the card went over the side. Nothing is beside it now, so it
+/// gets the room it needs.
+pub const GLASS: egui::Vec2 = egui::vec2(284.0, 300.0);
 /// How far below the middle of its box the bowl sits: the lubber window is above it.
 pub const GLASS_DROP: f32 = 18.0;
 /// And the rim.
@@ -916,7 +919,9 @@ pub fn draw(
     // comes off the bar and is screwed to the corner of the case, where it stays
     // whichever way you are looking.
     egui::Area::new("binnacle".into())
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-10.0, -8.0))
+        // Clear of the help button in the same corner: two things anchored to one
+        // corner is one thing on top of another.
+        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-10.0, -40.0))
         .interactable(false)
         .show(ctx, |ui| {
             frame.show(ui, |ui| {
