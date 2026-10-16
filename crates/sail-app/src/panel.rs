@@ -946,7 +946,7 @@ pub fn draw(
                         // bar whichever page is open and whatever is on it.
                         // Half the case, less the glass and the pilot's column, so the
                         // glass still falls on the middle line of the bar.
-                        ui.set_width(290.0);
+                        ui.set_width(196.0);
                         {
                             // Sheets, on their own winches, continuously trimmed.
                             let want_main = cfg
@@ -994,43 +994,6 @@ pub fn draw(
                                 ) {
                                     sim.controls.jib_sheet = jib_sheet;
                                 }
-                                // The preventer, beside the mainsheet because that is whose line
-                                // it is: it goes on the end of the same spar. A light rather than
-                                // a slider — it is on or it is off — and it sat in the headsail
-                                // column at first, which is both the wrong place and, in a column
-                                // that narrow, invisible. Reported as not being in the console at
-                                // all, which from where anybody was looking it was not.
-                                ui.vertical(|ui| {
-                                    ui.add_space(2.0);
-                                    plate(ui, "BOOM");
-                                    ui.add_space(4.0);
-                                    let rigged = sim.controls.preventer;
-                                    if ui
-                                        .selectable_label(
-                                            rigged,
-                                            egui::RichText::new(if rigged {
-                                                "PREVENTED"
-                                            } else {
-                                                "free (F)"
-                                            })
-                                            .monospace()
-                                            .size(10.0)
-                                            .color(
-                                                if rigged {
-                                                    egui::Color32::from_rgb(20, 20, 20)
-                                                } else {
-                                                    egui::Color32::from_rgb(150, 150, 130)
-                                                },
-                                            ),
-                                        )
-                                        .on_hover_text(
-                                            "a line forward from the boom end: she cannot gybe",
-                                        )
-                                        .clicked()
-                                    {
-                                        sim.controls.preventer = !rigged;
-                                    }
-                                });
                             });
                         }
                     });
@@ -1058,6 +1021,40 @@ pub fn draw(
                         // panel reaches into steel the circle is not using.
                         ui.set_width(140.0);
                         ui.set_height(GLASS.y);
+                        // **The preventer, over the pilot, in the same column.** It is a rope
+                        // somebody ties on and leaves — one switch, on or off — and standing it
+                        // beside the sheets cost the bar a whole column for a word. Over the
+                        // pilot it shares one: the two of them are the things you set and stop
+                        // thinking about, which is why they belong together and why neither
+                        // needs to be in your hand.
+                        ui.vertical(|ui| {
+                            ui.add_space(2.0);
+                            plate(ui, "BOOM");
+                            ui.add_space(4.0);
+                            let rigged = sim.controls.preventer;
+                            if ui
+                                .selectable_label(
+                                    rigged,
+                                    egui::RichText::new(if rigged {
+                                        "PREVENTED"
+                                    } else {
+                                        "free (F)"
+                                    })
+                                    .monospace()
+                                    .size(10.0)
+                                    .color(if rigged {
+                                        egui::Color32::from_rgb(20, 20, 20)
+                                    } else {
+                                        egui::Color32::from_rgb(150, 150, 130)
+                                    }),
+                                )
+                                .on_hover_text("a line forward from the boom end: she cannot gybe")
+                                .clicked()
+                            {
+                                sim.controls.preventer = !rigged;
+                            }
+                        });
+
                         let left = ui.cursor().left();
                         let top = ui.cursor().top();
                         // **It runs under the whole bowl and out the other side**, with
@@ -1411,7 +1408,7 @@ pub fn draw(
 const BESIDE_THE_GLASS: f32 = 140.0 + GLASS.x + 146.0;
 
 /// And the bar itself: the sheets, and that half. Fixed, and it stays fixed.
-const CONSOLE_WIDTH: f32 = BESIDE_THE_GLASS + 290.0;
+const CONSOLE_WIDTH: f32 = BESIDE_THE_GLASS + 196.0;
 
 /// How far above the bar the open locker sits: clear of it, with the case showing
 /// between, the way a locker door stands open over a bench.
