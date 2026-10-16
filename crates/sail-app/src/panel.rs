@@ -224,14 +224,7 @@ impl Deck {
 /// an autopilot is reached for in exactly those moments. It is four buttons and two
 /// lines of type; it fits beside the card, where the course it is holding can be read
 /// against the course she is making.
-fn the_pilot(
-    ui: &mut egui::Ui,
-    pilot: &mut Pilot,
-    sim: &Sim,
-    // How far in from the left this row must start, given its own width: the curve of
-    // the bowl it is fitted against.
-    inset: &dyn Fn(f32, f32) -> f32,
-) {
+fn the_pilot(ui: &mut egui::Ui, pilot: &mut Pilot, sim: &Sim) {
     let telemetry = sim.sim.telemetry;
     // Why it last let go, for half a minute after it did — and the vane saying it is
     // beaten, which it has to do here because there is no alarm to sound and no relay to
@@ -247,12 +240,10 @@ fn the_pilot(
     } else {
         pilot.last_reason.filter(|_| pilot.since_reason < 30.0)
     };
-    // **One width for every row.** Set against a curve, rows of different widths give a
-    // staircase — each one correct and the block ragged — so they are all the width of
-    // the widest control and the column's two edges are both the arc of the bowl.
-    const WIDE: f32 = 104.0;
+    // A margin off the plate's edge, the same for every row: it is a panel, and the
+    // things screwed to a panel line up with each other.
     let row = |ui: &mut egui::Ui| {
-        ui.add_space(inset(ui.cursor().top() + 13.0, WIDE));
+        ui.add_space(8.0);
     };
     ui.horizontal(|ui| {
         row(ui);
@@ -1208,28 +1199,37 @@ pub fn draw(
                     // you reach for without looking, and a column of buttons floating in
                     // the middle of the case is a column you have to find first.
                     ui.scope(|ui| {
-                        // **In the crescent beside the glass, and following its curve.**
-                        // The case is square and the bowl is round, so the steel either
-                        // side of it is a pair of crescents; a straight column standing
-                        // in one leaves a gap that belongs to neither. Each row is set
-                        // out to where the glass actually reaches at *that* height,
-                        // which is what text does round a picture.
-                        ui.set_width(136.0);
+                        // **A plate that slides under the bowl.**
+                        //
+                        // The rows were stepped round the curve one at a time, which is
+                        // correct for every row and ragged as a block — reported from
+                        // the deck, and then drawn by hand as this: one panel, square,
+                        // tucked under the glass so the circle covers its corner. The
+                        // instruments on a case of this age are plates screwed to other
+                        // plates, and that is what this looks like.
+                        //
+                        // It is painted before the binnacle, so the bowl lands on top of
+                        // it. That overlap is the whole effect and it costs nothing: the
+                        // panel reaches into steel the circle is not using.
+                        ui.set_width(140.0);
                         ui.set_height(GLASS.y);
                         let left = ui.cursor().left();
                         let top = ui.cursor().top();
-                        // Where the bowl will be: it is drawn next in this row, so its
-                        // middle is this column's right edge plus half a glass.
-                        let bowl = egui::pos2(
-                            left + 136.0 + GLASS.x * 0.5,
-                            top + GLASS.y * 0.5 + GLASS_DROP,
+                        let plate = egui::Rect::from_min_max(
+                            egui::pos2(left - 4.0, top + 128.0),
+                            egui::pos2(left + 140.0 + 62.0, top + GLASS.y + 6.0),
+                        );
+                        ui.painter()
+                            .rect_filled(plate, 3.0, paint::BEZEL.gamma_multiply(0.42));
+                        ui.painter().rect_stroke(
+                            plate,
+                            3.0,
+                            egui::Stroke::new(1.0, paint::BEZEL.gamma_multiply(0.8)),
+                            egui::StrokeKind::Inside,
                         );
                         ui.vertical(|ui| {
-                            ui.add_space(150.0);
-                            the_pilot(ui, &mut pilot, &sim, &|y: f32, wide: f32| {
-                                (bowl.x - bulge(bowl, GLASS_R + 11.0, y) - 8.0 - wide - left)
-                                    .max(0.0)
-                            });
+                            ui.add_space(138.0);
+                            the_pilot(ui, &mut pilot, &sim);
                         });
                     });
                     ui.vertical(|ui| {
