@@ -489,7 +489,7 @@ fn passage(ui: &mut egui::Ui, course: &mut crate::course::Course) {
             .monospace()
             .size(12.0),
         )
-        .on_hover_text("the same button as the one on the console")
+        .on_hover_text("the yard will have another the moment you put this one down")
         .clicked()
     {
         course.wants_new = true;

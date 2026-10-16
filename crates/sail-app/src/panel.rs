@@ -604,7 +604,6 @@ pub fn draw(
     mut bank: ResMut<Bank>,
     mut pilot: ResMut<Pilot>,
     mut console: ResMut<Console>,
-    mut settings: ResMut<crate::settings::Settings>,
     mut course: ResMut<Course>,
     nav: Res<crate::navigation::Navigation>,
     polar: Res<crate::hud::Polar>,
@@ -1102,38 +1101,13 @@ pub fn draw(
 
                             ui.add_space(8.0);
 
-                            // What is left when everything that is a *setting* has gone to the
-                            // settings panel.
-                            //
-                            // The console's rule is that everything the keyboard can do the
-                            // mouse can do, and it was being read as though it also said
-                            // everything the mouse can do must be on the bar. It does not. The
-                            // sound switch was the mute key and the mute button in the menu and
-                            // a third copy here; the view and the diagnostic panel are a
-                            // preference and a microscope. Three switches came off the bar, and
-                            // in exchange the ink drawing and the resolution — which were keys
-                            // and nothing else, so the rule was being broken in the direction
-                            // that matters — can now be reached with a mouse at all.
-                            ui.vertical(|ui| {
-                                plate(ui, "SHIP");
-                                if small_button(ui, "SETTINGS  ESC").clicked() {
-                                    settings.open = !settings.open;
-                                }
-                                // The third of the keyboard-only three, and the one with
-                                // consequences, so it says what it will cost rather than
-                                // sitting there as a word.
-                                if small_button(
-                                    ui,
-                                    match course.leg {
-                                        Leg::Idle => "TAKE A JOB",
-                                        Leg::Carrying => "GIVE UP, NEW JOB",
-                                    },
-                                )
-                                .clicked()
-                                {
-                                    course.wants_new = true;
-                                }
-                            });
+                            // **And nothing else.** The ship's two switches were here
+                            // because the console's rule is that everything the keyboard can
+                            // do the mouse can do — which was read as *everything the mouse
+                            // can do must be on the bar*. It does not say that. Settings is a
+                            // key everybody tries first, and giving up a job is a decision
+                            // with consequences that belongs on the page where the passage
+                            // is, not beside the winch.
 
                             // The clutch bank: one winch, one line at a time.
                             ui.vertical(|ui| {
