@@ -268,11 +268,11 @@ fn the_pilot(ui: &mut egui::Ui, pilot: &mut Pilot, sim: &Sim) {
 /// own, the same trick clipped the bowl against the edge of its own frame: the laylines,
 /// the wind barb and half the card went over the side. Nothing is beside it now, so it
 /// gets the room it needs.
-pub const GLASS: egui::Vec2 = egui::vec2(242.0, 300.0);
+pub const GLASS: egui::Vec2 = egui::vec2(214.0, 282.0);
 /// How far below the middle of its box the bowl sits: the lubber window is above it.
 pub const GLASS_DROP: f32 = 18.0;
 /// And the rim.
-pub const GLASS_R: f32 = 104.0;
+pub const GLASS_R: f32 = 96.0;
 
 /// How far the bowl reaches out at a given height — the thing text does round a picture.
 ///
@@ -838,7 +838,13 @@ pub fn draw(
                         // show — the log, the wind's strength, what she is making good,
                         // the water under her and what the glass is doing.
                         ui.vertical(|ui| {
-                            ui.set_width(170.0);
+                            // As wide as its widest reading and no wider: the column was
+                            // set to a number and the number was larger than the type,
+                            // so there was a hand's breadth of empty case down the
+                            // middle of the instrument. The case now comes out about the
+                            // width of the folded chart, which is the other thing in a
+                            // corner of this screen and the one to match.
+                            ui.set_width(118.0);
                             // Tight, because the column has to finish inside the same case
                             // as the bowl beside it: at four points between rows the last
                             // line went over the bottom edge.
