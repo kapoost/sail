@@ -617,9 +617,10 @@ fn tab(ui: &mut egui::Ui, name: &str, on: bool) -> egui::Response {
             if on { paint::FACE } else { paint::BEZEL },
         ))
         .corner_radius(2.0)
-        // One width for all of them. A ragged column beside a circle is two curves
-        // arguing; a straight edge is the case, which is what the tabs are screwed to.
-        .min_size(egui::vec2(112.0, 26.0)),
+        // Each as wide as its own name. A squared-off column looked tidier and cost
+        // thirty points of case to do it — and the thing that actually wants the room
+        // is the bowl, which everything on this bar is arranged around.
+        .min_size(egui::vec2(0.0, 26.0)),
     )
 }
 
@@ -906,7 +907,7 @@ pub fn draw(
                         // bar whichever page is open and whatever is on it.
                         // Half the case, less the glass and the pilot's column, so the
                         // glass still falls on the middle line of the bar.
-                        ui.set_width(CONSOLE_WIDTH - 246.0 - 150.0 - 126.0);
+                        ui.set_width(CONSOLE_WIDTH - 246.0 - 130.0 - 118.0);
                         match deck {
                             Deck::Helm => {
                                 // Sheets, on their own winches, continuously trimmed.
@@ -1168,14 +1169,20 @@ pub fn draw(
                         //
                         // Sized rather than laid out bottom-up: a bottom-up layout with
                         // nothing to measure against takes the height of the window.
-                        ui.set_width(150.0);
+                        ui.set_width(130.0);
                         ui.set_height(284.0);
                         // A vertical layout to drop it into the pocket: the parent here
                         // is a row, and `add_space` in a row is a space *across*, which
                         // is a quiet way to move a column sideways and wonder why it did
                         // not move down.
-                        ui.vertical(|ui| {
-                            ui.add_space(118.0);
+                        // Low in the pocket and hard against the bowl: right-aligned, so
+                        // the buttons sit under the glass's shoulder rather than out in
+                        // the middle of the case.
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+                            // Far enough down that the last row of buttons sits on the
+                            // same line as the helm reading under the glass: two
+                            // columns either side of the bowl, ending together.
+                            ui.add_space(160.0);
                             the_pilot(ui, &mut pilot, &sim);
                         });
                     });
@@ -1309,7 +1316,7 @@ pub fn draw(
 /// The number is the rack of seven lines plus the glass, the pilot and the tabs: packed
 /// down from 1180, which was the old bar's width and had a hand's breadth of empty case
 /// in it on every page but one.
-const CONSOLE_WIDTH: f32 = 1074.0;
+const CONSOLE_WIDTH: f32 = 1046.0;
 
 /// A gauge: wide enough for a label, a number and a unit, and no taller than it has to
 /// be. Two of them side by side are the width of the column.
