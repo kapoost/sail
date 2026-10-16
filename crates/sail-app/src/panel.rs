@@ -283,6 +283,19 @@ pub const GLASS_R: f32 = 104.0;
 ///
 /// What text does round a picture: a straight column beside a circle leaves a crescent
 /// of case belonging to neither, and a column that follows the curve puts every button
+/// What the panel needs to know about a rope to draw its clutch.
+///
+/// A parcel rather than eight arguments: a list that long is a list you get wrong in the
+/// order, and these five are one thing anyway — the state of one line on the coachroof.
+pub struct Rope<'a> {
+    pub selected: bool,
+    pub stops: Option<&'a [f64]>,
+    pub position: Option<&'a str>,
+    /// How fast it comes in, and how long this frame was.
+    pub rate: f64,
+    pub dt: f64,
+}
+
 /// A narrow brass tab down the edge of a panel, for folding it away.
 ///
 /// The letters run down it, which is what a tab on the edge of a locker does — and it is
@@ -1020,40 +1033,50 @@ pub fn draw(
                                         };
                                         let stops = line.detents(&sim.controls);
                                         let position = line.position(&sim.controls);
-                                        let (clicked, worked) = clutch(
+                                        let (clicked, step) = clutch(
                                             ui,
                                             &name,
+                                            &Rope {
+                                                selected,
+                                                stops,
+                                                position,
+                                                rate: line.rate(&sim.controls),
+                                                dt: time.delta_secs_f64(),
+                                            },
                                             &mut value,
-                                            selected,
-                                            stops,
-                                            position,
-                                            line.rate(&sim.controls),
-                                            time.delta_secs_f64(),
                                         );
                                         if clicked {
                                             bank.selected = i;
                                             bank.since_change = 0.0;
                                         }
-                                        if worked {
-                                            bank.selected = i;
-                                            // A detented line cannot be dragged to anywhere
-                                            // between its stops; the hand on the lever picks
-                                            // the nearest one and the line runs there.
+                                        if step != 0 {
+                                            // The next cringle up or down, and the line
+                                            // runs there at its own pace: one press
+                                            // starts the job, the job takes as long as
+                                            // it takes.
                                             if let Some(stops) = line.detents(&sim.controls) {
-                                                let nearest = stops
+                                                let here = stops
                                                     .iter()
-                                                    .copied()
+                                                    .enumerate()
                                                     .min_by(|a, b| {
-                                                        (a - value)
+                                                        (a.1 - value)
                                                             .abs()
-                                                            .partial_cmp(&(b - value).abs())
+                                                            .partial_cmp(&(b.1 - value).abs())
                                                             .unwrap()
                                                     })
-                                                    .unwrap_or(0.0);
-                                                bank.target[i] = Some(nearest);
-                                            } else {
-                                                line.set_from_ui(&mut sim.controls, value);
+                                                    .map(|(n, _)| n as i32)
+                                                    .unwrap_or(0);
+                                                let want = (here + step)
+                                                    .clamp(0, stops.len() as i32 - 1)
+                                                    as usize;
+                                                bank.target[i] = Some(stops[want]);
                                             }
+                                        } else if value != line.get(&sim.controls) {
+                                            // A pull on a line that stops wherever you
+                                            // stop it: the value is already where the
+                                            // hand left it.
+                                            bank.target[i] = None;
+                                            line.set_from_ui(&mut sim.controls, value);
                                         }
                                     }
                                 });
@@ -1848,16 +1871,9 @@ fn lever(
 /// A line with stops shows them as notches along the travel and says which one it is at;
 /// a line without shows a bar and a figure. The difference between *which* and *how
 /// much*, which an instrument can say without a word of explanation.
-fn clutch(
-    ui: &mut egui::Ui,
-    label: &str,
-    value: &mut f64,
-    selected: bool,
-    stops: Option<&[f64]>,
-    position: Option<&str>,
-    rate: f64,
-    dt: f64,
-) -> (bool, bool) {
+fn clutch(ui: &mut egui::Ui, label: &str, line: &Rope, value: &mut f64) -> (bool, i32) {
+    let (selected, stops, position, rate, dt) =
+        (line.selected, line.stops, line.position, line.rate, line.dt);
     ui.vertical(|ui| {
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(78.0, 104.0), egui::Sense::click());
@@ -1919,6 +1935,7 @@ fn clutch(
         // And the two halves of the winch. Held rather than clicked, because that is
         // what grinding is: the line runs while your hand is on the handle.
         let mut worked = false;
+        let mut step = 0i32;
         for (which, legend) in [(1.0_f64, "HAUL"), (-1.0, "EASE")] {
             let at = egui::Rect::from_min_size(
                 egui::pos2(
@@ -1947,12 +1964,22 @@ fn clutch(
                 egui::FontId::monospace(letter::UNIT),
                 if down { paint::INK } else { paint::FACE },
             );
-            if down {
+            // **A line with stops takes a step; a line without takes a pull.** They
+            // were both treated as a pull, and the reef went nowhere at all: the button
+            // nudged it a thousandth off its cringle and the bank then ran it back to
+            // the nearest stop, which was the one it had just left. Reported from the
+            // deck as the reef not working, which it was not.
+            if stops.is_some() {
+                if hit.clicked() {
+                    step += which as i32;
+                    worked = true;
+                }
+            } else if down {
                 *value = (*value + which * rate * dt).clamp(0.0, 1.0);
                 worked = true;
             }
         }
-        (response.clicked() || worked, worked)
+        (response.clicked() || worked, step)
     })
     .inner
 }
