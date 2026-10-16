@@ -168,7 +168,13 @@ pub struct Console {
 /// an autopilot is reached for in exactly those moments. It is four buttons and two
 /// lines of type; it fits beside the card, where the course it is holding can be read
 /// against the course she is making.
-fn the_pilot(ui: &mut egui::Ui, pilot: &mut Pilot, sim: &Sim) {
+fn the_pilot(
+    ui: &mut egui::Ui,
+    pilot: &mut Pilot,
+    sim: &Sim,
+    // Where a row of this width may start at this height: the curve of the bowl.
+    inset: &dyn Fn(f32, f32) -> f32,
+) {
     let telemetry = sim.sim.telemetry;
     // Why it last let go, for half a minute after it did — and the vane saying it is
     // beaten, which it has to do here because there is no alarm to sound and no relay to
@@ -184,10 +190,11 @@ fn the_pilot(ui: &mut egui::Ui, pilot: &mut Pilot, sim: &Sim) {
     } else {
         pilot.last_reason.filter(|_| pilot.since_reason < 30.0)
     };
-    // A margin off the plate's edge, the same for every row: it is a panel, and the
-    // things screwed to a panel line up with each other.
+    // **One width for every row**, set against the curve: rows of different widths give
+    // a staircase — each one correct and the block ragged.
+    const WIDE: f32 = 96.0;
     let row = |ui: &mut egui::Ui| {
-        ui.add_space(8.0);
+        ui.add_space(inset(ui.cursor().top() + 13.0, WIDE));
     };
     ui.horizontal(|ui| {
         row(ui);
@@ -288,7 +295,7 @@ fn the_pilot(ui: &mut egui::Ui, pilot: &mut Pilot, sim: &Sim) {
 /// own, the same trick clipped the bowl against the edge of its own frame: the laylines,
 /// the wind barb and half the card went over the side. Nothing is beside it now, so it
 /// gets the room it needs.
-pub const GLASS: egui::Vec2 = egui::vec2(284.0, 300.0);
+pub const GLASS: egui::Vec2 = egui::vec2(206.0, 300.0);
 /// How far below the middle of its box the bowl sits: the lubber window is above it.
 pub const GLASS_DROP: f32 = 18.0;
 /// And the rim.
@@ -299,6 +306,16 @@ pub const GLASS_R: f32 = 104.0;
 /// Asked for from the deck as *flowing round it like a word processor*, and it is the
 /// right instinct: a straight column beside a circle leaves a crescent of empty case
 /// that belongs to neither, while a column that follows the curve puts every button as
+/// How far the bowl reaches out at a given height.
+///
+/// What text does round a picture: a straight column beside a circle leaves a crescent
+/// of case belonging to neither, and a column that follows the curve puts every button
+/// as close to the glass as that row can be.
+fn bulge(centre: egui::Pos2, r: f32, y: f32) -> f32 {
+    let dy = (y - centre.y).abs().min(r);
+    (r * r - dy * dy).sqrt()
+}
+
 /// Everything the glass shows, in one parcel.
 pub struct Glass {
     pub heading: f64,
@@ -932,11 +949,27 @@ pub fn draw(
                     // to be looking, so it follows the glass into the corner rather than
                     // staying on a bar that changes with the view.
                     ui.scope(|ui| {
-                        ui.set_width(136.0);
+                        // Hard against the bowl, row by row: the column is only as wide
+                        // as it has to be and each button is set out to where the glass
+                        // actually reaches at that height, so the circle takes the space
+                        // it needs and the pilot takes the rest.
+                        ui.set_width(118.0);
                         ui.set_height(GLASS.y);
+                        let left = ui.cursor().left();
+                        let top = ui.cursor().top();
+                        let bowl = egui::pos2(
+                            left + 118.0 + GLASS.x * 0.5,
+                            top + GLASS.y * 0.5 + GLASS_DROP,
+                        );
                         ui.vertical(|ui| {
-                            ui.add_space(96.0);
-                            the_pilot(ui, &mut pilot, &sim);
+                            // Low enough that the block is beside the widest part of the
+                            // bowl, where the crescent is narrowest and the buttons can
+                            // come closest to the glass.
+                            ui.add_space(104.0);
+                            the_pilot(ui, &mut pilot, &sim, &|y: f32, wide: f32| {
+                                (bowl.x - bulge(bowl, GLASS_R + 13.0, y) - 6.0 - wide - left)
+                                    .max(0.0)
+                            });
                         });
                     });
                     ui.vertical(|ui| {
