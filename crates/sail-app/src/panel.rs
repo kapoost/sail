@@ -133,13 +133,7 @@ pub struct Console {
 /// an autopilot is reached for in exactly those moments. It is four buttons and two
 /// lines of type; it fits beside the card, where the course it is holding can be read
 /// against the course she is making.
-fn the_pilot(
-    ui: &mut egui::Ui,
-    pilot: &mut Pilot,
-    sim: &Sim,
-    // Where a row of this width may start at this height: the curve of the bowl.
-    inset: &dyn Fn(f32, f32) -> f32,
-) {
+fn the_pilot(ui: &mut egui::Ui, pilot: &mut Pilot, sim: &Sim) {
     let telemetry = sim.sim.telemetry;
     // Why it last let go, for half a minute after it did — and the vane saying it is
     // beaten, which it has to do here because there is no alarm to sound and no relay to
@@ -155,11 +149,10 @@ fn the_pilot(
     } else {
         pilot.last_reason.filter(|_| pilot.since_reason < 30.0)
     };
-    // **One width for every row**, set against the curve: rows of different widths give
-    // a staircase — each one correct and the block ragged.
-    const WIDE: f32 = 96.0;
+    // The same margin for every row: it is a column, and the things in a column line
+    // up with each other.
     let row = |ui: &mut egui::Ui| {
-        ui.add_space(inset(ui.cursor().top() + 13.0, WIDE));
+        ui.add_space(1.0);
     };
     ui.horizontal(|ui| {
         row(ui);
@@ -260,7 +253,7 @@ fn the_pilot(
 /// own, the same trick clipped the bowl against the edge of its own frame: the laylines,
 /// the wind barb and half the card went over the side. Nothing is beside it now, so it
 /// gets the room it needs.
-pub const GLASS: egui::Vec2 = egui::vec2(206.0, 300.0);
+pub const GLASS: egui::Vec2 = egui::vec2(242.0, 300.0);
 /// How far below the middle of its box the bowl sits: the lubber window is above it.
 pub const GLASS_DROP: f32 = 18.0;
 /// And the rim.
@@ -275,12 +268,6 @@ pub const GLASS_R: f32 = 104.0;
 ///
 /// What text does round a picture: a straight column beside a circle leaves a crescent
 /// of case belonging to neither, and a column that follows the curve puts every button
-/// as close to the glass as that row can be.
-fn bulge(centre: egui::Pos2, r: f32, y: f32) -> f32 {
-    let dy = (y - centre.y).abs().min(r);
-    (r * r - dy * dy).sqrt()
-}
-
 /// Everything the glass shows, in one parcel.
 pub struct Glass {
     pub heading: f64,
@@ -860,7 +847,7 @@ pub fn draw(
                     // show — the log, the wind's strength, what she is making good,
                     // the water under her and what the glass is doing.
                     ui.vertical(|ui| {
-                        ui.set_width(168.0);
+                        ui.set_width(170.0);
                         // Tight, because the column has to finish inside the same case
                         // as the bowl beside it: at four points between rows the last
                         // line went over the bottom edge.
@@ -890,6 +877,13 @@ pub fn draw(
                         readout(ui, "TWS", &format!("{:.0} kn", ms_to_kn(telemetry.tws)));
                         readout(ui, "TWA", &format!("{:+.0}°", deg(telemetry.twa)));
                         readout(ui, "VMG", &format!("{:.1} kn", ms_to_kn(telemetry.vmg)));
+                        // **The pilot among the figures**, which is where it belongs: what
+                        // it is holding reads against the wind above it and the water
+                        // below. Two columns and a glass made a corner wider than it had
+                        // any right to be; one column makes it as narrow as the bowl.
+                        ui.add_space(7.0);
+                        the_pilot(ui, &mut pilot, &sim);
+                        ui.add_space(7.0);
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 3.0;
                             gauge(ui, "SEA", telemetry.significant_height, 0.0, 4.0, "m");
@@ -917,30 +911,6 @@ pub fn draw(
                     // not two — and an autopilot is reached for from wherever you happen
                     // to be looking, so it follows the glass into the corner rather than
                     // staying on a bar that changes with the view.
-                    ui.scope(|ui| {
-                        // Hard against the bowl, row by row: the column is only as wide
-                        // as it has to be and each button is set out to where the glass
-                        // actually reaches at that height, so the circle takes the space
-                        // it needs and the pilot takes the rest.
-                        ui.set_width(118.0);
-                        ui.set_height(GLASS.y);
-                        let left = ui.cursor().left();
-                        let top = ui.cursor().top();
-                        let bowl = egui::pos2(
-                            left + 118.0 + GLASS.x * 0.5,
-                            top + GLASS.y * 0.5 + GLASS_DROP,
-                        );
-                        ui.vertical(|ui| {
-                            // Low enough that the block is beside the widest part of the
-                            // bowl, where the crescent is narrowest and the buttons can
-                            // come closest to the glass.
-                            ui.add_space(104.0);
-                            the_pilot(ui, &mut pilot, &sim, &|y: f32, wide: f32| {
-                                (bowl.x - bulge(bowl, GLASS_R + 13.0, y) - 6.0 - wide - left)
-                                    .max(0.0)
-                            });
-                        });
-                    });
                     ui.vertical(|ui| {
                         binnacle(
                             ui,
