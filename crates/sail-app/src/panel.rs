@@ -654,41 +654,6 @@ fn tab(ui: &mut egui::Ui, name: &str, on: bool, at: egui::Rect) -> egui::Respons
     )
 }
 
-/// Everything in `add`, on a plate.
-///
-/// **A case of this age is plates screwed to other plates**, and the groups on this bar
-/// are the plates: the sheets on one, the rack of lines on another, the pilot on a third
-/// that slides under the bowl. The alternative — groups floating on one flat field,
-/// told apart only by the space between them — is a screen's way of grouping and not a
-/// panel's.
-///
-/// Painted behind, by reserving the shape before the contents are laid out and filling
-/// it in once their rectangle is known. Which is the only way round: a background has to
-/// know how big the thing in front of it turned out to be.
-fn panel<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    let behind = ui.painter().add(egui::Shape::Noop);
-    let inner = ui.scope(|ui| {
-        ui.add_space(5.0);
-        let got = add(ui);
-        ui.add_space(5.0);
-        got
-    });
-    let at = inner.response.rect.expand2(egui::vec2(7.0, 2.0));
-    ui.painter().set(
-        behind,
-        egui::Shape::Vec(vec![
-            egui::Shape::rect_filled(at, 3.0, paint::BEZEL.gamma_multiply(0.42)),
-            egui::Shape::rect_stroke(
-                at,
-                3.0,
-                egui::Stroke::new(1.0, paint::BEZEL.gamma_multiply(0.8)),
-                egui::StrokeKind::Inside,
-            ),
-        ]),
-    );
-    inner.inner
-}
-
 /// A name with its letters set apart, the way an engraver sets them.
 fn spread(name: &str) -> String {
     name.chars()
@@ -983,252 +948,244 @@ pub fn draw(
                         ui.set_width(CONSOLE_WIDTH - GLASS.x - 136.0 - 146.0);
                         match deck {
                             Deck::Helm => {
-                                panel(ui, |ui| {
-                                    // Sheets, on their own winches, continuously trimmed.
-                                    let want_main = cfg
-                                        .main
-                                        .profile
-                                        .optimal_sheet(telemetry.awa, telemetry.main.camber);
-                                    let want_jib = cfg
-                                        .genoa
-                                        .profile
-                                        .optimal_sheet(telemetry.awa, telemetry.jib.camber);
-                                    let mut main_sheet = sim.controls.main_sheet;
-                                    let mut jib_sheet = sim.controls.jib_sheet;
-                                    // The two sheets. Trimming for you has no switch here and is the
-                                    // one thing on the boat that does not: it stands for a crew doing
-                                    // it, which is a different kind of act from putting your own hand
-                                    // on a winch, and a button for it sat on the console inviting
-                                    // itself to be pressed instead of the levers beside it. `T`.
-                                    ui.horizontal_top(|ui| {
-                                        if lever(
-                                            ui,
-                                            "MAIN",
-                                            &mut main_sheet,
-                                            Some(want_main),
-                                            sail_state(
-                                                &telemetry.main,
-                                                1.0 - sim.controls.reef * cfg.max_reef,
-                                            ),
-                                            (
-                                                telemetry.main.drive + telemetry.main_upper.drive,
-                                                telemetry.main.side + telemetry.main_upper.side,
-                                            ),
-                                        ) {
-                                            sim.controls.main_sheet = main_sheet;
-                                        }
-                                        if lever(
-                                            ui,
-                                            "GENOA",
-                                            &mut jib_sheet,
-                                            Some(want_jib),
-                                            sail_state(&telemetry.jib, 1.0 - sim.controls.furl),
-                                            (
-                                                telemetry.jib.drive + telemetry.jib_upper.drive,
-                                                telemetry.jib.side + telemetry.jib_upper.side,
-                                            ),
-                                        ) {
-                                            sim.controls.jib_sheet = jib_sheet;
-                                        }
-                                        // The preventer, beside the mainsheet because that is whose line
-                                        // it is: it goes on the end of the same spar. A light rather than
-                                        // a slider — it is on or it is off — and it sat in the headsail
-                                        // column at first, which is both the wrong place and, in a column
-                                        // that narrow, invisible. Reported as not being in the console at
-                                        // all, which from where anybody was looking it was not.
-                                        ui.vertical(|ui| {
-                                            ui.add_space(2.0);
-                                            plate(ui, "BOOM");
-                                            ui.add_space(4.0);
-                                            let rigged = sim.controls.preventer;
-                                            if ui
-                                                .selectable_label(
-                                                    rigged,
-                                                    egui::RichText::new(if rigged {
-                                                        "PREVENTED"
-                                                    } else {
-                                                        "free (F)"
-                                                    })
-                                                    .monospace()
-                                                    .size(10.0)
-                                                    .color(if rigged {
-                                                        egui::Color32::from_rgb(20, 20, 20)
-                                                    } else {
-                                                        egui::Color32::from_rgb(150, 150, 130)
-                                                    }),
-                                                )
-                                                .on_hover_text(
-                                                    "a line forward from the boom end: she cannot gybe",
-                                                )
-                                                .clicked()
-                                            {
-                                                sim.controls.preventer = !rigged;
-                                            }
-                                        });
-                                    });
-                            });
-                            }
-                            Deck::Lines => {
-                                panel(ui, |ui| {
-                                    // The clutch bank: one winch, one line at a time.
+                                // Sheets, on their own winches, continuously trimmed.
+                                let want_main = cfg
+                                    .main
+                                    .profile
+                                    .optimal_sheet(telemetry.awa, telemetry.main.camber);
+                                let want_jib = cfg
+                                    .genoa
+                                    .profile
+                                    .optimal_sheet(telemetry.awa, telemetry.jib.camber);
+                                let mut main_sheet = sim.controls.main_sheet;
+                                let mut jib_sheet = sim.controls.jib_sheet;
+                                // The two sheets. Trimming for you has no switch here and is the
+                                // one thing on the boat that does not: it stands for a crew doing
+                                // it, which is a different kind of act from putting your own hand
+                                // on a winch, and a button for it sat on the console inviting
+                                // itself to be pressed instead of the levers beside it. `T`.
+                                ui.horizontal_top(|ui| {
+                                    if lever(
+                                        ui,
+                                        "MAIN",
+                                        &mut main_sheet,
+                                        Some(want_main),
+                                        sail_state(
+                                            &telemetry.main,
+                                            1.0 - sim.controls.reef * cfg.max_reef,
+                                        ),
+                                        (
+                                            telemetry.main.drive + telemetry.main_upper.drive,
+                                            telemetry.main.side + telemetry.main_upper.side,
+                                        ),
+                                    ) {
+                                        sim.controls.main_sheet = main_sheet;
+                                    }
+                                    if lever(
+                                        ui,
+                                        "GENOA",
+                                        &mut jib_sheet,
+                                        Some(want_jib),
+                                        sail_state(&telemetry.jib, 1.0 - sim.controls.furl),
+                                        (
+                                            telemetry.jib.drive + telemetry.jib_upper.drive,
+                                            telemetry.jib.side + telemetry.jib_upper.side,
+                                        ),
+                                    ) {
+                                        sim.controls.jib_sheet = jib_sheet;
+                                    }
+                                    // The preventer, beside the mainsheet because that is whose line
+                                    // it is: it goes on the end of the same spar. A light rather than
+                                    // a slider — it is on or it is off — and it sat in the headsail
+                                    // column at first, which is both the wrong place and, in a column
+                                    // that narrow, invisible. Reported as not being in the console at
+                                    // all, which from where anybody was looking it was not.
                                     ui.vertical(|ui| {
-                                        plate(ui, "CLUTCHES");
-                                        ui.horizontal(|ui| {
-                                            for (i, line) in BANK.iter().enumerate() {
-                                                let mut value = line.get(&sim.controls);
-                                                let selected = i == bank.selected;
-                                                // A line that leads nowhere on the sail that is up gets
-                                                // its name bracketed rather than hidden: the clutch is
-                                                // still on the coachroof, it just has nothing on the
-                                                // other end of it at the moment.
-                                                let rigged = line.rigged_for(&sim.controls);
-                                                // The short name on the plate; the long one is said
-                                                // under the rack where there is a line for it.
-                                                let name = if rigged {
-                                                    line.tag(&sim.controls).to_string()
-                                                } else {
-                                                    format!("({})", line.tag(&sim.controls))
-                                                };
-                                                let stops = line.detents(&sim.controls);
-                                                let position = line.position(&sim.controls);
-                                                let (clicked, dragged) = clutch(
-                                                    ui, &name, &mut value, selected, stops, position,
-                                                );
-                                                if clicked {
-                                                    bank.selected = i;
-                                                    bank.since_change = 0.0;
-                                                }
-                                                if dragged {
-                                                    bank.selected = i;
-                                                    // A detented line cannot be dragged to anywhere
-                                                    // between its stops; the hand on the lever picks
-                                                    // the nearest one and the line runs there.
-                                                    if let Some(stops) = line.detents(&sim.controls) {
-                                                        let nearest = stops
-                                                            .iter()
-                                                            .copied()
-                                                            .min_by(|a, b| {
-                                                                (a - value)
-                                                                    .abs()
-                                                                    .partial_cmp(&(b - value).abs())
-                                                                    .unwrap()
-                                                            })
-                                                            .unwrap_or(0.0);
-                                                        bank.target[i] = Some(nearest);
-                                                    } else {
-                                                        line.set_from_ui(&mut sim.controls, value);
-                                                    }
-                                                }
-                                            }
-                                        });
-                                        ui.label(
-                                            egui::RichText::new(fit(
-                                                // The long name belongs on this line and not on the
-                                                // plate: a nameplate is a label, and the sentence that
-                                                // explains it is a different object.
-                                                &if bank.line().rigged_for(&sim.controls) {
-                                                    format!(
-                                                        "{} — hauling in {}",
-                                                        bank.line().name_now(&sim.controls),
-                                                        bank.line().hauled_now(&sim.controls)
-                                                    )
-                                                } else {
-                                                    format!(
-                                                        "{} is not led to this sail",
-                                                        bank.line().name()
-                                                    )
-                                                },
-                                                44,
-                                            ))
-                                            .color(paint::LABEL)
-                                            .monospace()
-                                            .size(9.0),
-                                        );
-                                    });
-                            });
-                            }
-                            Deck::Gear => {
-                                panel(ui, |ui| {
-                                    // The sail wardrobe, and the pilot.
-                                    ui.vertical(|ui| {
-                                        plate(ui, "HEADSAIL");
+                                        ui.add_space(2.0);
+                                        plate(ui, "BOOM");
                                         ui.add_space(4.0);
-                                        let rolled = sim.controls.furl > 0.9;
-                                        for sail in [
-                                            Headsail::Genoa,
-                                            Headsail::Code0,
-                                            Headsail::Gennaker,
-                                            Headsail::Spinnaker,
-                                        ] {
-                                            let up = sim.controls.headsail == sail;
-                                            let label = egui::RichText::new(sail.name().to_uppercase())
+                                        let rigged = sim.controls.preventer;
+                                        if ui
+                                            .selectable_label(
+                                                rigged,
+                                                egui::RichText::new(if rigged {
+                                                    "PREVENTED"
+                                                } else {
+                                                    "free (F)"
+                                                })
                                                 .monospace()
                                                 .size(10.0)
-                                                .color(if up {
-                                                    egui::Color32::BLACK
-                                                } else if rolled {
-                                                    paint::LABEL
+                                                .color(if rigged {
+                                                    egui::Color32::from_rgb(20, 20, 20)
                                                 } else {
-                                                    egui::Color32::from_gray(90)
-                                                });
-                                            let button = egui::Button::new(label).fill(if up {
-                                                paint::LIVE
+                                                    egui::Color32::from_rgb(150, 150, 130)
+                                                }),
+                                            )
+                                            .on_hover_text(
+                                                "a line forward from the boom end: she cannot gybe",
+                                            )
+                                            .clicked()
+                                        {
+                                            sim.controls.preventer = !rigged;
+                                        }
+                                    });
+                                });
+                            }
+                            Deck::Lines => {
+                                // The clutch bank: one winch, one line at a time.
+                                ui.vertical(|ui| {
+                                    plate(ui, "CLUTCHES");
+                                    ui.horizontal(|ui| {
+                                        for (i, line) in BANK.iter().enumerate() {
+                                            let mut value = line.get(&sim.controls);
+                                            let selected = i == bank.selected;
+                                            // A line that leads nowhere on the sail that is up gets
+                                            // its name bracketed rather than hidden: the clutch is
+                                            // still on the coachroof, it just has nothing on the
+                                            // other end of it at the moment.
+                                            let rigged = line.rigged_for(&sim.controls);
+                                            // The short name on the plate; the long one is said
+                                            // under the rack where there is a line for it.
+                                            let name = if rigged {
+                                                line.tag(&sim.controls).to_string()
                                             } else {
-                                                egui::Color32::from_gray(26)
-                                            });
-                                            // Only with the sail rolled away: you furl, change, and set.
-                                            if ui.add_enabled(rolled, button).clicked() {
-                                                sim.controls.headsail = sail;
+                                                format!("({})", line.tag(&sim.controls))
+                                            };
+                                            let stops = line.detents(&sim.controls);
+                                            let position = line.position(&sim.controls);
+                                            let (clicked, dragged) = clutch(
+                                                ui, &name, &mut value, selected, stops, position,
+                                            );
+                                            if clicked {
+                                                bank.selected = i;
+                                                bank.since_change = 0.0;
+                                            }
+                                            if dragged {
+                                                bank.selected = i;
+                                                // A detented line cannot be dragged to anywhere
+                                                // between its stops; the hand on the lever picks
+                                                // the nearest one and the line runs there.
+                                                if let Some(stops) = line.detents(&sim.controls) {
+                                                    let nearest = stops
+                                                        .iter()
+                                                        .copied()
+                                                        .min_by(|a, b| {
+                                                            (a - value)
+                                                                .abs()
+                                                                .partial_cmp(&(b - value).abs())
+                                                                .unwrap()
+                                                        })
+                                                        .unwrap_or(0.0);
+                                                    bank.target[i] = Some(nearest);
+                                                } else {
+                                                    line.set_from_ui(&mut sim.controls, value);
+                                                }
                                             }
                                         }
-                                        if !rolled {
-                                            ui.label(
-                                                egui::RichText::new("roll it away first")
-                                                    .monospace()
-                                                    .size(10.0)
-                                                    .color(egui::Color32::from_gray(90)),
-                                            );
-                                        }
                                     });
+                                    ui.label(
+                                        egui::RichText::new(fit(
+                                            // The long name belongs on this line and not on the
+                                            // plate: a nameplate is a label, and the sentence that
+                                            // explains it is a different object.
+                                            &if bank.line().rigged_for(&sim.controls) {
+                                                format!(
+                                                    "{} — hauling in {}",
+                                                    bank.line().name_now(&sim.controls),
+                                                    bank.line().hauled_now(&sim.controls)
+                                                )
+                                            } else {
+                                                format!(
+                                                    "{} is not led to this sail",
+                                                    bank.line().name()
+                                                )
+                                            },
+                                            44,
+                                        ))
+                                        .color(paint::LABEL)
+                                        .monospace()
+                                        .size(9.0),
+                                    );
+                                });
+                            }
+                            Deck::Gear => {
+                                // The sail wardrobe, and the pilot.
+                                ui.vertical(|ui| {
+                                    plate(ui, "HEADSAIL");
+                                    ui.add_space(4.0);
+                                    let rolled = sim.controls.furl > 0.9;
+                                    for sail in [
+                                        Headsail::Genoa,
+                                        Headsail::Code0,
+                                        Headsail::Gennaker,
+                                        Headsail::Spinnaker,
+                                    ] {
+                                        let up = sim.controls.headsail == sail;
+                                        let label = egui::RichText::new(sail.name().to_uppercase())
+                                            .monospace()
+                                            .size(10.0)
+                                            .color(if up {
+                                                egui::Color32::BLACK
+                                            } else if rolled {
+                                                paint::LABEL
+                                            } else {
+                                                egui::Color32::from_gray(90)
+                                            });
+                                        let button = egui::Button::new(label).fill(if up {
+                                            paint::LIVE
+                                        } else {
+                                            egui::Color32::from_gray(26)
+                                        });
+                                        // Only with the sail rolled away: you furl, change, and set.
+                                        if ui.add_enabled(rolled, button).clicked() {
+                                            sim.controls.headsail = sail;
+                                        }
+                                    }
+                                    if !rolled {
+                                        ui.label(
+                                            egui::RichText::new("roll it away first")
+                                                .monospace()
+                                                .size(10.0)
+                                                .color(egui::Color32::from_gray(90)),
+                                        );
+                                    }
+                                });
 
-                                    ui.add_space(8.0);
-                            });
+                                ui.add_space(8.0);
                             }
                             Deck::Ship => {
-                                panel(ui, |ui| {
-                                    // What is left when everything that is a *setting* has gone to the
-                                    // settings panel.
-                                    //
-                                    // The console's rule is that everything the keyboard can do the
-                                    // mouse can do, and it was being read as though it also said
-                                    // everything the mouse can do must be on the bar. It does not. The
-                                    // sound switch was the mute key and the mute button in the menu and
-                                    // a third copy here; the view and the diagnostic panel are a
-                                    // preference and a microscope. Three switches came off the bar, and
-                                    // in exchange the ink drawing and the resolution — which were keys
-                                    // and nothing else, so the rule was being broken in the direction
-                                    // that matters — can now be reached with a mouse at all.
-                                    ui.vertical(|ui| {
-                                        plate(ui, "SHIP");
-                                        if small_button(ui, "SETTINGS  ESC").clicked() {
-                                            settings.open = !settings.open;
-                                        }
-                                        // The third of the keyboard-only three, and the one with
-                                        // consequences, so it says what it will cost rather than
-                                        // sitting there as a word.
-                                        if small_button(
-                                            ui,
-                                            match course.leg {
-                                                Leg::Idle => "TAKE A JOB",
-                                                Leg::Carrying => "GIVE UP, NEW JOB",
-                                            },
-                                        )
-                                        .clicked()
-                                        {
-                                            course.wants_new = true;
-                                        }
-                                    });
-                            });
+                                // What is left when everything that is a *setting* has gone to the
+                                // settings panel.
+                                //
+                                // The console's rule is that everything the keyboard can do the
+                                // mouse can do, and it was being read as though it also said
+                                // everything the mouse can do must be on the bar. It does not. The
+                                // sound switch was the mute key and the mute button in the menu and
+                                // a third copy here; the view and the diagnostic panel are a
+                                // preference and a microscope. Three switches came off the bar, and
+                                // in exchange the ink drawing and the resolution — which were keys
+                                // and nothing else, so the rule was being broken in the direction
+                                // that matters — can now be reached with a mouse at all.
+                                ui.vertical(|ui| {
+                                    plate(ui, "SHIP");
+                                    if small_button(ui, "SETTINGS  ESC").clicked() {
+                                        settings.open = !settings.open;
+                                    }
+                                    // The third of the keyboard-only three, and the one with
+                                    // consequences, so it says what it will cost rather than
+                                    // sitting there as a word.
+                                    if small_button(
+                                        ui,
+                                        match course.leg {
+                                            Leg::Idle => "TAKE A JOB",
+                                            Leg::Carrying => "GIVE UP, NEW JOB",
+                                        },
+                                    )
+                                    .clicked()
+                                    {
+                                        course.wants_new = true;
+                                    }
+                                });
                             }
                         }
                     });
@@ -1258,9 +1215,15 @@ pub fn draw(
                         ui.set_height(GLASS.y);
                         let left = ui.cursor().left();
                         let top = ui.cursor().top();
+                        // **It runs under the whole bowl and out the other side**, with
+                        // the helm reading on it: one long plate carrying the pilot, the
+                        // glass and what the blade is doing, which is the group these
+                        // three actually are. A plate that stops where the circle starts
+                        // is a plate hiding behind it.
+                        let bowl = left + 140.0 + GLASS.x * 0.5;
                         let plate = egui::Rect::from_min_max(
-                            egui::pos2(left - 4.0, top + 128.0),
-                            egui::pos2(left + 140.0 + 62.0, top + GLASS.y + 6.0),
+                            egui::pos2(left - 4.0, top + 126.0),
+                            egui::pos2(bowl + GLASS_R + 21.0, top + GLASS.y + 34.0),
                         );
                         ui.painter()
                             .rect_filled(plate, 3.0, paint::BEZEL.gamma_multiply(0.42));
@@ -2004,7 +1967,7 @@ fn lever(
         // setting, and an inch of it was asking for a trim to be judged in sixths of a
         // millimetre. There is a page to itself now, so it can have the room.
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(84.0, 246.0), egui::Sense::click_and_drag());
+            ui.allocate_exact_size(egui::vec2(84.0, 282.0), egui::Sense::click_and_drag());
         let p = ui.painter();
         p.rect_filled(rect, 3.0, paint::CASE);
         p.rect_stroke(
@@ -2100,7 +2063,7 @@ fn clutch(
 ) -> (bool, bool) {
     ui.vertical(|ui| {
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(72.0, 246.0), egui::Sense::click_and_drag());
+            ui.allocate_exact_size(egui::vec2(72.0, 282.0), egui::Sense::click_and_drag());
         let p = ui.painter();
         p.rect_filled(rect, 3.0, paint::CASE);
         p.rect_stroke(
