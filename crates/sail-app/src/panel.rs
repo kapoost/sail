@@ -648,6 +648,34 @@ pub fn draw(
                 // readout's worth of sea given back, and nothing in here is close enough
                 // to anything else to be misread for it.
                 ui.spacing_mut().item_spacing.y = 4.0;
+                // **The water and the glass, back in the window on the left.**
+                //
+                // They went to the corner with the rest of the readings and they are the
+                // wrong sort of reading for it: the corner is what she is doing this
+                // minute — her speed, the wind, what the pilot is holding — and these
+                // four are what the day is doing. Which is the question the destination
+                // in this window is already asking.
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    gauge(ui, "SEA", telemetry.significant_height, 0.0, 4.0, "m");
+                    gauge_alarmed(
+                        ui,
+                        "DEPTH",
+                        telemetry.depth,
+                        0.0,
+                        10.0,
+                        "m",
+                        telemetry.under_keel < 1.5,
+                    );
+                });
+                let (glass, tendency) = sim.sim.wind.barometer();
+                readout(
+                    ui,
+                    "BARO",
+                    &format!("{glass:.0} {}", tendency_words(tendency)),
+                );
+                let (building, turning) = sim.sim.wind.outlook();
+                readout(ui, "OUTLOOK", &fit(&outlook_words(building, turning), 16));
 
                 // **The three she is steered by**, in the size they deserve, in a
                 // fixed order, in a fixed place. Everything under them is a thing you
@@ -847,27 +875,6 @@ pub fn draw(
                             ui.add_space(7.0);
                             the_pilot(ui, &mut pilot, &sim);
                             ui.add_space(7.0);
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 3.0;
-                                gauge(ui, "SEA", telemetry.significant_height, 0.0, 4.0, "m");
-                                gauge_alarmed(
-                                    ui,
-                                    "DEPTH",
-                                    telemetry.depth,
-                                    0.0,
-                                    10.0,
-                                    "m",
-                                    telemetry.under_keel < 1.5,
-                                );
-                            });
-                            let (glass, tendency) = sim.sim.wind.barometer();
-                            readout(
-                                ui,
-                                "BARO",
-                                &format!("{glass:.0} {}", tendency_words(tendency)),
-                            );
-                            let (building, turning) = sim.sim.wind.outlook();
-                            readout(ui, "OUTLOOK", &fit(&outlook_words(building, turning), 16));
                         });
                         // **The pilot belongs beside the glass.** The course it is holding
                         // is read against the course she is making, which is one glance and
