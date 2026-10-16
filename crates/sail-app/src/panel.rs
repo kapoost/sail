@@ -786,17 +786,127 @@ pub fn draw(
     //
     // Anchored on the right, because the glass is the thing that must not move: it is
     // the instrument, the others are tools beside it.
-    egui::Area::new("console".into())
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-10.0, -40.0))
+    // --- The corner: the glass, and the sheets under it -----------------------------
+    //
+    // **The instrument above and the ropes below**, in one column in the corner where
+    // the hand rests. Asked for from the deck, and it is the arrangement of a real
+    // binnacle pedestal: the card at eye height on top of the pillar and the gear you
+    // work at the bottom of it.
+    egui::Area::new("corner".into())
+        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-10.0, -10.0))
         .interactable(true)
         .show(ctx, |ui| {
-            ui.horizontal_top(|ui| {
-                // The tools for the job in hand, which is what the view says it is.
-                // Dropped to the same bottom edge as the glass: the sheets are a shade
-                // shorter than the binnacle and hanging them from the top left a step in
-                // the skyline.
-                ui.vertical(|ui| {
-                    ui.add_space(16.0);
+            ui.vertical(|ui| {
+                frame.show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        // **What is not already on the glass.**
+                        //
+                        // Her head is the card, the apparent wind is the needle on the
+                        // boss, and her heel is the line across the bottom half of the
+                        // bowl: three of the readings that used to be printed in the
+                        // corner of the screen are now *drawn*, and printing them again
+                        // beside the drawing is the oldest way to make an instrument
+                        // panel unreadable. What is left is everything the glass cannot
+                        // show — the log, the wind's strength, what she is making good,
+                        // the water under her and what the glass is doing.
+                        ui.vertical(|ui| {
+                            ui.set_width(170.0);
+                            // Tight, because the column has to finish inside the same case
+                            // as the bowl beside it: at four points between rows the last
+                            // line went over the bottom edge.
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.label(
+                                egui::RichText::new(format!("{:.1}", ms_to_kn(telemetry.stw)))
+                                    .color(paint::FACE)
+                                    .monospace()
+                                    .size(letter::PRIMARY),
+                            );
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 3.0;
+                                ui.label(
+                                    egui::RichText::new("LOG")
+                                        .color(paint::LABEL)
+                                        .monospace()
+                                        .size(letter::LABEL),
+                                );
+                                ui.label(
+                                    egui::RichText::new("kn")
+                                        .color(paint::LABEL.gamma_multiply(0.75))
+                                        .monospace()
+                                        .size(letter::UNIT),
+                                );
+                            });
+                            readout(ui, "AWS", &format!("{:.1} kn", ms_to_kn(telemetry.aws)));
+                            readout(ui, "TWS", &format!("{:.0} kn", ms_to_kn(telemetry.tws)));
+                            readout(ui, "TWA", &format!("{:+.0}°", deg(telemetry.twa)));
+                            readout(ui, "VMG", &format!("{:.1} kn", ms_to_kn(telemetry.vmg)));
+                            // **The pilot among the figures**, which is where it belongs: what
+                            // it is holding reads against the wind above it and the water
+                            // below. Two columns and a glass made a corner wider than it had
+                            // any right to be; one column makes it as narrow as the bowl.
+                            ui.add_space(7.0);
+                            the_pilot(ui, &mut pilot, &sim);
+                            ui.add_space(7.0);
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 3.0;
+                                gauge(ui, "SEA", telemetry.significant_height, 0.0, 4.0, "m");
+                                gauge_alarmed(
+                                    ui,
+                                    "DEPTH",
+                                    telemetry.depth,
+                                    0.0,
+                                    10.0,
+                                    "m",
+                                    telemetry.under_keel < 1.5,
+                                );
+                            });
+                            let (glass, tendency) = sim.sim.wind.barometer();
+                            readout(
+                                ui,
+                                "BARO",
+                                &format!("{glass:.0} {}", tendency_words(tendency)),
+                            );
+                            let (building, turning) = sim.sim.wind.outlook();
+                            readout(ui, "OUTLOOK", &fit(&outlook_words(building, turning), 16));
+                        });
+                        // **The pilot belongs beside the glass.** The course it is holding
+                        // is read against the course she is making, which is one glance and
+                        // not two — and an autopilot is reached for from wherever you happen
+                        // to be looking, so it follows the glass into the corner rather than
+                        // staying on a bar that changes with the view.
+                        ui.vertical(|ui| {
+                            binnacle(
+                                ui,
+                                &Glass {
+                                    heading,
+                                    heel: telemetry.heel,
+                                    twd: telemetry.twd,
+                                    beat: polar.beat(),
+                                    mark: match course.leg {
+                                        Leg::Carrying => {
+                                            Some(course.to_target(sim.sim.state.pos).1)
+                                        }
+                                        Leg::Idle => None,
+                                    },
+                                    awa: telemetry.awa,
+                                    aws: telemetry.aws,
+                                    twa: telemetry.twa,
+                                },
+                            );
+                            // The blade and what it has left, under the glass: it lost its
+                            // own dial when the wind took the middle, and it is two figures
+                            // — not an instrument, but not nothing either.
+                            ui.horizontal(|ui| {
+                                ui.add_space(52.0);
+                                readout(ui, "HELM", &format!("{:+.0}°", deg(sim.controls.rudder)));
+                                // The words come back when there is something to say: a helm
+                                // that has gone soft for want of way wants the opposite
+                                // response to one whose blade has stalled.
+                                readout(ui, "BITE", &bite_words(&telemetry));
+                            });
+                        });
+                    });
+                });
                     frame.show(ui, |ui| {
                     ui.horizontal_top(|ui| {
                         // Sized to its contents now. The fixed width was what kept a
@@ -946,27 +1056,23 @@ pub fn draw(
                         });
                     });
                 });
-                });
-                // **The rack of lines, under every camera.** Seven lines on one winch is
-                // cockpit work, but the cockpit is where you are standing whichever way
-                // the camera is pointing — and a control you can reach is a control that
-                // should be reachable. The tab folds it away when the foredeck wants the
-                // room.
-                // The tab that folds the rack away, on its own edge: a wall of seven
-                // levers is a lot of case to carry when you are on the foredeck with
-                // nothing on the winch.
+            });
+        });
+
+    // --- The rack of lines, in the middle of the bottom -----------------------------
+    //
+    // Seven ropes on one winch, on every camera, where there is room for a wall of
+    // levers to be read along. The tab on its edge folds it away when the foredeck
+    // wants the room.
+    egui::Area::new("rack".into())
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -10.0))
+        .interactable(true)
+        .show(ctx, |ui| {
+            ui.horizontal_top(|ui| {
                 if tab_edge(ui, console.rack) {
                     console.rack = !console.rack;
                 }
                 if console.rack {
-                    // **Low and compact.** A rack of winch buttons is a third of a glass
-                    // and it used to be as tall as one: three hundred points of case for
-                    // seven ropes. It is dropped to the bottom edge by hand, because a
-                    // row that bottom-aligns its children in egui stretches them to the
-                    // tallest instead — which is how the short panel came out the height
-                    // of the binnacle with everything bunched at its top.
-                    ui.vertical(|ui| {
-                        ui.add_space(GLASS.y - 128.0);
                     frame.show(ui, |ui| {
                         ui.horizontal_top(|ui| {
                             // **Each view gets the tools its job needs.**
@@ -977,47 +1083,46 @@ pub fn draw(
                             // adjust from down there. A bar that showed everything everywhere
                             // was a bar that showed the wrong thing three times out of four.
                             // **The gear beside the lines**, which is the same kind of
-                        // thing: what is set, and what is led where. The wardrobe and the
-                        // ship's own switches used to be a page of their own and then a
-                        // group on the bar that kept landing on top of the sheets.
+                            // thing: what is set, and what is led where. The wardrobe and the
+                            // ship's own switches used to be a page of their own and then a
+                            // group on the bar that kept landing on top of the sheets.
 
+                            ui.add_space(8.0);
 
-                        ui.add_space(8.0);
+                            // What is left when everything that is a *setting* has gone to the
+                            // settings panel.
+                            //
+                            // The console's rule is that everything the keyboard can do the
+                            // mouse can do, and it was being read as though it also said
+                            // everything the mouse can do must be on the bar. It does not. The
+                            // sound switch was the mute key and the mute button in the menu and
+                            // a third copy here; the view and the diagnostic panel are a
+                            // preference and a microscope. Three switches came off the bar, and
+                            // in exchange the ink drawing and the resolution — which were keys
+                            // and nothing else, so the rule was being broken in the direction
+                            // that matters — can now be reached with a mouse at all.
+                            ui.vertical(|ui| {
+                                plate(ui, "SHIP");
+                                if small_button(ui, "SETTINGS  ESC").clicked() {
+                                    settings.open = !settings.open;
+                                }
+                                // The third of the keyboard-only three, and the one with
+                                // consequences, so it says what it will cost rather than
+                                // sitting there as a word.
+                                if small_button(
+                                    ui,
+                                    match course.leg {
+                                        Leg::Idle => "TAKE A JOB",
+                                        Leg::Carrying => "GIVE UP, NEW JOB",
+                                    },
+                                )
+                                .clicked()
+                                {
+                                    course.wants_new = true;
+                                }
+                            });
 
-                        // What is left when everything that is a *setting* has gone to the
-                        // settings panel.
-                        //
-                        // The console's rule is that everything the keyboard can do the
-                        // mouse can do, and it was being read as though it also said
-                        // everything the mouse can do must be on the bar. It does not. The
-                        // sound switch was the mute key and the mute button in the menu and
-                        // a third copy here; the view and the diagnostic panel are a
-                        // preference and a microscope. Three switches came off the bar, and
-                        // in exchange the ink drawing and the resolution — which were keys
-                        // and nothing else, so the rule was being broken in the direction
-                        // that matters — can now be reached with a mouse at all.
-                        ui.vertical(|ui| {
-                            plate(ui, "SHIP");
-                            if small_button(ui, "SETTINGS  ESC").clicked() {
-                                settings.open = !settings.open;
-                            }
-                            // The third of the keyboard-only three, and the one with
-                            // consequences, so it says what it will cost rather than
-                            // sitting there as a word.
-                            if small_button(
-                                ui,
-                                match course.leg {
-                                    Leg::Idle => "TAKE A JOB",
-                                    Leg::Carrying => "GIVE UP, NEW JOB",
-                                },
-                            )
-                            .clicked()
-                            {
-                                course.wants_new = true;
-                            }
-                        });
-
-                        // The clutch bank: one winch, one line at a time.
+                            // The clutch bank: one winch, one line at a time.
                             ui.vertical(|ui| {
                                 plate(ui, "CLUTCHES");
                                 ui.horizontal(|ui| {
@@ -1111,118 +1216,7 @@ pub fn draw(
                             });
                         });
                     });
-                    });
                 }
-                frame.show(ui, |ui| {
-                    ui.horizontal_top(|ui| {
-                        // **What is not already on the glass.**
-                        //
-                        // Her head is the card, the apparent wind is the needle on the
-                        // boss, and her heel is the line across the bottom half of the
-                        // bowl: three of the readings that used to be printed in the
-                        // corner of the screen are now *drawn*, and printing them again
-                        // beside the drawing is the oldest way to make an instrument
-                        // panel unreadable. What is left is everything the glass cannot
-                        // show — the log, the wind's strength, what she is making good,
-                        // the water under her and what the glass is doing.
-                        ui.vertical(|ui| {
-                            ui.set_width(170.0);
-                            // Tight, because the column has to finish inside the same case
-                            // as the bowl beside it: at four points between rows the last
-                            // line went over the bottom edge.
-                            ui.spacing_mut().item_spacing.y = 2.0;
-                            ui.label(
-                                egui::RichText::new(format!("{:.1}", ms_to_kn(telemetry.stw)))
-                                    .color(paint::FACE)
-                                    .monospace()
-                                    .size(letter::PRIMARY),
-                            );
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 3.0;
-                                ui.label(
-                                    egui::RichText::new("LOG")
-                                        .color(paint::LABEL)
-                                        .monospace()
-                                        .size(letter::LABEL),
-                                );
-                                ui.label(
-                                    egui::RichText::new("kn")
-                                        .color(paint::LABEL.gamma_multiply(0.75))
-                                        .monospace()
-                                        .size(letter::UNIT),
-                                );
-                            });
-                            readout(ui, "AWS", &format!("{:.1} kn", ms_to_kn(telemetry.aws)));
-                            readout(ui, "TWS", &format!("{:.0} kn", ms_to_kn(telemetry.tws)));
-                            readout(ui, "TWA", &format!("{:+.0}°", deg(telemetry.twa)));
-                            readout(ui, "VMG", &format!("{:.1} kn", ms_to_kn(telemetry.vmg)));
-                            // **The pilot among the figures**, which is where it belongs: what
-                            // it is holding reads against the wind above it and the water
-                            // below. Two columns and a glass made a corner wider than it had
-                            // any right to be; one column makes it as narrow as the bowl.
-                            ui.add_space(7.0);
-                            the_pilot(ui, &mut pilot, &sim);
-                            ui.add_space(7.0);
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 3.0;
-                                gauge(ui, "SEA", telemetry.significant_height, 0.0, 4.0, "m");
-                                gauge_alarmed(
-                                    ui,
-                                    "DEPTH",
-                                    telemetry.depth,
-                                    0.0,
-                                    10.0,
-                                    "m",
-                                    telemetry.under_keel < 1.5,
-                                );
-                            });
-                            let (glass, tendency) = sim.sim.wind.barometer();
-                            readout(
-                                ui,
-                                "BARO",
-                                &format!("{glass:.0} {}", tendency_words(tendency)),
-                            );
-                            let (building, turning) = sim.sim.wind.outlook();
-                            readout(ui, "OUTLOOK", &fit(&outlook_words(building, turning), 16));
-                        });
-                        // **The pilot belongs beside the glass.** The course it is holding
-                        // is read against the course she is making, which is one glance and
-                        // not two — and an autopilot is reached for from wherever you happen
-                        // to be looking, so it follows the glass into the corner rather than
-                        // staying on a bar that changes with the view.
-                        ui.vertical(|ui| {
-                            binnacle(
-                                ui,
-                                &Glass {
-                                    heading,
-                                    heel: telemetry.heel,
-                                    twd: telemetry.twd,
-                                    beat: polar.beat(),
-                                    mark: match course.leg {
-                                        Leg::Carrying => {
-                                            Some(course.to_target(sim.sim.state.pos).1)
-                                        }
-                                        Leg::Idle => None,
-                                    },
-                                    awa: telemetry.awa,
-                                    aws: telemetry.aws,
-                                    twa: telemetry.twa,
-                                },
-                            );
-                            // The blade and what it has left, under the glass: it lost its
-                            // own dial when the wind took the middle, and it is two figures
-                            // — not an instrument, but not nothing either.
-                            ui.horizontal(|ui| {
-                                ui.add_space(52.0);
-                                readout(ui, "HELM", &format!("{:+.0}°", deg(sim.controls.rudder)));
-                                // The words come back when there is something to say: a helm
-                                // that has gone soft for want of way wants the opposite
-                                // response to one whose blade has stalled.
-                                readout(ui, "BITE", &bite_words(&telemetry));
-                            });
-                        });
-                    });
-                });
             });
         });
 

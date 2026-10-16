@@ -285,10 +285,14 @@ pub const DOCUMENTED: [KeyCode; 44] = [
 pub fn draw(mut contexts: bevy_egui::EguiContexts, mut help: ResMut<Help>) -> Result {
     let ctx = contexts.ctx_mut()?;
 
-    // The mark in the corner. Small, always there, and the first thing anybody tries
-    // when they do not know what a program wants from them.
+    // **The mark, on the instrument case rather than in the corner of the screen.**
+    //
+    // Small, always there, and the first thing anybody tries when they do not know what
+    // a program wants from them — but it was anchored to the same corner as the
+    // binnacle, and two things anchored to one corner is one thing on top of another.
+    // It sits over the top of the glass's case now, where there is brass to spare.
     egui::Area::new("help mark".into())
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-14.0, -14.0))
+        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-20.0, -360.0))
         .show(ctx, |ui| {
             let (rect, response) =
                 ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::click());
