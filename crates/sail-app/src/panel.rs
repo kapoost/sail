@@ -155,12 +155,29 @@ pub fn primary(ui: &mut egui::Ui, figures: [(String, &str, &str); 3]) {
     });
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct Console {
     /// Hidden with H, for a clean look at the water.
     pub hidden: bool,
     /// Which page of the console is open.
     pub deck: Deck,
+}
+
+impl Default for Console {
+    fn default() -> Self {
+        Self {
+            hidden: false,
+            // Which page she opens on, so that the look of one can be worked on without
+            // a hand to click the tab: `SAIL_DECK=lines`. A pocket in the environment
+            // beside the rest of them, and it reads the same names as the plates.
+            deck: match std::env::var("SAIL_DECK").as_deref() {
+                Ok("lines") => Deck::Lines,
+                Ok("gear") => Deck::Gear,
+                Ok("ship") => Deck::Ship,
+                _ => Deck::Helm,
+            },
+        }
+    }
 }
 
 /// The pages of the console, in the order a hand reaches for them.
@@ -887,7 +904,7 @@ pub fn draw(
                         // bar whichever page is open and whatever is on it.
                         // Half the case, less the glass and the pilot's column, so the
                         // glass still falls on the middle line of the bar.
-                        ui.set_width((CONSOLE_WIDTH - 246.0) * 0.5 - 196.0);
+                        ui.set_width(CONSOLE_WIDTH - 246.0 - 158.0 - 148.0);
                         match deck {
                             Deck::Helm => {
                                 // Sheets, on their own winches, continuously trimmed.
@@ -1137,9 +1154,19 @@ pub fn draw(
                     // the bar rather than on the chart.
                     // The pilot where the hand is already looking: beside the glass,
                     // not on a page you are not on exactly when you want it.
-                    ui.vertical(|ui| {
-                        ui.set_width(196.0);
-                        the_pilot(ui, &mut pilot, &sim);
+                    // Down on the bottom edge and up against the glass: it is the thing
+                    // you reach for without looking, and a column of buttons floating in
+                    // the middle of the case is a column you have to find first.
+                    ui.scope(|ui| {
+                        // Sized to the glass beside it, or the bottom-up layout takes
+                        // the height of the whole window and the case grows a hand's
+                        // breadth of empty steel under everything.
+                        ui.set_width(158.0);
+                        ui.set_height(284.0);
+                        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                            ui.add_space(26.0);
+                            the_pilot(ui, &mut pilot, &sim);
+                        });
                     });
                     ui.vertical(|ui| {
                         binnacle(
@@ -1261,7 +1288,17 @@ pub fn draw(
 }
 
 /// How wide the console is, in points, whatever is written in it.
-const CONSOLE_WIDTH: f32 = 1180.0;
+/// **As wide as the widest page and no wider.**
+///
+/// Fixed rather than sized to its contents, which is not tidiness: the bar is anchored
+/// on its middle, so a width that changes slides the whole console sideways — and once
+/// in a thousand frames egui lays it out twice, which with different widths put two
+/// consoles on the screen at once. Fixed makes the second pass land on the first.
+///
+/// The number is the rack of seven lines plus the glass, the pilot and the tabs: packed
+/// down from 1180, which was the old bar's width and had a hand's breadth of empty case
+/// in it on every page but one.
+const CONSOLE_WIDTH: f32 = 1104.0;
 
 /// A gauge: wide enough for a label, a number and a unit, and no taller than it has to
 /// be. Two of them side by side are the width of the column.
