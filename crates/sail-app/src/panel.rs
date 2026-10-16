@@ -893,6 +893,52 @@ pub fn draw(
                                             {
                                                 sim.controls.preventer = !rigged;
                                             }
+                                            // **The wardrobe under the boom**, because
+                                            // the two are the same conversation: what is
+                                            // set forward, and what is stopping the spar
+                                            // behind it. Asked for from the deck, and it
+                                            // puts every sail she carries in one column.
+                                            ui.add_space(10.0);
+                                            ui.vertical(|ui| {
+                                                                        plate(ui, "HEADSAIL");
+                                                                        ui.add_space(4.0);
+                                                                        let rolled = sim.controls.furl > 0.9;
+                                                                        for sail in [
+                                                                            Headsail::Genoa,
+                                                                            Headsail::Code0,
+                                                                            Headsail::Gennaker,
+                                                                            Headsail::Spinnaker,
+                                                                        ] {
+                                                                            let up = sim.controls.headsail == sail;
+                                                                            let label = egui::RichText::new(sail.name().to_uppercase())
+                                                                                .monospace()
+                                                                                .size(10.0)
+                                                                                .color(if up {
+                                                                                    egui::Color32::BLACK
+                                                                                } else if rolled {
+                                                                                    paint::LABEL
+                                                                                } else {
+                                                                                    egui::Color32::from_gray(90)
+                                                                                });
+                                                                            let button = egui::Button::new(label).fill(if up {
+                                                                                paint::LIVE
+                                                                            } else {
+                                                                                egui::Color32::from_gray(26)
+                                                                            });
+                                                                            // Only with the sail rolled away: you furl, change, and set.
+                                                                            if ui.add_enabled(rolled, button).clicked() {
+                                                                                sim.controls.headsail = sail;
+                                                                            }
+                                                                        }
+                                                                        if !rolled {
+                                                                            ui.label(
+                                                                                egui::RichText::new("roll it away first")
+                                                                                    .monospace()
+                                                                                    .size(10.0)
+                                                                                    .color(egui::Color32::from_gray(90)),
+                                                                            );
+                                                                        }
+                                                                    });
                                         });
                                     });
                                 });
@@ -935,47 +981,6 @@ pub fn draw(
                         // ship's own switches used to be a page of their own and then a
                         // group on the bar that kept landing on top of the sheets.
 
-                        // The sail wardrobe, and the pilot.
-                        ui.vertical(|ui| {
-                            plate(ui, "HEADSAIL");
-                            ui.add_space(4.0);
-                            let rolled = sim.controls.furl > 0.9;
-                            for sail in [
-                                Headsail::Genoa,
-                                Headsail::Code0,
-                                Headsail::Gennaker,
-                                Headsail::Spinnaker,
-                            ] {
-                                let up = sim.controls.headsail == sail;
-                                let label = egui::RichText::new(sail.name().to_uppercase())
-                                    .monospace()
-                                    .size(10.0)
-                                    .color(if up {
-                                        egui::Color32::BLACK
-                                    } else if rolled {
-                                        paint::LABEL
-                                    } else {
-                                        egui::Color32::from_gray(90)
-                                    });
-                                let button = egui::Button::new(label).fill(if up {
-                                    paint::LIVE
-                                } else {
-                                    egui::Color32::from_gray(26)
-                                });
-                                // Only with the sail rolled away: you furl, change, and set.
-                                if ui.add_enabled(rolled, button).clicked() {
-                                    sim.controls.headsail = sail;
-                                }
-                            }
-                            if !rolled {
-                                ui.label(
-                                    egui::RichText::new("roll it away first")
-                                        .monospace()
-                                        .size(10.0)
-                                        .color(egui::Color32::from_gray(90)),
-                                );
-                            }
-                        });
 
                         ui.add_space(8.0);
 
