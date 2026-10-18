@@ -49,18 +49,16 @@ pub const HAILING: f64 = 180.0;
 /// rather than how near.
 pub const ABAFT_THE_BEAM: f64 = rad(80.0);
 
-/// How far astern of the pilot boat the brig tries to stay, metres.
-///
-/// She is three hundred tons at six knots: she will not stop, and she cannot turn inside
-/// her own length. Two cables is the distance at which what you did thirty seconds ago is
-/// what she is doing now — which is the whole feeling of having one behind you.
-const ASTERN: f64 = 370.0;
-
 /// What she is carrying under her, below which she is on the bottom.
 pub const SHE_DRAWS: f64 = crate::ship::DRAFT as f64;
 
-/// Water she is through and clear in, metres. Past this depth there is nothing to pilot
-/// her round and the job is done.
+/// How near the anchorage she has to be brought, metres.
+///
+/// Three cables, which is where a ship of this size rounds up and lets go — near enough
+/// that she is *in*, far enough that nobody is asked to park her.
+const ARRIVED: f64 = 550.0;
+
+/// Deep water, for the offing the job starts from.
 const SAFE_WATER: f64 = 18.0;
 
 /// How often she loses another cask while her lashings are going, seconds.
@@ -94,6 +92,16 @@ pub struct Pilotage {
     pub hail: Option<(String, f64)>,
     /// When the last one was called, so that she is not a parrot.
     hailed_at: f64,
+    /// Where she is bound, and the simulation time the job started.
+    ///
+    /// **The anchorage is the end of the job, not deep water.** Written first as *clear
+    /// water on the far side*, which read well and meant that a brig started in forty
+    /// metres and boarded in forty metres was through before anybody had piloted
+    /// anything — it reported her delivered within seconds, with the time counted from
+    /// the start of the session rather than from the start of the work. A pilot takes a
+    /// ship **in**. That is the whole trade and it is what the player is paid for.
+    pub bound_for: DVec2,
+    began: f64,
 }
 
 /// How long a hail stands on screen, and the least time between two of them, seconds.
@@ -103,8 +111,13 @@ const BETWEEN_HAILS: f64 = 11.0;
 /// How a piece of pilotage ended.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
-    /// Through, in deep water, with the time it took and the casks that were saved.
-    Delivered { minutes: f64, casks: u32 },
+    /// In the anchorage, with the time it took, the casks saved, and the least water
+    /// she was taken over — which is the number another pilot would ask about.
+    Delivered {
+        minutes: f64,
+        casks: u32,
+        least: f64,
+    },
     /// On the putty. The one failure this job has.
     Aground { least: f64 },
     /// She went by. A pilot who cannot catch a ship has not lost anything except the fee.
@@ -114,8 +127,15 @@ pub enum Outcome {
 impl Outcome {
     pub fn words(&self) -> String {
         match self {
-            Outcome::Delivered { minutes, casks } => {
-                format!("she is through — {minutes:.0} minutes, {casks} casks out of the water")
+            Outcome::Delivered {
+                minutes,
+                casks,
+                least,
+            } => {
+                format!(
+                    "she is in — {minutes:.0} minutes, {least:.1} m at the worst of it, \
+                     {casks} casks saved"
+                )
             }
             Outcome::Aground { least } => {
                 format!("she is aground — you took her over {least:.1} m of water")
@@ -127,10 +147,12 @@ impl Outcome {
 
 impl Pilotage {
     /// Start the job: put her outside the islands, heading in.
-    pub fn begin(&mut self, brig: &mut Brig, at: DVec2, bound_for: DVec2) {
+    pub fn begin(&mut self, brig: &mut Brig, at: DVec2, bound_for: DVec2, now: f64) {
         *self = Pilotage {
             running: true,
             least_water: f64::INFINITY,
+            bound_for,
+            began: now,
             ..Default::default()
         };
         brig.afloat = true;
@@ -301,7 +323,7 @@ pub fn run(
             let wind = sim.sim.wind.sample(brig.at, now);
             let from = sail_core::wind::direction_of(wind);
             let to_mark = brig.bound_for - brig.at;
-            let twa_wanted = wrap_pi(to_mark.x.atan2(to_mark.y) - from + std::f64::consts::PI);
+            let twa_wanted = crate::ship::angle_off(to_mark.x.atan2(to_mark.y), from);
             // How sharply the track she is on is about to bend: the angle between the
             // leg she is running now and the one after it.
             let turn = if job.wake.len() > 2 {
@@ -332,20 +354,18 @@ pub fn run(
                 job.said = Some("she is on the bottom".into());
                 return;
             }
-            // Clear water on the far side and nothing left to pilot her round.
-            if under > SAFE_WATER && (brig.at - here).length() < ASTERN * 2.0 {
-                let clear = (0..8).all(|i| {
-                    let ahead = brig.at
-                        + DVec2::new(brig.heading.sin(), brig.heading.cos()) * (i as f64 * 120.0);
-                    land.depth(ahead) > SAFE_WATER
+            // **In, and brought up.** The job ends where the ship was going: inside the
+            // anchorage, with her way off enough to round up and let go. Not "in deep
+            // water", which is where she started.
+            let in_the_bay = (brig.at - job.bound_for).length() < ARRIVED;
+            if in_the_bay {
+                job.over = Some(Outcome::Delivered {
+                    minutes: (sim.sim.state.time - job.began) / 60.0,
+                    casks: flotsam.landed + flotsam.astern.len() as u32,
+                    least: job.least_water,
                 });
-                if clear {
-                    job.over = Some(Outcome::Delivered {
-                        minutes: sim.sim.state.time / 60.0,
-                        casks: flotsam.landed + flotsam.astern.len() as u32,
-                    });
-                    job.said = Some("she has sea room — you are discharged".into());
-                }
+                brig.set = [0.0, 0.0, 0.0];
+                job.said = Some("she is in — her anchor is on the bottom".into());
             }
         }
     } else if (brig.at - here).length() > 4_000.0 {
@@ -595,7 +615,7 @@ pub fn take_the_job(
         }
         _ => offing,
     };
-    job.begin(&mut brig, offing, bound_for);
+    job.begin(&mut brig, offing, bound_for, sim.sim.state.time);
     // Her deck cargo has been working loose since the gale: the first few are already
     // in the water astern of her.
     let head = DVec2::new(brig.heading.sin(), brig.heading.cos());

@@ -30,7 +30,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use glam::DVec2;
-use sail_core::units::{kn_to_ms, ms_to_kn, rad, wrap_pi};
+use sail_core::units::{kn_to_ms, ms_to_kn, rad, wrap_pi, wrap_tau};
 
 #[allow(unused_imports)]
 use crate::frame;
@@ -118,6 +118,24 @@ impl Default for Brig {
     }
 }
 
+/// Her wind angle: nought head to wind, plus or minus a hundred and eighty running.
+///
+/// **A function, because getting it upside down makes a square-rigger sail into the wind
+/// at six knots.** That is not a hypothetical: she did, and she was reported from the
+/// deck for pointing higher than a bermudan sloop, which is the one thing this rig
+/// cannot do. The simulation's convention is that `direction_of` gives the direction the
+/// wind blows *from*, and an angle off the bow is measured from it — no half turn in it
+/// anywhere.
+pub fn angle_off(heading: f64, from: f64) -> f64 {
+    wrap_pi(heading - from)
+}
+
+/// And the course that puts her at a given angle to the wind, which is the same statement
+/// turned round. One place, so the two cannot drift apart.
+pub fn course_for(from: f64, angle: f64) -> f64 {
+    wrap_tau(from + angle)
+}
+
 /// The closest she will lie to the true wind, radians.
 ///
 /// **Sixty-five degrees, and it is the whole character of the rig.** A square sail cannot
@@ -177,6 +195,46 @@ pub fn aback(awa: f64, braced: f64) -> bool {
 #[cfg(test)]
 mod how_she_sails {
     use super::*;
+
+    /// **Head to wind is nought and running is a hundred and eighty**, which is the
+    /// convention the rest of the simulation uses and the one this file had upside down.
+    ///
+    /// With the half turn in it she read a beat as a run: ordered to a mark dead to
+    /// windward she squared her yards and went at it at six knots, pointing higher than
+    /// a bermudan sloop, which is the one thing a square-rigger cannot do. Reported from
+    /// the deck in four words — *poszedł dużo ostrzej ode mnie*.
+    #[test]
+    fn her_wind_angle_is_measured_the_way_everybody_elses_is() {
+        let north = 0.0; // the wind comes from the north
+        assert!(
+            angle_off(rad(0.0), north).abs() < 1e-9,
+            "head to wind is nought"
+        );
+        assert!(
+            (angle_off(rad(180.0), north).abs() - std::f64::consts::PI).abs() < 1e-9,
+            "running is a hundred and eighty"
+        );
+        assert!((angle_off(rad(90.0), north) - rad(90.0)).abs() < 1e-9);
+        // And the course that puts her at an angle is the same statement turned round.
+        assert!(
+            (angle_off(course_for(north, CLOSEST), north) - CLOSEST).abs() < 1e-9,
+            "the two halves of the convention do not agree"
+        );
+        // The thing that was actually wrong: a ship headed at the wind must be stopped,
+        // not flying.
+        assert!(
+            ms_to_kn(through_the_water(
+                angle_off(rad(5.0), north),
+                kn_to_ms(14.0)
+            )) < 1.0
+        );
+        assert!(
+            ms_to_kn(through_the_water(
+                angle_off(rad(170.0), north),
+                kn_to_ms(14.0)
+            )) > 4.0
+        );
+    }
 
     /// **She does not go to windward**, which is the whole character of the rig.
     #[test]
@@ -905,8 +963,7 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>) {
         brig.speed = kn_to_ms(5.0);
         let wind = sim.sim.wind.sample(brig.at, sim.sim.state.time);
         let from = sail_core::wind::direction_of(wind);
-        let awa = wrap_pi(brig.heading - from + std::f64::consts::PI);
-        brig.braced = brace_for(awa);
+        brig.braced = brace_for(angle_off(brig.heading, from));
         return;
     }
     let dt = time.delta_secs_f64();
@@ -920,12 +977,12 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>) {
         let off = brig.bound_for - brig.at;
         off.x.atan2(off.y)
     };
-    let twa_wanted = wrap_pi(want - from + std::f64::consts::PI);
+    let twa_wanted = angle_off(want, from);
     let steer = if twa_wanted.abs() < CLOSEST {
         // Pick whichever tack is nearer to where she is going, and lie as close as the
         // rig allows on it.
         let side = if twa_wanted.abs() < 1e-6 {
-            if wrap_pi(brig.heading - from).is_sign_negative() {
+            if angle_off(brig.heading, from).is_sign_negative() {
                 -1.0
             } else {
                 1.0
@@ -933,7 +990,7 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>) {
         } else {
             twa_wanted.signum()
         };
-        from + std::f64::consts::PI + side * CLOSEST
+        course_for(from, side * CLOSEST)
     } else {
         want
     };
@@ -942,7 +999,7 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>) {
     let swing = rad(2.2) * dt;
     brig.heading = wrap_pi(brig.heading + error.clamp(-swing, swing));
 
-    let twa = wrap_pi(brig.heading - from + std::f64::consts::PI);
+    let twa = angle_off(brig.heading, from);
     let want_speed = through_the_water(twa, tws) * brig.set.iter().sum::<f32>() as f64 / 3.0;
     // Three hundred tons does not change speed quickly; a minute to pick up most of a
     // change is about right.
@@ -953,7 +1010,7 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>) {
     let apparent = {
         let head = DVec2::new(brig.heading.sin(), brig.heading.cos());
         let flow = wind - head * brig.speed;
-        wrap_pi(flow.x.atan2(flow.y) - brig.heading + std::f64::consts::PI)
+        angle_off(brig.heading, sail_core::wind::direction_of(flow))
     };
     let want_brace = brace_for(apparent);
     let haul = rad(50.0) / BRACING * dt;
@@ -1032,7 +1089,7 @@ pub fn work_her(
     }
     let wind = sim.sim.wind.sample(brig.at, sim.sim.state.time);
     let from = sail_core::wind::direction_of(wind);
-    let awa = wrap_pi(brig.heading - from + std::f64::consts::PI);
+    let awa = angle_off(brig.heading, from);
     for (sail, mesh) in &canvas {
         let (height, half) = YARDS[sail.tier];
         let drop = match sail.tier {
