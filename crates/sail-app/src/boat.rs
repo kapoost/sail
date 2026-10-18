@@ -1028,6 +1028,9 @@ pub fn update_sails(
                     // bulged past the end of its own boom, which is a sail hanging off
                     // the spar that is supposed to be holding it.
                     footed: surface.which == Sail::Staysail,
+                    // The boom is the mainsail's: every other sail aboard has a free
+                    // foot and shakes right down to its tack.
+                    boomed: surface.which == Sail::Main,
                     // What the sail is cut to, plus what the wind puts into it.
                     //
                     // The camber in the trim is the designed shape — what the outhaul
@@ -2089,6 +2092,10 @@ struct SailTrim<'a> {
     chord: f32,
     /// A spar along the foot, which therefore has no belly in it at all.
     footed: bool,
+    /// Whether the foot is laced to a spar, which is what decides if the sail can shake
+    /// low down. A mainsail cannot: the boom holds that edge. A headsail's foot is free
+    /// cloth and shakes all the way to the tack.
+    boomed: bool,
 }
 
 /// Build a sail for a boat that is not yours.
@@ -2120,6 +2127,7 @@ pub fn dress_sail(mesh: &mut Mesh, g: &SailGeometry, lee: f32, luffing: f32, sha
             chord: 0.0,
             fullness: 1.0,
             footed: true,
+            boomed: true,
         },
     );
 }
@@ -2139,6 +2147,7 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
         flying,
         fullness,
         footed,
+        boomed,
         chord,
     } = *trim;
     let mut positions = Vec::with_capacity(SAIL_U * SAIL_V);
@@ -2430,10 +2439,28 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
             // width, which is the loudest thing that ever happens on a boat and the
             // reason a kite collapsing wakes the off watch. Reported from the deck in one
             // line: it flattens and does not flog, and it is really very light canvas.
+            //
+            // **And how much of the sail has lost its flow decides where.** A sail is
+            // hardly ever all-or-nothing: long before it is in the wind's eye the flow
+            // is arriving on the wrong side of its *luff*, and what shows is a fold
+            // running up the forward quarter of the cloth with the after two thirds
+            // still pulling. That is what a trimmer steers by and the only reason the
+            // telltales are sewn where they are. Drawn with the whole-sail profile and
+            // a linear amplitude, a genoa at four tenths luffing moved the cloth by a
+            // hand's breadth — the instruments said LUFFING and the sail stood like a
+            // sheet of tin, which is how this was reported.
+            //
+            // So the shaking starts at the luff and spreads aft as the sail gives up.
+            let whole = v * u.powf(if boomed { 0.65 } else { 0.35 });
+            // Just abaft the stay: nothing at the luff itself, which is hanked to a
+            // wire, everything a quarter of the way back, and gone by two thirds.
+            let abaft_the_luff = (v * 4.5).min(1.0)
+                * (1.0 - crate::clouds::step_between(0.22, 0.65, v))
+                * u.powf(0.3);
             let free_edge = if fullness > 1.2 {
                 0.45 + 0.55 * (v * u.powf(0.35))
             } else {
-                v * u.powf(0.65)
+                abaft_the_luff * (1.0 - luffing) + whole * luffing
             };
             // Flogging, and it has to *look* like flogging.
             //
@@ -2452,7 +2479,12 @@ fn build_sail(mesh: &mut Mesh, g: &SailGeometry, trim: &SailTrim) {
             let beat = 7.0 + 11.0 * shake;
             let flap = ((now * beat + u * 5.0 + v * 3.0).sin() * 0.62
                 + (now * beat * 1.7 + u * 9.0 - v * 4.0).sin() * 0.38)
-                * luffing
+                // Not the fraction itself but its root, because the fraction is how
+                // much of the sail has stopped working and not how far the cloth moves:
+                // a sail four tenths luffing is a sail with a fold in it you can hear
+                // from the cockpit, and at four tenths of the amplitude it was a sail
+                // with a ripple nobody could see.
+                * luffing.powf(0.55)
                 // Four tenths of the chord at the leech, not a whole one.
                 //
                 // It went up to 1.05 for the sake of a sail that cracks rather than
@@ -2702,6 +2734,90 @@ mod cloth_stays_cloth {
     use super::*;
     use sail_core::state::{Controls, Headsail};
 
+    /// How far the cloth of a genoa moves between two instants, metres.
+    ///
+    /// **A sail head to wind is the loudest thing on a boat**, and it has to look like
+    /// it. This measures the one thing that distinguishes flogging from standing still:
+    /// how far a given point of the cloth is from where it was a tenth of a second ago.
+    fn flogs_by(luffing: f32, sheet: f32) -> f32 {
+        let cfg = sail_core::boat::BoatConfig::archipelago_packet();
+        let controls = Controls {
+            headsail: Headsail::Genoa,
+            jib_sheet: sheet as f64,
+            ..Default::default()
+        };
+        let chord = cfg.genoa.profile.chord_angle(sheet as f64) as f32;
+        let g = headsail_shape(&cfg, &controls, -1.0, chord, 1.0 - luffing, 0.0);
+        let shrouds = shroud_polyline(cfg.beam as f32, false, 0.0, -1.0);
+        let cloth = |now: f32| {
+            let trim = SailTrim {
+                lee: -1.0,
+                fullness: 1.0,
+                twist: 0.18,
+                luffing,
+                draft: 0.11,
+                now,
+                foot_sag: 0.0,
+                draft_at: 0.42,
+                shrouds: &shrouds,
+                clear_mast: true,
+                // Ten knots of apparent, which is the breeze the deck reported this in.
+                shake: 0.65,
+                flying: false,
+                footed: false,
+                boomed: false,
+                chord,
+            };
+            let mut mesh = Mesh::new(
+                bevy::mesh::PrimitiveTopology::TriangleList,
+                bevy::asset::RenderAssetUsages::default(),
+            );
+            build_sail(&mut mesh, &g, &trim);
+            let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) =
+                mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            else {
+                panic!("the sail has no positions");
+            };
+            p.iter().map(|v| Vec3::from(*v)).collect::<Vec<_>>()
+        };
+        let (a, b) = (cloth(0.0), cloth(0.1));
+        a.iter()
+            .zip(b.iter())
+            .map(|(a, b)| (*a - *b).length())
+            .fold(0.0_f32, f32::max)
+    }
+
+    /// **A genoa in the wind\'s eye flogs, and a drawing one does not.**
+    ///
+    /// Reported from the deck with the instruments reading LUFFING beside a sail
+    /// standing like a sheet of tin. The measurement is the difference between the two
+    /// states rather than an absolute: what matters is that the cloth which is not
+    /// working moves, by something a person would call flogging, and the cloth which is
+    /// working stays where it is put.
+    #[test]
+    fn a_genoa_head_to_wind_does_not_stand_like_tin() {
+        let flogging = flogs_by(1.0, 0.45);
+        let backwinded = flogs_by(0.4, 0.2);
+        let drawing = flogs_by(0.0, 0.1);
+        assert!(
+            flogging > 0.35,
+            "a genoa head to wind moved {flogging:.3} m in a tenth of a second, which is \
+             not flogging"
+        );
+        assert!(
+            drawing < 0.02,
+            "a drawing genoa moved {drawing:.3} m in a tenth of a second"
+        );
+        // And the one in between, which is the case that was reported: the forward part
+        // of the sail has lost its flow and the rest is still pulling. A fold you can
+        // hear from the cockpit, not a ripple nobody can see.
+        assert!(
+            backwinded > 0.18,
+            "a genoa four tenths luffing moved {backwinded:.3} m in a tenth of a second \
+             — the instruments say LUFFING and the sail stands like tin"
+        );
+    }
+
     /// Build one sail and report the sharpest angle anywhere in its surface, degrees.
     ///
     /// A sail is a membrane. It curves, it folds along the mast when it has to, and it
@@ -2753,6 +2869,7 @@ mod cloth_stays_cloth {
             shake: 0.0,
             flying: kind != Headsail::Genoa,
             footed: false,
+            boomed: false,
             chord,
         };
         let mut mesh = Mesh::new(

@@ -15,6 +15,7 @@ mod clouds;
 mod clutch;
 mod course;
 mod creel;
+mod crew;
 mod curve;
 mod deck;
 mod deck_texture;
@@ -243,6 +244,7 @@ fn main() {
     .insert_resource(fishing::Fishing::new(weather.seed))
     .init_resource::<camera::ViewAim>()
     .init_resource::<boathook::Boathook>()
+    .init_resource::<crew::Crew>()
     .init_resource::<navigation::Navigation>()
     .init_resource::<sight::Sighting>()
     .init_resource::<marks::Coast>()
@@ -382,6 +384,7 @@ fn main() {
                     navigation::write_up_the_log,
                     navigation::the_fix_holds,
                     navigation::reckon,
+                    crew::work,
                     boathook::reach,
                     boathook::mark_the_water,
                     boathook::dress,

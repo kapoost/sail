@@ -160,6 +160,7 @@ pub fn gather(
     mut dumping: Local<Dump>,
     mut held_for: Local<f32>,
     mut stage: Local<u8>,
+    mut crew: ResMut<crate::crew::Crew>,
 ) {
     let dt = time.delta_secs_f64();
     let cfg = sim.config();
@@ -305,6 +306,30 @@ pub fn gather(
                 // Otherwise: left exactly where you put it.
             }
         }
+    }
+
+    // **A hand on a sheet stands the watch down.**
+    //
+    // The same bargain the pilot makes with the helm, and for the same reason: two
+    // people hauling on one rope in opposite directions is not a crew, it is a fight,
+    // and the one who should win is the one whose hand is actually on it. Taking the
+    // sheets back is as plain as putting a hand on them, and calling the watch again is
+    // one press of the switch.
+    if crew.standing
+        && [
+            KeyCode::KeyW,
+            KeyCode::KeyS,
+            KeyCode::KeyQ,
+            KeyCode::KeyE,
+            KeyCode::KeyA,
+            KeyCode::KeyD,
+            KeyCode::KeyT,
+        ]
+        .iter()
+        .any(|k| keys.just_pressed(*k))
+    {
+        crew.standing = false;
+        info!("you took the sheets — watch stood down");
     }
 
     // --- Mainsheet: a tackle you pull and hold, so absolute ---------------------

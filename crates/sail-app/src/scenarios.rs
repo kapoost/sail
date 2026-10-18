@@ -37,6 +37,7 @@ fn at_sea() -> App {
     app.init_resource::<ButtonInput<KeyCode>>();
     app.init_resource::<crate::input::HelmSource>();
     app.init_resource::<crate::input::Pilot>();
+    app.init_resource::<crate::crew::Crew>();
     app
 }
 
@@ -112,6 +113,129 @@ mod the_deck {
             sail_core::state::Headsail::Code0,
             "one press, one sail"
         );
+    }
+}
+
+#[cfg(test)]
+mod the_watch_on_deck {
+    use super::*;
+    use sail_core::units::{deg, rad};
+
+    /// The course the test holds her on while the crew works.
+    #[derive(Resource)]
+    struct HeldOn(f64);
+
+    /// What is under test is the crew, not the steering, so the helm is the test's.
+    /// Left to herself with the sheets flogging she rounds up and the question becomes
+    /// a different one.
+    fn held(mut sim: ResMut<Sim>, on: Res<HeldOn>) {
+        sim.sim.state.heading = on.0;
+        sim.sim.state.yaw_rate = 0.0;
+    }
+
+    /// A boat sailing, with the hands called on deck and nothing else running.
+    fn with_a_crew(heading: f64) -> App {
+        let mut app = at_sea();
+        app.init_resource::<crate::clutch::Bank>();
+        app.insert_resource(HeldOn(heading));
+        // **A tenth of a second a frame, instead of whatever the wall clock says.**
+        //
+        // Headless frames take microseconds, so a system whose rate is per *second*
+        // does nothing at all in a thousand of them: the crew hauling at half a sheet a
+        // second moved the mainsheet by eight hundredths in what should have been ten
+        // minutes. Bevy has the knob for exactly this, and a test about how long a job
+        // takes had better be the thing holding the clock.
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(100),
+        ));
+        app.add_systems(
+            Update,
+            (held, crate::sim::advance, crate::crew::work).chain(),
+        );
+        {
+            let mut sim = app.world_mut().resource_mut::<Sim>();
+            // Sheets flogging right out and the vang off: everything wrong, which is
+            // what a crew is for.
+            sim.sim.state.heading = heading;
+            sim.controls.main_sheet = 0.9;
+            sim.controls.jib_sheet = 0.9;
+            sim.controls.vang = 0.0;
+            sim.controls.furl = 0.0;
+        }
+        app.world_mut().resource_mut::<crate::crew::Crew>().standing = true;
+        app
+    }
+
+    /// **The watch trims the sheets, and does it at a winch's pace.**
+    ///
+    /// Both halves matter. A crew that does not trim is a switch that does nothing; a
+    /// crew that arrives at the answer in one frame is a cheat, and through a tack the
+    /// difference is visible from the cockpit.
+    #[test]
+    fn the_hands_haul_the_sheets_in_and_take_time_over_it() {
+        let mut app = with_a_crew(rad(45.0));
+        app.update();
+        let after_one = app.world().resource::<Sim>().controls.main_sheet;
+        assert!(
+            after_one > 0.8,
+            "one frame took the mainsheet from 0.9 to {after_one:.2}, which is a winch \
+             nobody is turning"
+        );
+        for _ in 0..300 {
+            app.update();
+        }
+        let sim = app.world().resource::<Sim>();
+        // Against the trim a crew is actually chasing, which is the *bent* one: the
+        // headsail's downwash takes several degrees off the wind the mainsail meets,
+        // and a main trimmed to the masthead fly is eased too far by exactly that.
+        let t = sim.sim.telemetry;
+        let (want, _) = sail_core::autopilot::optimal_sheets_bent(
+            &sim.config(),
+            t.awa,
+            sim.controls.outhaul,
+            sim.controls.headsail,
+            t.bend_main,
+            t.bend_jib,
+        );
+        assert!(
+            (sim.controls.main_sheet - want).abs() < 0.08,
+            "the watch left the mainsheet at {:.2} with {:.2} wanted at {:.0} deg apparent",
+            sim.controls.main_sheet,
+            want,
+            deg(sim.sim.telemetry.awa)
+        );
+    }
+
+    /// **And they go to the clutch bank for the shape controls**, one line at a time,
+    /// because there is one winch on the coachroof and a crew is subject to it too.
+    #[test]
+    fn the_vang_comes_on_without_anybody_asking() {
+        // Off the wind, which is where the vang is the whole leech.
+        let mut app = with_a_crew(rad(200.0));
+        for _ in 0..400 {
+            app.update();
+        }
+        let sim = app.world().resource::<Sim>();
+        assert!(
+            sim.controls.vang > 0.5,
+            "the vang is still at {:.2} with the boom out at {:.0} deg apparent",
+            sim.controls.vang,
+            deg(sim.sim.telemetry.awa)
+        );
+    }
+
+    /// And with the watch stood down they touch nothing at all, which is the other half
+    /// of a switch meaning anything.
+    #[test]
+    fn stood_down_they_do_not_touch_a_rope() {
+        let mut app = with_a_crew(rad(45.0));
+        app.world_mut().resource_mut::<crate::crew::Crew>().standing = false;
+        for _ in 0..200 {
+            app.update();
+        }
+        let sim = app.world().resource::<Sim>();
+        assert_eq!(sim.controls.main_sheet, 0.9);
+        assert_eq!(sim.controls.vang, 0.0);
     }
 }
 

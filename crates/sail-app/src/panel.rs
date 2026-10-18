@@ -612,6 +612,7 @@ pub fn draw(
     nav: Res<crate::navigation::Navigation>,
     polar: Res<crate::hud::Polar>,
     mut fishing: ResMut<crate::fishing::Fishing>,
+    mut crew: ResMut<crate::crew::Crew>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     // How long the screen has been up, so it can surface rather than appear.
@@ -913,7 +914,31 @@ pub fn draw(
                             // own dial when the wind took the middle, and it is two figures
                             // — not an instrument, but not nothing either.
                             ui.horizontal(|ui| {
-                                ui.add_space(52.0);
+                                // **The watch, in the space under the dial.** Reached
+                                // for without looking, which is why it is a square the
+                                // size of a thumb and not another lamp with a word on
+                                // it: with the hands on deck you steer and they sail
+                                // her, and that is a thing you hand over and take back
+                                // the way you hand over a helm.
+                                ui.add_space(4.0);
+                                let job = crew.doing();
+                                if hands(ui, crew.standing).on_hover_text(if crew.standing {
+                                    format!("the watch has the sails — {job}")
+                                } else {
+                                    "call the watch on deck: they work the sails, you steer"
+                                        .to_string()
+                                }).clicked() {
+                                    crew.standing = !crew.standing;
+                                    info!(
+                                        "{}",
+                                        if crew.standing {
+                                            "watch on deck — they have the sheets"
+                                        } else {
+                                            "watch stood down — you have the sheets"
+                                        }
+                                    );
+                                }
+                                ui.add_space(4.0);
                                 readout(ui, "HELM", &format!("{:+.0}°", deg(sim.controls.rudder)));
                                 // The words come back when there is something to say: a helm
                                 // that has gone soft for want of way wants the opposite
@@ -2016,6 +2041,59 @@ fn nudge_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// The one state change on this panel that has to be legible from the other end of the
 /// cockpit — *is the pilot steering her* — so it is a change of material rather than a
 /// change of tint.
+/// The watch: a square switch with two hands engraved on it.
+///
+/// **A picture rather than a word, because it is not an instrument.** Everything else on
+/// this console is a reading or a lever; this one says *there are people aboard and they
+/// are working*, and the oldest way to say that on a brass plate is to engrave the
+/// people. It is square and it is the size of a thumb, because it is the one control you
+/// reach for without looking at it.
+fn hands(ui: &mut egui::Ui, standing: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(44.0, 44.0), egui::Sense::click());
+    let p = ui.painter();
+    let lit = standing;
+    let hot = response.hovered();
+    p.rect_filled(rect, 2.0, if lit { paint::LIVE } else { paint::TRACK });
+    p.rect_stroke(
+        rect,
+        2.0,
+        egui::Stroke::new(
+            if lit || hot { 1.4 } else { 1.0 },
+            if lit { paint::FACE } else { paint::BEZEL },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    let ink = if lit { paint::INK } else { paint::FACE };
+    let c = rect.center();
+    // Two of them, one at a winch handle and one leaning back on a sheet: a head, a
+    // body, and the arms, which is as much as survives at this size.
+    let figure = |p: &egui::Painter, at: egui::Pos2, h: f32, lean: f32| {
+        p.circle_filled(at + egui::vec2(lean * 0.7, -h * 0.62), h * 0.16, ink);
+        p.add(egui::Shape::convex_polygon(
+            vec![
+                at + egui::vec2(lean * 0.6 - h * 0.17, -h * 0.42),
+                at + egui::vec2(lean * 0.6 + h * 0.17, -h * 0.42),
+                at + egui::vec2(h * 0.20, h * 0.42),
+                at + egui::vec2(-h * 0.20, h * 0.42),
+            ],
+            ink,
+            egui::Stroke::NONE,
+        ));
+        // The arms, out in front and holding something. Nobody stands on a foredeck
+        // with their hands by their sides.
+        p.line_segment(
+            [
+                at + egui::vec2(lean * 0.6, -h * 0.34),
+                at + egui::vec2(lean * 1.5 + h * 0.10, -h * 0.10),
+            ],
+            egui::Stroke::new(h * 0.10, ink),
+        );
+    };
+    figure(p, c + egui::vec2(-6.0, 7.0), 24.0, 3.0);
+    figure(p, c + egui::vec2(8.0, 9.0), 20.0, -3.0);
+    response
+}
+
 fn lamp_button(ui: &mut egui::Ui, text: &str, lit: bool) -> egui::Response {
     ui.add(
         egui::Button::new(
