@@ -224,6 +224,46 @@ mod the_watch_on_deck {
         );
     }
 
+    /// **They change the headsail, and they do it in the right order.**
+    ///
+    /// The whole job, not the setting: the genoa rolled away first because nothing is
+    /// bent on with the bow full of sail, then the new one on the sprit, then set. This
+    /// is the wiring test for it — the resource, the clutch bank and the rule the
+    /// keyboard obeys all have to agree, and a state machine that decides afresh every
+    /// frame would get stuck half way through with the drum turning both ways.
+    #[test]
+    fn the_watch_rolls_the_genoa_away_before_it_sets_a_kite() {
+        // Running in a working breeze, which is where a kite belongs and a genoa is in
+        // the mainsail's shadow doing nothing.
+        let mut app = with_a_crew(rad(185.0));
+        let mut rolled_away = false;
+        for _ in 0..900 {
+            app.update();
+            let sim = app.world().resource::<Sim>();
+            if sim.controls.headsail == sail_core::state::Headsail::Genoa {
+                // While the genoa is still the sail, the only thing that may have
+                // happened to it is being rolled up.
+                rolled_away |= sim.controls.furl > 0.98;
+            } else {
+                assert!(
+                    rolled_away,
+                    "a sail was bent on with the genoa still out: furl {:.2}",
+                    sim.controls.furl
+                );
+            }
+        }
+        let sim = app.world().resource::<Sim>();
+        assert!(
+            sim.controls.headsail.flying(),
+            "running in a breeze and still under the genoa"
+        );
+        assert!(
+            sim.controls.furl < 0.05,
+            "the new sail was bent on and left in its bag: furl {:.2}",
+            sim.controls.furl
+        );
+    }
+
     /// And with the watch stood down they touch nothing at all, which is the other half
     /// of a switch meaning anything.
     #[test]

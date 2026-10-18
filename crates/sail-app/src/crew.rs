@@ -53,6 +53,23 @@ const EASY_FOR: f64 = 40.0;
 /// chasing a number, which is both wrong about sailing and visibly silly.
 const WORTH_THE_TRIP: f64 = 0.10;
 
+/// How long the conditions have to ask for a different headsail before anybody goes
+/// forward, seconds.
+///
+/// **A sail change is twenty minutes of work and a wet foredeck.** Nobody does one
+/// because the wind went aft for half a minute, and a crew that did would spend the
+/// passage changing sails and none of it sailing. Forty seconds of the same answer.
+const BEFORE_A_CHANGE: f64 = 40.0;
+
+/// How much of what a sail is built for the crew will actually carry, as a fraction of
+/// its own cloth limit.
+///
+/// Three quarters, and the margin is the point: a kite that blows out at twenty-two
+/// knots apparent is a kite that comes down at sixteen, because the gust that takes it
+/// is the one that has not arrived yet. Cloth is the one thing aboard with no second
+/// chance.
+const CARRIES_TO: f64 = 0.72;
+
 /// The hands, and whether they are on deck.
 #[derive(Resource, Default)]
 pub struct Crew {
@@ -63,6 +80,30 @@ pub struct Crew {
     /// Seconds she has been over too far, and seconds she has been easy.
     pressed: f64,
     easy: f64,
+    /// The sail they are on their way to, once they have decided to change.
+    ///
+    /// A change is a job with stages and not a setting: roll the old one away, bend the
+    /// new one on, set it. Holding it here is what stops the decision being re-made
+    /// forty times a second half way through doing it.
+    changing: Option<sail_core::state::Headsail>,
+    /// And how long the conditions have been asking for that sail.
+    asking: f64,
+    asked_for: Option<sail_core::state::Headsail>,
+    /// The wind as somebody deciding about sails sees it: a running average rather than
+    /// this instant.
+    ///
+    /// **This is not a smoothing hack, it is the difference between a decision and a
+    /// twitch.** Running at a hundred and twenty degrees in a seaway the apparent angle
+    /// swings thirty degrees every time she rolls, and a wardrobe chosen off the
+    /// instantaneous number changed its mind between the gennaker, the Code 0 and the
+    /// genoa four times a minute — so the dwell timer never got anywhere and nothing was
+    /// ever set. Measured in the headless boat before it was written: want Gennaker,
+    /// want Code0, want Genoa, want Gennaker, ten seconds apart.
+    ///
+    /// A crew looks at where the wind has been for the last minute. Twenty seconds of
+    /// time constant is that, and it is deliberately far longer than the sheets', which
+    /// answer the wind that is here now.
+    settled: Option<(f64, f64, f64)>,
 }
 
 impl Crew {
@@ -98,11 +139,65 @@ fn shorten(crew: &mut Crew, heel: f64, dt: f64, at: f64) -> Option<f64> {
     None
 }
 
+/// Which sail belongs on the bow in this wind, at this angle.
+///
+/// **The point of sail is read off the *true* wind and the sail's own limits off the
+/// apparent one**, and that is not pedantry: the point of sail is where you are going
+/// relative to the weather and does not move with boat speed, while whether a sail fills
+/// and whether its cloth survives are both questions about the air actually going over
+/// it. Mixing those up is how a Code 0 ends up set on a run and a kite on a beat.
+///
+/// The ladder runs from the deep running sail inwards, and the first one that will both
+/// fill and survive gets the job. The genoa is the bottom of it and always available:
+/// it is the sail that is still there when everything else has been put back in its bag.
+pub fn wardrobe(
+    cfg: &sail_core::boat::BoatConfig,
+    twa: f64,
+    awa: f64,
+    aws: f64,
+) -> sail_core::state::Headsail {
+    use sail_core::state::Headsail::*;
+    let off = twa.abs();
+    // **A Code 0 is not a running sail and a spinnaker is not a reaching one**, which
+    // is why this is three short lists and not one long one sorted by size. Each list
+    // holds only the sails that belong at that angle at all; the cloth limit then
+    // decides which of them the day will allow, and the genoa catches everything that
+    // falls through.
+    let ladder: &[sail_core::state::Headsail] = if off > rad(150.0) {
+        &[Spinnaker, Gennaker]
+    } else if off > rad(115.0) {
+        &[Gennaker, Spinnaker]
+    } else if off > rad(72.0) {
+        &[Code0, Gennaker]
+    } else {
+        // Upwind there is one sail and it is on the stay. Everything else aboard is cut
+        // for a wind that is not forward of the beam.
+        return Genoa;
+    };
+    for kind in ladder.iter().copied() {
+        // Will it stay full at this apparent angle, with a margin so that one luff of
+        // the helm does not collapse it — and is the cloth within what it is built for.
+        let fills = awa.abs() > kind.fills_above() + rad(6.0);
+        let holds = aws < cfg.headsail(kind).limit_aws * CARRIES_TO;
+        if fills && holds {
+            return kind;
+        }
+    }
+    Genoa
+}
+
 /// Where each line on the bank ought to be with the wind where it is.
 ///
 /// One function because a crew does not have a different opinion in two places, and
 /// because the test below reads the same numbers the deck does.
-pub fn wants(line: Line, c: &sail_core::state::Controls, awa: f64, heel: f64, aws: f64) -> f64 {
+pub fn wants(
+    line: Line,
+    c: &sail_core::state::Controls,
+    awa: f64,
+    heel: f64,
+    aws: f64,
+    changing: bool,
+) -> f64 {
     let off = awa.abs();
     match line {
         Line::Outhaul => outhaul_for(awa, heel, OVERPOWERED_HEEL),
@@ -120,36 +215,150 @@ pub fn wants(line: Line, c: &sail_core::state::Controls, awa: f64, heel: f64, aw
             let breeze = smoothstep(10.0, 22.0, ms_to_kn(aws));
             (0.20 + 0.45 * upwind + 0.30 * breeze).clamp(0.0, 1.0)
         }
-        // The genoa comes in with the main, which is how a rig stays balanced as it is
-        // shortened down: roll a bit away with each slab rather than sailing her under
-        // a full headsail and a handkerchief of main.
+        // **Rolled right away while a change is going on**, because that is the first
+        // act of one: you cannot bend a new sail on with the old one drawing. Otherwise
+        // the genoa comes in with the main, which is how a rig stays balanced as it is
+        // shortened down — a bit rolled away with each slab, rather than sailing her
+        // under a full headsail and a handkerchief of main.
+        Line::Furl if changing => 1.0,
+        Line::Furl if c.headsail.flying() => 0.0,
         Line::Furl => (c.reef * 0.8).clamp(0.0, 0.95),
-        // Not theirs to decide. Setting a staysail is a sail change, which is the
-        // skipper's call and takes somebody to the foredeck.
-        Line::Reef | Line::Staysail | Line::StaysailSheet => line.get(c),
+        // **The staysail is the heavy-weather sail and the slot-filler**, and the two
+        // conditions it goes up in are the same condition: a rig that has been shortened
+        // down. Two slabs in the main, or it blowing hard enough that it is about to be,
+        // and it is hoisted — a small sail low down and inboard, which is the one that
+        // keeps her driving when the genoa has been rolled to a scrap.
+        Line::Staysail => {
+            let shortened = c.reef >= 0.45;
+            let blowing = ms_to_kn(aws) > 26.0;
+            // Not under a kite: the staysail stands in the middle of the foretriangle
+            // and a spinnaker sheet comes across it.
+            let kite = matches!(
+                c.headsail,
+                sail_core::state::Headsail::Gennaker | sail_core::state::Headsail::Spinnaker
+            );
+            if (shortened || blowing) && !kite {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        // Its club boom finds its own angle; the tackle on the end is the only shape
+        // control it has. Hauled upwind, eased as the boom goes out — the same argument
+        // as the vang, on a smaller sail.
+        Line::StaysailSheet => 0.75 - 0.45 * smoothstep(rad(60.0), rad(130.0), off),
+        // A decision rather than a trim: [`shorten`] owns the reef.
+        Line::Reef => line.get(c),
     }
 }
 
 /// The watch, working.
+///
+/// The order is a crew's order: look at the sky first — is the right sail even on the
+/// bow — then the thing that cannot wait, then the sheets, then the gear.
 pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>, time: Res<Time>) {
     if !crew.standing {
         crew.on = None;
         crew.pressed = 0.0;
         crew.easy = 0.0;
+        crew.changing = None;
+        crew.asking = 0.0;
+        crew.settled = None;
         return;
     }
     let dt = time.delta_secs_f64();
     let cfg = sim.config();
     let t = sim.sim.telemetry;
     let (awa, heel, aws) = (t.awa, sim.sim.state.heel, t.aws);
+    crew.on = None;
 
-    // **In irons, back the headsail.** Nobody waits to be told: she is stopped, head to
-    // wind, with the rudder doing nothing because there is no water going over it, and
-    // the only thing aboard that will push her bow off is a sail held on the wrong side.
-    // A crew does it before the skipper has finished swearing.
+    // --- The wardrobe: is the right sail even on the bow ---------------------------
+    //
+    // A change is a job with stages, so it is decided once and then carried out: roll
+    // the old sail away, bend the new one on, set it. The decision has to hold for most
+    // of a minute first, because the alternative is a foredeck crew that never gets to
+    // sit down.
+    // What somebody deciding about sails is looking at: the wind of the last minute
+    // rather than of this wave. See [`Crew::settled`].
+    let settled = {
+        let k = 1.0 - (-dt / 20.0).exp();
+        let (mut twa, mut a, mut w) = crew.settled.unwrap_or((t.twa.abs(), awa.abs(), aws));
+        twa += (t.twa.abs() - twa) * k;
+        a += (awa.abs() - a) * k;
+        w += (aws - w) * k;
+        crew.settled = Some((twa, a, w));
+        (twa, a, w)
+    };
+    let want_sail = wardrobe(&cfg, settled.0, settled.1, settled.2);
+    if crew.changing.is_none() {
+        if want_sail == sim.controls.headsail {
+            crew.asking = 0.0;
+            crew.asked_for = None;
+        } else {
+            if crew.asked_for != Some(want_sail) {
+                crew.asked_for = Some(want_sail);
+                crew.asking = 0.0;
+            }
+            crew.asking += dt;
+            // Cloth that is already past what it is built for does not get to wait out
+            // the dwell: coming down is the one sail change nobody argues about.
+            let urgent = aws > cfg.headsail(sim.controls.headsail).limit_aws * CARRIES_TO;
+            if crew.asking > BEFORE_A_CHANGE || urgent {
+                crew.changing = Some(want_sail);
+                crew.asking = 0.0;
+                info!(
+                    "crew: {} coming down, {} going up",
+                    sim.controls.headsail.name(),
+                    want_sail.name()
+                );
+            }
+        }
+    }
+    if let Some(to) = crew.changing {
+        crew.on = Some("changing the headsail");
+        // **A change is a job and not a trim**, so the furling line is worked right to
+        // its end rather than to within a tenth of it. The first version left this to
+        // the general gear loop, which stops at a line that is close enough — and a
+        // drum nine tenths home is a sail still on the bow, so the change stood there
+        // half done for as long as anybody watched it.
+        //
+        // The old sail away first. On the stay that is the drum; set flying it is the
+        // sail coming down on deck. Either way the rule the keyboard obeys is the rule
+        // here: nothing is bent on until the bow is clear.
+        // Rolled right away while the old sail is still the one on the bow; run out
+        // again the moment the new one is bent on.
+        let bent_on = sim.controls.headsail == to;
+        let want = if bent_on { 0.0 } else { 1.0 };
+        let step = Line::Furl.rate(&sim.controls) * dt;
+        let now = sim.controls.furl;
+        let next = if (want - now).abs() <= step {
+            want
+        } else {
+            now + step * (want - now).signum()
+        };
+        sim.controls.furl = next;
+        if !bent_on && next >= 0.999 {
+            sim.controls.headsail = to;
+            info!("crew: {} bent on", to.name());
+        }
+        if bent_on && next <= 0.001 {
+            crew.changing = None;
+            info!("crew: {} set and drawing", to.name());
+        }
+        // One winch, one job: while the foredeck is busy nothing else gets hands.
+        return;
+    }
+    let changing = crew.changing.is_some();
+
+    // --- In irons, back the headsail ------------------------------------------------
+    //
+    // Nobody waits to be told: she is stopped, head to wind, with the rudder doing
+    // nothing because there is no water going over it, and the only thing aboard that
+    // will push her bow off is a sail held on the wrong side. A crew does it before the
+    // skipper has finished swearing.
     let in_irons = t.twa.abs() < rad(28.0) && ms_to_kn(t.stw) < 1.6;
     let genoa = sim.controls.headsail == sail_core::state::Headsail::Genoa;
-    if in_irons && genoa && sim.controls.furl < 0.9 {
+    if in_irons && genoa && sim.controls.furl < 0.9 && !changing {
         sim.controls.headsail_aback = true;
         crew.on = Some("backing the headsail");
     } else if sim.controls.headsail_aback && !in_irons {
@@ -158,8 +367,25 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
         sim.controls.headsail_aback = false;
     }
 
-    // The sheets, continuously, on their own winches — and trimmed to the wind each sail
-    // actually meets rather than to the masthead fly, which is what the bend terms are.
+    // --- The preventer, before the run and not during the gybe ---------------------
+    //
+    // The one line aboard that exists to stop something happening. A crew rigs it when
+    // she settles down to run and takes it off before anybody means to gybe, and the
+    // angles are deliberately far apart so that it is not being rigged and unrigged
+    // every time she yaws on a wave.
+    let running = t.twa.abs() > rad(150.0);
+    if running && !sim.controls.preventer {
+        sim.controls.preventer = true;
+        info!("crew: preventer on — she is running");
+    } else if t.twa.abs() < rad(128.0) && sim.controls.preventer {
+        sim.controls.preventer = false;
+        info!("crew: preventer off");
+    }
+
+    // --- The sheets, continuously, on their own winches ----------------------------
+    //
+    // Trimmed to the wind each sail actually meets rather than to the masthead fly,
+    // which is what the bend terms are.
     if !sim.controls.headsail_aback {
         let (m, j) = optimal_sheets_bent(
             &cfg,
@@ -174,9 +400,10 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
         sim.controls.jib_sheet += (j - sim.controls.jib_sheet) * haul;
     }
 
-    // The reef, which is a decision rather than a trim, and goes to the bank as a
-    // destination the way the player's own press does: one winch, one job, and it takes
-    // as long as it takes.
+    // --- The reef, which is a decision rather than a trim ---------------------------
+    //
+    // It goes to the bank as a destination the way the player's own press does: one
+    // winch, one job, and it takes as long as it takes.
     let at = sim.controls.reef;
     if let Some(stop) = shorten(&mut crew, heel, dt, at) {
         let which = BANK.iter().position(|l| *l == Line::Reef).unwrap_or(3);
@@ -196,27 +423,45 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
         );
     }
 
-    // And the shape controls, one line at a time, because there is one winch and this
-    // crew is subject to the same rule the player is. Whichever is furthest from where
-    // it should be gets the hands.
+    // --- And the gear, one line at a time -------------------------------------------
+    //
+    // Because there is one winch on the coachroof and this crew is subject to the same
+    // rule the player is. Whichever line is furthest from where it should be gets the
+    // hands; a line with stops is given a destination and left to run there.
     if bank.target.iter().any(|t| t.is_some()) {
+        if crew.on.is_none() {
+            crew.on = Some("at the clutch bank");
+        }
         return;
     }
     let mut worst: Option<(Line, f64, f64)> = None;
     for line in BANK {
-        if !line.rigged_for(&sim.controls) || line.detents(&sim.controls).is_some() {
+        if !line.rigged_for(&sim.controls) || line == Line::Reef {
             continue;
         }
-        if line == Line::StaysailSheet || line == Line::Staysail {
-            continue;
-        }
-        let want = wants(line, &sim.controls, awa, heel, aws);
+        let want = wants(line, &sim.controls, awa, heel, aws, changing);
         let off = (want - line.get(&sim.controls)).abs();
         if off > WORTH_THE_TRIP && worst.as_ref().is_none_or(|(_, _, had)| off > *had) {
             worst = Some((line, want, off));
         }
     }
-    if let Some((line, want, _)) = worst {
+    let Some((line, want, _)) = worst else {
+        if crew.on.is_none() {
+            crew.on = Some("on the sheets");
+        }
+        return;
+    };
+    if let Some(stops) = line.detents(&sim.controls) {
+        // A line with positions is not dragged to a number: it is sent to the nearest
+        // stop, which for a halyard or a sail in its bag is up or down and nothing else.
+        let stop = stops
+            .iter()
+            .copied()
+            .min_by(|a, b| (a - want).abs().total_cmp(&(b - want).abs()))
+            .unwrap_or(want);
+        let which = BANK.iter().position(|l| *l == line).unwrap_or(0);
+        bank.target[which] = Some(stop);
+    } else {
         let now = line.get(&sim.controls);
         let step = line.rate(&sim.controls) * dt;
         let next = if (want - now).abs() <= step {
@@ -225,17 +470,17 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
             now + step * (want - now).signum()
         };
         line.set_from_ui(&mut sim.controls, next);
-        if crew.on.is_none() {
-            crew.on = Some(match line {
-                Line::Outhaul => "on the outhaul",
-                Line::Vang => "on the vang",
-                Line::GenoaCar => "on the car",
-                Line::Furl => "on the furling line",
-                _ => "on the sheets",
-            });
-        }
-    } else if crew.on.is_none() {
-        crew.on = Some("on the sheets");
+    }
+    if crew.on.is_none() {
+        crew.on = Some(match line {
+            Line::Outhaul => "on the outhaul",
+            Line::Vang => "on the vang",
+            Line::GenoaCar => "on the car",
+            Line::Furl => "on the furling line",
+            Line::Staysail => "setting the staysail",
+            Line::StaysailSheet => "on the staysail sheet",
+            Line::Reef => "on the reef pennant",
+        });
     }
 }
 
@@ -243,6 +488,7 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
 mod the_watch {
     use super::*;
     use sail_core::state::Controls;
+    use sail_core::units::kn_to_ms;
 
     /// **A crew that reefs for a gust is a crew nobody wants.**
     ///
@@ -295,12 +541,65 @@ mod the_watch {
     #[test]
     fn the_vang_comes_on_as_the_boom_goes_out() {
         let c = Controls::default();
-        let close = wants(Line::Vang, &c, rad(30.0), 0.0, 8.0);
-        let reach = wants(Line::Vang, &c, rad(100.0), 0.0, 8.0);
-        let run = wants(Line::Vang, &c, rad(160.0), 0.0, 8.0);
+        let close = wants(Line::Vang, &c, rad(30.0), 0.0, 8.0, false);
+        let reach = wants(Line::Vang, &c, rad(100.0), 0.0, 8.0, false);
+        let run = wants(Line::Vang, &c, rad(160.0), 0.0, 8.0, false);
         assert!(reach > close + 0.2, "{close:.2} close, {reach:.2} reaching");
         assert!(run >= reach - 1e-6);
         assert!((0.0..=1.0).contains(&run));
+    }
+
+    /// **The ladder of sails, and what keeps a crew off the foredeck.**
+    ///
+    /// Upwind there is one sail and it is on the stay; off the wind the deepest sail
+    /// that will both stay full and survive the breeze gets the job; and when it is
+    /// blowing, everything cut for light air stays in its bag whatever the angle is.
+    #[test]
+    fn the_right_sail_for_the_angle_and_the_breeze() {
+        use sail_core::state::Headsail::*;
+        let cfg = sail_core::boat::BoatConfig::charter_sloop_34();
+        let light = kn_to_ms(9.0);
+        assert_eq!(
+            wardrobe(&cfg, rad(40.0), rad(28.0), light),
+            Genoa,
+            "beating"
+        );
+        assert_eq!(
+            wardrobe(&cfg, rad(90.0), rad(62.0), light),
+            Code0,
+            "a beam reach in nine knots is the one condition a Code 0 exists for"
+        );
+        assert_eq!(wardrobe(&cfg, rad(130.0), rad(95.0), light), Gennaker);
+        assert_eq!(wardrobe(&cfg, rad(170.0), rad(150.0), light), Spinnaker);
+        // And it blowing: a kite that blows out at twenty-two knots apparent comes down
+        // well before twenty-two, because the gust that takes it is the one that has not
+        // arrived yet.
+        assert_eq!(
+            wardrobe(&cfg, rad(170.0), rad(150.0), kn_to_ms(19.0)),
+            Genoa,
+            "nineteen knots over the deck is no place for half-ounce cloth"
+        );
+        // Nor is a kite any use with the apparent wind too far forward, whatever the
+        // true angle says: the luff falls in and it flogs in the lee of the main. With
+        // nothing on the running list able to stand, the sail on the stay gets it —
+        // which is what the genoa is for and why it is the bottom of every ladder.
+        assert_eq!(wardrobe(&cfg, rad(155.0), rad(40.0), light), Genoa);
+    }
+
+    /// The staysail is the heavy-weather sail: up when the rig has been shortened down,
+    /// in its bag when it has not, and never under a kite that would sheet across it.
+    #[test]
+    fn the_staysail_goes_up_when_she_is_shortened_down() {
+        let mut c = Controls::default();
+        assert_eq!(wants(Line::Staysail, &c, rad(40.0), 0.0, 8.0, false), 0.0);
+        c.reef = 0.5;
+        assert_eq!(wants(Line::Staysail, &c, rad(40.0), 0.0, 8.0, false), 1.0);
+        c.headsail = sail_core::state::Headsail::Spinnaker;
+        assert_eq!(
+            wants(Line::Staysail, &c, rad(160.0), 0.0, 8.0, false),
+            0.0,
+            "a spinnaker sheet comes across the foretriangle the staysail stands in"
+        );
     }
 
     /// And the genoa comes in with the main, which is what keeps a shortened rig
@@ -308,9 +607,9 @@ mod the_watch {
     #[test]
     fn the_headsail_is_rolled_away_with_the_reefs() {
         let mut c = Controls::default();
-        let full = wants(Line::Furl, &c, rad(40.0), 0.0, 10.0);
+        let full = wants(Line::Furl, &c, rad(40.0), 0.0, 10.0, false);
         c.reef = 0.75;
-        let deep = wants(Line::Furl, &c, rad(40.0), 0.0, 10.0);
+        let deep = wants(Line::Furl, &c, rad(40.0), 0.0, 10.0, false);
         assert!(full < 0.05);
         assert!(
             deep > 0.5,

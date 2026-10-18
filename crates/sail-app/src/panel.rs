@@ -824,7 +824,7 @@ pub fn draw(
     // the hand rests. Asked for from the deck, and it is the arrangement of a real
     // binnacle pedestal: the card at eye height on top of the pillar and the gear you
     // work at the bottom of it.
-    egui::Area::new("corner".into())
+    let corner = egui::Area::new("corner".into())
         .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-10.0, -10.0))
         .interactable(true)
         .show(ctx, |ui| {
@@ -914,31 +914,7 @@ pub fn draw(
                             // own dial when the wind took the middle, and it is two figures
                             // — not an instrument, but not nothing either.
                             ui.horizontal(|ui| {
-                                // **The watch, in the space under the dial.** Reached
-                                // for without looking, which is why it is a square the
-                                // size of a thumb and not another lamp with a word on
-                                // it: with the hands on deck you steer and they sail
-                                // her, and that is a thing you hand over and take back
-                                // the way you hand over a helm.
-                                ui.add_space(4.0);
-                                let job = crew.doing();
-                                if hands(ui, crew.standing).on_hover_text(if crew.standing {
-                                    format!("the watch has the sails — {job}")
-                                } else {
-                                    "call the watch on deck: they work the sails, you steer"
-                                        .to_string()
-                                }).clicked() {
-                                    crew.standing = !crew.standing;
-                                    info!(
-                                        "{}",
-                                        if crew.standing {
-                                            "watch on deck — they have the sheets"
-                                        } else {
-                                            "watch stood down — you have the sheets"
-                                        }
-                                    );
-                                }
-                                ui.add_space(4.0);
+                                ui.add_space(52.0);
                                 readout(ui, "HELM", &format!("{:+.0}°", deg(sim.controls.rudder)));
                                 // The words come back when there is something to say: a helm
                                 // that has gone soft for want of way wants the opposite
@@ -1099,6 +1075,56 @@ pub fn draw(
                 });
             });
         });
+
+    // --- The watch, on its own plate beside the instruments -------------------------
+    //
+    // **Off the case on purpose.** Everything inside that case is a reading or a lever
+    // — things the ship does and things you do to her. Calling the watch on deck is
+    // neither: it is a decision about who is sailing the boat, which is why it is a
+    // switch on its own plate screwed to the bulkhead beside the instruments and not
+    // another lamp in among them. It is also then the one control you can find without
+    // reading anything, which is what it is for.
+    {
+        let case = corner.response.rect;
+        let job = crew.doing();
+        egui::Area::new("watch".into())
+            .fixed_pos(egui::pos2(case.left() - 66.0, case.top() + 26.0))
+            .interactable(true)
+            .show(ctx, |ui| {
+                frame.show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        if hands(ui, crew.standing)
+                            .on_hover_text(if crew.standing {
+                                format!("the watch has the sails — {job}")
+                            } else {
+                                "call the watch on deck: they sail her, you steer".to_string()
+                            })
+                            .clicked()
+                        {
+                            crew.standing = !crew.standing;
+                            info!(
+                                "{}",
+                                if crew.standing {
+                                    "watch on deck — they have the sails"
+                                } else {
+                                    "watch stood down — you have the sails"
+                                }
+                            );
+                        }
+                        ui.label(
+                            egui::RichText::new(if crew.standing { "WATCH" } else { "SOLO" })
+                                .monospace()
+                                .size(letter::UNIT)
+                                .color(if crew.standing {
+                                    paint::GOOD
+                                } else {
+                                    paint::LABEL
+                                }),
+                        );
+                    });
+                });
+            });
+    }
 
     // --- The rack of lines, in the middle of the bottom -----------------------------
     //
