@@ -133,8 +133,15 @@ mod the_watch_on_deck {
         sim.sim.state.yaw_rate = 0.0;
     }
 
-    /// A boat sailing, with the hands called on deck and nothing else running.
+    /// A boat sailing, with the hands on deck and the helm held by the test.
     fn with_a_crew(heading: f64) -> App {
+        let mut app = crewed(heading);
+        app.add_systems(Update, held.before(crate::sim::advance));
+        app
+    }
+
+    /// The same boat with nobody on the helm, for the tests that are about steering.
+    fn crewed(heading: f64) -> App {
         let mut app = at_sea();
         app.init_resource::<crate::clutch::Bank>();
         app.insert_resource(HeldOn(heading));
@@ -148,10 +155,7 @@ mod the_watch_on_deck {
         app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(100),
         ));
-        app.add_systems(
-            Update,
-            (held, crate::sim::advance, crate::crew::work).chain(),
-        );
+        app.add_systems(Update, (crate::sim::advance, crate::crew::work).chain());
         {
             let mut sim = app.world_mut().resource_mut::<Sim>();
             // Sheets flogging right out and the vang off: everything wrong, which is
@@ -221,6 +225,29 @@ mod the_watch_on_deck {
             "the vang is still at {:.2} with the boom out at {:.0} deg apparent",
             sim.controls.vang,
             deg(sim.sim.telemetry.awa)
+        );
+        // **And it is worked home, not to within a tenth of home.**
+        //
+        // The threshold that decides whether a line is worth a trip to the winch was
+        // doing both jobs, so every control on the bank sat up to a tenth of its travel
+        // from where it belonged — permanently a little bit wrong, which is the one
+        // thing a crew is there to prevent.
+        //
+        // Not nought, because what the line is being worked *to* moves: the wind shifts
+        // while the hands are on another rope, and a crew goes back to it when it is
+        // worth the trip again. Half of the old floor is the claim.
+        let want = crate::crew::wants(
+            crate::clutch::Line::Vang,
+            &sim.controls,
+            sim.sim.telemetry.awa,
+            sim.sim.state.heel,
+            sim.sim.telemetry.aws,
+            false,
+        );
+        assert!(
+            (sim.controls.vang - want).abs() < 0.05,
+            "the vang was left at {:.3} with {want:.3} wanted",
+            sim.controls.vang
         );
     }
 
@@ -299,6 +326,127 @@ mod the_watch_on_deck {
             break;
         }
         assert!(caught, "no sail change happened, so nothing was tested");
+    }
+
+    /// **A crew that reefs its way down to bare poles in a Force 5 is not a crew.**
+    ///
+    /// The one behaviour of this whole system that cannot be judged from reading it:
+    /// what it does over a quarter of an hour of real weather, with gusts, a wind that
+    /// wanders and a sea running. Measured before it was fixed — in nineteen knots the
+    /// watch had the main *handed* and had touched the reefing pennant seven times in
+    /// half an hour, because every slab was followed by a trim back to maximum lift that
+    /// stood her straight up on her ear again.
+    ///
+    /// **Run it by hand: `cargo test -- --ignored the_watch_does_not_reef`.**
+    ///
+    /// Half an hour of weather is a minute of test, and the fault it catches needs the
+    /// half hour — at six minutes it does not show at all, which was checked by putting
+    /// the old constants back and watching this pass. So it is the measurement harness
+    /// it actually is, and the two mechanisms it found are pinned by unit tests in
+    /// `crew.rs` that cost nothing and run every time.
+    #[test]
+    #[ignore]
+    fn the_watch_does_not_reef_its_way_to_bare_poles_in_a_working_breeze() {
+        let seed = 30; // nineteen and a half knots, which is a reef and not a storm.
+        let w = crate::weather::Weather::draw(seed);
+        let kn = sail_core::units::ms_to_kn(w.tws);
+        assert!(
+            (18.0..21.0).contains(&kn),
+            "the weather this test is about changed: {kn:.1} kn"
+        );
+        let mut app = at_sea();
+        app.insert_resource(Sim::new(crate::weather::Weather::draw(seed)));
+        app.init_resource::<crate::clutch::Bank>();
+        // Close-hauled, where the heel is.
+        app.insert_resource(HeldOn(w.wind_from + rad(45.0)));
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(250),
+        ));
+        app.add_systems(
+            Update,
+            (
+                held,
+                crate::sim::advance,
+                crate::crew::work,
+                crate::clutch::handle,
+            )
+                .chain(),
+        );
+        app.world_mut().resource_mut::<crate::crew::Crew>().standing = true;
+        let (mut changes, mut last, mut deepest) = (0, 0.0f64, 0.0f64);
+        for _ in 0..7_200 {
+            app.update();
+            let reef = app.world().resource::<Sim>().controls.reef;
+            deepest = deepest.max(reef);
+            if (reef - last).abs() > 0.2 {
+                changes += 1;
+                last = reef;
+            }
+        }
+        assert!(
+            deepest < 0.95,
+            "the main was handed in {kn:.0} knots of true wind"
+        );
+        assert!(
+            changes <= 3,
+            "{changes} trips to the reefing pennant in half an hour of steady weather"
+        );
+    }
+
+    /// **The pilot steers and the watch sails: the two run together.**
+    ///
+    /// The combination nobody had tried, and the one a tired skipper actually wants —
+    /// the boat sailing herself while you go below. The hazard is not physics, it is
+    /// wiring: `gather` stands the watch down when a hand goes on a sheet, and the pilot
+    /// lives in the same system. If one of its keys ever counted as a hand on a rope,
+    /// engaging the pilot would quietly fire the crew.
+    #[test]
+    fn the_pilot_and_the_watch_do_not_put_each_other_out_of_work() {
+        // No `held` here: the whole question is whether the pilot steers her, so the
+        // test keeps its hands off the helm.
+        let mut app = crewed(rad(60.0));
+        app.add_systems(Update, crate::input::gather);
+        // Way on first. A tiller pilot engaged on a stopped boat has nothing going over
+        // the blade and lets go within seconds — correctly, and it is what happened the
+        // first time this was written: *it could not hold the course, rudder was hard
+        // over*. You do not switch one on until she is sailing.
+        for _ in 0..600 {
+            app.update();
+        }
+        let heading = {
+            let sim = app.world().resource::<Sim>();
+            let state = sim.sim.state;
+            assert!(
+                sail_core::units::ms_to_kn(sim.sim.telemetry.stw) > 2.0,
+                "she never got going, so the pilot was never the thing under test"
+            );
+            app.world_mut()
+                .resource_mut::<crate::input::Pilot>()
+                .hold_heading(&state);
+            state.heading
+        };
+        for _ in 0..600 {
+            app.update();
+        }
+        let crew = app.world().resource::<crate::crew::Crew>();
+        assert!(crew.standing, "engaging the pilot stood the watch down");
+        let sim = app.world().resource::<Sim>();
+        assert!(
+            app.world().resource::<crate::input::Pilot>().engaged(),
+            "the watch stood the pilot down: {:?}",
+            app.world().resource::<crate::input::Pilot>().last_reason
+        );
+        let off = sail_core::units::deg(sail_core::units::wrap_pi(sim.sim.state.heading - heading));
+        assert!(
+            off.abs() < 20.0,
+            "she wandered {off:.0} deg off the course the pilot was holding"
+        );
+        // And the sails were worked while it steered.
+        assert!(
+            sim.controls.main_sheet < 0.6,
+            "the mainsheet was left flogging at {:.2} with a watch on deck",
+            sim.controls.main_sheet
+        );
     }
 
     /// And with the watch stood down they touch nothing at all, which is the other half

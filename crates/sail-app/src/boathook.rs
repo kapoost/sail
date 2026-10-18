@@ -671,6 +671,26 @@ pub fn mark_setup(
     }
 }
 
+/// Everything near enough to be worth marking, nearest first.
+///
+/// A man and a lifebuoy are in the list on the same terms as a barrel, because the
+/// manoeuvre is the same manoeuvre — and a cask already on the painter astern is not in
+/// it at all, because it has been caught. Separated from the drawing so that *what gets
+/// a ring* is a question with an answer a test can read.
+pub fn worth_marking(
+    over: &crate::mob::Overboard,
+    flotsam: &crate::barrels::Flotsam,
+    here: glam::DVec2,
+) -> Vec<glam::DVec2> {
+    let mut about: Vec<glam::DVec2> = Vec::new();
+    about.extend(over.oscar());
+    about.extend(over.ring_afloat());
+    about.extend(flotsam.adrift.iter().copied());
+    about.retain(|at| (*at - here).length() < MARKED_WITHIN);
+    about.sort_by(|a, b| (*a - here).length().total_cmp(&(*b - here).length()));
+    about
+}
+
 /// Lay a ring on the water round everything within reaching distance of becoming a catch.
 ///
 /// The colour carries the one condition the geometry cannot: a boathook does not stop a
@@ -700,14 +720,7 @@ pub fn mark_the_water(
     let t = sim.sim.state.time;
     let radius = marked_radius(&sim.config());
 
-    // Everything catchable, nearest first. A man and a lifebuoy are in the list on the
-    // same terms as a barrel, because the manoeuvre is the same manoeuvre.
-    let mut about: Vec<glam::DVec2> = Vec::new();
-    about.extend(over.oscar());
-    about.extend(over.ring_afloat());
-    about.extend(flotsam.adrift.iter().copied());
-    about.retain(|at| (*at - here).length() < MARKED_WITHIN);
-    about.sort_by(|a, b| (*a - here).length().total_cmp(&(*b - here).length()));
+    let about = worth_marking(&over, &flotsam, here);
 
     let slow = sail_core::units::ms_to_kn(sim.sim.telemetry.stw.abs()) < SLOW_ENOUGH;
     for (which, mesh, material, mut transform, mut show) in &mut rings {
@@ -777,5 +790,49 @@ mod the_marked_water {
         // And it is a ring somebody can steer at: wider than she is, narrower than a
         // boat length.
         assert!(r > cfg.beam && r < cfg.loa * 0.6, "{r} m");
+    }
+}
+
+#[cfg(test)]
+mod what_gets_a_ring {
+    use super::*;
+    use glam::DVec2;
+
+    /// **Everything in the water that could be caught, and nothing that has been.**
+    ///
+    /// The ring goes round a man and round the lifebuoy on the same terms as round a
+    /// barrel — it is the same manoeuvre, and the one that matters is the one nobody
+    /// gets to practise. A cask already on the painter is not in the water any more, and
+    /// a ring round a thing you have is a ring in the way.
+    #[test]
+    fn a_man_a_lifebuoy_and_a_cask_are_marked_but_not_what_is_already_astern() {
+        let here = DVec2::ZERO;
+        let mut flotsam = crate::barrels::Flotsam::default();
+        let near = DVec2::new(30.0, 0.0);
+        let far = DVec2::new(0.0, MARKED_WITHIN + 50.0);
+        flotsam.adrift = vec![near, far];
+        let mut over = crate::mob::Overboard::default();
+        let him = DVec2::new(8.0, 0.0);
+        over.man_overboard(him, 0.0);
+
+        let marked = worth_marking(&over, &flotsam, here);
+        assert_eq!(
+            marked.first().copied(),
+            Some(him),
+            "nearest first, and the nearest is him"
+        );
+        assert!(marked.contains(&near));
+        assert!(
+            !marked.contains(&far),
+            "a cask beyond {MARKED_WITHIN} m got a ring nobody could see"
+        );
+
+        // And once it is hooked it is not in the water to be marked.
+        flotsam.hooked(near);
+        let marked = worth_marking(&over, &flotsam, here);
+        assert!(
+            !marked.contains(&near),
+            "a cask on the painter astern still had a ring round it"
+        );
     }
 }

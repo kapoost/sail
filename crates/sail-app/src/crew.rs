@@ -33,6 +33,21 @@ use crate::sim::Sim;
 /// difference between a crew and a cheat.
 const HAUL: f64 = 0.45 * 2.2;
 
+/// How much of the mainsheet's travel the watch will spill before it reefs.
+///
+/// **A crew eases before it reefs**, and the order is not a preference: a slab is twenty
+/// minutes of work and a sheet is a second, so the first answer to being over on her ear
+/// is to let the mainsheet go and the top of the sail twist open. Measured why it has to
+/// be here at all: trimming both sails to their best angle of attack whatever the heel
+/// is, the watch reefed, re-trimmed to maximum lift, lay over again and reefed again —
+/// in nineteen and a half knots it had the main *handed* inside half an hour, which is
+/// storm canvas for a Force 5. The reef rule was not wrong; it was being fed by a trim
+/// rule that would not give an inch.
+///
+/// A third of the travel, which is enough to take ten degrees off her and not so much
+/// that she stops going anywhere.
+const SPILLS: f64 = 0.35;
+
 /// How long she has to be lying over before anybody reefs, seconds.
 ///
 /// **Reefing is a decision about the next hour, not about this gust.** Twelve seconds of
@@ -42,16 +57,27 @@ const PRESSED_FOR: f64 = 12.0;
 
 /// And how long she has to be standing up before they shake one out, seconds.
 ///
-/// Longer, deliberately. Putting a reef in is cheap and taking it out is a job, so the
-/// bias is towards leaving it in — which is what every cruising crew that has ever been
-/// rained on does.
-const EASY_FOR: f64 = 40.0;
+/// Three minutes, which is fifteen times the other number, and deliberately. Putting a
+/// reef in is cheap and taking it out is a job, so the bias is towards leaving it in —
+/// what every cruising crew that has ever been rained on does. Measured why it has to be
+/// this long: at forty seconds the watch put reefs in and shook them out five times in
+/// half an hour in a steady nineteen knots, which is a crew nobody would sail with.
+const EASY_FOR: f64 = 180.0;
 
 /// How far off a shape control has to be before it is worth going to the winch.
 ///
 /// A tenth of its travel. Less than that and the crew would live at the clutch bank
 /// chasing a number, which is both wrong about sailing and visibly silly.
 const WORTH_THE_TRIP: f64 = 0.10;
+
+/// And how close is close enough to close the clutch again.
+///
+/// **The threshold decides whether you go; it does not decide where you stop.** With one
+/// number doing both jobs every line on the bank sat up to a tenth of its travel away
+/// from where it should be — the vang and the outhaul permanently a little bit wrong,
+/// which is the one thing a crew is there to prevent. You put the rope on the drum, you
+/// work it home, and then you close the clutch.
+const HOME: f64 = 0.01;
 
 /// How long the conditions have to ask for a different headsail before anybody goes
 /// forward, seconds.
@@ -89,6 +115,13 @@ pub struct Crew {
     /// And how long the conditions have been asking for that sail.
     asking: f64,
     asked_for: Option<sail_core::state::Headsail>,
+    /// The line they have on the winch, kept until it is home.
+    ///
+    /// Which rope is on the drum is a fact about the deck and not a thing to re-derive
+    /// every frame: a crew that re-chose forty times a second would put a line on,
+    /// bring it within a tenth of where it belongs, find another line further out and
+    /// walk away from the first one — leaving every control a little bit wrong for ever.
+    on_the_winch: Option<Line>,
     /// The wind as somebody deciding about sails sees it: a running average rather than
     /// this instant.
     ///
@@ -122,9 +155,13 @@ impl Crew {
 /// Heel, because heel is the pressure gauge every sailor on every boat actually reads,
 /// and because it is the one that already decides the outhaul. Hysteresis with real
 /// dwell either side of it: she has to mean it.
-fn shorten(crew: &mut Crew, heel: f64, dt: f64, at: f64) -> Option<f64> {
+fn shorten(crew: &mut Crew, heel: f64, dt: f64, at: f64, spilled: bool) -> Option<f64> {
     const SLABS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
-    let over = heel.abs() > OVERPOWERED_HEEL + rad(4.0);
+    // Over *and* out of sheet: the slab is for the wind that the mainsheet could not
+    // answer. Without the second half of that condition the watch reefs its way down to
+    // bare poles in a Force 5, because every slab is followed by a trim that stands her
+    // straight back up on her ear.
+    let over = spilled && heel.abs() > OVERPOWERED_HEEL + rad(4.0);
     let easy = heel.abs() < OVERPOWERED_HEEL - rad(7.0);
     crew.pressed = if over { crew.pressed + dt } else { 0.0 };
     crew.easy = if easy { crew.easy + dt } else { 0.0 };
@@ -264,6 +301,7 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
         crew.changing = None;
         crew.asking = 0.0;
         crew.settled = None;
+        crew.on_the_winch = None;
         return;
     }
     let dt = time.delta_secs_f64();
@@ -352,6 +390,12 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
     //
     // Trimmed to the wind each sail actually meets rather than to the masthead fly,
     // which is what the bend terms are.
+    // **Eased past the best trim when she is overpowered**, which is the first answer to
+    // heel and the one that costs nothing: the mainsheet goes, the top of the sail twists
+    // open, and the heeling moment comes off before the drive does. The main first and
+    // the headsail hardly at all — the main is up high with a long lever and it is the
+    // sail that spills cleanly.
+    let spill = SPILLS * smoothstep(OVERPOWERED_HEEL, OVERPOWERED_HEEL + rad(9.0), heel.abs());
     if !sim.controls.headsail_aback {
         let (m, j) = optimal_sheets_bent(
             &cfg,
@@ -361,6 +405,7 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
             t.bend_main,
             t.bend_jib,
         );
+        let (m, j) = ((m + spill).min(1.0), (j + spill * 0.25).min(1.0));
         let haul = (HAUL * dt).min(1.0);
         sim.controls.main_sheet += (m - sim.controls.main_sheet) * haul;
         sim.controls.jib_sheet += (j - sim.controls.jib_sheet) * haul;
@@ -371,7 +416,10 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
     // It goes to the bank as a destination the way the player's own press does: one
     // winch, one job, and it takes as long as it takes.
     let at = sim.controls.reef;
-    if let Some(stop) = shorten(&mut crew, heel, dt, at) {
+    // Out of sheet: what she is still carrying at this heel is not something the trim
+    // can take off her any more.
+    let spilled = spill > SPILLS * 0.9;
+    if let Some(stop) = shorten(&mut crew, heel, dt, at, spilled) {
         let which = BANK.iter().position(|l| *l == Line::Reef).unwrap_or(3);
         bank.target[which] = Some(stop);
         crew.on = Some(if stop > at {
@@ -443,16 +491,26 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
         }
         return;
     }
-    let mut worst: Option<(Line, f64, f64)> = None;
-    for line in BANK {
-        if !line.rigged_for(&sim.controls) || line == Line::Reef {
-            continue;
-        }
+    // The rope already on the drum keeps the hands until it is home; only when the
+    // clutch has been closed again is there a choice to make.
+    let mut worst: Option<(Line, f64, f64)> = crew.on_the_winch.and_then(|line| {
         let want = wants(line, &sim.controls, awa, heel, aws, changing);
         let off = (want - line.get(&sim.controls)).abs();
-        if off > WORTH_THE_TRIP && worst.as_ref().is_none_or(|(_, _, had)| off > *had) {
-            worst = Some((line, want, off));
+        (off > HOME && line.rigged_for(&sim.controls)).then_some((line, want, off))
+    });
+    if worst.is_none() {
+        crew.on_the_winch = None;
+        for line in BANK {
+            if !line.rigged_for(&sim.controls) || line == Line::Reef {
+                continue;
+            }
+            let want = wants(line, &sim.controls, awa, heel, aws, changing);
+            let off = (want - line.get(&sim.controls)).abs();
+            if off > WORTH_THE_TRIP && worst.as_ref().is_none_or(|(_, _, had)| off > *had) {
+                worst = Some((line, want, off));
+            }
         }
+        crew.on_the_winch = worst.map(|(line, _, _)| line);
     }
     let Some((line, want, _)) = worst else {
         if crew.on.is_none() {
@@ -509,12 +567,12 @@ mod the_watch {
         let hard = OVERPOWERED_HEEL + rad(9.0);
         // Two seconds of it.
         for _ in 0..40 {
-            assert!(shorten(&mut crew, hard, 0.05, 0.0).is_none());
+            assert!(shorten(&mut crew, hard, 0.05, 0.0, true).is_none());
         }
         // And then she stays there.
         let mut took = None;
         for _ in 0..400 {
-            if let Some(stop) = shorten(&mut crew, hard, 0.05, 0.0) {
+            if let Some(stop) = shorten(&mut crew, hard, 0.05, 0.0, true) {
                 took = Some(stop);
                 break;
             }
@@ -530,9 +588,9 @@ mod the_watch {
         let easy = OVERPOWERED_HEEL - rad(12.0);
         let mut seconds = 0.0;
         let mut shook = None;
-        for _ in 0..2000 {
+        for _ in 0..8_000 {
             seconds += 0.05;
-            if let Some(stop) = shorten(&mut crew, easy, 0.05, 0.5) {
+            if let Some(stop) = shorten(&mut crew, easy, 0.05, 0.5, true) {
                 shook = Some(stop);
                 break;
             }
@@ -542,6 +600,34 @@ mod the_watch {
             seconds > PRESSED_FOR,
             "a reef came out after {seconds:.0} s, faster than one goes in"
         );
+    }
+
+    /// **Eased before reefed, and no slab until the sheet has been given away.**
+    ///
+    /// The two halves of the fault that had the watch reefing its way to bare poles in a
+    /// Force 5: it trimmed to maximum lift whatever the heel was, so every slab was
+    /// followed by a trim that stood her straight back up on her ear.
+    #[test]
+    fn she_is_eased_before_she_is_reefed() {
+        let mut crew = Crew::default();
+        let hard = OVERPOWERED_HEEL + rad(9.0);
+        // On her ear with the sheet still in hand: the answer is the sheet, not a reef,
+        // however long it goes on for.
+        for _ in 0..2_000 {
+            assert!(
+                shorten(&mut crew, hard, 0.05, 0.0, false).is_none(),
+                "a slab was taken with the mainsheet still hard in"
+            );
+        }
+        // And once there is no sheet left to give, the slab comes.
+        let mut took = None;
+        for _ in 0..600 {
+            if let Some(stop) = shorten(&mut crew, hard, 0.05, 0.0, true) {
+                took = Some(stop);
+                break;
+            }
+        }
+        assert_eq!(took, Some(0.25));
     }
 
     /// The vang is the one that is easiest to get backwards: it does nothing upwind,

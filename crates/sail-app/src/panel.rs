@@ -1121,6 +1121,26 @@ pub fn draw(
                                     paint::LABEL
                                 }),
                         );
+                        // **And what they are on.** The pilot has had a line saying what
+                        // it is holding since the day it was built, for the reason every
+                        // autopilot has a display: a machine working on its own that
+                        // cannot say what it is working on is a machine you watch instead
+                        // of trust. A tooltip is not that line — nobody hovers over a
+                        // switch to find out whether the reef went in.
+                        ui.set_width(104.0);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(job)
+                                    .monospace()
+                                    .size(letter::UNIT)
+                                    .color(if crew.standing {
+                                        paint::LABEL
+                                    } else {
+                                        egui::Color32::TRANSPARENT
+                                    }),
+                            )
+                            .wrap(),
+                        );
                     });
                 });
             });
