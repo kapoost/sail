@@ -1269,8 +1269,10 @@ pub fn draw(
                                             bank.selected = i;
                                             bank.since_change = 0.0;
                                         }
-                                        if clicked || step != 0 || value != line.get(&sim.controls)
-                                        {
+                                        // Working one, not picking one up to look at it:
+                                        // choosing a line off the bank is a glance, and
+                                        // a glance should not fire the watch.
+                                        if step != 0 || value != line.get(&sim.controls) {
                                             crew.stand_down("the bank");
                                         }
                                         if step != 0 {

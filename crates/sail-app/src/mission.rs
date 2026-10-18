@@ -84,6 +84,11 @@ pub struct Pilotage {
     /// Where she was when the route was last laid off, so the search starts from her
     /// rather than from the pilot boat.
     pub brig_at: DVec2,
+    /// Whether anybody has ever been ahead of her. Before that she stands on by
+    /// herself, which is the chase; after it, losing the pilot means waiting for him.
+    pub led_once: bool,
+    /// And where the job ends: the water off it she can be left in.
+    pub let_go_at: DVec2,
     /// Where she is bound, and the simulation time the job started.
     ///
     /// **The anchorage is the end of the job, not deep water.** Written first as *clear
@@ -139,11 +144,19 @@ impl Outcome {
 
 impl Pilotage {
     /// Start the job: put her outside the islands, heading in.
-    pub fn begin(&mut self, brig: &mut Brig, at: DVec2, bound_for: DVec2, now: f64) {
+    pub fn begin(
+        &mut self,
+        brig: &mut Brig,
+        at: DVec2,
+        bound_for: DVec2,
+        let_go_at: DVec2,
+        now: f64,
+    ) {
         *self = Pilotage {
             running: true,
             least_water: f64::INFINITY,
             bound_for,
+            let_go_at,
             began: now,
             ..Default::default()
         };
@@ -284,11 +297,36 @@ pub fn run(
             sim.sim.state.time,
         );
     }
+    if job.leading {
+        job.led_once = true;
+    }
     if !job.leading && was_leading {
         job.call_across(
             "where are you, pilot — we have lost you",
             sim.sim.state.time,
         );
+    }
+    // **Before anybody has led her she stands on; afterwards she waits.**
+    //
+    // Both halves are the manoeuvre. She comes in from seaward making for the coast
+    // under her own navigation, and that is the chase: she will not wait for a boat
+    // that has not caught her yet. But a ship that *has* taken a pilot and then lost
+    // sight of him does not carry on into a bay she does not know — she rounds up,
+    // hauls up her courses and lies there until he is ahead of her again, which is what
+    // every ship waiting off a pilot station is doing.
+    if !job.leading {
+        if job.led_once {
+            brig.set = [0.0, 0.45, 0.0];
+            brig.bound_for = brig.at + DVec2::new(brig.heading.sin(), brig.heading.cos()) * 400.0;
+            if was_leading {
+                job.said = Some("she is standing off, waiting for you to get ahead".into());
+            }
+        } else {
+            brig.set = [1.0, 1.0, 1.0];
+            brig.bound_for = job.bound_for;
+        }
+    } else {
+        brig.set = [1.0, 1.0, 1.0];
     }
 
     if job.leading {
@@ -397,20 +435,50 @@ pub fn fly_the_flag(job: Res<Pilotage>, mut flag: Query<&mut Visibility, With<Pi
     }
 }
 
+/// Where a ship her size is let go: the nearest water to the anchorage that she can lie
+/// in and get out of.
+///
+/// **The anchorage is not it.** Measured, which is how this was caught: every harbour in
+/// this archipelago carries 5.6 m, she draws 3.9, and the route search wants six and a
+/// third — so the way in could never reach the harbour dot and the last leg was drawn to
+/// it through water nothing had checked. A pilot does not park a ship anyway; he takes
+/// her to where she can round up and let go, and that is a place with water under her.
+pub fn where_she_is_let_go(sim: &Sim, bound_for: DVec2) -> DVec2 {
+    let Some(land) = sim.sim.land.as_ref() else {
+        return bound_for;
+    };
+    let mut best = (bound_for, f64::INFINITY);
+    for ring in 1..=8 {
+        let r = ring as f64 * 200.0;
+        for step in 0..24 {
+            let b = step as f64 / 24.0 * std::f64::consts::TAU;
+            let at = bound_for + DVec2::new(b.sin(), b.cos()) * r;
+            if land.depth(at) > SHE_DRAWS + CLEARANCE * 2.0 && r < best.1 {
+                best = (at, r);
+            }
+        }
+        if best.1.is_finite() {
+            break;
+        }
+    }
+    best.0
+}
+
 /// Whether she is clear: off the anchorage, in water that needs nobody.
 ///
 /// Both halves matter. Deep water two miles from where she is going is the sea she came
 /// in from; the anchorage with a reef still between her and it is not clear water. The
 /// job ends where the pilot's usefulness does.
-pub fn clear_of_it(sim: &Sim, brig: &Brig, bound_for: DVec2) -> bool {
+pub fn clear_of_it(sim: &Sim, brig: &Brig, let_go_at: DVec2) -> bool {
     let Some(land) = sim.sim.land.as_ref() else {
         return false;
     };
     let head = DVec2::new(brig.heading.sin(), brig.heading.cos());
-    let near = (brig.at - bound_for).length() < ARRIVED * 3.0;
-    let under = land.depth(brig.at) > SAFE_WATER;
-    let ahead = (1..=5).all(|i| land.depth(brig.at + head * (i as f64 * 150.0)) > SAFE_WATER);
-    near && under && ahead
+    let there = (brig.at - let_go_at).length() < ARRIVED;
+    let under = land.depth(brig.at) > SHE_DRAWS + CLEARANCE * 2.0;
+    let ahead =
+        (1..=5).all(|i| land.depth(brig.at + head * (i as f64 * 120.0)) > SHE_DRAWS + CLEARANCE);
+    there && under && ahead
 }
 
 /// `Enter` lets her go: the pilot flag comes down and the job is done.
@@ -436,7 +504,7 @@ pub fn discharge(
     if hook.on.is_some() {
         return;
     }
-    if !clear_of_it(&sim, &brig, job.bound_for) {
+    if !clear_of_it(&sim, &brig, job.let_go_at) {
         job.said = Some("not yet — she is not in clear water off the anchorage".into());
         sound.0.strike_damped(140.0, 0.2, 0.9);
         return;
@@ -647,7 +715,8 @@ pub fn take_the_job(
         }
         _ => offing,
     };
-    job.begin(&mut brig, offing, bound_for, sim.sim.state.time);
+    let let_go_at = where_she_is_let_go(&sim, bound_for);
+    job.begin(&mut brig, offing, bound_for, let_go_at, sim.sim.state.time);
     // Her deck cargo has been working loose since the gale: the first few are already
     // in the water astern of her.
     let head = DVec2::new(brig.heading.sin(), brig.heading.cos());
@@ -900,7 +969,8 @@ pub fn lay_off_the_route(sim: Res<Sim>, mut job: ResMut<Pilotage>, time: Res<Tim
     let from = sail_core::wind::direction_of(wind);
     // From where she is, because what is behind her is nobody's problem now.
     let brig_at = job.brig_at;
-    job.route = the_way_in(&sim, brig_at, job.bound_for, from).unwrap_or_default();
+    let let_go_at = job.let_go_at;
+    job.route = the_way_in(&sim, brig_at, let_go_at, from).unwrap_or_default();
 }
 
 #[cfg(test)]
@@ -926,25 +996,32 @@ mod the_pilots_water {
             let Some((offing, bound_for)) = find_her_a_job(&sim, here) else {
                 continue;
             };
-            let Some(route) = the_way_in(&sim, offing, bound_for, 0.0) else {
+            let let_go_at = where_she_is_let_go(&sim, bound_for);
+            assert!(
+                land.depth(let_go_at) > SHE_DRAWS + CLEARANCE,
+                "seed {seed}: she is let go in {:.1} m",
+                land.depth(let_go_at)
+            );
+            let Some(route) = the_way_in(&sim, offing, let_go_at, 0.0) else {
                 continue;
             };
             found += 1;
             assert!(route.len() >= 2, "a route with nothing in it");
             assert!(
-                (route[route.len() - 1] - bound_for).length() < 1.0,
-                "the way in does not end at the anchorage"
+                (route[route.len() - 1] - let_go_at).length() < 1.0,
+                "the way in does not end where she is let go"
             );
             for pair in route.windows(2) {
                 let steps = ((pair[1] - pair[0]).length() / 40.0).ceil() as usize;
                 for k in 0..=steps {
                     let at = pair[0].lerp(pair[1], k as f64 / steps as f64);
-                    // The last approach is allowed to shoal towards the anchorage
-                    // itself, because an anchorage *is* shoal water — that is what
-                    // makes it an anchorage.
-                    if (at - bound_for).length() < ARRIVED {
-                        continue;
-                    }
+                    // **No exemption for the last leg.** It used to skip everything
+                    // within three cables of the anchorage, which is exactly the water
+                    // the search could not reach — every harbour here carries 5.6 m and
+                    // the search wants 6.3 — so the approach was drawn to the harbour
+                    // dot through soundings nothing had looked at, and the test said it
+                    // was fine. Now the route ends where she is let go, and the whole of
+                    // it is checked.
                     let under = land.depth(at);
                     assert!(
                         under > SHE_DRAWS,
@@ -955,5 +1032,73 @@ mod the_pilots_water {
             }
         }
         assert!(found > 0, "no seed produced a pilotage job to check");
+    }
+}
+
+#[cfg(test)]
+mod can_the_job_even_end {
+    use super::*;
+
+    /// **The job has to be finishable**, which is a thing to measure rather than hope:
+    /// there must be water off every anchorage that she can be left in.
+    #[test]
+    fn there_is_water_off_every_anchorage_to_let_her_go_in() {
+        for seed in 0..6u64 {
+            let sim = Sim::new(crate::weather::Weather::draw(seed));
+            let Some(land) = sim.sim.land.as_ref() else {
+                continue;
+            };
+            let here = sim.sim.state.pos;
+            let Some((_, bound_for)) = find_her_a_job(&sim, here) else {
+                continue;
+            };
+            let let_go_at = where_she_is_let_go(&sim, bound_for);
+            let under = land.depth(let_go_at);
+            assert!(
+                under > SHE_DRAWS + CLEARANCE,
+                "seed {seed}: the only water off the anchorage is {under:.1} m"
+            );
+            assert!(
+                (let_go_at - bound_for).length() < ARRIVED * 4.0,
+                "seed {seed}: she would be left {:.0} m from where she was going",
+                (let_go_at - bound_for).length()
+            );
+        }
+    }
+
+    /// PROBE: how deep is it round an anchorage.
+    #[test]
+    #[ignore]
+    fn probe_clear_water() {
+        for seed in 0..6u64 {
+            let sim = Sim::new(crate::weather::Weather::draw(seed));
+            let Some(land) = sim.sim.land.as_ref() else {
+                continue;
+            };
+            let here = sim.sim.state.pos;
+            let Some((_, bound_for)) = find_her_a_job(&sim, here) else {
+                continue;
+            };
+            let at_harbour = land.depth(bound_for);
+            let mut deepest: f64 = 0.0;
+            let mut best_at = bound_for;
+            for step in 0..24 {
+                let b = step as f64 / 24.0 * std::f64::consts::TAU;
+                for r in [400.0, 800.0, 1_200.0, 1_600.0] {
+                    let at = bound_for + DVec2::new(b.sin(), b.cos()) * r;
+                    let d = land.depth(at);
+                    if d > deepest && r < ARRIVED * 3.0 {
+                        deepest = d;
+                        best_at = at;
+                    }
+                }
+            }
+            println!(
+                "seed {seed}: harbour {at_harbour:.1} m, deepest within {:.0} m is {deepest:.1} m \
+                 at {:.0} m off — SAFE_WATER is {SAFE_WATER}",
+                ARRIVED * 3.0,
+                (best_at - bound_for).length()
+            );
+        }
     }
 }

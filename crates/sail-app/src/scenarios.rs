@@ -506,7 +506,12 @@ mod the_pilotage {
         brig.speed = kn_to_ms(5.0);
         brig.at = here - glam::DVec2::new(0.0, astern);
         brig.bound_for = here + glam::DVec2::new(0.0, 5_000.0);
-        app.world_mut().resource_mut::<Pilotage>().running = true;
+        let mut job = app.world_mut().resource_mut::<Pilotage>();
+        job.running = true;
+        // Where she is bound on her own, which is what she steers for until somebody is
+        // ahead of her — the real job sets it in `begin`.
+        job.bound_for = here + glam::DVec2::new(0.0, 5_000.0);
+        job.let_go_at = job.bound_for;
         here
     }
 
@@ -533,6 +538,47 @@ mod the_pilotage {
         assert!(
             (now - here).length() < 400.0,
             "she is steering at something that is not where the pilot boat has been"
+        );
+    }
+
+    /// **The chase, and then the waiting.** Both halves are the manoeuvre: she comes in
+    /// from seaward under her own navigation and will not wait for a boat that has not
+    /// caught her, and a ship that *has* taken a pilot and then lost sight of him rounds
+    /// up and lies there rather than carrying on into a bay she does not know.
+    #[test]
+    fn she_stands_on_until_she_is_led_and_waits_once_she_has_been() {
+        let mut app = with_a_brig();
+        // Astern of her: nobody is leading, and nobody has.
+        standing_in(&mut app, -200.0);
+        let harbour = app.world().resource::<Brig>().bound_for;
+        for _ in 0..8 {
+            app.update();
+        }
+        {
+            let brig = app.world().resource::<Brig>();
+            assert!(
+                (brig.bound_for - harbour).length() < 1.0,
+                "she stopped before anybody had caught her"
+            );
+            assert_eq!(brig.set, [1.0, 1.0, 1.0], "and she had all sail set");
+        }
+        // Now get ahead of her, and then drop back again.
+        let here = app.world().resource::<Sim>().sim.state.pos;
+        app.world_mut().resource_mut::<Brig>().at = here - glam::DVec2::new(0.0, 300.0);
+        for _ in 0..4 {
+            app.update();
+        }
+        assert!(app.world().resource::<Pilotage>().led_once);
+        app.world_mut().resource_mut::<Brig>().at = here + glam::DVec2::new(0.0, 300.0);
+        for _ in 0..4 {
+            app.update();
+        }
+        let brig = app.world().resource::<Brig>();
+        assert!(!app.world().resource::<Pilotage>().leading);
+        assert!(
+            brig.set[0] < 0.1 && brig.set[2] < 0.1,
+            "she carried on under all plain sail with no pilot in sight: {:?}",
+            brig.set
         );
     }
 

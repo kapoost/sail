@@ -961,7 +961,7 @@ pub fn draw(
             // The pilot's water first, under everything else: it is advice, and advice
             // does not go on top of the plot.
             if job.running && job.over.is_none() {
-                the_way_in(&table, &job.route, job.bound_for);
+                the_way_in(&table, &job.route, job.let_go_at);
             }
 
             the_track_made_good(&table, &nav);
