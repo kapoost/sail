@@ -289,80 +289,125 @@ pub fn setup(
             // The scan arrives with its length along X and Y up, so it is turned a
             // quarter circle to put the bow at -Z where the rest of the boat expects
             // it, and dropped so her waterline is the waterline.
+            // **Which hull, and how it is stood up.**
+            //
+            // The scan is the default and the knobs are for trying another one. Putting
+            // a generated hull in front of the camera is four numbers — which file, how
+            // long it is in its own units, which way its bow points, and how far down it
+            // sits — and all four are wrong on the first look at any model. Rebuilding
+            // the game between each guess is what makes that a bad afternoon, so they
+            // are environment variables and the loop is seconds:
+            //
+            //   SAIL_HULL=sample.glb SAIL_HULL_LOA=1.0 SAIL_HULL_TURN=2 SAIL_HULL_SINK=-0.4
+            //
+            // `TURN` is in quarter circles about the mast, because a model's bow lands
+            // on one of four axes and never anywhere between them.
+            let knob = |name: &str, fallback: f32| -> f32 {
+                std::env::var(name)
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(fallback)
+            };
+            let (file, scan_loa, quarters, sink) = match std::env::var("SAIL_HULL") {
+                Ok(file) if !file.is_empty() => (
+                    file,
+                    knob("SAIL_HULL_LOA", 1.0),
+                    knob("SAIL_HULL_TURN", 0.0),
+                    knob("SAIL_HULL_SINK", HULL_SINKAGE),
+                ),
+                // Minus a quarter turn, not plus. Which end of a double-ender is the
+                // bow is not obvious from a bounding box — both are pointed — so it was
+                // settled from the hull's own shape: her greatest beam is a little
+                // abaft amidships and the longer run from there is towards -X, which is
+                // where the bow of a hull like this is.
+                _ => ("venus.glb".to_string(), SCAN_LOA, -1.0, HULL_SINKAGE),
+            };
             b.spawn((
                 // Bevy 0.20 renamed the old `SceneRoot` to this, scenes having been
                 // rebuilt around the world-serialization machinery.
                 bevy::world_serialization::WorldAssetRoot(
-                    assets.load(GltfAssetLabel::Scene(0).from_asset("venus.glb")),
+                    assets.load(GltfAssetLabel::Scene(0).from_asset(file)),
                 ),
-                Transform::from_xyz(0.0, HULL_SINKAGE, 0.0)
-                    // Minus a quarter turn, not plus. Which end of a double-ender is
-                    // the bow is not obvious from a bounding box — both are pointed —
-                    // so it was settled from the hull's own shape: her greatest beam
-                    // is a little abaft amidships and the longer run from there is
-                    // towards -X, which is where the bow of a hull like this is.
-                    .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2))
-                    .with_scale(Vec3::splat(cfg.loa as f32 / SCAN_LOA)),
+                Transform::from_xyz(0.0, sink, 0.0)
+                    .with_rotation(Quat::from_rotation_y(
+                        quarters * std::f32::consts::FRAC_PI_2,
+                    ))
+                    .with_scale(Vec3::splat(cfg.loa as f32 / scan_loa)),
             ));
             // Deck, coachroof and cockpit, built over the open hull — see `deck.rs`.
             // Painted rather than varnished: a working boat's deck is painted, and the
             // scan's own weathered planking is the thing worth looking at.
+            // A generated hull arrives with its own deck, coachroof and cockpit on it,
+            // and ours built over the top of those is two decks. `SAIL_DECK=off` takes
+            // the drawn one away so the model can be looked at as it is.
+            let our_deck = std::env::var("SAIL_DECK")
+                .map(|v| v != "off")
+                .unwrap_or(true);
             let (walked_on, painted) = crate::deck::structure_mesh();
             // Laid planking on everything you stand on, in metres, so a plank is
             // 62 mm wide on the foredeck and on the cabin top alike.
-            b.spawn((
-                Mesh3d(meshes.add(walked_on)),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::WHITE,
-                    base_color_texture: Some(images.add(crate::deck_texture::planking())),
-                    normal_map_texture: Some(images.add(crate::deck_texture::planking_normal())),
-                    perceptual_roughness: 0.68,
-                    ..default()
-                })),
-                Transform::default(),
-            ));
-            // Cabin sides and the cockpit well: painted, and glossier than the deck,
-            // which is the difference your eye uses to tell a wall from a floor.
-            let painted_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.88, 0.87, 0.83),
-                perceptual_roughness: 0.32,
-                double_sided: true,
-                cull_mode: None,
-                ..default()
-            });
-            b.spawn((
-                Mesh3d(meshes.add(painted)),
-                MeshMaterial3d(painted_mat.clone()),
-                Transform::default(),
-            ));
-            // Bottom boards over the bilge, planked like the deck because that is
-            // what they are. Without them the open cockpit looks straight through the
-            // hull at the sea, which is a thing no boat does for long.
-            b.spawn((
-                Mesh3d(meshes.add(crate::deck::sole_mesh())),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.62, 0.58, 0.50),
-                    base_color_texture: Some(images.add(crate::deck_texture::planking())),
-                    perceptual_roughness: 0.80,
+            if our_deck {
+                b.spawn((
+                    Mesh3d(meshes.add(walked_on)),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::WHITE,
+                        base_color_texture: Some(images.add(crate::deck_texture::planking())),
+                        normal_map_texture: Some(
+                            images.add(crate::deck_texture::planking_normal()),
+                        ),
+                        perceptual_roughness: 0.68,
+                        ..default()
+                    })),
+                    Transform::default(),
+                ));
+                // Cabin sides and the cockpit well: painted, and glossier than the deck,
+                // which is the difference your eye uses to tell a wall from a floor.
+                let painted_mat = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.88, 0.87, 0.83),
+                    perceptual_roughness: 0.32,
                     double_sided: true,
                     cull_mode: None,
                     ..default()
-                })),
-                Transform::default(),
-            ));
-            // King plank and covering board, in the same timber as the trim.
-            b.spawn((
-                Mesh3d(meshes.add(crate::deck::deck_detail_mesh())),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.70, 0.64, 0.52),
-                    base_color_texture: Some(images.add(crate::deck_texture::planking())),
-                    perceptual_roughness: 0.60,
-                    ..default()
-                })),
-                Transform::default(),
-            ));
-            // Toerail along the sheer and coaming round the cockpit: varnished, so
-            // they read as trim rather than as more deck.
+                });
+                b.spawn((
+                    Mesh3d(meshes.add(painted)),
+                    MeshMaterial3d(painted_mat.clone()),
+                    Transform::default(),
+                ));
+                // Bottom boards over the bilge, planked like the deck because that is
+                // what they are. Without them the open cockpit looks straight through the
+                // hull at the sea, which is a thing no boat does for long.
+                b.spawn((
+                    Mesh3d(meshes.add(crate::deck::sole_mesh())),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.62, 0.58, 0.50),
+                        base_color_texture: Some(images.add(crate::deck_texture::planking())),
+                        perceptual_roughness: 0.80,
+                        double_sided: true,
+                        cull_mode: None,
+                        ..default()
+                    })),
+                    Transform::default(),
+                ));
+                // King plank and covering board, in the same timber as the trim.
+                b.spawn((
+                    Mesh3d(meshes.add(crate::deck::deck_detail_mesh())),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.70, 0.64, 0.52),
+                        base_color_texture: Some(images.add(crate::deck_texture::planking())),
+                        perceptual_roughness: 0.60,
+                        ..default()
+                    })),
+                    Transform::default(),
+                ));
+            } // `SAIL_DECK=off` ends here. What is above is the structure we draw over
+              // the scan; a generated hull brings its own and two decks is two decks.
+              // What is below is gear, and a hull with no winches on it is not a boat
+              // whichever mesh it came from.
+
+            // Toerail along the sheer and coaming round the cockpit: varnished, so they
+            // read as trim rather than as more deck. The materials live out here because
+            // the fittings are made of them too.
             let varnish = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.46, 0.31, 0.16),
                 perceptual_roughness: 0.25,
@@ -377,11 +422,13 @@ pub fn setup(
                 perceptual_roughness: 0.30,
                 ..default()
             });
-            b.spawn((
-                Mesh3d(meshes.add(crate::deck::trim_mesh())),
-                MeshMaterial3d(varnish.clone()),
-                Transform::default(),
-            ));
+            if our_deck {
+                b.spawn((
+                    Mesh3d(meshes.add(crate::deck::trim_mesh())),
+                    MeshMaterial3d(varnish.clone()),
+                    Transform::default(),
+                ));
+            }
             crate::fittings::spawn(
                 b,
                 &mut crate::fittings::Workshop {

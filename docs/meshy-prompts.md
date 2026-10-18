@@ -84,3 +84,30 @@ poprawia teksturę, nie proporcje.
 pawęży z podcięciem. Jeśli kadłub z Meshy będzie lepszy od proceduralnego — a rufa brygu
 jest dziś za bardzo pudełkowata — podmieniamy sam kadłub i zostawiamy omasztowanie z
 kodu.
+
+
+---
+
+## Wkładanie wygenerowanego kadłuba do gry
+
+Cztery pokrętła, bez przebudowy — bo wszystkie cztery są źle ustawione przy pierwszym
+spojrzeniu na dowolny model, a przebudowa między każdym zgadywaniem to zmarnowany
+wieczór:
+
+```
+SAIL_HULL=trellis-hull.glb   # plik w assets/ (albo obok binarki)
+SAIL_HULL_LOA=1.0            # jak długi jest model we własnych jednostkach
+SAIL_HULL_TURN=2             # ćwiartki obrotu wokół masztu: dziób ma trafić na -Z
+SAIL_HULL_SINK=-0.55         # ile metrów w dół, żeby linia wodna była linią wodną
+SAIL_DECK=off                # model ma własny pokład — nasz zdjąć, bo dwa to dwa
+```
+
+Jak znaleźć te liczby bez zgadywania: wczytaj siatkę i zmierz ją. Dla `sample.glb` z
+TRELLIS wyszło 4094 wierzchołki, 5060 trójkątów, długość 1,0 wzdłuż Z, szerokość 0,33,
+wysokość 0,41 — czyli proporcje 11,0 × 3,67 × 4,5 m po przeskalowaniu do naszej długości,
+przy konfiguracji 11,00 × 3,40 × (2,25 zanurzenia). **Dziób poznaje się po zbieżności
+przekrojów:** szerokość spada do 0,046 na końcu +Z i zostaje 0,186 na −Z, więc +Z to
+dziób, a −Z pawęż — stąd `TURN=2`, bo u nas dziób patrzy na −Z.
+
+Pliki `assets/*-hull.glb` są poza gitem: to eksperyment, a nie łódka, i licencja tego,
+co wychodzi z generatora, zależy od tego, czym się go karmiło.

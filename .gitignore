@@ -16,3 +16,7 @@
 
 # Session scratch
 /.claude/
+
+# Generated hulls under evaluation: provenance and licence not settled, and they
+# are an experiment rather than the boat. The knobs that load them are in boat.rs.
+assets/*-hull.glb
