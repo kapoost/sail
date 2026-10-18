@@ -837,7 +837,7 @@ pub fn draw(
     // the hand rests. Asked for from the deck, and it is the arrangement of a real
     // binnacle pedestal: the card at eye height on top of the pillar and the gear you
     // work at the bottom of it.
-    let corner = egui::Area::new("corner".into())
+    egui::Area::new("corner".into())
         .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-10.0, -10.0))
         .interactable(true)
         .show(ctx, |ui| {
@@ -937,7 +937,17 @@ pub fn draw(
                         });
                     });
                 });
+                // **The same width as the glass over it, so both end at the same edge.**
+                //
+                // The column is as wide as its widest block and a narrower one in it
+                // leaves a strip of sea down the right of the screen between the two —
+                // reported from the deck as the sheets not lining up with the
+                // instruments above them. Right-aligning the row instead made the area
+                // claim the whole window and paint a black wall across it, which is what
+                // `Align::Max` does in a container with no width to align inside of.
+                let case_width = ui.min_rect().width();
                     frame.show(ui, |ui| {
+                    ui.set_min_width(case_width - 16.0);
                     ui.horizontal_top(|ui| {
                         // Sized to its contents now. The fixed width was what kept a
                         // centre-anchored bar from sliding about as the contents
@@ -1078,6 +1088,73 @@ pub fn draw(
                                                                                     .color(egui::Color32::from_gray(90)),
                                                                             );
                                                                         }
+                                                                        // **The watch, under the wardrobe.**
+                                                                        //
+                                                                        // It stood on its own plate beside the case, which was
+                                                                        // the right idea about what it *is* — a decision about
+                                                                        // who is sailing her rather than a reading — and the
+                                                                        // wrong place for it: a free-floating panel anchored
+                                                                        // off another panel's edge sits on top of whatever
+                                                                        // that panel grows into, and it covered the log and
+                                                                        // the wind. It belongs with the sails, because what it
+                                                                        // does is work them.
+                                                                        ui.add_space(8.0);
+                                                                        ui.horizontal(|ui| {
+                                                                            let job = crew.doing();
+                                                                            if hands(ui, crew.standing)
+                                                                                .on_hover_text(if crew.standing {
+                                                                                    format!("the watch has the sails — {job}")
+                                                                                } else {
+                                                                                    "call the watch on deck: they sail her, you steer"
+                                                                                        .to_string()
+                                                                                })
+                                                                                .clicked()
+                                                                            {
+                                                                                crew.standing = !crew.standing;
+                                                                                info!(
+                                                                                    "{}",
+                                                                                    if crew.standing {
+                                                                                        "watch on deck — they have the sails"
+                                                                                    } else {
+                                                                                        "watch stood down — you have the sails"
+                                                                                    }
+                                                                                );
+                                                                            }
+                                                                            ui.vertical(|ui| {
+                                                                                ui.label(
+                                                                                    egui::RichText::new(if crew.standing {
+                                                                                        "WATCH"
+                                                                                    } else {
+                                                                                        "SOLO"
+                                                                                    })
+                                                                                    .monospace()
+                                                                                    .size(letter::UNIT)
+                                                                                    .color(if crew.standing {
+                                                                                        paint::GOOD
+                                                                                    } else {
+                                                                                        paint::LABEL
+                                                                                    }),
+                                                                                );
+                                                                                // What they are on, for the same reason the
+                                                                                // pilot says what it is holding: a machine
+                                                                                // working on its own that cannot say what it is
+                                                                                // working on is one you watch instead of trust.
+                                                                                ui.set_width(96.0);
+                                                                                ui.add(
+                                                                                    egui::Label::new(
+                                                                                        egui::RichText::new(job)
+                                                                                            .monospace()
+                                                                                            .size(letter::UNIT)
+                                                                                            .color(if crew.standing {
+                                                                                                paint::LABEL
+                                                                                            } else {
+                                                                                                egui::Color32::TRANSPARENT
+                                                                                            }),
+                                                                                    )
+                                                                                    .wrap(),
+                                                                                );
+                                                                            });
+                                                                        });
                                                                     });
                                         });
                                     });
@@ -1088,76 +1165,6 @@ pub fn draw(
                 });
             });
         });
-
-    // --- The watch, on its own plate beside the instruments -------------------------
-    //
-    // **Off the case on purpose.** Everything inside that case is a reading or a lever
-    // — things the ship does and things you do to her. Calling the watch on deck is
-    // neither: it is a decision about who is sailing the boat, which is why it is a
-    // switch on its own plate screwed to the bulkhead beside the instruments and not
-    // another lamp in among them. It is also then the one control you can find without
-    // reading anything, which is what it is for.
-    {
-        let case = corner.response.rect;
-        let job = crew.doing();
-        egui::Area::new("watch".into())
-            .fixed_pos(egui::pos2(case.left() - 66.0, case.top() + 26.0))
-            .interactable(true)
-            .show(ctx, |ui| {
-                frame.show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        if hands(ui, crew.standing)
-                            .on_hover_text(if crew.standing {
-                                format!("the watch has the sails — {job}")
-                            } else {
-                                "call the watch on deck: they sail her, you steer".to_string()
-                            })
-                            .clicked()
-                        {
-                            crew.standing = !crew.standing;
-                            info!(
-                                "{}",
-                                if crew.standing {
-                                    "watch on deck — they have the sails"
-                                } else {
-                                    "watch stood down — you have the sails"
-                                }
-                            );
-                        }
-                        ui.label(
-                            egui::RichText::new(if crew.standing { "WATCH" } else { "SOLO" })
-                                .monospace()
-                                .size(letter::UNIT)
-                                .color(if crew.standing {
-                                    paint::GOOD
-                                } else {
-                                    paint::LABEL
-                                }),
-                        );
-                        // **And what they are on.** The pilot has had a line saying what
-                        // it is holding since the day it was built, for the reason every
-                        // autopilot has a display: a machine working on its own that
-                        // cannot say what it is working on is a machine you watch instead
-                        // of trust. A tooltip is not that line — nobody hovers over a
-                        // switch to find out whether the reef went in.
-                        ui.set_width(104.0);
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(job)
-                                    .monospace()
-                                    .size(letter::UNIT)
-                                    .color(if crew.standing {
-                                        paint::LABEL
-                                    } else {
-                                        egui::Color32::TRANSPARENT
-                                    }),
-                            )
-                            .wrap(),
-                        );
-                    });
-                });
-            });
-    }
 
     // --- The rack of lines, in the middle of the bottom -----------------------------
     //
