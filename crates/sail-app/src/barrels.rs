@@ -40,10 +40,19 @@ const ASTERN: f64 = 9.0;
 const LEEWAY: f64 = 0.03;
 
 /// How many are out there at once.
-const HOW_MANY: usize = 14;
+///
+/// Forty, up from fourteen. The first number was a sea with a barrel in it now and
+/// then, which is realistic and useless: hooking one is a manoeuvre you want to *drill*,
+/// and a drill needs the next repetition to be a few minutes away rather than a passage
+/// away. This is a cargo gone over the side, not flotsam.
+const HOW_MANY: usize = 40;
 
 /// Where they are scattered, metres from her when the world is built.
-const SCATTERED_WITHIN: (f64, f64) = (300.0, 2_600.0);
+///
+/// The near edge is a cable and a half — far enough that the first one has to be found
+/// through the glasses and sailed to, near enough that the finding is the start of the
+/// game rather than the whole of it.
+const SCATTERED_WITHIN: (f64, f64) = (260.0, 2_600.0);
 
 /// Everything floating that is not a boat.
 #[derive(Resource, Default)]
