@@ -398,6 +398,40 @@ Oscar over the side, and get him back. It talks you through a recognised recover
 than leaving you to invent one — and it is the one piece of boat handling where being bad
 at it costs a life and nobody practises.
 
+## The boathook, and what is floating out there
+
+Four feet of varnished ash with a hook on the end, lying in its chocks on the starboard
+side deck. It is on the boat because it is on every boat, and it is in the game because
+of what it does to two manoeuvres that used to end by themselves: coming alongside a
+person in the water, and picking the lifebuoy back out of it. The hook goes to whatever
+is within its length — you do not aim it — and `Enter` takes the catch. **When** is the
+whole of it: a hook put on while the deck is dropping away is a hook torn out of your
+hands, and the sea decides when that is, not the player.
+
+To practise that for the price of a barrel, there are forty casks adrift in the
+archipelago. Through the glasses the nearest one inside four hundred metres is reported
+the way a lookout reports it — *a cask fine on the starboard bow, 280 m* — because a
+bearing in words puts your head in the right place where a figure makes you do arithmetic
+first. The water you have to get her into is drawn on the water: a ring round each one,
+ivory outside it, green when she is in it and slow enough to hold what she hooks, and
+vermilion when she is in it going too fast, which is the commonest way this is got wrong.
+Hooked casks go on the painter astern, nose to tail, seven metres apart, and follow her
+round a headland instead of cutting the corner onto it. They come off at any anchorage,
+one at a time, alongside and stopped.
+
+## The watch on deck
+
+The pilot steers because a tiller pilot is a box you can buy and bolt down. There is no
+box that trims a boat — what trims a boat is people, which is why the switch beside the
+instruments has two of them engraved on it. With the watch on deck you take the helm and
+they sail her: the sheets continuously, trimmed to the wind each sail actually meets
+rather than to the masthead fly; the shape controls one line at a time, because there is
+one winch on the coachroof and a crew is subject to that rule too; the right sail for the
+angle and the breeze, which is a job with stages rather than a setting — roll the old one
+away, bend the new one on, set it. They ease before they reef, which is the order that
+matters: a slab is twenty minutes of work and a sheet is a second. A hand on any sheet
+stands them down, the way a hand on the tiller takes the helm from the pilot.
+
 ## The pilot
 
 Two pieces of gear in one box, because they are two pieces of gear on a real boat. `P`

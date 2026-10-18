@@ -377,6 +377,7 @@ fn main() {
                         barrels::drift,
                         barrels::dress,
                         barrels::float,
+                        barrels::land_them,
                     )
                         .chain(),
                     navigation::lost_at_sea,

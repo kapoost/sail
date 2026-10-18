@@ -613,6 +613,7 @@ pub fn draw(
     polar: Res<crate::hud::Polar>,
     mut fishing: ResMut<crate::fishing::Fishing>,
     mut crew: ResMut<crate::crew::Crew>,
+    flotsam: Res<crate::barrels::Flotsam>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     // How long the screen has been up, so it can surface rather than appear.
@@ -805,6 +806,18 @@ pub fn draw(
                     ),
                     ("DONE", &format!("{}", course.delivered)),
                 );
+                // **The casks, but only once there are any.** A counter that reads zero
+                // all passage is a line of instrument saying nothing, and this panel is
+                // already the one thing on screen that cannot be folded away. What is on
+                // the painter is the number that matters while you are collecting them —
+                // she tows slower with every one — and what is ashore is the score.
+                if !flotsam.astern.is_empty() || flotsam.landed > 0 {
+                    readout_pair(
+                        ui,
+                        ("IN TOW", &format!("{}", flotsam.astern.len())),
+                        ("ASHORE", &format!("{}", flotsam.landed)),
+                    );
+                }
             });
         });
 
