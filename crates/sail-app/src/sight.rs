@@ -418,6 +418,43 @@ pub fn aim(
     }
 }
 
+/// How far a cask can be picked out through the glasses, metres.
+///
+/// **A barrel is a hard thing to see and an easy thing to find.** Half of it is under
+/// water and the half above is the colour of wet wood; at two hundred metres with the
+/// naked eye it is one dark lump among a thousand, which is exactly what a sea looks
+/// like. Through seven-by-fifties it is a *shape that does not move with the waves* —
+/// and that is what a lookout is actually doing: not seeing further, but holding one
+/// patch of water still enough for something out of place to show.
+///
+/// Four hundred metres, which is about where a half-submerged drum stops being a shape
+/// and becomes a rumour.
+const CASK_SPOTTED: f64 = 400.0;
+
+/// Where a thing lies relative to her head, in the words a lookout gives it in.
+///
+/// **A bearing from a lookout is not a number.** *Two points off the starboard bow* is
+/// how it has been said since before anybody wrote any of this down, and it is said that
+/// way because the person hearing it is looking for the thing rather than plotting it:
+/// the words put your head in the right place, and a figure makes you do arithmetic
+/// first.
+pub fn off_the_bow(relative: f64) -> String {
+    let deg = sail_core::units::wrap_pi(relative).to_degrees();
+    let side = if deg < 0.0 { "port" } else { "starboard" };
+    let off = deg.abs();
+    match off {
+        _ if off < 5.0 => "right ahead".to_string(),
+        _ if off < 25.0 => format!("fine on the {side} bow"),
+        _ if off < 60.0 => format!("on the {side} bow"),
+        _ if off < 80.0 => format!("broad on the {side} bow"),
+        _ if off < 100.0 => format!("on the {side} beam"),
+        _ if off < 125.0 => format!("broad on the {side} quarter"),
+        _ if off < 160.0 => format!("on the {side} quarter"),
+        _ if off < 175.0 => format!("fine on the {side} quarter"),
+        _ => "right astern".to_string(),
+    }
+}
+
 /// The glasses at the eye: the lens coming up, and the view narrowing with it.
 ///
 /// Over a third of a second rather than instantly, because a cut from one field of view
@@ -450,6 +487,8 @@ pub fn draw(
     sighting: Res<Sighting>,
     nav: Res<Navigation>,
     chart: Res<crate::chart::Chart>,
+    sim: Res<Sim>,
+    flotsam: Res<crate::barrels::Flotsam>,
 ) -> Result {
     use bevy_egui::egui;
     if !sighting.up && sighting.lens < 0.01 {
@@ -513,6 +552,33 @@ pub fn draw(
                 egui::FontId::monospace(13.0),
                 egui::Color32::from_rgb(232, 176, 58),
             );
+        }
+        // **And what is floating out there**, which is the other thing a pair of glasses
+        // is for. A cask is not hard to see because it is far away — it is hard because
+        // it is one dark lump among a thousand, and what the glasses do is hold a patch
+        // of water still enough for the one that is not a wave to show. The report comes
+        // in a lookout's words: where to put your head, and how far.
+        let here = sim.sim.state.pos;
+        if let Some(cask) = flotsam.nearest(here) {
+            let off = cask - here;
+            let range = off.length();
+            if range < CASK_SPOTTED {
+                let bearing = off.x.atan2(off.y);
+                painter.text(
+                    egui::pos2(
+                        screen.center().x,
+                        screen.center().y + screen.height() * 0.345,
+                    ),
+                    egui::Align2::CENTER_CENTER,
+                    format!(
+                        "a cask {}, {:.0} m",
+                        off_the_bow(bearing - sim.sim.state.heading),
+                        range
+                    ),
+                    egui::FontId::monospace(13.0),
+                    egui::Color32::from_rgb(222, 218, 206),
+                );
+            }
         }
     }
     if !sighting.up {
@@ -892,5 +958,29 @@ mod what_she_may_shoot {
     #[test]
     fn not_lost_names_everything() {
         assert!(can_be_named("Fuglvoe", false, &[]));
+    }
+}
+
+#[cfg(test)]
+mod the_lookout {
+    use super::*;
+    use sail_core::units::rad;
+
+    /// **The words a lookout gives a bearing in**, and the boundaries between them.
+    ///
+    /// They are not decoration: *two points off the starboard bow* puts your head in the
+    /// right place, and a figure makes you do arithmetic before you can start looking.
+    #[test]
+    fn a_bearing_is_given_in_the_words_it_is_looked_for_in() {
+        assert_eq!(off_the_bow(0.0), "right ahead");
+        assert_eq!(off_the_bow(rad(15.0)), "fine on the starboard bow");
+        assert_eq!(off_the_bow(rad(-15.0)), "fine on the port bow");
+        assert_eq!(off_the_bow(rad(45.0)), "on the starboard bow");
+        assert_eq!(off_the_bow(rad(90.0)), "on the starboard beam");
+        assert_eq!(off_the_bow(rad(-140.0)), "on the port quarter");
+        assert_eq!(off_the_bow(rad(180.0)), "right astern");
+        // And the long way round comes to the same place, because a bearing is an angle
+        // and not a number of degrees somebody typed.
+        assert_eq!(off_the_bow(rad(345.0)), "fine on the port bow");
     }
 }
