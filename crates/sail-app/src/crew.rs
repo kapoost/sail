@@ -314,40 +314,6 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
             }
         }
     }
-    if let Some(to) = crew.changing {
-        crew.on = Some("changing the headsail");
-        // **A change is a job and not a trim**, so the furling line is worked right to
-        // its end rather than to within a tenth of it. The first version left this to
-        // the general gear loop, which stops at a line that is close enough — and a
-        // drum nine tenths home is a sail still on the bow, so the change stood there
-        // half done for as long as anybody watched it.
-        //
-        // The old sail away first. On the stay that is the drum; set flying it is the
-        // sail coming down on deck. Either way the rule the keyboard obeys is the rule
-        // here: nothing is bent on until the bow is clear.
-        // Rolled right away while the old sail is still the one on the bow; run out
-        // again the moment the new one is bent on.
-        let bent_on = sim.controls.headsail == to;
-        let want = if bent_on { 0.0 } else { 1.0 };
-        let step = Line::Furl.rate(&sim.controls) * dt;
-        let now = sim.controls.furl;
-        let next = if (want - now).abs() <= step {
-            want
-        } else {
-            now + step * (want - now).signum()
-        };
-        sim.controls.furl = next;
-        if !bent_on && next >= 0.999 {
-            sim.controls.headsail = to;
-            info!("crew: {} bent on", to.name());
-        }
-        if bent_on && next <= 0.001 {
-            crew.changing = None;
-            info!("crew: {} set and drawing", to.name());
-        }
-        // One winch, one job: while the foredeck is busy nothing else gets hands.
-        return;
-    }
     let changing = crew.changing.is_some();
 
     // --- In irons, back the headsail ------------------------------------------------
@@ -428,6 +394,49 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
     // Because there is one winch on the coachroof and this crew is subject to the same
     // rule the player is. Whichever line is furthest from where it should be gets the
     // hands; a line with stops is given a destination and left to run there.
+    // --- The foredeck, if a change was decided on above -----------------------------
+    //
+    // It sits *here*, in the gear section, and not up with the decision — which is where
+    // it was written first, with a `return` under it. That return meant that for the
+    // quarter of a minute a change takes, nobody was on the sheets and nobody would have
+    // backed the headsail if she had gone into irons: the whole crew had apparently
+    // walked forward. The sheets are on their own winches and somebody's hands never
+    // leave them. What a sail change actually monopolises is the one winch on the
+    // coachroof, which is exactly what this section is.
+    if let Some(to) = crew.changing {
+        crew.on = Some("changing the headsail");
+        // **A change is a job and not a trim**, so the furling line is worked right to
+        // its end rather than to within a tenth of it. The first version left this to
+        // the general gear loop, which stops at a line that is close enough — and a
+        // drum nine tenths home is a sail still on the bow, so the change stood there
+        // half done for as long as anybody watched it.
+        //
+        // The old sail away first. On the stay that is the drum; set flying it is the
+        // sail coming down on deck. Either way the rule the keyboard obeys is the rule
+        // here: nothing is bent on until the bow is clear.
+        // Rolled right away while the old sail is still the one on the bow; run out
+        // again the moment the new one is bent on.
+        let bent_on = sim.controls.headsail == to;
+        let want = if bent_on { 0.0 } else { 1.0 };
+        let step = Line::Furl.rate(&sim.controls) * dt;
+        let now = sim.controls.furl;
+        let next = if (want - now).abs() <= step {
+            want
+        } else {
+            now + step * (want - now).signum()
+        };
+        sim.controls.furl = next;
+        if !bent_on && next >= 0.999 {
+            sim.controls.headsail = to;
+            info!("crew: {} bent on", to.name());
+        }
+        if bent_on && next <= 0.001 {
+            crew.changing = None;
+            info!("crew: {} set and drawing", to.name());
+        }
+        // One winch, one job: while the foredeck is busy nothing else gets hands.
+        return;
+    }
     if bank.target.iter().any(|t| t.is_some()) {
         if crew.on.is_none() {
             crew.on = Some("at the clutch bank");

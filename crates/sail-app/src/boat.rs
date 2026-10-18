@@ -1028,9 +1028,11 @@ pub fn update_sails(
                     // bulged past the end of its own boom, which is a sail hanging off
                     // the spar that is supposed to be holding it.
                     footed: surface.which == Sail::Staysail,
-                    // The boom is the mainsail's: every other sail aboard has a free
-                    // foot and shakes right down to its tack.
-                    boomed: surface.which == Sail::Main,
+                    // Which sails have a spar along the foot, and therefore cannot
+                    // shake down there. The mainsail's boom and the staysail's club are
+                    // both spars; a headsail's foot is free cloth all the way to the
+                    // tack.
+                    boomed: surface.which != Sail::Headsail,
                     // What the sail is cut to, plus what the wind puts into it.
                     //
                     // The camber in the trim is the designed shape — what the outhaul

@@ -264,6 +264,43 @@ mod the_watch_on_deck {
         );
     }
 
+    /// **A sail change does not take everybody forward.**
+    ///
+    /// The sheets are on their own winches and somebody's hands never leave them. The
+    /// first version of the foredeck job returned out of the whole system while it ran,
+    /// so for the quarter of a minute a change takes nobody trimmed anything and nobody
+    /// would have backed the headsail if she had gone into irons. What a change actually
+    /// monopolises is the one winch on the coachroof.
+    #[test]
+    fn the_sheets_are_still_worked_while_the_foredeck_changes_sail() {
+        let mut app = with_a_crew(rad(185.0));
+        let mut caught = false;
+        for _ in 0..900 {
+            app.update();
+            let mid_change = {
+                let sim = app.world().resource::<Sim>();
+                sim.controls.headsail == sail_core::state::Headsail::Genoa
+                    && (0.2..0.9).contains(&sim.controls.furl)
+            };
+            if !mid_change {
+                continue;
+            }
+            // Throw the mainsheet right off in the middle of the job and see whether
+            // anybody takes it up again.
+            app.world_mut().resource_mut::<Sim>().controls.main_sheet = 0.9;
+            app.update();
+            let after = app.world().resource::<Sim>().controls.main_sheet;
+            assert!(
+                after < 0.89,
+                "the mainsheet was dumped half way through a sail change and left at \
+                 {after:.3} — the whole crew went forward"
+            );
+            caught = true;
+            break;
+        }
+        assert!(caught, "no sail change happened, so nothing was tested");
+    }
+
     /// And with the watch stood down they touch nothing at all, which is the other half
     /// of a switch meaning anything.
     #[test]

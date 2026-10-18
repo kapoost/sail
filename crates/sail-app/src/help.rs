@@ -70,6 +70,11 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             ("T", "a hand on the sheet: once for the sail that leads"),
             (
                 " ",
+                "— or the switch beside the instruments: the watch on deck sails her \
+                 while you steer, and a hand on any sheet stands them down",
+            ),
+            (
+                " ",
                 "press again for the other — main first upwind, headsail off it",
             ),
             (
