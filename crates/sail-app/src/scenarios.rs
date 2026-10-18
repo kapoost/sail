@@ -465,6 +465,103 @@ mod the_watch_on_deck {
 }
 
 #[cfg(test)]
+mod the_pilotage {
+    use super::*;
+    use crate::mission::{Pilotage, HAILING};
+    use crate::ship::Brig;
+    use sail_core::units::{kn_to_ms, rad};
+
+    fn with_a_brig() -> App {
+        let mut app = at_sea();
+        app.init_resource::<Brig>();
+        app.init_resource::<Pilotage>();
+        app.init_resource::<crate::barrels::Flotsam>();
+        app.init_resource::<crate::boathook::Boathook>();
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(250),
+        ));
+        app.add_systems(
+            Update,
+            (
+                crate::mission::board,
+                crate::mission::run,
+                crate::ship::sail_her,
+            )
+                .chain(),
+        );
+        app
+    }
+
+    /// **The whole job in one scenario**: she is there, you get ahead of her, `Enter`
+    /// puts somebody aboard, and from then on she steers where you have been.
+    ///
+    /// This is the wiring, which is where every fault in this game has lived: three
+    /// resources, a key, and a system order. None of it is findable by reading.
+    #[test]
+    fn she_takes_a_pilot_and_then_follows_the_water_you_took_her_through() {
+        let mut app = with_a_brig();
+        let here = app.world().resource::<Sim>().sim.state.pos;
+        {
+            // Her, a cable off and standing the same way, with us across her bow — which
+            // is the one place she will take anybody from.
+            let mut brig = app.world_mut().resource_mut::<Brig>();
+            brig.afloat = true;
+            brig.heading = rad(0.0);
+            brig.speed = kn_to_ms(5.0);
+            brig.at = here - glam::DVec2::new(0.0, HAILING * 0.6);
+            brig.bound_for = here + glam::DVec2::new(0.0, 5_000.0);
+        }
+        app.world_mut().resource_mut::<Pilotage>().running = true;
+        // Where she was going on her own, before anybody got aboard.
+        let was = app.world().resource::<Brig>().bound_for;
+        press(&mut app, KeyCode::Enter);
+        assert!(
+            app.world().resource::<Pilotage>().aboard,
+            "she would not take a pilot from a boat lying across her bow a cable off"
+        );
+
+        // And now she follows: her destination stops being the harbour and becomes the
+        // water the pilot boat has already crossed.
+        for _ in 0..40 {
+            app.update();
+        }
+        let now = app.world().resource::<Brig>().bound_for;
+        assert!(
+            (now - was).length() > 100.0,
+            "she is still steering for wherever she was going on her own"
+        );
+        assert!(
+            (now - here).length() < 400.0,
+            "she is steering at something that is not where the pilot boat has been"
+        );
+    }
+
+    /// And she does not take one from under her own stern, however close it gets.
+    #[test]
+    fn nobody_boards_her_over_the_taffrail() {
+        let mut app = with_a_brig();
+        let here = app.world().resource::<Sim>().sim.state.pos;
+        {
+            let mut brig = app.world_mut().resource_mut::<Brig>();
+            brig.afloat = true;
+            brig.heading = rad(0.0);
+            brig.speed = kn_to_ms(5.0);
+            // Right astern of her: the boat is behind her transom, which is the one
+            // place a small boat must never be.
+            brig.at = here + glam::DVec2::new(0.0, 60.0);
+            brig.bound_for = here + glam::DVec2::new(0.0, 5_000.0);
+        }
+        app.world_mut().resource_mut::<Pilotage>().running = true;
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.world().resource::<Pilotage>().aboard);
+        assert!(
+            app.world().resource::<Pilotage>().said.is_some(),
+            "and she said why"
+        );
+    }
+}
+
+#[cfg(test)]
 mod the_chart_table {
     use super::*;
     use crate::chart::{Chart, DeckLog, Plotted, Wrote};

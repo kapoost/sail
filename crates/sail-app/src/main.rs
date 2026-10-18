@@ -32,6 +32,7 @@ mod input;
 mod islands;
 mod logbook;
 mod marks;
+mod mission;
 mod mob;
 mod music;
 mod navigation;
@@ -45,6 +46,7 @@ mod sail_texture;
 mod scenarios;
 mod sea_texture;
 mod settings;
+mod ship;
 mod shot;
 mod sight;
 mod sim;
@@ -245,6 +247,9 @@ fn main() {
     .init_resource::<camera::ViewAim>()
     .init_resource::<boathook::Boathook>()
     .init_resource::<crew::Crew>()
+    .init_resource::<ship::Brig>()
+    .init_resource::<mission::Pilotage>()
+    .init_resource::<mission::WantsPilotage>()
     .init_resource::<navigation::Navigation>()
     .init_resource::<sight::Sighting>()
     .init_resource::<marks::Coast>()
@@ -279,6 +284,7 @@ fn main() {
             (
                 mob::setup,
                 boathook::setup,
+                ship::setup,
                 boathook::mark_setup,
                 tutorial::setup,
                 marks::setup,
@@ -386,6 +392,18 @@ fn main() {
                     navigation::the_fix_holds,
                     navigation::reckon,
                     crew::work,
+                    // The brig and the job she is here for: she is sailed, then told
+                    // where to go, then drawn — in that order, because her yards are
+                    // braced for the wind she is in this frame and not last one's.
+                    (
+                        mission::take_the_job,
+                        mission::board,
+                        mission::run,
+                        ship::sail_her,
+                        ship::work_her,
+                        ship::place,
+                    )
+                        .chain(),
                     boathook::reach,
                     boathook::mark_the_water,
                     boathook::dress,
@@ -425,6 +443,7 @@ fn main() {
             navigation::adrift_card,
             chart::glass,
             boathook::draw,
+            mission::draw,
         )
             .chain(),
     );

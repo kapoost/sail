@@ -156,6 +156,8 @@ pub fn draw(
     mut net: ResMut<crate::net::Net>,
     fleet: Res<crate::fleet::Fleet>,
     mut lesson: ResMut<crate::tutorial::Tutorial>,
+    mut wants: ResMut<crate::mission::WantsPilotage>,
+    job: Res<crate::mission::Pilotage>,
     mut course: ResMut<crate::course::Course>,
 ) -> Result {
     if !settings.open {
@@ -431,7 +433,7 @@ pub fn draw(
                     passage(ui, &mut course);
                 }
                 if settings.tab == Tab::Drill {
-                    drill(ui, &mut lesson);
+                    drill(ui, &mut lesson, &mut wants, &job);
                 }
                 if settings.tab == Tab::Network {
                     together(ui, &mut net, &fleet, sim.sim.state.pos);
@@ -496,10 +498,71 @@ fn passage(ui: &mut egui::Ui, course: &mut crate::course::Course) {
     }
 }
 
+/// **The job, offered the way a job is offered**: here is a ship, here is what is wrong,
+/// and here is what it will take. Not a difficulty setting and not a list of objectives —
+/// the whole of it fits in four lines because the whole of it is seamanship you already
+/// have the instruments for.
+fn pilotage(
+    ui: &mut egui::Ui,
+    wants: &mut crate::mission::WantsPilotage,
+    job: &crate::mission::Pilotage,
+) {
+    heading(ui, "PILOTAGE — A BRIG OFF THE HEADLAND");
+    ui.label(
+        egui::RichText::new(
+            "A loaded brig stands in from seaward wanting a pilot for the inner \
+             passage. She draws four metres where you draw two, she will not lie closer \
+             than sixty-five degrees to the wind, and she cannot stop.\n\nCatch her, get \
+             ahead of her, and go aboard with Enter. Then she follows your wake, and \
+             every sounding you take is for her. Her deck cargo has been working loose \
+             since the gale — the casks in the water are hers.",
+        )
+        .color(egui::Color32::from_rgb(176, 182, 190))
+        .monospace()
+        .size(11.0),
+    );
+    ui.add_space(8.0);
+    if job.running {
+        if let Some(over) = &job.over {
+            ui.label(
+                egui::RichText::new(over.words())
+                    .color(egui::Color32::from_rgb(230, 198, 120))
+                    .monospace()
+                    .size(11.0),
+            );
+            ui.add_space(6.0);
+        }
+        if ui
+            .button(egui::RichText::new("LET HER GO").monospace().size(12.0))
+            .clicked()
+        {
+            wants.stop = true;
+        }
+    } else if ui
+        .button(
+            egui::RichText::new("TAKE THE JOB — SHE IS STANDING IN")
+                .monospace()
+                .size(12.0),
+        )
+        .clicked()
+    {
+        wants.start = true;
+    }
+}
+
 /// A page rather than a key, because starting a man-overboard drill by accident in the
 /// middle of a delivery would be a poor joke, and because this is where somebody who has
 /// just opened the game looks for the thing that teaches them to sail it.
-fn drill(ui: &mut egui::Ui, lesson: &mut crate::tutorial::Tutorial) {
+fn drill(
+    ui: &mut egui::Ui,
+    lesson: &mut crate::tutorial::Tutorial,
+    wants: &mut crate::mission::WantsPilotage,
+    job: &crate::mission::Pilotage,
+) {
+    pilotage(ui, wants, job);
+    ui.add_space(14.0);
+    ui.separator();
+    ui.add_space(10.0);
     heading(ui, "MAN OVERBOARD DRILL");
     ui.label(
         egui::RichText::new(
@@ -570,7 +633,7 @@ pub const PAGES: [(Tab, &str); 6] = [
     (Tab::Weather, "WEATHER"),
     (Tab::Passage, "PASSAGE"),
     (Tab::Network, "TOGETHER"),
-    (Tab::Drill, "DRILL"),
+    (Tab::Drill, "MISSIONS"),
 ];
 
 fn heading(ui: &mut egui::Ui, text: &str) {
