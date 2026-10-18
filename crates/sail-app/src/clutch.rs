@@ -72,10 +72,17 @@ impl Line {
     /// the forties, which is exactly where a cruising main has a third row of points
     /// sewn into it. Reported from the deck as a missing reef.
     ///
-    /// A roller genoa has none — it is a drum, it stops wherever you stop it, and
-    /// sailing with a third of it rolled away is an ordinary thing to do. A sail set
-    /// flying has two and they are the only two: up, or away. So does the staysail,
-    /// which is hanked on and hoisted and has no middle state either.
+    /// **And the roller genoa has them too, which is a change of mind worth writing
+    /// down.** This said a drum stops wherever you stop it and that sailing with a third
+    /// of it rolled away is an ordinary thing to do. Both of those are true about a
+    /// boat, and both were wrong about a *game*: expressing "a third away" meant holding
+    /// a key and watching a number, which is the winch's view of the job rather than the
+    /// person's. A roller headsail is reefed in rolls — you put a reef in it, you put
+    /// another one in — so the stops are those reefs, and getting to one still takes the
+    /// drum as long as it takes.
+    ///
+    /// A sail set flying has two stops and they are the only two: up, or away. So does
+    /// the staysail, which is hanked on and hoisted and has no middle state either.
     pub fn detents(self, c: &Controls) -> Option<&'static [f64]> {
         const SLABS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
         const EITHER: [f64; 2] = [0.0, 1.0];
@@ -83,6 +90,7 @@ impl Line {
             Line::Reef => Some(&SLABS),
             Line::Staysail => Some(&EITHER),
             Line::Furl if c.headsail != sail_core::state::Headsail::Genoa => Some(&EITHER),
+            Line::Furl => Some(&SLABS),
             _ => None,
         }
     }
@@ -109,6 +117,13 @@ impl Line {
             (Line::Reef, 2, _) => "2nd reef",
             (Line::Reef, 3, _) => "3rd reef",
             (Line::Reef, _, _) => "handed",
+            // A roller headsail is reefed in rolls, and the names are the ones anybody
+            // uses for them: full, a reef in it, another reef, and rolled away.
+            (Line::Furl, 0, 5) => "full",
+            (Line::Furl, 1, 5) => "1st roll",
+            (Line::Furl, 2, 5) => "2nd roll",
+            (Line::Furl, 3, 5) => "3rd roll",
+            (Line::Furl, _, 5) => "away",
             (_, 0, _) => "down",
             (_, _, _) => "set",
         })
@@ -223,7 +238,11 @@ impl Line {
             Line::Vang => 0.35,
             Line::GenoaCar => 0.28,
             Line::Reef => 0.085,
-            Line::Furl => 0.14,
+            // A headsail comes in round its own stay against the full load of the sail,
+            // which is why there is a winch on the furling line and why putting a reef
+            // in one is a minute of work rather than a flick. The same rate as a reef
+            // pennant, which is the other line on this boat that shortens sail.
+            Line::Furl => 0.085,
             // A halyard, by hand. Slower than anything else on the bank, because that
             // is what setting a sail is — and because the decision to put it up ought
             // to be made before you need it rather than while you do.
@@ -374,10 +393,14 @@ mod the_bank {
         let c = Controls::default();
         assert!(Line::Vang.detents(&c).is_none());
         assert!(Line::Vang.position(&c).is_none());
-        assert!(
-            Line::Furl.position(&c).is_none(),
-            "a roller genoa is a drum"
-        );
+        // And the furling line *does* have them now: a roller headsail is reefed in
+        // rolls, and the stops are those reefs. The flying sails keep their two.
+        assert_eq!(Line::Furl.position(&c), Some("full"));
+        let flying = Controls {
+            headsail: sail_core::state::Headsail::Code0,
+            ..Default::default()
+        };
+        assert_eq!(Line::Furl.detents(&flying).map(|d| d.len()), Some(2));
     }
 
     /// Half-way between two slabs she is at the nearer one, not at neither.

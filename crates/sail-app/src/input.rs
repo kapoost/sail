@@ -161,6 +161,7 @@ pub fn gather(
     mut held_for: Local<f32>,
     mut stage: Local<u8>,
     mut crew: ResMut<crate::crew::Crew>,
+    mut orders: ResMut<crate::orders::Orders>,
 ) {
     let dt = time.delta_secs_f64();
     let cfg = sim.config();
@@ -416,24 +417,22 @@ pub fn gather(
         step -= 1;
     }
     if step != 0 {
-        if sim.controls.furl > 0.9 {
-            let order = [
-                Headsail::Genoa,
-                Headsail::Code0,
-                Headsail::Gennaker,
-                Headsail::Spinnaker,
-            ];
-            let at = order
-                .iter()
-                .position(|h| *h == sim.controls.headsail)
-                .unwrap_or(0) as i32;
-            let next = (at + step).clamp(0, order.len() as i32 - 1) as usize;
-            if order[next] != sim.controls.headsail {
-                sim.controls.headsail = order[next];
-                info!("bent on the {}", order[next].name());
-            }
-        } else {
-            info!("roll the headsail away first — furling line is on the bank");
+        // An order rather than a switch: the key says which sail should be up, and the
+        // foredeck does the furling, the swap and the setting in that order and at its
+        // own pace. The refusal that used to live here — *roll the headsail away first*
+        // — was the game asking the player to be the winch.
+        let wardrobe = [
+            Headsail::Genoa,
+            Headsail::Code0,
+            Headsail::Gennaker,
+            Headsail::Spinnaker,
+        ];
+        let from = orders.headsail.unwrap_or(sim.controls.headsail);
+        let at = wardrobe.iter().position(|h| *h == from).unwrap_or(0) as i32;
+        let next = (at + step).clamp(0, wardrobe.len() as i32 - 1) as usize;
+        if wardrobe[next] != from {
+            orders.headsail = Some(wardrobe[next]);
+            info!("hands forward — {} to go up", wardrobe[next].name());
         }
     }
 

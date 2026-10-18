@@ -24,6 +24,7 @@ use sail_core::sail::outhaul_for;
 use sail_core::units::{ms_to_kn, rad, smoothstep};
 
 use crate::clutch::{Bank, Line, BANK};
+use crate::orders::Orders;
 use crate::sim::Sim;
 
 /// How fast the hands haul a sheet, fraction of its travel per second.
@@ -106,12 +107,6 @@ pub struct Crew {
     /// Seconds she has been over too far, and seconds she has been easy.
     pressed: f64,
     easy: f64,
-    /// The sail they are on their way to, once they have decided to change.
-    ///
-    /// A change is a job with stages and not a setting: roll the old one away, bend the
-    /// new one on, set it. Holding it here is what stops the decision being re-made
-    /// forty times a second half way through doing it.
-    changing: Option<sail_core::state::Headsail>,
     /// And how long the conditions have been asking for that sail.
     asking: f64,
     asked_for: Option<sail_core::state::Headsail>,
@@ -293,12 +288,17 @@ pub fn wants(
 ///
 /// The order is a crew's order: look at the sky first — is the right sail even on the
 /// bow — then the thing that cannot wait, then the sheets, then the gear.
-pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>, time: Res<Time>) {
+pub fn work(
+    mut sim: ResMut<Sim>,
+    mut bank: ResMut<Bank>,
+    mut crew: ResMut<Crew>,
+    mut orders: ResMut<Orders>,
+    time: Res<Time>,
+) {
     if !crew.standing {
         crew.on = None;
         crew.pressed = 0.0;
         crew.easy = 0.0;
-        crew.changing = None;
         crew.asking = 0.0;
         crew.settled = None;
         crew.on_the_winch = None;
@@ -328,7 +328,7 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
         (twa, a, w)
     };
     let want_sail = wardrobe(&cfg, settled.0, settled.1, settled.2);
-    if crew.changing.is_none() {
+    if !orders.changing() {
         if want_sail == sim.controls.headsail {
             crew.asking = 0.0;
             crew.asked_for = None;
@@ -342,7 +342,7 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
             // the dwell: coming down is the one sail change nobody argues about.
             let urgent = aws > cfg.headsail(sim.controls.headsail).limit_aws * CARRIES_TO;
             if crew.asking > BEFORE_A_CHANGE || urgent {
-                crew.changing = Some(want_sail);
+                orders.headsail = Some(want_sail);
                 crew.asking = 0.0;
                 info!(
                     "crew: {} coming down, {} going up",
@@ -352,7 +352,7 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
             }
         }
     }
-    let changing = crew.changing.is_some();
+    let changing = orders.changing();
 
     // --- In irons, back the headsail ------------------------------------------------
     //
@@ -451,38 +451,18 @@ pub fn work(mut sim: ResMut<Sim>, mut bank: ResMut<Bank>, mut crew: ResMut<Crew>
     // walked forward. The sheets are on their own winches and somebody's hands never
     // leave them. What a sail change actually monopolises is the one winch on the
     // coachroof, which is exactly what this section is.
-    if let Some(to) = crew.changing {
+    // The change itself is not written here. It is one sequence — roll the old sail
+    // away, bend the new one on with the bow clear, set it — and it belongs to whoever
+    // asked for it rather than to whoever is doing it, so the watch asks the same way
+    // you do. Two copies of a sail change is two sail changes that disagree.
+    //
+    // And it is not *called* here either, because then it would be called twice in a
+    // frame — once by the standing order's own system and once by the watch — and the
+    // drum would turn at double speed with the hands on deck. The watch asks; one
+    // system does. What the watch owes the change is the rest of the deck leaving it
+    // alone: one winch, one job.
+    if orders.changing() {
         crew.on = Some("changing the headsail");
-        // **A change is a job and not a trim**, so the furling line is worked right to
-        // its end rather than to within a tenth of it. The first version left this to
-        // the general gear loop, which stops at a line that is close enough — and a
-        // drum nine tenths home is a sail still on the bow, so the change stood there
-        // half done for as long as anybody watched it.
-        //
-        // The old sail away first. On the stay that is the drum; set flying it is the
-        // sail coming down on deck. Either way the rule the keyboard obeys is the rule
-        // here: nothing is bent on until the bow is clear.
-        // Rolled right away while the old sail is still the one on the bow; run out
-        // again the moment the new one is bent on.
-        let bent_on = sim.controls.headsail == to;
-        let want = if bent_on { 0.0 } else { 1.0 };
-        let step = Line::Furl.rate(&sim.controls) * dt;
-        let now = sim.controls.furl;
-        let next = if (want - now).abs() <= step {
-            want
-        } else {
-            now + step * (want - now).signum()
-        };
-        sim.controls.furl = next;
-        if !bent_on && next >= 0.999 {
-            sim.controls.headsail = to;
-            info!("crew: {} bent on", to.name());
-        }
-        if bent_on && next <= 0.001 {
-            crew.changing = None;
-            info!("crew: {} set and drawing", to.name());
-        }
-        // One winch, one job: while the foredeck is busy nothing else gets hands.
         return;
     }
     if bank.target.iter().any(|t| t.is_some()) {

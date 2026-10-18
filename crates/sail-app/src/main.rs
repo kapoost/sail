@@ -37,6 +37,7 @@ mod mob;
 mod music;
 mod navigation;
 mod net;
+mod orders;
 mod panel;
 mod rain;
 mod retro;
@@ -250,6 +251,7 @@ fn main() {
     .init_resource::<ship::Brig>()
     .init_resource::<mission::Pilotage>()
     .init_resource::<mission::WantsPilotage>()
+    .init_resource::<orders::Orders>()
     .init_resource::<navigation::Navigation>()
     .init_resource::<sight::Sighting>()
     .init_resource::<marks::Coast>()
@@ -391,6 +393,7 @@ fn main() {
                     navigation::write_up_the_log,
                     navigation::the_fix_holds,
                     navigation::reckon,
+                    orders::carry_out,
                     crew::work,
                     // The brig and the job she is here for: she is sailed, then told
                     // where to go, then drawn — in that order, because her yards are

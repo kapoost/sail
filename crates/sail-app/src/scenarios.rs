@@ -38,6 +38,7 @@ fn at_sea() -> App {
     app.init_resource::<crate::input::HelmSource>();
     app.init_resource::<crate::input::Pilot>();
     app.init_resource::<crate::crew::Crew>();
+    app.init_resource::<crate::orders::Orders>();
     app
 }
 
@@ -98,20 +99,23 @@ mod the_deck {
     /// **X and Z walk the wardrobe one sail at a time.**
     ///
     /// The other half of the same fault: with the block read twice, one press stepped
-    /// two sails and the Code 0 could not be reached at all.
+    /// two sails and the Code 0 could not be reached at all. What the press does now is
+    /// *order* the next sail — the foredeck still has to roll the old one away first —
+    /// so the assertion is about what was asked for rather than about what is up.
     #[test]
     fn x_steps_one_sail() {
         let mut app = sailing();
-        {
-            // Only with the headsail rolled away, which is the rule on a boat.
-            let mut sim = app.world_mut().resource_mut::<Sim>();
-            sim.controls.furl = 1.0;
-        }
         press(&mut app, KeyCode::KeyX);
         assert_eq!(
-            app.world().resource::<Sim>().controls.headsail,
-            sail_core::state::Headsail::Code0,
+            app.world().resource::<crate::orders::Orders>().headsail,
+            Some(sail_core::state::Headsail::Code0),
             "one press, one sail"
+        );
+        press(&mut app, KeyCode::KeyX);
+        assert_eq!(
+            app.world().resource::<crate::orders::Orders>().headsail,
+            Some(sail_core::state::Headsail::Gennaker),
+            "and the next press is the next sail, not the one after it"
         );
     }
 }
@@ -155,7 +159,15 @@ mod the_watch_on_deck {
         app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(100),
         ));
-        app.add_systems(Update, (crate::sim::advance, crate::crew::work).chain());
+        app.add_systems(
+            Update,
+            (
+                crate::sim::advance,
+                crate::orders::carry_out,
+                crate::crew::work,
+            )
+                .chain(),
+        );
         {
             let mut sim = app.world_mut().resource_mut::<Sim>();
             // Sheets flogging right out and the vang off: everything wrong, which is
@@ -367,6 +379,7 @@ mod the_watch_on_deck {
             (
                 held,
                 crate::sim::advance,
+                crate::orders::carry_out,
                 crate::crew::work,
                 crate::clutch::handle,
             )

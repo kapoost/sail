@@ -30,7 +30,7 @@ use bevy::prelude::*;
 use glam::DVec2;
 use sail_core::units::{kn_to_ms, ms_to_kn, rad, wrap_pi};
 
-use crate::ship::Brig;
+use crate::ship::{Brig, CLOSEST};
 use crate::sim::Sim;
 
 /// How far off she will take a pilot aboard, metres.
@@ -83,7 +83,22 @@ pub struct Pilotage {
     pub least_water: f64,
     /// What she is told, for the deck to read.
     pub said: Option<String>,
+    /// What her master has just called across, and the simulation time it stands until.
+    ///
+    /// **A ship with a pilot aboard is not a silent ship.** The master does not hand over
+    /// and go below: he stands beside you and says what his vessel will and will not do,
+    /// because he is the one who knows her and because it is still his ship. Everything
+    /// she calls across is information the player cannot get any other way — how fast she
+    /// can follow, how fine a turn she can make, how close to the wind she will lie — and
+    /// all of it arrives the way it arrives on a real bridge, which is somebody saying it.
+    pub hail: Option<(String, f64)>,
+    /// When the last one was called, so that she is not a parrot.
+    hailed_at: f64,
 }
+
+/// How long a hail stands on screen, and the least time between two of them, seconds.
+const HAIL_STANDS: f64 = 9.0;
+const BETWEEN_HAILS: f64 = 11.0;
 
 /// How a piece of pilotage ended.
 #[derive(Clone, Debug, PartialEq)]
@@ -155,6 +170,69 @@ impl Pilotage {
     }
 }
 
+/// What her master has to say about how he is being led, if anything.
+///
+/// One function with the measurements as arguments, because the thing that makes a hail
+/// worth having is that it is *true* — it has to be the same numbers her sailing is made
+/// of, and a test has to be able to ask it questions without a sea.
+///
+/// In the order a seaman would say them: the one that is about to put her on the bottom
+/// first, then the one that is about to stop her, then the ones about keeping up.
+pub fn remark(
+    under: f64,
+    ahead: f64,
+    twa_wanted: f64,
+    turn: f64,
+    gap: f64,
+    closing: f64,
+) -> Option<&'static str> {
+    // Water, first and always. He is reading his own lead line and he has four metres
+    // under him when you have ten.
+    if ahead < SHE_DRAWS + 2.5 {
+        return Some("shoaling ahead — we draw four metres, pilot");
+    }
+    if under < SHE_DRAWS + 1.5 {
+        return Some("we are feeling the bottom — take us off this");
+    }
+    // The course he is being led onto. A square-rigger that is asked to lie closer than
+    // she can lie does not pinch: she stops, and then she is a ship with no steerage
+    // way in a narrow place, which is how this ends badly.
+    if twa_wanted.abs() < CLOSEST + rad(6.0) {
+        return Some("we cannot lie that close — she will not go there");
+    }
+    // The turn. Three hundred tons does not go round a corner: she needs a hundred and
+    // fifty metres of water to swing in, and asking for less is asking for nothing.
+    if turn > rad(55.0) {
+        return Some("that is too fine a turn for her — give her room to swing");
+    }
+    // And the station. Either of these is recoverable; both of them are the pilot
+    // forgetting that there is a ship behind him.
+    if gap > TOO_FAR {
+        return Some("you are running away from us — we cannot hold that");
+    }
+    if gap < TOO_NEAR && closing > kn_to_ms(1.0) {
+        return Some("we are coming up on you — she has no brakes");
+    }
+    None
+}
+
+/// Station: further than this and she has lost you, nearer and she is about to run you
+/// down.
+const TOO_FAR: f64 = 900.0;
+const TOO_NEAR: f64 = 110.0;
+
+impl Pilotage {
+    /// Put a hail on the deck, if she has not just said something else.
+    fn call_across(&mut self, words: &str, now: f64) {
+        if now - self.hailed_at < BETWEEN_HAILS {
+            return;
+        }
+        self.hailed_at = now;
+        self.hail = Some((words.to_string(), now + HAIL_STANDS));
+        info!("brig: {words}");
+    }
+}
+
 /// The job, frame by frame: her casks, her following, and the two ways it ends.
 pub fn run(
     time: Res<Time>,
@@ -186,21 +264,61 @@ pub fn run(
 
     // --- Once aboard, she follows the water you took her into ----------------------
     if job.aboard {
-        // A breadcrumb every so often, which is what she is actually steering at: not
-        // where you *are* — a ship two cables astern aiming at the pilot boat cuts every
-        // corner you just went round — but where you *were*.
+        // **A track, not a tow-rope.** She steers at where the pilot boat *was*, not at
+        // where it is: a ship two cables astern aiming at the boat herself cuts every
+        // corner you just went round, which on this coast is the corner you went round
+        // for a reason.
         if job.wake.last().is_none_or(|p| (*p - here).length() > 25.0) {
             job.wake.push(here);
         }
-        // The oldest crumb still more than her following distance ahead of her.
-        let target = job
-            .wake
-            .iter()
-            .find(|p| (**p - brig.at).length() > ASTERN * 0.55)
-            .copied()
-            .unwrap_or(here);
-        brig.bound_for = target;
-        job.wake.retain(|p| (*p - brig.at).length() > 20.0);
+        // The oldest mark she has not reached yet is the one she steers for, and it is
+        // dropped when she gets to it. Written first as *the oldest mark more than two
+        // cables off*, which is the same thing right up until she overruns the track —
+        // and then it is a mark **astern** of her, and she turns round and sails back
+        // down her own wake looking for it.
+        while job.wake.len() > 1 && (job.wake[0] - brig.at).length() < 60.0 {
+            job.wake.remove(0);
+        }
+        brig.bound_for = job.wake.first().copied().unwrap_or(here);
+
+        // --- What her master makes of how he is being led --------------------------
+        //
+        // Everything here is measured off her own sailing rather than invented: the
+        // water under her, the course the next mark would put her on against the closest
+        // she can lie, how sharp the track turns, and where the pilot boat is.
+        let now = sim.sim.state.time;
+        if job.hail.as_ref().is_some_and(|(_, until)| now > *until) {
+            job.hail = None;
+        }
+        {
+            let head = DVec2::new(brig.heading.sin(), brig.heading.cos());
+            let (under, ahead) = sim
+                .sim
+                .land
+                .as_ref()
+                .map(|l| (l.depth(brig.at), l.depth(brig.at + head * 320.0)))
+                .unwrap_or((99.0, 99.0));
+            let wind = sim.sim.wind.sample(brig.at, now);
+            let from = sail_core::wind::direction_of(wind);
+            let to_mark = brig.bound_for - brig.at;
+            let twa_wanted = wrap_pi(to_mark.x.atan2(to_mark.y) - from + std::f64::consts::PI);
+            // How sharply the track she is on is about to bend: the angle between the
+            // leg she is running now and the one after it.
+            let turn = if job.wake.len() > 2 {
+                let a = job.wake[1] - job.wake[0];
+                let b = job.wake[2] - job.wake[1];
+                wrap_pi(b.x.atan2(b.y) - a.x.atan2(a.y)).abs()
+            } else {
+                0.0
+            };
+            let gap = (here - brig.at).length();
+            // Whether that gap is closing, which is what turns "near" into "about to be
+            // run down".
+            let closing = brig.speed - sim.sim.telemetry.sog;
+            if let Some(words) = remark(under, ahead, twa_wanted, turn, gap, closing) {
+                job.call_across(words, now);
+            }
+        }
 
         // --- The bottom, which is the whole point of the job -----------------------
         if let Some(land) = sim.sim.land.as_ref() {
@@ -271,6 +389,68 @@ pub fn board(
             job.said = Some(why.into());
             sound.0.strike_damped(140.0, 0.2, 0.9);
         }
+    }
+}
+
+#[cfg(test)]
+mod what_her_master_says {
+    use super::*;
+
+    /// **In the order a seaman would say them**, and every one of them measured off her
+    /// own sailing rather than invented.
+    ///
+    /// The water first, because that is the one that puts her on the bottom; then the
+    /// course, because a square-rigger led inside her own limit does not pinch, she
+    /// *stops*, and a stopped ship in a narrow place is the whole disaster; then the
+    /// turn; then the station.
+    #[test]
+    fn she_says_the_thing_that_matters_most_first() {
+        let deep = 30.0;
+        let fair = rad(110.0);
+        // Nothing wrong: nothing said. A ship that comments on a good passage is a
+        // ship nobody listens to by the second headland.
+        assert_eq!(remark(deep, deep, fair, 0.0, 400.0, 0.0), None);
+        // Shoal water ahead outranks everything else that is wrong at the same time.
+        let all_wrong = remark(deep, SHE_DRAWS + 1.0, rad(40.0), rad(80.0), 2_000.0, 0.0);
+        assert!(all_wrong.unwrap().contains("shoaling"));
+        // A course she cannot lie.
+        assert!(remark(deep, deep, rad(40.0), 0.0, 400.0, 0.0)
+            .unwrap()
+            .contains("cannot lie"));
+        // And that she *can* — sixty-five degrees is the rig's limit, so a hair outside
+        // it is a course and not a complaint.
+        assert_eq!(
+            remark(deep, deep, CLOSEST + rad(20.0), 0.0, 400.0, 0.0),
+            None
+        );
+        // A corner too fine for three hundred tons.
+        assert!(remark(deep, deep, fair, rad(70.0), 400.0, 0.0)
+            .unwrap()
+            .contains("too fine a turn"));
+        // Station: too far is running away, too near and closing is about to be run
+        // down — and too near while *opening* is just a pilot boat getting on with it.
+        assert!(remark(deep, deep, fair, 0.0, TOO_FAR + 50.0, 0.0)
+            .unwrap()
+            .contains("running away"));
+        assert!(remark(deep, deep, fair, 0.0, 60.0, kn_to_ms(2.0))
+            .unwrap()
+            .contains("coming up on you"));
+        assert_eq!(remark(deep, deep, fair, 0.0, 60.0, -kn_to_ms(2.0)), None);
+    }
+
+    /// And she is not a parrot: one hail at a time, and a gap between them.
+    #[test]
+    fn she_does_not_say_it_twice_in_the_same_breath() {
+        let mut job = Pilotage::default();
+        job.call_across("first", 100.0);
+        job.call_across("second", 102.0);
+        assert_eq!(
+            job.hail.as_ref().map(|(w, _)| w.as_str()),
+            Some("first"),
+            "she talked over herself"
+        );
+        job.call_across("third", 100.0 + BETWEEN_HAILS + 1.0);
+        assert_eq!(job.hail.as_ref().map(|(w, _)| w.as_str()), Some("third"));
     }
 }
 
@@ -481,6 +661,19 @@ pub fn draw(
             egui::Color32::from_rgb(214, 210, 198)
         },
     );
+    // And what her master has just called across, in his own words and under the line
+    // that says where she is: a hail is a thing somebody said, so it is in quotes and it
+    // is not an instrument reading.
+    if let Some((words, _)) = &job.hail {
+        painter.text(
+            egui::pos2(middle, top + 40.0),
+            egui::Align2::CENTER_CENTER,
+            format!("\u{201c}{words}\u{201d}"),
+            egui::FontId::monospace(15.0),
+            egui::Color32::from_rgb(232, 176, 58),
+        );
+    }
+
     // And the one instruction that matters right now.
     if job.over.is_none() && !job.aboard {
         let hint = match job.can_board(&brig, sim.sim.state.pos, sim.sim.telemetry.stw) {

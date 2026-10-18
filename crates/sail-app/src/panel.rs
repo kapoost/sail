@@ -614,6 +614,7 @@ pub fn draw(
     mut fishing: ResMut<crate::fishing::Fishing>,
     mut crew: ResMut<crate::crew::Crew>,
     flotsam: Res<crate::barrels::Flotsam>,
+    mut orders: ResMut<crate::orders::Orders>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     // How long the screen has been up, so it can surface rather than appear.
@@ -1052,42 +1053,69 @@ pub fn draw(
                                             ui.vertical(|ui| {
                                                                         plate(ui, "HEADSAIL");
                                                                         ui.add_space(4.0);
-                                                                        let rolled = sim.controls.furl > 0.9;
+                                                                        // **The list is an order, not a switch.**
+                                                                        //
+                                                                        // It used to be enabled only with the bow already
+                                                                        // clear, which made changing sail three separate
+                                                                        // jobs: pick the furling line out of the bank, hold
+                                                                        // a button until the drum was home, then come back
+                                                                        // here. That is the winch's view of the work. The
+                                                                        // person's view is *I want the Code 0 up*, and the
+                                                                        // foredeck takes a minute over it — which is what
+                                                                        // clicking a name does now, with the same sequence
+                                                                        // underneath and the same minute.
                                                                         for sail in [
                                                                             Headsail::Genoa,
                                                                             Headsail::Code0,
                                                                             Headsail::Gennaker,
                                                                             Headsail::Spinnaker,
                                                                         ] {
-                                                                            let up = sim.controls.headsail == sail;
+                                                                            let up = sim.controls.headsail == sail
+                                                                                && !orders.changing();
+                                                                            let asked = orders.headsail == Some(sail);
                                                                             let label = egui::RichText::new(sail.name().to_uppercase())
                                                                                 .monospace()
                                                                                 .size(10.0)
                                                                                 .color(if up {
                                                                                     egui::Color32::BLACK
-                                                                                } else if rolled {
-                                                                                    paint::LABEL
+                                                                                } else if asked {
+                                                                                    paint::LIVE
                                                                                 } else {
-                                                                                    egui::Color32::from_gray(90)
+                                                                                    paint::LABEL
                                                                                 });
-                                                                            let button = egui::Button::new(label).fill(if up {
-                                                                                paint::LIVE
-                                                                            } else {
-                                                                                egui::Color32::from_gray(26)
-                                                                            });
-                                                                            // Only with the sail rolled away: you furl, change, and set.
-                                                                            if ui.add_enabled(rolled, button).clicked() {
-                                                                                sim.controls.headsail = sail;
+                                                                            let button = egui::Button::new(label)
+                                                                                .fill(if up {
+                                                                                    paint::LIVE
+                                                                                } else {
+                                                                                    egui::Color32::from_gray(26)
+                                                                                })
+                                                                                .stroke(if asked {
+                                                                                    egui::Stroke::new(1.0, paint::LIVE)
+                                                                                } else {
+                                                                                    egui::Stroke::NONE
+                                                                                });
+                                                                            if ui.add(button).clicked() {
+                                                                                let was = sim.controls.headsail;
+                                                                                orders.set(&sim, sail);
+                                                                                info!(
+                                                                                    "{}",
+                                                                                    if orders.changing() {
+                                                                                        format!("hands forward — {} off her, {} on", was.name(), sail.name())
+                                                                                    } else {
+                                                                                        "belay that".to_string()
+                                                                                    }
+                                                                                );
                                                                             }
                                                                         }
-                                                                        if !rolled {
-                                                                            ui.label(
-                                                                                egui::RichText::new("roll it away first")
-                                                                                    .monospace()
-                                                                                    .size(10.0)
-                                                                                    .color(egui::Color32::from_gray(90)),
-                                                                            );
-                                                                        }
+                                                                        // What the foredeck is at, where the "roll it away
+                                                                        // first" refusal used to be. The line is the same
+                                                                        // height either way so that nothing below it moves.
+                                                                        ui.label(
+                                                                            egui::RichText::new(orders.doing.unwrap_or(" "))
+                                                                                .monospace()
+                                                                                .size(10.0)
+                                                                                .color(paint::LABEL),
+                                                                        );
                                                                         // **The watch, under the wardrobe.**
                                                                         //
                                                                         // It stood on its own plate beside the case, which was
