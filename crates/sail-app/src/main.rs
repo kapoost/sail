@@ -400,7 +400,9 @@ fn main() {
                     // braced for the wind she is in this frame and not last one's.
                     (
                         mission::take_the_job,
-                        mission::board,
+                        mission::discharge,
+                        mission::fly_the_flag,
+                        mission::lay_off_the_route,
                         mission::run,
                         ship::sail_her,
                         ship::work_her,

@@ -316,21 +316,24 @@ pub fn gather(
     // and the one who should win is the one whose hand is actually on it. Taking the
     // sheets back is as plain as putting a hand on them, and calling the watch again is
     // one press of the switch.
-    if crew.standing
-        && [
-            KeyCode::KeyW,
-            KeyCode::KeyS,
-            KeyCode::KeyQ,
-            KeyCode::KeyE,
-            KeyCode::KeyA,
-            KeyCode::KeyD,
-            KeyCode::KeyT,
-        ]
-        .iter()
-        .any(|k| keys.just_pressed(*k))
+    if [
+        KeyCode::KeyW,
+        KeyCode::KeyS,
+        KeyCode::KeyQ,
+        KeyCode::KeyE,
+        KeyCode::KeyA,
+        KeyCode::KeyD,
+        KeyCode::KeyT,
+        // The wardrobe as well: ordering a sail is a decision about the rig, and a
+        // watch that goes on having its own opinion about which sail is up is a watch
+        // that puts the staysail back up as fast as you can get it down.
+        KeyCode::KeyX,
+        KeyCode::KeyZ,
+    ]
+    .iter()
+    .any(|k| keys.just_pressed(*k))
     {
-        crew.standing = false;
-        info!("you took the sheets — watch stood down");
+        crew.stand_down("the ropes");
     }
 
     // --- Mainsheet: a tackle you pull and hold, so absolute ---------------------

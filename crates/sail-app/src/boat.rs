@@ -429,6 +429,39 @@ pub fn setup(
                     Transform::default(),
                 ));
             }
+            // **The pilot flag, in our own starboard rigging.**
+            //
+            // H in the international code — white next to the halyard, red flying —
+            // and it means *I have a pilot on board*. It is on **our** shrouds and not
+            // on the ship's because that is where it belongs in this trade: the pilot
+            // comes out in his own boat and the flag is the boat's statement that he is
+            // working. Hoisted when the job is taken, down when she is let go, which is
+            // the act that ends the job.
+            let mut flag = |colour: Color| {
+                materials.add(StandardMaterial {
+                    base_color: colour,
+                    perceptual_roughness: 0.92,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                })
+            };
+            let cloth = meshes.add(Cuboid::new(0.02, 0.34, 0.26));
+            for (colour, out) in [
+                (Color::srgb(0.88, 0.86, 0.82), 0.0_f32),
+                (Color::srgb(0.72, 0.16, 0.14), 0.27),
+            ] {
+                b.spawn((
+                    crate::mission::PilotFlag,
+                    Mesh3d(cloth.clone()),
+                    MeshMaterial3d(flag(colour)),
+                    // On the starboard lower shroud, a little above head height, where
+                    // a flag in the rigging is actually seized on.
+                    Transform::from_xyz(cfg.beam as f32 * 0.40, 3.4, -0.2 + out),
+                    Visibility::Hidden,
+                ));
+            }
+
             crate::fittings::spawn(
                 b,
                 &mut crate::fittings::Workshop {

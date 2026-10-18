@@ -1187,3 +1187,47 @@ pub(crate) fn what_was_set(e: &Entry) -> String {
         (n, false) => format!("{n} reef, no headsail"),
     }
 }
+
+/// The pilot's water: the way in, as legs somebody steers.
+///
+/// **Drawn like advice and not like a track.** It is dashed, because it is where she
+/// *should* go and not where anybody has been; the legs are ruled between marks a
+/// helmsman can steer for; and the last one is the approach, which gets a circle on it
+/// because arriving is a different act from passing. The wind is in it — the search
+/// refuses to lay a leg a square-rigger cannot sail — so the line moves when the wind
+/// does, which is the whole reason a pilot is a person and not a chart.
+pub(crate) fn the_way_in(t: &Table, route: &[glam::DVec2], anchorage: glam::DVec2) {
+    if route.len() < 2 {
+        return;
+    }
+    const INK: egui::Color32 = egui::Color32::from_rgb(40, 132, 96);
+    for pair in route.windows(2) {
+        let (a, b) = (t.to_screen(pair[0]), t.to_screen(pair[1]));
+        let along = b - a;
+        let len = along.length();
+        if len < 1.0 {
+            continue;
+        }
+        let step = along / len;
+        // Dashes of four pixels with three of air, which is how a recommended track is
+        // drawn on paper and why nobody confuses one with a bearing.
+        let mut at = 0.0;
+        while at < len {
+            let end = (at + 4.0).min(len);
+            t.p.line_segment([a + step * at, a + step * end], egui::Stroke::new(1.6, INK));
+            at = end + 3.0;
+        }
+    }
+    for turn in route.iter().take(route.len() - 1).skip(1) {
+        t.p.circle_stroke(t.to_screen(*turn), 3.0, egui::Stroke::new(1.3, INK));
+    }
+    // The anchorage, which is the end of the job.
+    let home = t.to_screen(anchorage);
+    t.p.circle_stroke(home, 7.0, egui::Stroke::new(1.6, INK));
+    t.p.circle_filled(home, 2.0, INK);
+    t.note(
+        home + egui::vec2(10.0, -10.0),
+        "the way in — deep water she can sail",
+        INK,
+    );
+}

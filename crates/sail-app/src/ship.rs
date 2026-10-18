@@ -583,14 +583,6 @@ pub struct Canvas {
 #[derive(Component)]
 pub struct Driver(usize);
 
-/// The pilot flag at the foremast head.
-///
-/// **H, white and red**, which in the international code means *I have a pilot on
-/// board* — the one flag in this game that is a statement about who is responsible
-/// rather than about what the ship is doing.
-#[derive(Component)]
-pub struct PilotFlag;
-
 /// Where a mast stands and how far up each of its pieces reaches, in her own frame.
 fn mast_foot(mast: usize) -> Vec3 {
     let t = if mast == 0 { FOREMAST } else { MAINMAST };
@@ -819,14 +811,6 @@ pub fn setup(
         perceptual_roughness: 0.55,
         ..default()
     });
-    let flag = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.80, 0.78, 0.74),
-        perceptual_roughness: 0.9,
-        double_sided: true,
-        cull_mode: None,
-        ..default()
-    });
-
     let hull = meshes.add(hull_mesh());
     let rigging = meshes.add(rigging_mesh());
 
@@ -920,15 +904,6 @@ pub fn setup(
                 Mesh3d(meshes.add(empty_cloth())),
                 MeshMaterial3d(painted.clone()),
                 Transform::default(),
-            ));
-            ship.spawn((
-                PilotFlag,
-                Mesh3d(meshes.add(Cuboid::new(0.05, 0.9, 1.4))),
-                MeshMaterial3d(flag),
-                Transform::from_translation(
-                    mast_foot(0) + Vec3::new(0.0, LOWER_MAST + TOPMAST - 1.2, 0.9),
-                ),
-                Visibility::Hidden,
             ));
         });
 }
@@ -1067,8 +1042,6 @@ pub fn work_her(
     mut yards: Query<(&Yard, &mut Transform)>,
     canvas: Query<(&Canvas, &Mesh3d)>,
     drivers: Query<(&Driver, &Mesh3d)>,
-    mut flag: Query<&mut Visibility, With<PilotFlag>>,
-    aboard: Res<crate::mission::Pilotage>,
 ) {
     if !brig.afloat {
         return;
@@ -1138,12 +1111,5 @@ pub fn work_her(
         if let Some(mut mesh) = meshes.get_mut(&mesh.0) {
             *mesh = cloth;
         }
-    }
-    if let Ok(mut show) = flag.single_mut() {
-        *show = if aboard.aboard {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
     }
 }

@@ -1096,6 +1096,7 @@ pub fn draw(
                                                                                 });
                                                                             if ui.add(button).clicked() {
                                                                                 let was = sim.controls.headsail;
+                                                                                crew.stand_down("the foredeck");
                                                                                 orders.set(&sim, sail);
                                                                                 info!(
                                                                                     "{}",
@@ -1267,6 +1268,10 @@ pub fn draw(
                                         if clicked {
                                             bank.selected = i;
                                             bank.since_change = 0.0;
+                                        }
+                                        if clicked || step != 0 || value != line.get(&sim.controls)
+                                        {
+                                            crew.stand_down("the bank");
                                         }
                                         if step != 0 {
                                             // The next cringle up or down, and the line

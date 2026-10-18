@@ -769,6 +769,7 @@ pub fn draw(
     coast: Res<crate::marks::Coast>,
     sky: Res<crate::sky::Sky>,
     fleet: Res<crate::fleet::Fleet>,
+    job: Res<crate::mission::Pilotage>,
 ) -> Result {
     if !chart.open {
         return Ok(());
@@ -956,6 +957,12 @@ pub fn draw(
             let crossing_at = sail_core::fix::plot(&nav.sights).map(|f| f.at);
 
             the_cast(&table, chart.streaming, st.time, st.pos, sky.hour);
+
+            // The pilot's water first, under everything else: it is advice, and advice
+            // does not go on top of the plot.
+            if job.running && job.over.is_none() {
+                the_way_in(&table, &job.route, job.bound_for);
+            }
 
             the_track_made_good(&table, &nav);
             reckoning(&table, &nav, st.time);

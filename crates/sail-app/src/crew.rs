@@ -135,6 +135,24 @@ pub struct Crew {
 }
 
 impl Crew {
+    /// **A hand on anything stands them down**, and it is one function because every
+    /// place that touches a rope has to do the same thing.
+    ///
+    /// Reported from the deck as the staysail that would not come down: it was coming
+    /// down, and the watch was hoisting it again inside a second, because a crew that
+    /// has an opinion about the staysail and no way of being overruled is not a crew —
+    /// it is an argument. Overruling it is the same act as taking a sheet: you did
+    /// something with your own hands, so the hands on deck are stood down until you
+    /// call them again. A new watch may set whatever it likes; this one has been told.
+    pub fn stand_down(&mut self, what: &str) {
+        if !self.standing {
+            return;
+        }
+        self.standing = false;
+        self.on = None;
+        info!("you took {what} — watch stood down");
+    }
+
     /// What the instrument says they are doing.
     pub fn doing(&self) -> &'static str {
         match (self.standing, self.on) {
