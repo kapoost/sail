@@ -277,6 +277,7 @@ fn main() {
             (
                 mob::setup,
                 boathook::setup,
+                boathook::mark_setup,
                 tutorial::setup,
                 marks::setup,
                 net::setup,
@@ -382,6 +383,7 @@ fn main() {
                     navigation::the_fix_holds,
                     navigation::reckon,
                     boathook::reach,
+                    boathook::mark_the_water,
                     boathook::dress,
                     sight::aim,
                     sight::glasses,

@@ -23,6 +23,7 @@
 
 use bevy::prelude::*;
 
+use crate::frame;
 use crate::sim::Sim;
 
 /// How far the hook reaches from her side, metres.
@@ -578,5 +579,203 @@ mod tests {
             share * 100.0,
             if share > 0.75 { "keypress" } else { "lottery" }
         );
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// The water you have to get her into.
+// ---------------------------------------------------------------------------------------
+
+/// How far off a thing can be and still have its water marked, metres.
+///
+/// **Ninety metres is a sighting, not a plan.** Further off than that and a ring drawn on
+/// the sea is a label on the horizon; nearer than that and it is the thing a helmsman is
+/// actually steering at — the patch of water she has to be *in*, which until now was a
+/// number nobody could see.
+const MARKED_WITHIN: f64 = 90.0;
+
+/// How many patches get marked at once. Four: whoever is in the water, the lifebuoy, and
+/// the two nearest casks, which is as much as can be read at a glance.
+const MARKED: usize = 4;
+
+/// Segments round the ring, and how wide the band of it is in metres.
+const SEGMENTS: usize = 72;
+const BAND: f64 = 0.34;
+
+/// How far her centreline has to come to the thing, metres.
+///
+/// **One fact with one owner.** The hook reaches [`REACH`] from her *rail*, and
+/// [`crate::mob::off_the_rail`] measures from the rail by taking half her beam off the
+/// distance to her centreline — so the ring that says *bring her into this* has to be
+/// that much wider than the hook is long, or the drawn circle and the circle the catch
+/// actually uses are two different circles. That has been this repository's oldest
+/// fault, so the drawing and the test below both call this.
+pub fn marked_radius(cfg: &sail_core::boat::BoatConfig) -> f64 {
+    REACH + cfg.beam * 0.5
+}
+
+/// One of the rings lying on the sea.
+#[derive(Component)]
+pub struct MarkedWater(usize);
+
+/// A flat band of triangles, its vertices rewritten every frame from the sea under them.
+///
+/// It is not a torus on a transform, and that is deliberate: a five-metre ring held rigid
+/// at the height of its own centre stands a foot clear of the water on one side and goes
+/// under on the other the moment a wave runs through it. Seventy-two pairs of vertices
+/// put on the surface itself cost nothing and sit *on* the sea, which is the only way a
+/// mark drawn on water reads as being drawn on water.
+fn band() -> Mesh {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::mesh::{Indices, PrimitiveTopology};
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
+    );
+    let n = SEGMENTS + 1;
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![Vec3::ZERO; n * 2]);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![Vec3::Y; n * 2]);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![Vec2::ZERO; n * 2]);
+    let mut tri: Vec<u32> = Vec::with_capacity(SEGMENTS * 6);
+    for i in 0..SEGMENTS as u32 {
+        let (a, b, c, d) = (i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 3);
+        tri.extend_from_slice(&[a, b, c, b, d, c]);
+    }
+    mesh.insert_indices(Indices::U32(tri));
+    mesh
+}
+
+pub fn mark_setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for which in 0..MARKED {
+        commands.spawn((
+            MarkedWater(which),
+            Mesh3d(meshes.add(band())),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgba(0.87, 0.85, 0.80, 0.70),
+                // Unlit, because it is not a thing floating in the weather — it is a mark
+                // the player has drawn on the sea, and it has to read at dusk as well as
+                // at noon.
+                unlit: true,
+                alpha_mode: AlphaMode::Blend,
+                double_sided: true,
+                cull_mode: None,
+                ..default()
+            })),
+            Transform::default(),
+            Visibility::Hidden,
+        ));
+    }
+}
+
+/// Lay a ring on the water round everything within reaching distance of becoming a catch.
+///
+/// The colour carries the one condition the geometry cannot: a boathook does not stop a
+/// boat, so arriving in the right water at five knots is arriving at nothing. Ivory while
+/// she is outside it, green the moment she is in it and slow enough to hold what she
+/// hooks, vermilion when she is in it going too fast — which is the commonest way this
+/// manoeuvre is got wrong, and now it is visible from the helm instead of from a log line
+/// after the fact.
+#[allow(clippy::too_many_arguments)]
+pub fn mark_the_water(
+    sim: Res<Sim>,
+    origin: Res<frame::RenderOrigin>,
+    over: Res<crate::mob::Overboard>,
+    flotsam: Res<crate::barrels::Flotsam>,
+    mut rings: Query<(
+        &MarkedWater,
+        &Mesh3d,
+        &MeshMaterial3d<StandardMaterial>,
+        &mut Transform,
+        &mut Visibility,
+    )>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let st = sim.render_state();
+    let here = st.pos;
+    let t = sim.sim.state.time;
+    let radius = marked_radius(&sim.config());
+
+    // Everything catchable, nearest first. A man and a lifebuoy are in the list on the
+    // same terms as a barrel, because the manoeuvre is the same manoeuvre.
+    let mut about: Vec<glam::DVec2> = Vec::new();
+    about.extend(over.oscar());
+    about.extend(over.ring_afloat());
+    about.extend(flotsam.adrift.iter().copied());
+    about.retain(|at| (*at - here).length() < MARKED_WITHIN);
+    about.sort_by(|a, b| (*a - here).length().total_cmp(&(*b - here).length()));
+
+    let slow = sail_core::units::ms_to_kn(sim.sim.telemetry.stw.abs()) < SLOW_ENOUGH;
+    for (which, mesh, material, mut transform, mut show) in &mut rings {
+        let Some(&at) = about.get(which.0) else {
+            *show = Visibility::Hidden;
+            continue;
+        };
+        *show = Visibility::Visible;
+        // In it when the hook could be put on the thing from where she is now: the same
+        // measurement the catch uses, not a second copy of it.
+        let inside = crate::mob::off_the_rail(&sim, at) < REACH;
+        if let Some(mut m) = materials.get_mut(&material.0) {
+            m.base_color = match (inside, slow) {
+                (true, true) => Color::srgba(0.42, 0.70, 0.44, 0.80),
+                (true, false) => Color::srgba(0.86, 0.30, 0.18, 0.80),
+                _ => Color::srgba(0.87, 0.85, 0.80, 0.62),
+            };
+        }
+        let middle = sim.sim.water.height(at, t) as f32;
+        transform.translation = origin.to_bevy(at, middle);
+        let Some(mut mesh) = meshes.get_mut(&mesh.0) else {
+            continue;
+        };
+        let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(pos)) =
+            mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
+        else {
+            continue;
+        };
+        for i in 0..=SEGMENTS {
+            let a = i as f64 / SEGMENTS as f64 * std::f64::consts::TAU;
+            let (s, c) = a.sin_cos();
+            let out = glam::DVec2::new(c, s);
+            for (k, r) in [radius - BAND * 0.5, radius + BAND * 0.5]
+                .into_iter()
+                .enumerate()
+            {
+                let p = at + out * r;
+                // Three centimetres over the surface: enough that it is not fighting the
+                // sea for the same pixels, little enough that it is still on it.
+                let h = sim.sim.water.height(p, t) as f32 + 0.03;
+                let v = origin.to_bevy(p, h) - origin.to_bevy(at, middle);
+                pos[i * 2 + k] = [v.x, v.y, v.z];
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod the_marked_water {
+    use super::*;
+
+    /// **The ring drawn and the circle the catch uses are one circle.**
+    ///
+    /// The hook reaches from her rail and the mark is drawn round her centreline, so the
+    /// two differ by half a beam — and the day they differ by anything else is the day a
+    /// player sails into a green ring and is told there is nothing in reach.
+    #[test]
+    fn the_ring_is_exactly_the_water_the_hook_can_reach_from() {
+        let cfg = sail_core::boat::BoatConfig::default();
+        let r = marked_radius(&cfg);
+        // Her rail is half a beam out from the centreline; the hook adds its own length.
+        assert!(
+            (r - cfg.beam * 0.5 - REACH).abs() < 1e-9,
+            "the ring is {r} m and the hook reaches {REACH} m off a {} m beam",
+            cfg.beam
+        );
+        // And it is a ring somebody can steer at: wider than she is, narrower than a
+        // boat length.
+        assert!(r > cfg.beam && r < cfg.loa * 0.6, "{r} m");
     }
 }
