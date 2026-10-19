@@ -88,6 +88,59 @@ const CREST_DARTS: f32 = 4200.0;
 const CREST_SPECKS: usize = 6;
 const CREST_PATCH: f64 = 1.5;
 
+// ---------------------------------------------------------------------------------------
+// The third source: a crest that is actually breaking, throwing water forward of itself.
+// ---------------------------------------------------------------------------------------
+
+/// Significant steepness at which a wind sea starts to throw its crests forward, and
+/// where it is doing it everywhere.
+///
+/// **Steepness is the whole criterion and it is not a local measurement.** A wave breaks
+/// when the water at its crest is moving as fast as the wave itself, which for a random
+/// sea comes down to the *significant steepness* — the significant height over the
+/// wavelength of the dominant component, `H / L` with `L = gT²/2π`. A long ocean swell
+/// four metres high is not breaking; a metre and a half of short wind sea on a six-second
+/// period is breaking all over, and it is the same number that tells you which.
+///
+/// **The numbers are the sea's, and the first pair were twice what they should have
+/// been.** A fully developed wind sea runs at a significant steepness of about one in
+/// twenty; whitecapping starts around one in fifty, which is a Force 4 chop, and by one
+/// in twenty-two the sea is white from end to end. Set at four and seven and a half
+/// hundredths, an ordinary working sea of a metre and a quarter on a six-second period
+/// came out at 0.021 and never broke at all — which is not a sea anybody has been out
+/// in. Measured against the three cases in the test below before they were changed.
+const PLUNGES_ABOVE: f64 = 0.018;
+const PLUNGES_HARD: f64 = 0.045;
+
+/// How far ahead of the crest the water lands, as a fraction of the significant height.
+///
+/// **This is the effect.** A breaker is not a white hat sitting on top of a wave: the
+/// crest curls over and throws its water down the *front face*, so the foam appears
+/// ahead of the crest and the wave then runs over it. That is what the eye reads as
+/// breaking rather than as foam — the white leading the wave by a few metres.
+const LEADS_BY: f64 = 1.1;
+
+/// How wide one breaking line is, metres, and how many marks are in it.
+///
+/// A line rather than a blob, because a breaker goes along the crest: it starts at one
+/// place and unzips sideways, and from a boat what you see is a white *edge* several
+/// metres long with the sea behind it still green.
+const TONGUE_WIDE: f64 = 9.0;
+const TONGUE_SPECKS: usize = 10;
+
+/// How hard the plunging water is thrown forward, m/s.
+///
+/// **Not the wave's speed.** The wave travels at `gT/2π` — ten metres a second for a
+/// six-second sea — and the water does not: it is moving at the orbital velocity, which
+/// is a tenth of that. Foam given the wave's speed shoots across the sea like something
+/// with an engine in it, which is the classic way to get this wrong. What *does* travel
+/// at the wave's speed is the place where the next breaking line is born, and that is
+/// handled by birth position rather than by giving anything a velocity.
+///
+/// So a speck gets the water's own velocity where it lands, plus this much of a throw
+/// down the face, and the throw is the only part that is about breaking.
+const THROWN_FORWARD: f64 = 1.8;
+
 /// How far out breaking crests are drawn, metres.
 ///
 /// Ninety: far enough that the sea has whitecaps in it rather than a ring of them round
@@ -162,6 +215,9 @@ pub struct Spray {
     /// sea's entire allowance went on looking and three whitecaps a second got drawn.
     /// Measured: three a second, over two and a half hectares of water.
     darts: f32,
+    /// And the same again for the breakers, which have their own rate: whitecaps are a
+    /// property of how much white is on the sea, and a breaking crest is an event.
+    plunges: f64,
 }
 
 impl Spray {
@@ -260,6 +316,7 @@ pub fn setup(
         seed: sail_core::rng::Pcg32::new(0xF0_A3_11),
         owed: 0.0,
         darts: 0.0,
+        plunges: 0.0,
     });
 }
 
@@ -458,6 +515,101 @@ pub fn update(
                 });
             }
             born_breaking += 1;
+        }
+    }
+
+    // --- And the crests that are actually breaking -----------------------------
+    //
+    // The source above draws whitecaps: foam *on* the tops, which is what a sea with
+    // some white in it looks like. This one draws the moment itself — the crest curling
+    // over and throwing its water down the front face, so the white appears a couple of
+    // metres **ahead** of the wave and the wave then runs over it.
+    //
+    // It only happens when the sea is steep enough to do it, which is a property of the
+    // whole spectrum rather than of the patch under the dart: significant height over
+    // the dominant wavelength. In a long swell nothing here fires at all, however big
+    // the waves are, and that is correct — a four-metre swell does not break in deep
+    // water and a metre and a half of short wind sea breaks everywhere.
+    let steepness = {
+        let period = sim.sim.water.peak_period_or(6.0);
+        let wavelength = 9.81 * period * period / std::f64::consts::TAU;
+        hs / wavelength.max(1.0)
+    };
+    let plunging =
+        crate::curve::smoothstep(PLUNGES_ABOVE as f32, PLUNGES_HARD as f32, steepness as f32)
+            as f64;
+    if plunging > 0.01 {
+        // The direction the sea is *going*, which is where a breaker throws its water.
+        // Not the wind at the boat and not the wave's own speed — see `THROWN_FORWARD`.
+        let forward = downwind.normalize_or_zero();
+        let across = glam::DVec2::new(forward.y, -forward.x);
+        let Spray {
+            live,
+            seed,
+            plunges,
+            ..
+        } = &mut *spray;
+        *plunges += CREST_DARTS as f64 * 0.22 * plunging * dt as f64;
+        while *plunges >= 1.0 && live.len() < budget() {
+            *plunges -= 1.0;
+            let r = &mut *seed;
+            let a = r.next_f64() * std::f64::consts::TAU;
+            let range = CREST_REACH * r.next_f64().sqrt();
+            let at = st.pos + glam::DVec2::new(a.cos(), a.sin()) * range;
+            // On a crest, and with the water *ahead* of it lower — which is how the
+            // front face is told from the back one. A breaker that threw its water up
+            // the back of the wave would be the effect drawn backwards, and from the
+            // deck that reads as the sea running the wrong way.
+            let here = sim.sim.water.height(at, t);
+            if here / hs.max(0.05) < CREST_TOP * 0.8 {
+                continue;
+            }
+            let ahead = at + forward * (hs * LEADS_BY).max(1.0);
+            if sim.sim.water.height(ahead, t) >= here {
+                continue;
+            }
+            // The line, laid along the crest rather than scattered round a point.
+            let width = TONGUE_WIDE * (0.5 + 0.5 * r.next_f64());
+            for n in 0..TONGUE_SPECKS {
+                if live.len() >= budget() {
+                    break;
+                }
+                // Along the crest at even spacing would be a string of beads, which
+                // is what it looked like: real foam is ragged, thickest where the wave
+                // went first and thinning away at both ends. So the marks are jittered
+                // along the line as well as across it, and a few are thrown further
+                // down the face than the rest.
+                let step = width / (TONGUE_SPECKS - 1) as f64;
+                let along = (n as f64 / (TONGUE_SPECKS - 1) as f64 - 0.5) * width
+                    + (r.next_f64() - 0.5) * step * 0.9;
+                let down = (r.next_f64() - 0.5) * 1.2 + r.next_f64().powi(3) * hs * 0.9;
+                let spot = ahead + across * along + forward * down;
+                // Thickest in the middle of the break and thinner at its ends.
+                let taper = {
+                    let u = n as f32 / (TONGUE_SPECKS - 1) as f32;
+                    0.45 + 0.55 * (std::f32::consts::PI * u).sin()
+                };
+                // The water's own velocity where it lands, plus the throw down the
+                // face. The first is why the foam stays with the sea instead of
+                // sliding over it; the second is the breaking.
+                let orbital = sim.sim.water.velocity(spot, t);
+                let drift = glam::DVec2::new(orbital.x, orbital.y)
+                    + forward * THROWN_FORWARD * (0.6 + 0.8 * r.next_f64())
+                    + downwind * blown.min(1.2) as f64 * 0.6;
+                live.push(Speck {
+                    at: spot,
+                    drift,
+                    age: 0.0,
+                    // Bigger than a whitecap speck: this is the front of a breaker, and
+                    // at two metres across it is one of the larger things on the water.
+                    scale: (3.2 + 3.0 * r.next_f64() as f32) * taper,
+                    phase: r.next_f64() as f32 * std::f32::consts::TAU,
+                    tint: 0.12 * r.next_f64() as f32,
+                    claw: true,
+                    beat: beat_of(r.next_f64() as f32),
+                    sparkle: sparkle_of(r.next_f64() as f32),
+                });
+            }
         }
     }
 
@@ -719,6 +871,57 @@ pub fn update(
         debug!(
             "spray: {born_breaking} of {darts_thrown} darts found a crest, {} specks alive",
             spray.live.len()
+        );
+    }
+}
+
+#[cfg(test)]
+mod when_a_sea_breaks {
+    use super::*;
+
+    /// How steep the sea is, from the two numbers that decide it.
+    fn steepness(hs: f64, period: f64) -> f64 {
+        hs / (9.81 * period * period / std::f64::consts::TAU)
+    }
+
+    /// **A long swell does not break and a short wind sea does**, whatever their
+    /// heights are — which is the whole reason the criterion is steepness rather than
+    /// size, and the fault it guards against is a four-metre ocean swell covered in
+    /// white water two hundred miles from the nearest land.
+    #[test]
+    fn breaking_is_steepness_and_not_height() {
+        // Four metres of long Atlantic swell: nothing.
+        let swell = steepness(4.0, 14.0);
+        assert!(
+            swell < PLUNGES_ABOVE,
+            "a fourteen-second swell came out at {swell:.3}, which would break"
+        );
+        // A metre and a half of short wind sea: breaking everywhere.
+        let wind_sea = steepness(1.5, 4.5);
+        assert!(
+            wind_sea > PLUNGES_HARD,
+            "a four-and-a-half-second sea came out at {wind_sea:.3}, which would not"
+        );
+        // And the ordinary working sea in between is in between.
+        let working = steepness(1.2, 6.0);
+        assert!(
+            (PLUNGES_ABOVE..PLUNGES_HARD).contains(&working),
+            "{working:.3} is not between the two thresholds"
+        );
+    }
+
+    /// The water is thrown at a fraction of the wave's own speed, not at it.
+    ///
+    /// A six-second sea runs at nine and a half metres a second; foam given that speed
+    /// crosses the sea like something with an engine in it. What travels at the wave's
+    /// speed is where the next breaking line is *born*, which is a position and not a
+    /// velocity.
+    #[test]
+    fn foam_is_not_given_the_speed_of_the_wave() {
+        let phase = 9.81 * 6.0 / std::f64::consts::TAU;
+        assert!(
+            THROWN_FORWARD < phase * 0.25,
+            "the throw is {THROWN_FORWARD} m/s against a wave doing {phase:.1}"
         );
     }
 }
