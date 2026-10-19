@@ -174,10 +174,31 @@ impl Weather {
         // gives the long cloud shadows, the shafts under the squalls and the warm light
         // the whole look was built on, and it climbs through the session anyway.
         let start_hour = 6.5 + rng.next_f64() * 2.0;
+        // `SAIL_HOUR=20.5` starts her at half past eight in the evening.
+        //
+        // The same kind of knob as `SAIL_SQUALL`: the sky's best hours are the two at
+        // either end of the day, and waiting twelve hours of real time to look at a
+        // sunset is not a way to work on one. Read here rather than where the sky is
+        // drawn so that everything downstream of the hour — the light, the cloud
+        // tones, the haze, the sea's own glints — agrees about what time it is.
+        let start_hour = std::env::var("SAIL_HOUR")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .map(|h| h.rem_euclid(24.0))
+            .unwrap_or(start_hour);
         // Beta-ish: most days are broken cloud and the extremes are rarer, which is
         // what a coastal sky does. Two draws averaged is the cheapest way to get that
         // shape and it is exact, not an approximation of one.
         let cover = 0.5 * (rng.next_f64() + rng.next_f64()) * 0.9 + 0.08;
+        // `SAIL_COVER=0.2` for a nearly clear day. The companion to `SAIL_HOUR`: the
+        // sky and the cloud in front of it are two things to look at and they have to
+        // be separable, or every judgement about one is really a judgement about how
+        // much of the other happened to be drawn.
+        let cover = std::env::var("SAIL_COVER")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .map(|c| c.clamp(0.0, 1.0))
+            .unwrap_or(cover);
 
         // How squally. Three kinds of day, in roughly the proportion a coast hands them
         // out: most are clear of them, some have one or two go by, and a few are one
