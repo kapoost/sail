@@ -51,11 +51,21 @@ pub const TILE_METRES: f32 = 24.0;
 /// neighbours, and a lattice with no straight lines in it stops being a lattice. It
 /// costs two noise samples a vertex and no memory at all.
 ///
-/// A third of a tile over a hundred metres: enough to bend the rows out of alignment,
-/// gentle enough that the ripples are stretched by about a tenth, which is under what
-/// the eye reads as distortion in moving water.
-const WARP_TILES: f32 = 0.34;
-const WARP_OVER: f32 = 100.0;
+/// Two swirls rather than one, because one was not enough to hide the grid and a single
+/// strong one only trades a lattice for a smear. The long one moves whole tiles about
+/// over two hundred metres; the short one bends their edges over sixty. Between them a
+/// copy of the tile is displaced, rotated a little by the shear, and distorted
+/// differently from its neighbours, which is as close to *not repeating* as one texture
+/// lookup gets.
+///
+/// The stretch between two vertices is what bounds them: 1.1 tiles over two hundred
+/// metres and 0.35 over sixty both come out near a quarter of a tile per ten metres of
+/// water, against a vertex every seventy centimetres. Smooth where it is looked at
+/// closely and scrambled at the distance where the repeat used to be legible.
+const WARP_LONG: f32 = 1.1;
+const WARP_LONG_OVER: f32 = 200.0;
+const WARP_SHORT: f32 = 0.35;
+const WARP_SHORT_OVER: f32 = 60.0;
 
 /// Where a patch of water reads its ripples from.
 ///
@@ -63,14 +73,22 @@ const WARP_OVER: f32 = 100.0;
 /// two different answers would be a line across the sea — which is the one thing worse
 /// than a repeat.
 pub fn ripple_uv(parcel: Vec2) -> Vec2 {
-    let swirl = |seed: u64, offset: Vec2| -> f32 {
-        let at = (parcel + offset) / WARP_OVER;
-        sail_core::noise::two_octaves(glam::DVec2::new(at.x as f64, at.y as f64), seed) as f32
+    // One octave, not two. This is asked four times at every one of forty thousand
+    // vertices, and a second octave of a field whose whole job is to be slow buys
+    // nothing anybody can see at eight milliseconds a frame — measured: sixty frames a
+    // second with it gone against forty with it in.
+    let swirl = |seed: u64, offset: Vec2, over: f32| -> f32 {
+        let at = (parcel + offset) / over;
+        sail_core::noise::value(glam::DVec2::new(at.x as f64, at.y as f64), seed) as f32
     };
     let warp = Vec2::new(
-        swirl(0x5EA_1A11, Vec2::ZERO),
-        swirl(0x5EA_1A12, Vec2::splat(37.0)),
-    ) * WARP_TILES;
+        swirl(0x5EA_1A11, Vec2::ZERO, WARP_LONG_OVER),
+        swirl(0x5EA_1A12, Vec2::splat(37.0), WARP_LONG_OVER),
+    ) * WARP_LONG
+        + Vec2::new(
+            swirl(0x5EA_1A13, Vec2::splat(113.0), WARP_SHORT_OVER),
+            swirl(0x5EA_1A14, Vec2::splat(211.0), WARP_SHORT_OVER),
+        ) * WARP_SHORT;
     Vec2::new(parcel.x / TILE_METRES, -parcel.y / TILE_METRES) + warp
 }
 
@@ -130,8 +148,23 @@ struct Ripple {
 /// aligned components give corduroy, which is exactly what this looked like before
 /// anyone fanned them.
 fn ripples() -> Vec<Ripple> {
-    // Wavelengths from the whole tile down to about half a metre.
-    let longest = 1.0_f32;
+    // **Nothing longer than a quarter of the tile.** Reported from the deck as the
+    // bright reflections lining up in rows, and that is what a long component in a
+    // tiled texture *is*: with amplitudes falling as `1/k`, the one-cycle and two-cycle
+    // components carried most of the picture's large-scale light and dark, they are
+    // identical in every copy of the tile, and so the whole sea was banded at
+    // twenty-four metres however well the short ripples behaved.
+    //
+    // The band also has no business being there. The mesh draws the sea down to about
+    // eight metres of wavelength and the texture is what fills in below the vertices;
+    // a six-metre feature painted on is a wave drawn twice, once by geometry that moves
+    // and once by a picture that repeats. Starting at four cycles across the tile leaves
+    // the texture carrying six metres and under — a scale at which a twenty-four metre
+    // repeat has nothing in it for the eye to line up.
+    //
+    // It costs no brightness: amplitude is `0.075/k`, so every component contributes the
+    // same slope, and dropping three of twenty-six leaves the glitter where it was.
+    let longest = 4.0_f32;
     let shortest = (TILE_METRES / 0.55).round();
     let count = 26;
     let mut out = Vec::with_capacity(count);
