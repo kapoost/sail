@@ -111,6 +111,37 @@ impl Line {
                 (which, best) = (i, off);
             }
         }
+        self.stop_called(c, which as i32)
+    }
+
+    /// Which stop she is at, as an index.
+    pub fn stop_index(self, c: &Controls) -> Option<usize> {
+        let stops = self.detents(c)?;
+        let v = self.get(c);
+        let (mut which, mut best) = (0, f64::MAX);
+        for (i, stop) in stops.iter().enumerate() {
+            let off = (stop - v).abs();
+            if off < best {
+                (which, best) = (i, off);
+            }
+        }
+        Some(which)
+    }
+
+    /// What *any* stop is called, not only the one she is at.
+    ///
+    /// **Because a button should say what it does.** Reported from the deck: the
+    /// staysail's buttons said HAUL and EASE, which is what a hand does to a rope and
+    /// tells nobody whether the sail is going up or coming down. A line with positions
+    /// has names for them, so the button can carry the name of the position it is about
+    /// to put her at — *set*, *handed*, *2nd reef* — and then there is nothing to work
+    /// out at all.
+    pub fn stop_called(self, c: &Controls, which: i32) -> Option<&'static str> {
+        let stops = self.detents(c)?;
+        if which < 0 || which as usize >= stops.len() {
+            return None;
+        }
+        let which = which as usize;
         Some(match (self, which, stops.len()) {
             (Line::Reef, 0, _) => "full",
             (Line::Reef, 1, _) => "1st reef",

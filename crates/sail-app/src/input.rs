@@ -316,22 +316,46 @@ pub fn gather(
     // and the one who should win is the one whose hand is actually on it. Taking the
     // sheets back is as plain as putting a hand on them, and calling the watch again is
     // one press of the switch.
-    if [
-        KeyCode::KeyW,
-        KeyCode::KeyS,
-        KeyCode::KeyQ,
-        KeyCode::KeyE,
-        KeyCode::KeyA,
-        KeyCode::KeyD,
-        KeyCode::KeyT,
-        // The wardrobe as well: ordering a sail is a decision about the rig, and a
-        // watch that goes on having its own opinion about which sail is up is a watch
-        // that puts the staysail back up as fast as you can get it down.
-        KeyCode::KeyX,
-        KeyCode::KeyZ,
-    ]
-    .iter()
-    .any(|k| keys.just_pressed(*k))
+    // **`shift T` calls the watch on deck, or stands them down.**
+    //
+    // The same letter as the five-second trim assist and deliberately: `T` is a hand
+    // going to a winch for as long as it takes to get that sail right, and `shift T` is
+    // that hand staying there. One is a thing you do; the other is a thing you arrange.
+    // The console switch says the same in a picture, and a control with no key is a
+    // control nobody finds.
+    let called_the_watch = fine && keys.just_pressed(KeyCode::KeyT);
+    if called_the_watch {
+        let standing = !crew.standing;
+        crew.standing = standing;
+        crew.on = None;
+        info!(
+            "{}",
+            if standing {
+                "watch on deck — they have the sails"
+            } else {
+                "watch stood down — you have the sails"
+            }
+        );
+    }
+    if !called_the_watch
+        && [
+            KeyCode::KeyW,
+            KeyCode::KeyS,
+            KeyCode::KeyQ,
+            KeyCode::KeyE,
+            KeyCode::KeyA,
+            KeyCode::KeyD,
+            // `T` on its own is a hand on a sheet; `shift T` is the switch, and the switch
+            // is handled below.
+            KeyCode::KeyT,
+            // The wardrobe as well: ordering a sail is a decision about the rig, and a
+            // watch that goes on having its own opinion about which sail is up is a watch
+            // that puts the staysail back up as fast as you can get it down.
+            KeyCode::KeyX,
+            KeyCode::KeyZ,
+        ]
+        .iter()
+        .any(|k| keys.just_pressed(*k))
     {
         crew.stand_down("the ropes");
     }
@@ -666,7 +690,7 @@ pub fn gather(
     // the broad reach because that is where the headsail takes over the driving, and it
     // is read off the *true* wind angle — the apparent one moves with the boat's own
     // speed, and the point of sail does not.
-    let pressed = keys.just_pressed(KeyCode::KeyT)
+    let pressed = (keys.just_pressed(KeyCode::KeyT) && !fine)
         || pad.is_some_and(|p| p.just_pressed(GamepadButton::North));
     if pressed {
         // A second press soon after the first moves to the other sail; after a pause the

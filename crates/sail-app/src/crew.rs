@@ -98,12 +98,22 @@ const BEFORE_A_CHANGE: f64 = 40.0;
 const CARRIES_TO: f64 = 0.72;
 
 /// The hands, and whether they are on deck.
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct Crew {
     /// Whether the watch is working the sails.
     pub standing: bool,
     /// What they are on at this moment, for the plate to say.
     pub on: Option<&'static str>,
+    /// **What they are allowed to decide**, as opposed to what they are allowed to do.
+    ///
+    /// Trimming is a watch's job and nobody argues about it. Shortening sail and
+    /// changing a headsail are not trim, they are *decisions* — about the next hour, and
+    /// about whether the kite is worth the risk — and a skipper who has made one does
+    /// not want it undone twenty seconds later by somebody reading a heel gauge. So the
+    /// two of them are switches: with reefs locked the watch sails her as she is set,
+    /// and with the wardrobe locked it keeps whatever sail is on the bow.
+    pub may_reef: bool,
+    pub may_change_sail: bool,
     /// Seconds she has been over too far, and seconds she has been easy.
     pressed: f64,
     easy: f64,
@@ -132,6 +142,26 @@ pub struct Crew {
     /// time constant is that, and it is deliberately far longer than the sheets', which
     /// answer the wind that is here now.
     settled: Option<(f64, f64, f64)>,
+}
+
+impl Default for Crew {
+    fn default() -> Self {
+        Self {
+            standing: false,
+            on: None,
+            // Allowed by default: a watch that may not reef is a watch with its hands
+            // tied, and the lock is for the passage where you have made the call
+            // yourself.
+            may_reef: true,
+            may_change_sail: true,
+            pressed: 0.0,
+            easy: 0.0,
+            asking: 0.0,
+            asked_for: None,
+            on_the_winch: None,
+            settled: None,
+        }
+    }
 }
 
 impl Crew {
@@ -345,7 +375,11 @@ pub fn work(
         crew.settled = Some((twa, a, w));
         (twa, a, w)
     };
-    let want_sail = wardrobe(&cfg, settled.0, settled.1, settled.2);
+    let want_sail = if crew.may_change_sail {
+        wardrobe(&cfg, settled.0, settled.1, settled.2)
+    } else {
+        sim.controls.headsail
+    };
     if !orders.changing() {
         if want_sail == sim.controls.headsail {
             crew.asking = 0.0;
@@ -437,7 +471,15 @@ pub fn work(
     // Out of sheet: what she is still carrying at this heel is not something the trim
     // can take off her any more.
     let spilled = spill > SPILLS * 0.9;
-    if let Some(stop) = shorten(&mut crew, heel, dt, at, spilled) {
+    // And whether shortening sail is theirs to decide at all. Trim is a watch's job;
+    // a reef is a decision about the next hour, and a skipper who has made one does not
+    // want it undone by somebody reading a heel gauge.
+    let shorten_her = if crew.may_reef {
+        shorten(&mut crew, heel, dt, at, spilled)
+    } else {
+        None
+    };
+    if let Some(stop) = shorten_her {
         let which = BANK.iter().position(|l| *l == Line::Reef).unwrap_or(3);
         bank.target[which] = Some(stop);
         crew.on = Some(if stop > at {

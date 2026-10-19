@@ -364,7 +364,9 @@ pub fn run(
                 .as_ref()
                 .map(|l| (l.depth(brig.at), l.depth(brig.at + head * 320.0)))
                 .unwrap_or((99.0, 99.0));
-            let wind = sim.sim.wind.sample(brig.at, now);
+            // Her wind, at her rig's height, because the hail is about what *she*
+            // can do with it.
+            let wind = crate::ship::her_wind(&sim, brig.at);
             let from = sail_core::wind::direction_of(wind);
             let to_mark = brig.bound_for - brig.at;
             let twa_wanted = crate::ship::angle_off(to_mark.x.atan2(to_mark.y), from);
@@ -965,7 +967,7 @@ pub fn lay_off_the_route(sim: Res<Sim>, mut job: ResMut<Pilotage>, time: Res<Tim
         return;
     }
     job.laid_off = 0.0;
-    let wind = sim.sim.wind.sample(sim.sim.state.pos, sim.sim.state.time);
+    let wind = crate::ship::her_wind(&sim, job.brig_at);
     let from = sail_core::wind::direction_of(wind);
     // From where she is, because what is behind her is nobody's problem now.
     let brig_at = job.brig_at;

@@ -118,6 +118,24 @@ impl Default for Brig {
     }
 }
 
+/// The height her sail plan works at, metres.
+///
+/// **The same wind field as ours, read where her sails are.** Both vessels sample one
+/// field at their own positions, so a gust that heads you heads her when it reaches her
+/// and a squall is in the same place for both — but our rig is read sail by sail at its
+/// own centre of effort, around six metres, and hers was being read at the reference
+/// height of ten. Her courses are at eight metres and her topgallants at twenty-six: the
+/// middle of that, weighted by where her area actually is, is sixteen, and the shear
+/// over open water makes that five per cent more wind than the ten-metre figure. Small,
+/// and it is the reason a square-rigger keeps her upper sails drawing in air the deck
+/// cannot feel.
+const SAIL_PLAN_HEIGHT: f64 = 16.0;
+
+/// The wind she is actually in: the field, at her position, at her rig's height.
+pub fn her_wind(sim: &Sim, at: DVec2) -> DVec2 {
+    sim.sim.wind.sample(at, sim.sim.state.time) * sail_core::wind::shear_factor(SAIL_PLAN_HEIGHT)
+}
+
 /// Her wind angle: nought head to wind, plus or minus a hundred and eighty running.
 ///
 /// **A function, because getting it upside down makes a square-rigger sail into the wind
@@ -936,13 +954,13 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>) {
         brig.at = st.pos + DVec2::new(off.sin(), off.cos()) * range;
         brig.heading = st.heading;
         brig.speed = kn_to_ms(5.0);
-        let wind = sim.sim.wind.sample(brig.at, sim.sim.state.time);
+        let wind = her_wind(&sim, brig.at);
         let from = sail_core::wind::direction_of(wind);
         brig.braced = brace_for(angle_off(brig.heading, from));
         return;
     }
     let dt = time.delta_secs_f64();
-    let wind = sim.sim.wind.sample(brig.at, sim.sim.state.time);
+    let wind = her_wind(&sim, brig.at);
     let from = sail_core::wind::direction_of(wind);
     let tws = wind.length();
 
@@ -1060,7 +1078,7 @@ pub fn work_her(
         let fan = 1.0 + yard.tier as f64 * 0.05;
         tr.rotation = Quat::from_rotation_y(-(brig.braced * ease * fan) as f32);
     }
-    let wind = sim.sim.wind.sample(brig.at, sim.sim.state.time);
+    let wind = her_wind(&sim, brig.at);
     let from = sail_core::wind::direction_of(wind);
     let awa = angle_off(brig.heading, from);
     for (sail, mesh) in &canvas {

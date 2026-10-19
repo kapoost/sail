@@ -291,6 +291,12 @@ pub struct Rope<'a> {
     pub selected: bool,
     pub stops: Option<&'a [f64]>,
     pub position: Option<&'a str>,
+    /// What the two buttons will do, when the line has positions: the name of the stop
+    /// each of them moves her to, or nothing when there is no further to go that way.
+    ///
+    /// A button that says HAUL on a halyard tells nobody whether the sail is going up or
+    /// coming down. A button that says SET does.
+    pub to: (Option<&'a str>, Option<&'a str>),
     /// How fast it comes in, and how long this frame was.
     pub rate: f64,
     pub dt: f64,
@@ -1182,6 +1188,49 @@ pub fn draw(
                                                                                     )
                                                                                     .wrap(),
                                                                                 );
+                                                                                // **What they may decide**,
+                                                                                // under the switch that
+                                                                                // calls them. Trim is
+                                                                                // theirs and nobody argues;
+                                                                                // a reef and a sail change
+                                                                                // are decisions, and a
+                                                                                // skipper who has made one
+                                                                                // does not want it undone
+                                                                                // by somebody reading a
+                                                                                // heel gauge. Lit is
+                                                                                // theirs.
+                                                                                let mut allowed = [
+                                                                                    (crew.may_reef, "REEFS", "the watch may shorten sail and shake it out again"),
+                                                                                    (crew.may_change_sail, "SAILS", "the watch may change the headsail for the wind it has"),
+                                                                                ];
+                                                                                for (on, name, hint) in allowed.iter_mut().map(|(a, b, c)| (a, *b, *c)) {
+                                                                                    if ui
+                                                                                        .add(
+                                                                                            egui::Button::new(
+                                                                                                egui::RichText::new(name)
+                                                                                                    .monospace()
+                                                                                                    .size(letter::UNIT)
+                                                                                                    .color(if *on {
+                                                                                                        egui::Color32::BLACK
+                                                                                                    } else {
+                                                                                                        paint::LABEL
+                                                                                                    }),
+                                                                                            )
+                                                                                            .fill(if *on {
+                                                                                                paint::LIVE
+                                                                                            } else {
+                                                                                                egui::Color32::from_gray(26)
+                                                                                            })
+                                                                                            .min_size(egui::vec2(54.0, 15.0)),
+                                                                                        )
+                                                                                        .on_hover_text(hint)
+                                                                                        .clicked()
+                                                                                    {
+                                                                                        *on = !*on;
+                                                                                    }
+                                                                                }
+                                                                                crew.may_reef = allowed[0].0;
+                                                                                crew.may_change_sail = allowed[1].0;
                                                                             });
                                                                         });
                                                                     });
@@ -1260,6 +1309,22 @@ pub fn draw(
                                                 selected,
                                                 stops,
                                                 position,
+                                                // Where each button takes her, by name.
+                                                to: line
+                                                    .stop_index(&sim.controls)
+                                                    .map(|at| {
+                                                        (
+                                                            line.stop_called(
+                                                                &sim.controls,
+                                                                at as i32 + 1,
+                                                            ),
+                                                            line.stop_called(
+                                                                &sim.controls,
+                                                                at as i32 - 1,
+                                                            ),
+                                                        )
+                                                    })
+                                                    .unwrap_or((None, None)),
                                                 rate: line.rate(&sim.controls),
                                                 dt: time.delta_secs_f64(),
                                             },
@@ -1989,6 +2054,12 @@ fn lever(
 fn clutch(ui: &mut egui::Ui, label: &str, line: &Rope, value: &mut f64) -> (bool, i32) {
     let (selected, stops, position, rate, dt) =
         (line.selected, line.stops, line.position, line.rate, line.dt);
+    // A direction with nowhere left to go is not offered: the staysail cannot be set
+    // twice and the third reef is the last one there is.
+    let dead = (
+        line.stops.is_some() && line.to.0.is_none(),
+        line.stops.is_some() && line.to.1.is_none(),
+    );
     ui.vertical(|ui| {
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(78.0, 104.0), egui::Sense::click());
@@ -2051,7 +2122,10 @@ fn clutch(ui: &mut egui::Ui, label: &str, line: &Rope, value: &mut f64) -> (bool
         // what grinding is: the line runs while your hand is on the handle.
         let mut worked = false;
         let mut step = 0i32;
-        for (which, legend) in [(1.0_f64, "HAUL"), (-1.0, "EASE")] {
+        for (which, legend) in [
+            (1.0_f64, line.to.0.unwrap_or("HAUL")),
+            (-1.0, line.to.1.unwrap_or("EASE")),
+        ] {
             let at = egui::Rect::from_min_size(
                 egui::pos2(
                     rect.left() + 6.0,
@@ -2059,10 +2133,15 @@ fn clutch(ui: &mut egui::Ui, label: &str, line: &Rope, value: &mut f64) -> (bool
                 ),
                 egui::vec2(rect.width() - 12.0, 24.0),
             );
+            let gone = if which > 0.0 { dead.0 } else { dead.1 };
             let hit = ui.interact(
                 at,
                 ui.id().with((label, legend)),
-                egui::Sense::click_and_drag(),
+                if gone {
+                    egui::Sense::hover()
+                } else {
+                    egui::Sense::click_and_drag()
+                },
             );
             let down = hit.is_pointer_button_down_on();
             p.rect_filled(at, 2.0, if down { paint::LIVE } else { paint::TRACK });
