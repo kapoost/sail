@@ -52,6 +52,56 @@ PC, and a link in a browser says neither. Half of that is now answered by
 `dist/install.sh`, which installs without going through a browser at all and therefore
 without quarantine.
 
+## The number that decides it, measured since
+
+The browser question used to be about what panics and what cannot find a UDP socket.
+Those are the easy half. The hard half is one loop:
+
+| | native, one thread, M5 |
+|---|---|
+| sea mesh | 4.4 ms light airs, 5.7 ms in a gale |
+| foam | 0.3 to 1.9 ms |
+| cloud | 0.1 ms |
+
+The frame is 16.7 ms at sixty. In a tab, scalar `f64` with a transcendental in the inner
+loop runs somewhere between one and a half and three times slower than native, so 5.7 ms
+becomes nine to seventeen — **the sea alone is the frame**. Nothing else on the list is
+close: the world is rendered at 960 and blown up, so the graphics card has almost nothing
+to do, and every texture in the game is generated at startup rather than downloaded,
+which is the one place a tab normally loses.
+
+So the browser does not hinge on wgpu, or on assets, or on WebGPU support. It hinges on
+201 × 201 vertices each asking a twenty-one component spectrum for height, slope and
+drift, once a frame, on one thread.
+
+### Does spreading it across cores help in a tab?
+
+**In shape, yes. In effect, only with the right hosting.** Threads in wasm need
+`SharedArrayBuffer`, which needs the `Cross-Origin-Opener-Policy` and
+`Cross-Origin-Embedder-Policy` headers, and **GitHub Pages cannot send headers** — so a
+parallel build served from where this project's page lives would run the single-threaded
+path and gain nothing. A host that can set headers (or the service-worker trick that
+fakes them) unlocks it; that is a hosting decision, not a code one.
+
+What the work buys regardless is the shape: a pure map over the vertex array with no
+shared mutable state and a read-only spectrum is exactly what both wasm threads and a
+vertex shader want. Doing it for the native frame rate leaves the loop in the form the
+browser would need.
+
+### What would actually settle it
+
+* **Put the sum in the vertex shader.** The sea becomes nearly free and the tab stops
+  being the question — at the cost of the property that makes this sea trustworthy: the
+  hull and the drawn surface asking the same water the same question. Survivable, because
+  the hull samples a handful of points a substep rather than forty thousand, so the
+  processor keeps doing *those* — but the WGSL would have to be generated from the same
+  Rust spectrum, with a test pinning the two together at sample points. That is the real
+  cost: not the shader, the agreement.
+* **Fewer vertices.** 201 to 129 is two and a half times less work, 5.7 ms to 2.4, at
+  the price of near-field detail the band limit already grades away with distance.
+* **Trim the memory.** 370 MB resident, 50 MB of it thirty-six key frames of ripple map.
+  A tab will take it and would rather not.
+
 ## The shape that would make sense
 
 A **single-player demo in a tab**, as a shop window: click a link, sail for five minutes,
