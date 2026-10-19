@@ -422,11 +422,46 @@ fn fbm(p: Vec2) -> f32 {
 /// up you cut the plane close overhead and the pattern is large; looking towards the
 /// horizon you cut it miles away and it compresses into a band, which is what a cloudy
 /// sky does and the one thing a cube of noise cannot do.
-fn deck(dir: Vec3, sun: Vec3, height: f32, scale: f32, cover: f32, drift: f32) -> (f32, f32) {
+/// Where the painted low deck starts, metres along the ray.
+///
+/// Six kilometres: the particle field in `clouds.rs` reaches seven and a half, so the
+/// painting fades in while the particles are still going and neither leaves a gap.
+const PAINTED_FROM: f32 = 6_000.0;
+
+fn deck(
+    dir: Vec3,
+    sun: Vec3,
+    height: f32,
+    scale: f32,
+    cover: f32,
+    drift: f32,
+    painted_from: f32,
+) -> (f32, f32) {
     if dir.y <= 0.02 {
         return (0.0, 0.0);
     }
     let reach = height / dir.y;
+    // **Only what is genuinely far away belongs on a cubemap.**
+    //
+    // A cubemap is painted at infinity, so a cloud on it is the same cloud from every
+    // position and has no parallax at all. That is right for the high deck and wrong for
+    // the low one, which `clouds.rs` also draws, as particles, out to seven and a half
+    // kilometres — so the low cloud was being drawn twice, in two different places, from
+    // two different fields: the painted one blocked the shafts and the real one cast the
+    // shadows, and neither knew about the other.
+    //
+    // Faded in with distance along the ray instead. Looking up steeply the deck is a few
+    // hundred metres off and the particles own that sky; looking towards the horizon it
+    // is kilometres away and the painting owns it. The handover overlaps the particles'
+    // own range so there is no band of empty sky between them.
+    let near = if painted_from > 0.0 {
+        ((reach / painted_from) - 1.0).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    if near <= 0.0 {
+        return (0.0, 0.0);
+    }
     // Beyond about forty kilometres the deck is below the horizon as far as the eye is
     // concerned, and sampling it there only makes a hard line.
     let fade = 1.0 - ((reach - 26_000.0) / 16_000.0).clamp(0.0, 1.0);
@@ -437,7 +472,7 @@ fn deck(dir: Vec3, sun: Vec3, height: f32, scale: f32, cover: f32, drift: f32) -
     let n = fbm(at);
     // Coverage as a threshold with a soft shoulder: hard enough to have edges, soft
     // enough that the edges are cloth rather than paper.
-    let density = ((n - (1.0 - cover)) / 0.22).clamp(0.0, 1.0) * fade;
+    let density = ((n - (1.0 - cover)) / 0.22).clamp(0.0, 1.0) * fade * near;
     // Lighting, and the trick that makes drawn clouds read: a cloud is lit on the side
     // facing the sun and the *shape* of that lighting comes from the density field's
     // own slope. Sampling the field a little way towards the sun and comparing is a
@@ -471,7 +506,7 @@ fn shafts(dir: Vec3, sun: Vec3, cover: f32) -> f32 {
     for i in 1..=STEPS {
         let f = i as f32 / STEPS as f32;
         let at = dir.lerp(sun, f * 0.85).normalize();
-        let (low, _) = deck(at, sun, CLOUD_LOW, SCALE_LOW, cover, 3.0);
+        let (low, _) = deck(at, sun, CLOUD_LOW, SCALE_LOW, cover, 3.0, PAINTED_FROM);
         let (storm, _) = deck(
             at,
             sun,
@@ -479,6 +514,7 @@ fn shafts(dir: Vec3, sun: Vec3, cover: f32) -> f32 {
             SCALE_STORM,
             COVER_STORM * cover / COVER_LOW,
             23.0,
+            0.0,
         );
         clear += (1.0 - (low + storm).min(1.0)) / STEPS as f32;
     }
@@ -607,6 +643,7 @@ fn sky_colour(dir: Vec3, state: &Sky) -> Vec3 {
         SCALE_STORM,
         COVER_STORM * shade,
         23.0,
+        0.0,
     );
     let (high_d, high_l) = deck(
         dir,
@@ -615,6 +652,7 @@ fn sky_colour(dir: Vec3, state: &Sky) -> Vec3 {
         SCALE_HIGH,
         COVER_HIGH * (0.45 + 0.55 * shade),
         11.0,
+        0.0,
     );
     let (mid_d, mid_l) = deck(
         dir,
@@ -623,6 +661,7 @@ fn sky_colour(dir: Vec3, state: &Sky) -> Vec3 {
         SCALE_MID,
         COVER_MID * (0.5 + 0.5 * shade),
         7.0,
+        0.0,
     );
     let (cir_d, cir_l) = deck(
         dir,
@@ -631,8 +670,9 @@ fn sky_colour(dir: Vec3, state: &Sky) -> Vec3 {
         SCALE_CIRRUS,
         COVER_CIRRUS * (0.7 + 0.3 * shade),
         17.0,
+        0.0,
     );
-    let (low_d, low_l) = deck(dir, sun, CLOUD_LOW, SCALE_LOW, cover, 3.0);
+    let (low_d, low_l) = deck(dir, sun, CLOUD_LOW, SCALE_LOW, cover, 3.0, PAINTED_FROM);
     // How high up this direction is looking, which stands in for how far up a cell it
     // is seeing. A squall is dark underneath and brilliant on top, and that is one
     // cloud, not two: the base is in its own shadow and the anvil is in the sun.

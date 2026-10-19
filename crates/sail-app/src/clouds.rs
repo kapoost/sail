@@ -107,10 +107,27 @@ struct Cell {
     at: glam::DVec2,
     /// Altitude of its base.
     base: f32,
-    /// How far its puffs are scattered horizontally.
+    /// How far its puffs are scattered horizontally, as drawn — this is `size` worked
+    /// out against the day's cover, and it is what the shadows and the shafts read.
     spread: f32,
-    /// How tall it is built.
+    /// Its own size, which does not change with the weather.
+    size: f32,
+    /// How much of it is there today, 0 to 1: `rank` against the cover, worked out once
+    /// a frame and read by the drawing, the shadow and the shafts, so all three agree.
+    presence: f32,
+    /// Where this cell stands in the queue as the sky fills, 0 to 1.
+    ///
+    /// **The field had no idea what the weather was.** Forty-eight cells were drawn at
+    /// all times — the same cloud in a clear blue morning and under a front — while the
+    /// cubemap behind them painted the cover properly, so the sky said one thing at
+    /// infinity and another overhead. A cell is present when the cover has reached its
+    /// rank, which makes the near sky fill and clear in the same order every time: the
+    /// same clouds come back as it thickens, which is what a sky does.
+    rank: f32,
+    /// How tall it is built, as drawn — `tall` against the cover.
     rise: f32,
+    /// Its own height, which does not change with the weather.
+    tall: f32,
     /// Where across the cell each shaft starts, as a fraction of the spread, and how
     /// wide it is in metres. Fixed with the cell so the shafts do not crawl about.
     beams: [(f32, f32); BEAMS],
@@ -223,6 +240,7 @@ impl Clouds {
         let discs: Vec<(glam::DVec2, f32, f32)> = self
             .cells
             .iter()
+            .filter(|cell| cell.presence > 0.25)
             .map(|cell| (cell.at - run * cell.base as f64, cell.spread * 0.95))
             .filter(|(centre, outer)| (*centre - boat).length() < reach + *outer as f64)
             .map(|(centre, outer)| (centre, outer * 0.45, outer))
@@ -543,7 +561,8 @@ fn seeded_cell(
             best.0
         }
     };
-    let spread = 230.0 + seed.next_f64() as f32 * 280.0;
+    let size = 230.0 + seed.next_f64() as f32 * 280.0;
+    let spread = size;
     let mut beams = [(0.0, 0.0); BEAMS];
     for b in &mut beams {
         *b = (
@@ -557,11 +576,16 @@ fn seeded_cell(
     // flat bases of a line of cumulus standing at one height over the land and lower
     // over the water is a real thing to look at.
     let over_land = if dry(at) { LAND_LIFT } else { 0.0 };
+    let rise = 90.0 + seed.next_f64() as f32 * 170.0;
     Cell {
         at,
         base: BASE_LOW + over_land + seed.next_f64() as f32 * (BASE_HIGH - BASE_LOW),
         spread,
-        rise: 90.0 + seed.next_f64() as f32 * 170.0,
+        size,
+        presence: 1.0,
+        rank: seed.next_f64() as f32,
+        rise,
+        tall: rise,
         beams,
         storm: 0.0,
     }
@@ -597,9 +621,22 @@ pub fn update(
     let drift =
         glam::DVec2::new(surface.x * c - surface.y * s, surface.x * s + surface.y * c) * 1.25;
 
+    // **How much of this field the day is actually using.**
+    //
+    // A cell is present once the cover has reached its rank, over a soft band so a
+    // thickening sky fills rather than pops. And the ones that are there grow with it:
+    // fair-weather cumulus are separate lumps with sky between them, and an overcast is
+    // the same cloud joined up — one wide flat sheet rather than forty-eight dots — so
+    // the spread goes up with the cover and the height comes down.
+    let cover = sky.cover;
+    let swell = 0.80 + 1.05 * cover;
+    let flatten = 1.25 - 0.55 * cover;
     let mut seed = sail_core::rng::Pcg32::new(0x5C_1D_0B ^ (t * 1000.0) as u64);
     for cell in &mut clouds.cells {
         cell.at += drift * dt;
+        cell.spread = cell.size * if cell.storm > 0.0 { 1.0 } else { swell };
+        cell.rise = cell.tall * if cell.storm > 0.0 { 1.0 } else { flatten };
+        cell.presence = step_between(cell.rank - 0.12, cell.rank, cover).max(cell.storm);
         if (cell.at - boat).length() > RANGE {
             *cell = seeded_cell(
                 &mut seed,
@@ -625,9 +662,14 @@ pub fn update(
             Some(&(at, radius, maturity)) => {
                 cell.at = at;
                 cell.base = 150.0 + 60.0 * (1.0 - maturity as f32);
-                cell.spread = radius as f32 * 0.85;
+                cell.size = radius as f32 * 0.85;
+                cell.spread = cell.size;
                 cell.rise = 260.0;
+                cell.tall = 260.0;
                 cell.storm = maturity as f32;
+                cell.presence = 1.0;
+                // A squall is weather whatever the cover says.
+                cell.rank = 0.0;
             }
             None if cell.storm > 0.0 => {
                 // Its squall has gone, so the cell goes back to being weather. Put it
@@ -704,7 +746,23 @@ pub fn update(
         colour = colour.lerp(haze, far * far * 0.6);
         // Opaque where it is a squall: you cannot see through one, which is the whole
         // reason it takes the island away.
-        let mut alpha = (0.80 + 0.19 * cell.storm) * (1.0 - far * far * 0.4);
+        // Present only if the day has got this far. The band is wide enough that a
+        // cell arrives over a minute of weather rather than between two frames.
+        if cell.presence <= 0.01 {
+            continue;
+        }
+        // **An overcast costs what it covers.** The cells grow until they join, so at
+        // full cover every one of their puffs is wide and the sky is drawn five or six
+        // deep in blended quads — forty frames a second rather than sixty, for puffs
+        // buried inside a cloud that is opaque long before you reach them. The inside
+        // ones go: the silhouette is the rim, and that is all a joined sheet shows.
+        if cover > 0.45 && i % 3 == 0 {
+            let inside = Vec3::new(p.offset.x, 0.0, p.offset.z).length() < 0.45;
+            if inside {
+                continue;
+            }
+        }
+        let mut alpha = (0.80 + 0.19 * cell.storm) * (1.0 - far * far * 0.4) * cell.presence;
 
         if ink.0 {
             // Drawn cloud is flat tone and hard edges: three levels, no gradient. The
@@ -757,6 +815,11 @@ pub fn update(
     let mut colours = Vec::with_capacity(CELLS * BEAMS * 4);
     let mut uvs = Vec::with_capacity(CELLS * BEAMS * 4);
     for cell in &clouds.cells {
+        // A cloud the day is not using casts no shaft, for the same reason it casts no
+        // shadow: it is not there.
+        if cell.presence <= 0.25 {
+            continue;
+        }
         // Across the sun, horizontally: the direction the beams are spread along.
         let across = Vec3::new(-sun.z, 0.0, sun.x).normalize_or_zero();
         let head = origin.to_bevy(cell.at, cell.base);
@@ -776,7 +839,7 @@ pub fn update(
             // Shadowed air: the haze colour with the light taken out of it. Not black,
             // and not a colour of its own — a shaft is the same sky, unlit.
             let mut tone = haze * 0.58;
-            let mut alpha = 0.16 * side_on * side_on;
+            let mut alpha = 0.16 * side_on * side_on * cell.presence;
             if ink.0 {
                 // Two levels and a touch stronger, because a drawn beam is a wedge with
                 // an edge and not an airbrushed gradient.
