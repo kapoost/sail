@@ -458,7 +458,17 @@ pub fn spray_marks() -> Image {
                 1 => bubble_mark(u, v),
                 frame => torn_claw(u, v, frame - 2),
             };
-            let i = ((y * W * 2 + x) * 4) as usize;
+            // The stride is the whole row of cells, and it was `W * 2` — the width of
+            // this sheet back when it held a drop and a claw. Adding the bubble and the
+            // four frames of tearing made the row three times longer and left the stride
+            // where it was, so every row was written into the first third of the buffer,
+            // on top of the rows before it: two thirds of the sheet stayed transparent
+            // black and what was left was a solid white block with no shape in it.
+            //
+            // Every mark on the sea has been that block ever since, which is the whole
+            // of "I cannot see the particles" and "there is no foam along the side"  —
+            // the foam was drawn, in quantity, as a texture with no marks in it.
+            let i = ((y * W * CELLS + x) * 4) as usize;
             let byte = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
             data[i] = byte;
             data[i + 1] = byte;
@@ -796,5 +806,93 @@ mod the_marks {
         // And the last frame still has something in it: foam thins out, it does not
         // blink off.
         assert!(was > 0.0);
+    }
+}
+
+#[cfg(test)]
+mod the_sheet {
+    use super::*;
+
+    fn sheet() -> (Vec<u8>, usize, usize) {
+        let image = spray_marks();
+        let size = image.texture_descriptor.size;
+        let data = image.data.expect("the sheet has no pixels");
+        (data, size.width as usize, size.height as usize)
+    }
+
+    /// **Every cell has a mark in it, and the sheet is written all the way down.**
+    ///
+    /// The fault this is for was a row stride: the sheet grew from two cells to six and
+    /// the stride stayed at two cells' width, so every row was written into the first
+    /// third of the buffer on top of the row before it. Two thirds of the image was
+    /// untouched black and the rest was a solid block with no shape in it — and since
+    /// the marks are drawn additively, what that produces is foam you cannot see.
+    /// Nothing else caught it: the image was the right size, the right format, had
+    /// mipmaps and uploaded cleanly. Only its content was wrong.
+    #[test]
+    fn each_mark_is_a_mark_and_the_whole_sheet_is_written() {
+        let (data, w, h) = sheet();
+        let cells = w / h;
+        assert_eq!(cells, 6, "six cells across a sheet one cell high");
+        let red = |x: usize, y: usize| data[(y * w + x) * 4] as f32 / 255.0;
+        // The sheet is written all the way down. These marks are round, so the top and
+        // the bottom thirds of the image carry about the same amount of ink; a stride
+        // that stops short leaves the bottom exactly empty, which no mark does.
+        let band = |from: usize, to: usize| -> f32 {
+            (from..to)
+                .flat_map(|y| (0..w).map(move |x| (x, y)))
+                .map(|(x, y)| red(x, y))
+                .sum::<f32>()
+                / ((to - from) * w) as f32
+        };
+        let (top, bottom) = (band(0, h / 3), band(2 * h / 3, h));
+        assert!(
+            bottom > top * 0.4,
+            "the bottom third of the sheet carries {bottom:.3} ink against the top's \
+             {top:.3}, which is a row stride that does not reach the bottom"
+        );
+        for cell in 0..cells {
+            let left = cell * h;
+            let ink: f32 = (0..h)
+                .flat_map(|y| (0..h).map(move |x| (x, y)))
+                .map(|(x, y)| red(left + x, y))
+                .sum::<f32>()
+                / (h * h) as f32;
+            assert!(
+                (0.002..0.6).contains(&ink),
+                "cell {cell} is {:.3} covered, which is either blank or a solid block",
+                ink
+            );
+            // A mark is a mark: its corners are water, not paint.
+            for (x, y) in [(2, 2), (h - 3, 2), (2, h - 3), (h - 3, h - 3)] {
+                assert!(
+                    red(left + x, y) < 0.25,
+                    "cell {cell} has paint in its corner, which is a square rather than a mark"
+                );
+            }
+        }
+    }
+
+    /// The four frames of a handful of foam coming apart get emptier, which is what
+    /// *tearing* means and is the whole reason there are four of them.
+    #[test]
+    fn the_foam_tears_as_it_goes() {
+        let (data, w, h) = sheet();
+        let red = |x: usize, y: usize| data[(y * w + x) * 4] as f32 / 255.0;
+        let ink = |cell: usize| -> f32 {
+            let left = cell * h;
+            (0..h)
+                .flat_map(|y| (0..h).map(move |x| (x, y)))
+                .map(|(x, y)| red(left + x, y))
+                .sum::<f32>()
+                / (h * h) as f32
+        };
+        let frames: Vec<f32> = (2..6).map(ink).collect();
+        for pair in frames.windows(2) {
+            assert!(
+                pair[1] < pair[0],
+                "a later frame of the tear is fuller than an earlier one: {frames:?}"
+            );
+        }
     }
 }

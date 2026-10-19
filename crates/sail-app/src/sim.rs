@@ -66,12 +66,28 @@ impl Sim {
         // A coastal fetch: enough to build a proper sea without the long ocean swell
         // that would dwarf a thirty-four footer. At twelve knots this is about 0.9 m
         // at four and a half seconds.
-        let sea = WindSea::new(
+        let mut sea = WindSea::new(
             weather.tws,
             weather.fetch,
             weather.wind_from,
             weather.seed ^ 0xC0FFEE,
         );
+        // `SAIL_SEA=built` opens with the sea the wind has already made, instead of the
+        // flat water it starts on and the two and a half hours it takes to build.
+        //
+        // The same kind of knob as `SAIL_SQUALL`, and it earned its place the same way:
+        // every question about what a gale looks like — the breakers, the white water,
+        // the size of the rollers — begins with half an hour of nothing happening, and
+        // a photograph taken in that half hour answers the wrong question. The panel has
+        // SETTLE NOW for a person; this is the same thing for a screenshot.
+        if std::env::var("SAIL_SEA").as_deref() == Ok("built") {
+            sea.settle(weather.tws, 0.0);
+            info!(
+                "the sea opens built: {:.1} m at {:.1} s",
+                sea.significant_height(),
+                sea.peak_period()
+            );
+        }
         // The archipelago, and a wind that knows it is there. The land goes in before
         // the first substep so the boat is never started on a rock.
         let land = std::sync::Arc::new(crate::islands::generate(weather.seed));

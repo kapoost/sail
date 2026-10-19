@@ -877,17 +877,38 @@ pub fn update_sea(
             let height = lift as f32;
             let (sx, sz) = (slope.x as f32, -slope.y as f32);
 
-            let point = Vec3::new(offset.x, height, offset.y);
+            // **And it moves sideways as well as up**, which is the difference between
+            // a sea and a corrugated sheet.
+            //
+            // Gerstner is a *parametrisation*: the parcel whose mean position is here is
+            // drawn at here-plus-its-own-displacement, and that displacement is what
+            // gathers water into the crests and spreads it out under the troughs. It is
+            // the whole reason the module says Gerstner rather than a sum of sines —
+            // crests sharper than troughs — and the drawn mesh was not doing it. Every
+            // vertex sat on its grid point and moved only up and down, so the picture
+            // was Airy: round humps of exactly the height the sea reports and none of
+            // the shape. Reported from the deck as the sea going flat, with no breakers
+            // and no rollers in it, which is precisely what a correct height and a wrong
+            // shape look like.
+            //
+            // It costs nothing. The displacement was already being computed for the
+            // texture coordinates, and this is what it was for.
+            let swell = water.drift;
+            let point = Vec3::new(offset.x + swell.x as f32, height, offset.y - swell.y as f32);
             let normal = Vec3::new(-sx, 1.0, -sz).normalize();
             positions.push(point);
             normals.push(normal);
 
             // World-locked UVs, so the detail stays with the sea rather than with the
-            // boat: the grid recentres every frame and the texture must not. On top of
-            // that the detail rides the water's own orbital displacement, which is
-            // bounded — a surface parcel travels a circle of the wave's amplitude — so
-            // the ripples go round with the wave instead of being dragged across it.
-            let parcel = world - water.drift - current - uv_base;
+            // boat: the grid recentres every frame and the texture must not.
+            //
+            // And the parcel is now simply *here*. While the vertex stood on its grid
+            // point, the water it was showing was the parcel that had drifted to it from
+            // upwave, so the coordinates had to be walked back by that displacement to
+            // keep the ripples riding the wave instead of being dragged across it. Now
+            // that the vertex goes where the parcel goes, its mean position is its own
+            // grid point and the correction would be applying the drift twice.
+            let parcel = world - current - uv_base;
             uvs.push(sea_texture::ripple_uv(Vec2::new(
                 parcel.x as f32,
                 parcel.y as f32,
@@ -1152,7 +1173,12 @@ pub fn seen_through(sun: Vec3, view: Vec3, normal: Vec3) -> f32 {
 /// Foam only belongs near a crest. A steep trough is still green water.
 #[inline]
 fn crest_weight(lift: f32) -> f32 {
-    ((lift + 0.15) / 0.6).clamp(0.0, 1.0)
+    // In deviations rather than in significant heights, which is the same correction the
+    // spray's `CREST_TOP` needed and for the same reason: Hs is four times the rms, so a
+    // threshold written as a fraction of Hs quietly moved when the sea stopped being a
+    // root two too tall. Full weight at 1.2 deviations — the top tenth of the water,
+    // which is where whitecaps are.
+    ((lift + 0.10) / 0.40).clamp(0.0, 1.0)
 }
 
 /// Report how long a frame takes, and how evenly.

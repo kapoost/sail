@@ -75,15 +75,36 @@ const LIFE: f32 = 3.4;
 /// that gets bigger while it gets fainter reads as something dispersing rather than
 /// something being turned off. The two together are most of what makes it look like
 /// foam and not like a sprite.
-const CLAW_LIFE: f32 = 1.6;
+const CLAW_LIFE: f32 = 4.0;
 /// How fast foam spreads outward from where it was thrown, m/s.
 const SPREAD: f64 = 0.55;
 /// How near the top of a wave a dart has to land, as a fraction of the significant
 /// height. Elevation only — see the dart loop for why steepness is the wrong question.
-const CREST_TOP: f64 = 0.42;
+///
+/// **Re-set when the sea stopped being a root two too tall.** Significant height is four
+/// times the root-mean-square elevation, so this threshold is really a number of standard
+/// deviations: 0.42 of Hs is 1.7 of them, which a Gaussian sea is above 4.6 % of the
+/// time. On the old surface — the one that was 41 % higher than it said — the same
+/// fraction of Hs was 1.2 deviations and 12 % of the water, and the whole look of a
+/// breaking sea was calibrated by eye against that. Correcting the height without
+/// correcting this took two thirds of the whitecaps off the sea.
+///
+/// Three tenths is 1.2 deviations and 11 % of the surface, which is where it was.
+const CREST_TOP: f64 = 0.30;
 
 /// How many looks at the water a fully whitecapped sea gets a second.
-const CREST_DARTS: f32 = 4200.0;
+///
+/// **Set against measured whitecap coverage**, which is a real number and not a taste:
+/// Monahan's relation gives the fraction of sea surface covered in white as
+/// `3.8e-6 U^3.4` — about one per cent of the water at twenty knots and five at a gale's
+/// thirty-two. Each crest found here is now nine marks along a streak a boat's length
+/// long, living four seconds; at a third of the old rate that comes out near five per
+/// cent in a gale, against the quarter of a per cent the old scattering of dots made.
+///
+/// Fewer and bigger is also what the frame can afford: these are additive quads and what
+/// they cost is area, so the same white water in a tenth as many marks is most of a
+/// millisecond back.
+const CREST_DARTS: f32 = 1400.0;
 /// How many bubbles are drawn in a patch of foam.
 ///
 /// Four, which is not how many there are — a square metre of fresh foam has thousands —
@@ -91,16 +112,28 @@ const CREST_DARTS: f32 = 4200.0;
 /// they stop being individuals and go back to being a texture, which the foam marks are
 /// already doing better and more cheaply.
 const BUBBLES_IN_A_PATCH: usize = 4;
+/// And how far out it is worth making any, metres.
+const BUBBLES_WITHIN: f64 = 35.0;
 
-/// Marks in one breaking crest, and how far they are scattered, metres.
+/// Marks in one breaking crest, and the shape they are laid in.
 ///
-/// Four rather than six, because the marks themselves got bigger. A whitecap is drawn
-/// with additive blending, so what it costs is its *area* — six marks a third of a metre
-/// across and four marks of a metre are the same number of quads and nine times the fill,
-/// and that came off the frame rate: fifty down to thirty-seven. Fewer and larger is both
-/// the cheaper picture and the truer one.
-const CREST_SPECKS: usize = 4;
-const CREST_PATCH: f64 = 1.5;
+/// **A whitecap is a streak, not a blob.** It was a handful of marks scattered in a
+/// circle a metre and a half across, which from the deck is a white dot — and a sea
+/// covered in white dots reads as sparkle rather than as breaking water. What a crest
+/// actually does is break *along itself*: the white runs down the crest line for ten or
+/// fifteen metres and a couple of metres across, perpendicular to the way the sea is
+/// going, and that long shape is the whole of what the eye recognises.
+///
+/// Nine marks along a streak whose length follows the sea — a metre and a half of chop
+/// breaks in patches you could stand on, a three-metre gale sea in streaks the length of
+/// the boat.
+const CREST_SPECKS: usize = 9;
+/// Half-width of the streak across the crest, metres.
+const CREST_WIDE: f64 = 1.1;
+/// Length along the crest, metres: a base and a part that follows the significant
+/// height, bounded either side so a millpond and a storm both stay believable.
+const CREST_LONG: (f64, f64) = (4.0, 3.4);
+const CREST_LONGEST: f64 = 16.0;
 
 // ---------------------------------------------------------------------------------------
 // The third source: a crest that is actually breaking, throwing water forward of itself.
@@ -575,27 +608,27 @@ pub fn update(
             if lifted < CREST_TOP {
                 continue;
             }
-            // A handful of small ones, not one big one.
+            // Laid along the crest, which is across the way the sea is running.
             //
-            // These specks are drawn as plain quads — there is no texture on them, which
-            // is right for foam at the hull where each is a pixel or two and the *field*
-            // of them is the picture. Scale one of those up to two metres and you have
-            // not drawn a whitecap, you have drawn a white square, which is what a
-            // square looks like when it is big enough to see its corners.
-            //
-            // So a breaking crest is a cluster: half a dozen specks a third of a metre
-            // across, scattered over a metre and a half of water. Same grammar as the
-            // foam off the bow — many small marks, each twinkling on its own — at the
-            // size the thing actually is.
+            // Each mark is still a small one and the *field* of them is the picture —
+            // that part was right. What was wrong was the arrangement: a circle of them
+            // is a dot however many there are, and the thing being drawn is a line of
+            // broken water a boat's length long.
             let blow = downwind * (0.5 + 1.5 * r.next_f64()) * blown.min(1.2) as f64;
-            for _ in 0..CREST_SPECKS {
+            let run = downwind.normalize_or_zero();
+            let crest = glam::DVec2::new(-run.y, run.x);
+            let long = (CREST_LONG.0 + CREST_LONG.1 * hs).min(CREST_LONGEST);
+            for i in 0..CREST_SPECKS {
                 if live.len() >= budget() {
                     break;
                 }
-                let spread = r.next_f64() * std::f64::consts::TAU;
-                let out = CREST_PATCH * r.next_f64().sqrt();
+                // Spaced along the streak rather than scattered in it, with enough
+                // jitter that the spacing is not a row of beads.
+                let step = i as f64 / (CREST_SPECKS - 1).max(1) as f64 - 0.5;
+                let along = (step + (r.next_f64() - 0.5) * 0.12) * long;
+                let across = (r.next_f64() - 0.5) * 2.0 * CREST_WIDE;
                 live.push(Speck {
-                    at: at + glam::DVec2::new(spread.cos(), spread.sin()) * out,
+                    at: at + crest * along + run * across,
                     drift: blow + glam::DVec2::new(a.cos(), a.sin()) * 0.25,
                     surge: glam::DVec2::ZERO,
                     age: 0.0,
@@ -614,14 +647,18 @@ pub fn update(
             // that is merely pale. They are spawned with the patch and outlive it — the
             // handful tears apart and the bubbles go on sitting there — which is why a
             // whitecap leaves a trail behind it instead of simply vanishing.
-            for _ in 0..BUBBLES_IN_A_PATCH {
+            // Only near enough to be resolved. A bubble is a few centimetres: at eighty
+            // metres it is a hundredth of a pixel, and a thousand of them out there were
+            // a thousand marks of budget and fill spent on nothing at all.
+            let close = range < BUBBLES_WITHIN;
+            for _ in 0..(if close { BUBBLES_IN_A_PATCH } else { 0 }) {
                 if live.len() >= budget() {
                     break;
                 }
-                let spread = r.next_f64() * std::f64::consts::TAU;
-                let out = CREST_PATCH * 1.4 * r.next_f64().sqrt();
+                let along = (r.next_f64() - 0.5) * long;
+                let across = (r.next_f64() - 0.5) * 2.4 * CREST_WIDE;
                 live.push(Speck {
-                    at: at + glam::DVec2::new(spread.cos(), spread.sin()) * out,
+                    at: at + crest * along + run * across,
                     // They go with the water and not with the wind: a bubble is in the
                     // sea rather than on it, and that difference is visible the moment
                     // there are both kinds in one patch.
@@ -929,7 +966,7 @@ pub fn update(
             // water a couple of metres across, not a scatter of coins: at a third of a
             // metre a mark forty metres out was a pixel and a half and the sea's own
             // texture — which draws white streaks of its own — simply swallowed it.
-            (0.06 + 0.22 * life) * s.scale
+            (0.10 + 0.30 * life) * s.scale
         } else {
             (0.04 + 0.06 * life) * s.scale * 0.62
         };
@@ -953,7 +990,25 @@ pub fn update(
             Mark::Bubble => 3.1,
             Mark::Drop => 1.7,
         };
-        let alpha = (1.0 - life).powf(fade) * 0.95 * twinkle.clamp(0.0, 1.4);
+        // **Foam arrives and then it lies there.** A curve that only falls says the
+        // first, and the first is a tenth of what a whitecap is: the break is white and
+        // hard for a second and the patch it leaves goes on sitting on the water for
+        // ten or twenty, pale and plain to see, drifting down the face of the wave. With
+        // the fall alone, seventeen hundred marks were alive on the sea and all but a
+        // couple of hundred were too faint to find — measured as bright pixels, the foam
+        // put 0.6 % of white on the water where the measured whitecap coverage for this
+        // wind is nearer three.
+        //
+        // So the arrival keeps its steep curve and a patch is laid under it: not quite
+        // half the brightness, holding nearly to the end of the mark's life. The maximum
+        // of the two, because they are the same water seen at two ages and the brighter
+        // is whichever one is happening.
+        let bloom = (1.0 - life).powf(fade);
+        let alpha = match s.kind {
+            Mark::Claw => bloom.max(0.45 * (1.0 - life).powf(0.7)),
+            _ => bloom,
+        } * 0.95
+            * twinkle.clamp(0.0, 1.4);
         // The surface this mark has to sit on is the one that is *drawn*, which is not
         // the one the water has. The mesh carries nothing finer than four samples
         // across it, so `update_sea` asks the field filtered to that — and this asked
@@ -967,7 +1022,22 @@ pub fn update(
         let offset = s.at - st.pos;
         let resolution =
             crate::world::drawn_resolution(Vec2::new(offset.x as f32, -offset.y as f32));
-        let surface = sim.sim.water.height_resolved(s.at, t, resolution);
+        // Asked for the whole parcel, not just its height.
+        //
+        // **A mark of foam sits on a parcel of water, and the drawn sea moves its
+        // parcels sideways.** The mesh is Gerstner: the vertex whose mean position is
+        // here is drawn here-plus-its-own-displacement, which gathers the water into
+        // the crests. A speck placed at its mean position with the height of that
+        // position is therefore drawn beside the water it belongs to — and since a mark
+        // floats a few centimetres proud, a few centimetres of disagreement puts it
+        // under the skin. Measured: six times the foam on the water made the picture
+        // barely a per cent brighter, because most of it was inside the sea.
+        //
+        // So the mark goes where its parcel goes. Same question, same answer, one
+        // definition — which is what the drift being in `Parcel` is for.
+        let water = sim.sim.water.surface_resolved(s.at, t, resolution);
+        let surface = water.height;
+        let afloat = s.at + water.drift;
         // And it comes *up through* the surface rather than being pinned to it. Foam
         // thrown by a breaking wave is under the water for a moment and then it is not;
         // what the eye reads is the arrival. A mark rises its own height over the first
@@ -1026,7 +1096,7 @@ pub fn update(
         // metre or two across, and at the same lift the sea — which is drawn opaque —
         // hid its bottom half and what was left read as something sunk rather than
         // something floating.
-        let centre = origin.to_bevy(s.at, height as f32);
+        let centre = origin.to_bevy(afloat, height as f32);
         // Facing the eye, so a speck is a speck from everywhere rather than a flake
         // lying on the water that vanishes edge-on.
         let to_eye = (view.translation - centre).normalize_or_zero();
@@ -1054,8 +1124,20 @@ pub fn update(
     // none are being born, or they are being born too small to see — and no amount of
     // looking at the water tells you which.
     if darts_thrown > 0 {
+        // Broken down by kind, because "there are no whitecaps" has three causes and
+        // one number cannot tell them apart: none are born, they are born and die at
+        // once, or they are there at a size nobody can see. A count of each kind alive
+        // separates the first two from the third in one line.
+        let (mut drops, mut claws, mut bubbles) = (0u32, 0u32, 0u32);
+        for s in &spray.live {
+            match s.kind {
+                Mark::Drop => drops += 1,
+                Mark::Claw => claws += 1,
+                Mark::Bubble => bubbles += 1,
+            }
+        }
         debug!(
-            "spray: {born_breaking} of {darts_thrown} darts found a crest, {} specks alive",
+            "spray: {born_breaking} of {darts_thrown} darts found a crest; alive {}              = {drops} hull, {claws} crest, {bubbles} bubbles",
             spray.live.len()
         );
     }
