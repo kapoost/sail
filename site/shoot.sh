@@ -20,6 +20,13 @@
 #     bash site/shoot.sh            # every scene
 #     bash site/shoot.sh brig rod   # just these
 #
+# **The scenes behind a key are driven from inside the game**, by the schedule in
+# `shot.rs`, not by making the window server type at it. That was tried first and does
+# not work: macOS will post synthetic key events to the focused window and `winit` never
+# reports them — measured with `h` and `F1`, both delivered, both ignored, console still
+# up in the resulting photograph. Doing it inside needs no permission from the operating
+# system and gives the same picture on anybody's machine.
+#
 # Needs the release binary (`cargo build --release -p sail-app`) and Python with Pillow
 # for the conversion. It opens a window per scene; it is not a headless tool.
 
@@ -42,12 +49,58 @@ scene_env () {
     gennaker) echo "SAIL_SEED=11 SAIL_HEADSAIL=gennaker SAIL_SHOT_AFTER=80" ;;
     rod)      echo "SAIL_SEED=3  SAIL_ROD=30 SAIL_HOOK=ling SAIL_FISH=20 SAIL_SHOT_AFTER=85" ;;
     drill)    echo "SAIL_SEED=5  SAIL_TUTORIAL=1   SAIL_SHOT_AFTER=70" ;;
+    # Everything below here needs a key pressed, which is what the score is for.
+    chart)    echo "SAIL_SEED=42 SAIL_SHOT_KEYS=70:shift+m SAIL_SHOT_AFTER=76" ;;
+    # Put her somewhere at sea with no idea where, then raise the glasses and ask what
+    # is in them. The plain version of this is weaker: a boat that already knows where
+    # she is answers "you know where you are", which is a photograph of the wrong half
+    # of the feature.
+    lost)     echo "SAIL_SEED=42 SAIL_SHOT_KEYS=66:shift+l;72:shift+b;76:b SAIL_SHOT_AFTER=79" ;;
+    # Three presses walks the view round to under the water, beside the lure.
+    below)    echo "SAIL_SEED=3 SAIL_ROD=30 SAIL_SHOT_KEYS=70:c;71:c;72:c SAIL_SHOT_AFTER=76" ;;
+    keys)     echo "SAIL_SEED=42 SAIL_SHOT_KEYS=70:f1 SAIL_SHOT_AFTER=73" ;;
     *) return 1 ;;
   esac
 }
 
-SCENES=${*:-"brig squall gennaker rod drill"}
+# A run of frames rather than one, for the single picture on the page that has to move.
+reel_env () {
+  echo "SAIL_SEED=19 SAIL_SQUALL=70 SAIL_SHOT_EVERY=0.22 SAIL_SHOT_FRAMES=30 SAIL_SHOT_AFTER=116"
+}
+
+SCENES=${*:-"brig squall gennaker rod drill chart lost below keys"}
 failed=()
+
+# `reel` is its own thing: thirty frames instead of one picture, made into a loop.
+if [ "$SCENES" = "reel" ]; then
+  frames=$(mktemp -d)
+  echo "reel      ... this one runs for two minutes"
+  # shellcheck disable=SC2086
+  env $(reel_env) SAIL_SHOT="$frames/f.png" SAIL_SHOT_EXIT=1 "$BIN" >"$frames/log" 2>&1
+  count=$(find "$frames" -name 'f-*.png' | wc -l | tr -d ' ')
+  echo "          $count frames"
+  [ "$count" -ge 20 ] || { echo "only $count frames — not enough for a loop"; exit 1; }
+  python3 - "$frames" "$OUT" <<'PY'
+import pathlib, sys
+from PIL import Image
+
+frames, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+ims = []
+for p in sorted(frames.glob("f-*.png")):
+    im = Image.open(p).convert("RGB")
+    ims.append(im.resize((1200, round(im.height * 1200 / im.width)), Image.LANCZOS))
+# Animated WebP rather than GIF: a GIF of moving water is 256 colours and about five
+# times the weight, and the sea is the one thing a 256-colour palette cannot do.
+dest = out / "sailing.webp"
+ims[0].save(dest, "WEBP", save_all=True, append_images=ims[1:], duration=220, loop=0,
+            quality=72, method=4)
+print(f"  {dest}  {dest.stat().st_size/1e3:.0f} kB  {len(ims)} frames")
+PY
+  rm -rf "$frames"
+  echo
+  echo "done — rebuild with: python3 site/build.py --pdf"
+  exit 0
+fi
 
 for name in $SCENES; do
   env_line=$(scene_env "$name") || { echo "unknown scene: $name"; exit 1; }

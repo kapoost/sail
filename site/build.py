@@ -167,6 +167,24 @@ def shots() -> list[tuple[str, str, str]]:
             "there — in a hull that draws more than yours and cannot turn like yours.",
         ),
         (
+            "chart.webp",
+            "The chart table",
+            "Dividers, a plain ruler, a parallel rule, a protractor, a pencil, a "
+            "stopwatch, a hand log and a rubber — and the deck log beside the paper, "
+            "because a chart is not where a navigator writes things down. The coast is "
+            "read off the same field the boat runs aground on, so it cannot lie about "
+            "the depths.",
+        ),
+        (
+            "lost.webp",
+            "Somewhere at sea, with no idea where",
+            "The names come off the marks and the chart stops following her; getting them "
+            "back is the exercise. Seeing a thing and knowing which thing it is are "
+            "different questions, and the second is the whole difficulty — three marks "
+            "well spread apart are a shape that belongs in one place on the coast and "
+            "nowhere else.",
+        ),
+        (
             "squall.webp",
             "A squall, announced",
             "Bearing, distance, and whether it is passing or coming for you — on the "
@@ -188,6 +206,14 @@ def shots() -> list[tuple[str, str, str]]:
             "RYA and US Sailing both teach — one instruction at a time, with a target "
             "heading and a mark in the water for each leg. When something has to be done "
             "in the next two seconds it is four words across the screen.",
+        ),
+        (
+            "below.webp",
+            "Under the surface, beside the lure",
+            "This project argued against the view on the grounds that the sea is opaque "
+            "and there would be nothing to see — which was an argument about the "
+            "surface. Ten metres of visibility, green rather than blue because this is a "
+            "shelf sea with a spring bloom in it.",
         ),
         (
             "rod.webp",
@@ -219,6 +245,37 @@ def head(title: str, description: str, css_extra: str = "") -> str:
 {css_extra}
 </head>
 <body>"""
+
+
+def help_shot() -> str:
+    """The help screen itself, which is where this list actually lives."""
+    f = HERE / "shots" / "keys.webp"
+    if not f.exists():
+        return ""
+    w, h = size_of(f)
+    return (
+        f'<figure><img src="shots/keys.webp" alt="The help screen in the game" '
+        f'loading="lazy" width="{w}" height="{h}">'
+        "<figcaption><b>The same list, in the program</b>Behind a mark in the corner, "
+        "which is the first thing anybody tries. The page above is generated from the "
+        "source of this screen.</figcaption></figure>"
+    )
+
+
+def reel_html() -> str:
+    """The loop, if there is one. Silence rather than a broken image if not."""
+    f = HERE / "shots" / "sailing.webp"
+    if not f.exists():
+        return ""
+    w, h = size_of(f)
+    return (
+        f'<figure class="hero reel"><img src="shots/sailing.webp" '
+        f'alt="The boat sailing in a squall, heeled over" width="{w}" height="{h}">'
+        "<figcaption><b>Thirty frames of a squall</b>She heels, the sea runs under her, "
+        "and the instruments answer — which is the half of this that a still photograph "
+        "cannot say. Recorded by the game photographing itself, because screen capture "
+        "wants a permission a build server does not have.</figcaption></figure>"
+    )
 
 
 def index(v: str) -> str:
@@ -297,6 +354,7 @@ def index(v: str) -> str:
   <div class="wrap">
     <div class="heading"><h2>Pictures</h2></div>
     <p class="lede narrow">{content.WHY_NOT_BROWSER}</p>
+    {reel_html()}
     <div class="gallery">{gallery}</div>
   </div>
 </section>
@@ -377,6 +435,7 @@ cargo run -p sail-core --release --example polar   # the speed polar</pre>
     <code>?</code> or <code>F1</code> in the game for the same list. It is not copied here
     by hand, because the one time a key list was written from memory on a download page,
     three of the keys were wrong.</p>
+    {help_shot()}
     {keys_html()}
   </div>
 </section>

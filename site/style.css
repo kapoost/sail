@@ -496,3 +496,13 @@ footer a {
     grid-template-columns: 4.5rem 1fr;
   }
 }
+
+/* The moving picture sits between the prose and the stills, and wants a little air
+   round it so it does not read as one of the gallery tiles. */
+.reel {
+  margin: 2.5rem 0 3rem;
+}
+
+.reel img {
+  border-color: var(--brass);
+}
