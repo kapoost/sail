@@ -432,6 +432,35 @@ away, bend the new one on, set it. They ease before they reef, which is the orde
 matters: a slab is twenty minutes of work and a sheet is a second. A hand on any sheet
 stands them down, the way a hand on the tiller takes the helm from the pilot.
 
+## Pilotage, and the brig
+
+The oldest job on any coast, and the only one where local knowledge is the whole of the
+value. A loaded brig stands in from seaward wanting a pilot for the inner passage: she
+makes six knots and will not wait for a boat that has not caught her, she will not lie
+closer than sixty-five degrees to the wind, and she draws four metres where you draw two.
+
+Nothing is transferred and nothing is handed over. **Get ahead of her** — inside seventy
+degrees of her bow and within three quarters of a mile — and she follows the water you
+cross, two cables astern and thirty seconds behind everything you do. Drop astern or out
+of sight after she has taken you and she rounds up and waits, because a ship that has a
+pilot does not carry on into a bay she does not know. Her master says what his vessel
+will and will not do, in the order a seaman says it: the bottom first, then a course she
+cannot sail, then a turn too fine for three hundred tons.
+
+The chart carries the way in — a search over the soundings for deep water away from the
+edges that a square-rigged ship can actually sail, so the line moves when the wind does.
+The pilot flag is in our own rigging, hoisted when the job is taken; `Enter` in clear
+water off the anchorage strikes it, and that is what ends the job. Her deck cargo has
+been working loose since the gale, so there are casks in the water on the way out to her.
+
+She is drawn to the boat's own standard: a lofted hull with her paint on it, masts in the
+three pieces a mast is made of, ratlines up the shrouds, and yards that brace round with
+the wind and stop where the shrouds stop them. The cloth bellies to leeward, gathers to
+the yard as it is clewed up, and lies flat against the mast when the wind comes on the
+front of it — aback, which is how a square-rigger is stopped.
+
+`Esc`, then **MISSIONS**, which also has the man-overboard drill.
+
 ## The pilot
 
 Two pieces of gear in one box, because they are two pieces of gear on a real boat. `P`
