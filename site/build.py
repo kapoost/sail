@@ -262,6 +262,29 @@ def help_shot() -> str:
     )
 
 
+def picture_pair() -> str:
+    """The two drawn widths, same frame, side by side.
+
+    Put in because the option is new and the only question worth asking about it is
+    *what does it change* — which is answered with a picture rather than a sentence.
+    The crop is rigging on purpose: on open water the two are indistinguishable, and a
+    comparison shot of a thing that does not differ is worse than none.
+    """
+    f = HERE / "shots" / "widths.webp"
+    if not f.exists():
+        return ""
+    w, h = size_of(f)
+    return (
+        f'<figure><img src="shots/widths.webp" '
+        f'alt="The same rigging drawn at 720 pixels across and at 960" '
+        f'loading="lazy" width="{w}" height="{h}">'
+        "<figcaption><b>720 on the left, 960 on the right</b>The same shrouds, the same "
+        "moment, enlarged equally. On open water the two are indistinguishable; it is "
+        "rigging that shows the difference, which is also what the coarsest width used "
+        "to lose.</figcaption></figure>"
+    )
+
+
 def reel_html() -> str:
     """The loop, if there is one. Silence rather than a broken image if not."""
     f = HERE / "shots" / "sailing.webp"
@@ -467,9 +490,15 @@ def manual(v: str, for_print: bool = False) -> str:
         f'<li><a href="#{k}">{html.escape(t)}</a></li>' for k, t, _ in content.MANUAL
     ) + '<li><a href="#every-key">Every key</a></li>'
 
-    body = "\n".join(
-        f'<h2 id="{k}">{html.escape(t)}</h2>\n{b.strip()}' for k, t, b in content.MANUAL
-    )
+    body_parts = []
+    for k, t, b in content.MANUAL:
+        body_parts.append(f'<h2 id="{k}">{html.escape(t)}</h2>\n{b.strip()}')
+        # The comparison belongs with the prose that describes the option, and the
+        # print stylesheet has to carry it too — a manual that mentions a difference it
+        # does not show is the thing this picture exists to prevent.
+        if k == "before-you-start":
+            body_parts.append(picture_pair())
+    body = "\n".join(part for part in body_parts if part)
 
     extra = '<link rel="stylesheet" href="print.css">' if for_print else ""
     back = "" if for_print else '<nav class="top"><a href="index.html">&larr; sail</a></nav>'
@@ -554,8 +583,19 @@ code { background: #f4f1ea; padding: 0 2px; }
 .group { background: #faf8f3; border-color: #d8d2c4; break-inside: avoid; }
 .plate { color: #8a6a26; border-bottom-color: #d8d2c4; }
 .key { color: #15181d; }
-.keys { display: block; columns: 2; column-gap: 1.4rem; }
-.group { margin-bottom: 0.8rem; padding: 0.6rem 0.8rem 0.7rem; }
+/* One column on paper, after trying both of the nicer shapes.
+
+   A CSS grid strands an empty half-page wherever it crosses a page break — the last
+   sheet came out with a column of nothing beside the last group. CSS columns fixed
+   that and then crashed the renderer outright: WeasyPrint falls over inside
+   `columns_layout` with `AttributeError: 'NoneType' object has no attribute
+   'children'`, which names nothing a person could act on and took a bisection to pin
+   on the stylesheet rather than on the page.
+
+   A list that runs straight down does neither, costs no extra pages — ten either way —
+   and is the shape a reference wants anyway. */
+.keys { display: block; }
+.group { margin-bottom: 0.8rem; padding: 0.6rem 0.8rem 0.7rem; max-width: 34rem; }
 .row { font-size: 8.5pt; grid-template-columns: 4.6rem 1fr; padding: 0.15rem 0; }
 .caveat { background: #faf8f3; border-color: #d8d2c4; border-left-color: #a8382a;
           break-inside: avoid; }
@@ -633,14 +673,18 @@ def main() -> None:
     # The two that are not in the gallery and so are not in that list: the loop under
     # the masthead and the photograph of the help screen. Copying only what `shots()`
     # names published a page referring to two files that were never put beside it.
-    for extra in ("sailing.webp", "keys.webp"):
+    for extra in ("sailing.webp", "keys.webp", "widths.webp"):
         if (HERE / "shots" / extra).exists():
             shutil.copy(HERE / "shots" / extra, OUT / "shots" / extra)
     # GitHub Pages would otherwise hand the whole thing to Jekyll.
     (OUT / ".nojekyll").write_text("", encoding="utf-8")
 
+    # Before the PDF as well as after: WeasyPrint reads these same pages, and when an
+    # image is missing it does not say so — it fell over inside its column layout with
+    # `AttributeError: 'NoneType' object has no attribute 'children'`, which names
+    # nothing a person could act on.
+    every_reference_resolves(expect_pdf=False)
     pdf = "--pdf" in sys.argv and build_pdf()
-    # After the PDF, which the pages link to and which is written last.
     every_reference_resolves(expect_pdf=pdf)
     print(f"built _site/ — sail {v}, {len(pictures)} pictures"
           f"{', manual.pdf' if pdf else ''}")

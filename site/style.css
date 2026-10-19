@@ -485,7 +485,9 @@ footer a {
   break-inside: avoid;
 }
 
-@media (max-width: 40rem) {
+/* Marked `screen` so the print renderer skips it knowingly: WeasyPrint cannot parse a
+   bare width query in rem and warns that it has ignored the whole block. */
+@media screen and (max-width: 40rem) {
   body {
     font-size: 17px;
   }

@@ -71,6 +71,71 @@ reel_env () {
 SCENES=${*:-"brig squall gennaker rod drill chart lost below keys"}
 failed=()
 
+# `widths` is a comparison rather than a scene: the same rigging at both drawn widths,
+# side by side, for the manual's paragraph about the PICTURE row. The option is new and
+# the only question worth asking about it is *what does it change*, which is answered
+# with a picture and not a sentence.
+#
+# Two runs are not frame-identical — the sea has moved on by the time the second one
+# reaches eighty seconds — so the crops are aligned by searching for the offset that
+# matches them before they are put together. Without that the reader is comparing two
+# different moments, and the pixel grid, which is the one thing the picture is about,
+# is lost in the difference.
+if [ "$SCENES" = "widths" ]; then
+  tmp=$(mktemp -d)
+  for px in 720 960; do
+    echo "widths: $px"
+    SAIL_SEED=42 SAIL_BRIG_SHOW=120 SAIL_PIXELS=$px \
+      SAIL_SHOT="$tmp/$px.png" SAIL_SHOT_AFTER=80 SAIL_SHOT_EXIT=1 \
+      "$BIN" > "$tmp/$px.log" 2>&1
+    test -s "$tmp/$px.png" || { echo "no picture at $px"; rm -rf "$tmp"; exit 1; }
+  done
+  python3 - "$tmp" "$OUT" <<'PY'
+import pathlib, sys
+import numpy as np
+from PIL import Image
+
+tmp, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+# Mast, forestay, shrouds and the sail's foot — the busiest rigging in the frame, and
+# where the difference lives. On open water there is none to see.
+box = (1150, 700, 1850, 1250)
+a_full = Image.open(tmp / "720.png").convert("RGB")
+b_full = Image.open(tmp / "960.png").convert("RGB")
+a_grey = np.asarray(a_full.convert("L").crop(box), dtype=np.float32)
+
+best = None
+for dx in range(-80, 81, 2):
+    for dy in range(-40, 41, 2):
+        shifted = (box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy)
+        b = np.asarray(b_full.convert("L").crop(shifted), dtype=np.float32)
+        score = float(np.abs(a_grey - b).mean())
+        if best is None or score < best[0]:
+            best = (score, dx, dy)
+_, dx, dy = best
+print(f"  aligned by {dx},{dy}")
+
+a = a_full.crop(box)
+b = b_full.crop((box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy))
+# Nearest neighbour on the way up: the subject is the pixel grid, and a smooth resize
+# averages away the very thing being compared.
+a = a.resize((a.width * 2, a.height * 2), Image.NEAREST)
+b = b.resize((b.width * 2, b.height * 2), Image.NEAREST)
+
+gap = 6
+sheet = Image.new("RGB", (a.width * 2 + gap, a.height), "#c69b4a")
+sheet.paste(a, (0, 0))
+sheet.paste(b, (a.width + gap, 0))
+sheet = sheet.resize((1600, round(sheet.height * 1600 / sheet.width)), Image.LANCZOS)
+dest = out / "widths.webp"
+sheet.save(dest, "WEBP", quality=88, method=6)
+print(f"  {dest}  {dest.stat().st_size/1e3:.0f} kB  {sheet.size}")
+PY
+  rm -rf "$tmp"
+  echo
+  echo "done — rebuild with: python3 site/build.py --pdf"
+  exit 0
+fi
+
 # `reel` is its own thing: thirty frames instead of one picture, made into a loop.
 if [ "$SCENES" = "reel" ]; then
   frames=$(mktemp -d)

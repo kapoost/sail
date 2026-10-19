@@ -151,7 +151,27 @@ MANUAL = [
 
         <p><b>The cockpit camera heels with the boat.</b> That is deliberate. Heel is the
         primary feedback channel on a sailing boat, and a view that stays level throws it
-        away.</p>""",
+        away.</p>
+
+        <p><b>The picture has a grain, and you can choose how coarse it is.</b>
+        <code>Esc</code>, then <b>PICTURE</b>: the row marked <em>pixels</em> offers 720,
+        960, and sharp. The world is drawn at that many pixels across and put on your
+        screen at whatever size your screen is, with no filtering in between — so the
+        sea's glitter is a dance of individual lit pixels rather than a sheen, and the
+        rigging is a stepped line. None of it is a filter over a modern image; it is a
+        genuinely small image, which is why it does not look like one with an effect on
+        it.</p>
+
+        <p>720 is what the game does unless you tell it otherwise, and it is where
+        everybody who has sat down with this has ended up. 960 is the same picture
+        finer, and it is worth knowing about if you are on a large display, where the
+        coarse one stops reading as a drawn picture and starts reading as a
+        low-resolution one. <em>sharp</em> turns the grain off entirely, for when you
+        want to see what is actually on the deck.</p>
+
+        <p>The console and the chart stay crisp at every setting. They are drawn
+        afterwards, in screen space: a pixelated instrument is a nostalgic idea rather
+        than a readable one.</p>""",
     ),
     (
         "the-boat",
