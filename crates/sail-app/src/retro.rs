@@ -137,14 +137,26 @@ impl Retro {
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
         else {
-            // Seven hundred and twenty, which is where this ends up every time somebody
-            // sits down with it. Sharp was the default on the reasoning that a new
-            // player should see the most of what is drawn; what a new player actually
-            // sees is a picture with no opinion about itself, and the whole look of this
+            // **Nine hundred and sixty, which is the finer of the two drawn widths.**
+            //
+            // Sharp was the default once, on the reasoning that a new player should see
+            // the most of what is drawn; what a new player actually sees in a sharp
+            // picture is one with no opinion about itself, and the whole look of this
             // thing — the drawn horizon, the flat tones, the stepped rigging — is built
-            // for a small image. `SAIL_PIXELS=0` still asks for sharp.
+            // for a small image. That argument has not changed and 720 is still on the
+            // row beside this one.
+            //
+            // What changed is the screen. 720 was chosen when the window was the size it
+            // is and the displays were smaller; on a large one it stops reading as a
+            // picture that was *drawn* and starts reading as one that is low on pixels,
+            // which is a different and much worse thing. And it costs nothing: measured
+            // on two machines, a minute each, the finer width came out inside the noise
+            // of the coarse one, because the wall is forty thousand vertices of sea on
+            // the processor and not the size of the target.
+            //
+            // `SAIL_PIXELS=720` asks for the coarse one, `SAIL_PIXELS=0` for sharp.
             return Self {
-                step: Some(0),
+                step: Some(nearest(960)),
                 supersample,
                 ..Self::default()
             };

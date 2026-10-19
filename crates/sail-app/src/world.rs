@@ -1023,6 +1023,46 @@ pub fn update_sea(
                 },
                 foam,
             );
+            // --- Water you can see *into*, where it is thin --------------------
+            //
+            // **The one thing a painted sea never has.** A wave is a lens: at the crest
+            // there is half a metre of water between you and the sky on the other side,
+            // and with the sun behind it the whole top of the wave goes a light jade and
+            // glows — which is why the sea looks like a liquid and a grey surface with
+            // highlights on it looks like a floor. It is the first thing you notice from
+            // a boat and the last thing anybody puts in a renderer.
+            //
+            // Asked for from the deck as transparency in the top layer, and this is that
+            // — written as colour rather than as alpha, which is a deliberate choice and
+            // not a shortcut. Making the surface itself translucent means sorting forty
+            // thousand vertices against the spray, the foam, the hull and the rain every
+            // frame, and buys nothing the eye can tell apart: what reads as *seeing into
+            // the water* is the colour of the light that came through it, and that is a
+            // number this loop already has everything to compute.
+            //
+            // Three things have to agree for it: thin water, a face turned towards you,
+            // and the sun on the other side of it.
+            let thin = crest_weight(lift) * smoothstep(0.7, 1.8, steepness);
+            if thin > 0.01 && shade < 0.6 {
+                let view = (eye - point).normalize_or_zero();
+                // Light arriving through the wave rather than off it: the sun opposite
+                // the eye, and the facet leaning towards the eye so there is water in
+                // the way rather than beside it.
+                let through = seen_through(sun, view, normal);
+                // Jade, not cyan: it is the colour of a wave held up to the light, which
+                // is the sea's own green with the blue taken out of it by the depth it
+                // did *not* have to travel through.
+                let lit = if ink {
+                    // The drawn sea works in flat tones, so this is another tone rather
+                    // than a gradient — which is what a painter does with the same
+                    // observation.
+                    Vec3::new(0.42, 0.74, 0.62)
+                } else {
+                    Vec3::new(0.34, 0.80, 0.68)
+                };
+                let how_much = (thin * through * (1.0 - foam)).clamp(0.0, 0.75);
+                colour = colour.lerp(lit, how_much);
+            }
             if ink {
                 // The hatching's coordinates, now that this vertex knows how dark it
                 // is. Across the stroke in world metres, so the strokes lie on the
@@ -1094,6 +1134,22 @@ pub fn update_sea(
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     }
+}
+
+/// How much of what you are looking at came *through* the water rather than off it.
+///
+/// **Three things have to agree**: the sun on the far side of the surface from the eye,
+/// and the facet leaning towards the eye so that there is water in the way rather than
+/// beside it. Looking down-sun at a wave you see reflection; looking up-sun through the
+/// same wave you see the light that crossed half a metre of sea, and that is the jade a
+/// crest goes when it is held up to the light.
+///
+/// Its own function because it is the one piece of this that can be checked without a
+/// sea: the loop it lives in builds forty thousand vertices and cannot be asked a
+/// question.
+#[inline]
+pub fn seen_through(sun: Vec3, view: Vec3, normal: Vec3) -> f32 {
+    (-sun.dot(view)).max(0.0).powf(1.6) * normal.dot(view).max(0.0)
 }
 
 /// Foam only belongs near a crest. A steep trough is still green water.
@@ -1283,5 +1339,42 @@ mod drawn_sea {
         assert_eq!(smoothstep(0.0, 1.0, -1.0), 0.0);
         assert_eq!(smoothstep(0.0, 1.0, 2.0), 1.0);
         assert!((smoothstep(0.0, 1.0, 0.5) - 0.5).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod light_through_a_wave {
+    use super::*;
+
+    /// **Up-sun you see through a wave; down-sun you see off it.**
+    ///
+    /// The whole of the translucency is in that sentence, and it is the one part of it
+    /// that can be asked a question without a sea in front of you.
+    #[test]
+    fn the_crest_only_glows_with_the_sun_behind_it() {
+        // Looking north along the water at a crest leaning towards us.
+        let view = Vec3::new(0.0, 0.35, -0.94).normalize();
+        let facing = Vec3::new(0.0, 0.7, -0.71).normalize();
+        // Sun low and beyond the wave, so the light has to cross the water to reach us:
+        // `view` runs from the water *to the eye*, so a sun on the far side points the
+        // other way along it. Getting that round the wrong way is the easiest mistake
+        // here and this test made it first.
+        let behind = Vec3::new(0.0, 0.22, 0.98).normalize();
+        // And the same sun over our own shoulder.
+        let over_us = Vec3::new(0.0, 0.22, -0.98).normalize();
+        let lit = seen_through(behind, view, facing);
+        let dark = seen_through(over_us, view, facing);
+        assert!(
+            lit > 0.5,
+            "a crest with the sun behind it came out at {lit:.2}"
+        );
+        assert!(
+            dark < 0.01,
+            "a crest with the sun behind the *eye* glowed at {dark:.2}"
+        );
+        // A facet turned away gives nothing however the sun lies: there is no water in
+        // the way, only water beside.
+        let away = Vec3::new(0.0, 0.7, 0.71).normalize();
+        assert!(seen_through(behind, view, away) < 0.01);
     }
 }

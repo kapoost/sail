@@ -1049,7 +1049,6 @@ mod lighting {
         assert!(Sky::at(12.0, 0.5).illuminance() > Sky::at(6.5, 0.5).illuminance());
     }
 
-
     /// Sunrise and sunset for the latitude and declination this archipelago is drawn at.
     const SUNSET: f32 = 18.52;
     const NOON: f32 = 12.0;
@@ -1064,8 +1063,14 @@ mod lighting {
         let noon = Sky::at(NOON, 0.3).low_sun();
         let setting = Sky::at(SUNSET, 0.3).low_sun();
         let night = Sky::at(NIGHT, 0.3).low_sun();
-        assert!(noon < 0.05, "noon should have no sunset colour in it: {noon}");
-        assert!(setting > 0.8, "the horizon is where the colour is: {setting}");
+        assert!(
+            noon < 0.05,
+            "noon should have no sunset colour in it: {noon}"
+        );
+        assert!(
+            setting > 0.8,
+            "the horizon is where the colour is: {setting}"
+        );
         assert!(night < 0.05, "one in the morning is not a sunset: {night}");
     }
 
@@ -1094,7 +1099,10 @@ mod lighting {
         let noon = Sky::at(NOON, 0.3).illuminance();
         let dusk = Sky::at(SUNSET + 0.5, 0.3).illuminance();
         let night = Sky::at(NIGHT, 0.3).illuminance();
-        assert!(dusk < noon * 0.75, "half an hour after sunset is dimmer: {dusk}");
+        assert!(
+            dusk < noon * 0.75,
+            "half an hour after sunset is dimmer: {dusk}"
+        );
         assert!(
             night < noon * 0.05,
             "one in the morning lit at {night} against {noon} at noon"
