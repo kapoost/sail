@@ -108,6 +108,12 @@ scene_env () {
     # The course is laid off the wind when the sequence starts, so the seed decides
     # where it lies; 42 is the one these pictures are taken in.
     race)     echo "SAIL_SEED=42 SAIL_RACE=85 SAIL_SHOT_AFTER=70" ;;
+    # The sky at the end of the day, which needs both knobs: the hour because sunset is
+    # twelve hours from where a passage starts, and the cover because the sky and the
+    # cloud in front of it are two things and a 90% day hides the first behind the
+    # second. 18:06 is six degrees up — late enough for the fire, early enough that the
+    # sea still has light on it.
+    sunset)   echo "SAIL_SEED=42 SAIL_HOUR=18.4 SAIL_COVER=0.2 SAIL_SHOT_AFTER=78" ;;
     *) return 1 ;;
   esac
 }
@@ -117,7 +123,7 @@ reel_env () {
   echo "SAIL_SEED=19 SAIL_SQUALL=70 SAIL_SHOT_EVERY=0.22 SAIL_SHOT_FRAMES=30 SAIL_SHOT_AFTER=116"
 }
 
-SCENES=${*:-"brig race squall gennaker rod drill chart lost below keys"}
+SCENES=${*:-"brig race sunset squall gennaker rod drill chart lost below keys"}
 failed=()
 
 # `widths` is a comparison rather than a scene: the same rigging at both drawn widths,
@@ -257,7 +263,7 @@ rm -rf "$RAW"
 
 if [ ${#failed[@]} -gt 0 ]; then
   echo
-  echo "these scenes produced nothing, twice: ${failed[*]}"
+  echo "these scenes produced nothing in three tries: ${failed[*]}"
   echo "the page still has whatever was there before — do not call it refreshed"
   exit 1
 fi
