@@ -486,13 +486,48 @@ pub fn install_font(mut contexts: bevy_egui::EguiContexts) -> Result {
 /// middle of the screen without making anything hard to hit with a mouse.
 const UI_SCALE: f32 = 0.84;
 
+/// How wide the console needs to be, in egui points, to lay itself out without the
+/// pieces touching.
+///
+/// **Measured off the drawn console rather than guessed**: the weather block on the left
+/// takes about a hundred and fifty points, the rack of clutches in the middle four
+/// hundred and twenty, and the glass with the sheets and the wardrobe under it eight
+/// hundred and thirty. With the margins that is fourteen hundred and twenty, and this is
+/// that with a little air.
+const CONSOLE_POINTS: f32 = 1_450.0;
+
+/// And the smallest the instruments may be drawn, against the screen's own density.
+///
+/// Half size. Past that the figures stop being readable and a console you cannot read is
+/// not a smaller console, it is a decoration — better to let the last of it overlap than
+/// to shrink it into illegibility.
+const SMALLEST: f32 = 0.5;
+
+/// How large to draw the instruments on a window of this size.
+///
+/// **The console is a fixed layout and the window is not always the one it was drawn
+/// for.** The main window is not resizable, which was supposed to settle this — but a
+/// laptop whose display is smaller than the window gets a smaller window anyway, and
+/// then the three blocks of the console are laid out from the left, the middle and the
+/// right into a space that cannot hold all three, and they overlap. Reported as the
+/// instrument row overflowing on a narrow screen.
+///
+/// So the scale is the smaller of what looks right and what fits: a big window gets the
+/// size the console was drawn at, and a small one gets the instruments shrunk until the
+/// strip has room — which is the one thing a drawn panel can do that a real one cannot.
+pub fn console_scale(physical_width: f32, scale_factor: f32) -> f32 {
+    let drawn_at = scale_factor * UI_SCALE;
+    let fits = physical_width / CONSOLE_POINTS;
+    drawn_at.min(fits).max(scale_factor * SMALLEST)
+}
+
 /// Set the instruments' size. Their own camera means this is independent of the
 /// picture the world is drawn in.
 pub fn scale_instruments(windows: Query<&Window>, mut contexts: bevy_egui::EguiContexts) -> Result {
     let Ok(window) = windows.single() else {
         return Ok(());
     };
-    let ppp = window.scale_factor() * UI_SCALE;
+    let ppp = console_scale(window.physical_width() as f32, window.scale_factor());
     let ctx = contexts.ctx_mut()?;
     if (ctx.pixels_per_point() - ppp).abs() > 1e-4 {
         ctx.set_pixels_per_point(ppp);
@@ -503,6 +538,38 @@ pub fn scale_instruments(windows: Query<&Window>, mut contexts: bevy_egui::EguiC
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A console that does not fit is a console that overlaps**, and the one thing a
+    /// drawn panel can do about it is get smaller.
+    #[test]
+    fn the_instruments_shrink_until_the_strip_fits() {
+        // The window it was drawn for: the size it was drawn at, and no squeezing.
+        let full = console_scale(2880.0, 2.0);
+        assert!((full - 2.0 * UI_SCALE).abs() < 1e-6);
+        assert!(2880.0 / full > CONSOLE_POINTS, "it fits at full size");
+        // A laptop whose display is smaller than the window: shrunk, and shrunk by
+        // exactly enough that the strip has room.
+        for width in [1600.0_f32, 1280.0, 1024.0] {
+            let ppp = console_scale(width, 2.0);
+            assert!(ppp < 2.0 * UI_SCALE, "{width} was not squeezed at all");
+            // Either there is room now, or the squeeze has run into the floor — which
+            // is the honest statement of the rule, because past half size the figures
+            // stop being readable and overlapping beats unreadable.
+            let room = width / ppp >= CONSOLE_POINTS - 1.0;
+            let floored = (ppp - 2.0 * SMALLEST).abs() < 1e-6;
+            assert!(
+                room || floored,
+                "{width} px left the console {:.0} points wide and was not at the floor",
+                width / ppp
+            );
+        }
+        // The first of those three does fit: a sixteen-hundred-pixel window is squeezed
+        // and still legible, which is the case this exists for.
+        assert!(1600.0 / console_scale(1600.0, 2.0) >= CONSOLE_POINTS - 1.0);
+        // And never into illegibility: past half size the figures stop being readable,
+        // and a console you cannot read is a decoration.
+        assert!(console_scale(400.0, 2.0) >= 2.0 * SMALLEST);
+    }
 
     /// A number asks for the width nearest it, which is what the docs have always said.
     ///

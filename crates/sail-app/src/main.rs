@@ -138,6 +138,15 @@ fn unpacked() -> Option<String> {
     Some(dir.to_string_lossy().into_owned())
 }
 
+/// The window, and the knob for looking at a smaller one.
+fn window_size() -> (u32, u32) {
+    let asked = std::env::var("SAIL_WINDOW").ok().and_then(|v| {
+        let (w, h) = v.split_once(['x', 'X'])?;
+        Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+    });
+    asked.unwrap_or((1440, 880))
+}
+
 fn main() {
     let seed = std::env::var("SAIL_SEED")
         .ok()
@@ -184,7 +193,12 @@ fn main() {
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "sail".into(),
-                    resolution: (1440u32, 880u32).into(),
+                    // `SAIL_WINDOW=1024x640` for looking at the console on a screen
+                    // smaller than this one. The window is not resizable — see below —
+                    // but a laptop whose display is smaller than the window gets one
+                    // anyway, and that case has to be looked at rather than reasoned
+                    // about.
+                    resolution: window_size().into(),
                     // The window is fixed at this size on purpose. The instruments are
                     // not a responsive layout: the console, the chart and the gauges are
                     // drawn at known pixel sizes into a 480-line image that is then

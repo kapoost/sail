@@ -440,21 +440,57 @@ pub fn dress(
         return;
     }
     let orange = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.86, 0.38, 0.10),
+        base_color: Color::srgb(0.90, 0.36, 0.06),
         perceptual_roughness: 0.75,
         ..default()
     });
-    // An inflatable mark is a cone on a ring, which is what a club lays and what
-    // everybody pictures when somebody says *the windward mark*.
-    let cone = meshes.add(Cone::new(0.85, 1.9));
+    let black = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.10, 0.10, 0.12),
+        perceptual_roughness: 0.9,
+        ..default()
+    });
+    // **A mark you cannot see is a mark you cannot sail to.**
+    //
+    // The first version was an inflatable: a cone a metre and a half high, which is what
+    // a club lays and what everybody pictures. At two hundred metres in a drawn picture
+    // seven hundred and twenty pixels wide it is *one orange pixel in a grey sea* — the
+    // start was being sailed off the panel, with the thing the panel was about invisible.
+    // Reported from the session photographing it, and it is a sailing fault rather than
+    // a drawing one.
+    //
+    // So the marks are spar buoys, which is the other thing a club lays and the one a
+    // committee uses when the water is open: a staff three metres out of the sea with a
+    // black topmark on it and a float at the waterline. The topmark is the point — a
+    // dark shape against the sky is visible at a distance where orange against grey
+    // water is not, and that is exactly why every real one has one.
+    let float = meshes.add(Sphere::new(0.55));
+    let staff = meshes.add(Cylinder::new(0.07, 3.0));
+    let topmark = meshes.add(Cone::new(0.42, 0.8));
     for at in want {
-        commands.spawn((
-            Buoy,
-            crate::course::Floating { at, lift: 0.75 },
-            Mesh3d(cone.clone()),
-            MeshMaterial3d(orange.clone()),
-            Transform::from_translation(origin.to_bevy(at, 0.75)),
-        ));
+        commands
+            .spawn((
+                Buoy,
+                crate::course::Floating { at, lift: 0.3 },
+                Transform::from_translation(origin.to_bevy(at, 0.3)),
+                Visibility::default(),
+            ))
+            .with_children(|mark| {
+                mark.spawn((
+                    Mesh3d(float.clone()),
+                    MeshMaterial3d(orange.clone()),
+                    Transform::default(),
+                ));
+                mark.spawn((
+                    Mesh3d(staff.clone()),
+                    MeshMaterial3d(orange.clone()),
+                    Transform::from_xyz(0.0, 1.5, 0.0),
+                ));
+                mark.spawn((
+                    Mesh3d(topmark.clone()),
+                    MeshMaterial3d(black.clone()),
+                    Transform::from_xyz(0.0, 3.2, 0.0),
+                ));
+            });
     }
 }
 
