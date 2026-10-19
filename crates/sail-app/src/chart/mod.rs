@@ -770,6 +770,7 @@ pub fn draw(
     sky: Res<crate::sky::Sky>,
     fleet: Res<crate::fleet::Fleet>,
     job: Res<crate::mission::Pilotage>,
+    race: Res<crate::race::Race>,
 ) -> Result {
     if !chart.open {
         return Ok(());
@@ -963,6 +964,9 @@ pub fn draw(
             if job.running && job.over.is_none() {
                 the_way_in(&table, &job.route, job.let_go_at);
             }
+            // And the race course, which is the same kind of thing: not where she has
+            // been, but where she is supposed to go.
+            the_course(&table, &race);
 
             the_track_made_good(&table, &nav);
             reckoning(&table, &nav, st.time);

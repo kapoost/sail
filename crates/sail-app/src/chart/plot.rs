@@ -1231,3 +1231,65 @@ pub(crate) fn the_way_in(t: &Table, route: &[glam::DVec2], anchorage: glam::DVec
         INK,
     );
 }
+
+/// The race course: the line, the marks, and the order they are taken in.
+///
+/// **A course is a drawing before it is a sail.** Every race in the world starts with
+/// somebody looking at a board or a chart and working out which way round it goes, and
+/// the one question a sailor has on the water — *where is the line from here* — is a
+/// question a chart answers and a horizon does not.
+pub(crate) fn the_course(t: &Table, race: &crate::race::Race) {
+    if !race.running() {
+        return;
+    }
+    const INK: egui::Color32 = egui::Color32::from_rgb(190, 86, 24);
+    let (boat, pin) = race.line;
+    let (a, b) = (t.to_screen(boat), t.to_screen(pin));
+    // The line itself, drawn heavier than anything else on the paper: for five minutes
+    // it is the only thing on the chart that matters.
+    t.p.line_segment([a, b], egui::Stroke::new(2.2, INK));
+    for (end, name) in [(a, "committee"), (b, "pin")] {
+        t.p.circle_filled(end, 3.0, INK);
+        t.note(end + egui::vec2(6.0, -12.0), name, INK);
+    }
+    // The marks, numbered in the order they are rounded — which is the thing that is
+    // argued about in the dinghy park and never on the water.
+    for (n, mark) in race.marks.iter().enumerate() {
+        let at = t.to_screen(*mark);
+        t.p.circle_stroke(at, 5.0, egui::Stroke::new(1.6, INK));
+        t.p.text(
+            at + egui::vec2(8.0, -8.0),
+            egui::Align2::LEFT_TOP,
+            format!("{}", n + 1),
+            egui::FontId::monospace(9.0),
+            INK,
+        );
+    }
+    // And the legs between them, so the way round is a shape rather than a list.
+    let middle = boat.lerp(pin, 0.5);
+    let mut was = middle;
+    for mark in &race.marks {
+        let (from, to) = (t.to_screen(was), t.to_screen(*mark));
+        let along = to - from;
+        let len = along.length();
+        if len > 1.0 {
+            let step = along / len;
+            let mut at = 0.0;
+            while at < len {
+                let end = (at + 3.0).min(len);
+                t.p.line_segment(
+                    [from + step * at, from + step * end],
+                    egui::Stroke::new(1.0, INK),
+                );
+                at = end + 4.0;
+            }
+        }
+        was = *mark;
+    }
+    // The other boats, as the little marks a committee puts on a sketch — enough to
+    // say who is where, which is the whole of what a chart can say about a fleet.
+    for rival in &race.rivals {
+        let at = t.to_screen(rival.at);
+        t.p.circle_filled(at, 2.0, INK);
+    }
+}

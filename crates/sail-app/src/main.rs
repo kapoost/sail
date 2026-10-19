@@ -420,6 +420,7 @@ fn main() {
                         mission::fly_the_flag,
                         mission::lay_off_the_route,
                         race::run,
+                        race::rivals,
                         race::dress,
                         mission::run,
                         ship::sail_her,

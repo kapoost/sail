@@ -25,7 +25,7 @@
 
 use bevy::prelude::*;
 use glam::DVec2;
-use sail_core::units::rad;
+use sail_core::units::{kn_to_ms, ms_to_kn, rad, smoothstep, wrap_pi, wrap_tau};
 
 use crate::sim::Sim;
 
@@ -89,6 +89,8 @@ pub struct Race {
     crossed_at: Option<f64>,
     /// What the deck is told, and until when.
     pub said: Option<(String, f64)>,
+    /// The others.
+    pub rivals: Vec<Rival>,
     /// Seconds to put on the clock instead of five minutes, for the knob below.
     shorten_to: Option<f64>,
     /// Asked for from the menu, and read by `run` on the next frame.
@@ -311,7 +313,6 @@ pub fn run(sim: Res<Sim>, mut race: ResMut<Race>, mut first: Local<bool>) {
 #[cfg(test)]
 mod the_line {
     use super::*;
-    use sail_core::units::kn_to_ms;
 
     /// A line across the wind, committee boat to the east.
     fn line_across(wind_from: f64) -> (DVec2, DVec2) {
@@ -526,10 +527,19 @@ pub fn draw(
             let to_line = distance_to_the_line(race.line, here);
             let speed = sim.sim.telemetry.stw.max(0.1);
             let run = to_line / speed;
+            // Where it is, as well as how far: a distance with no bearing on it is a
+            // number you cannot steer by, and the line is the one thing on the water
+            // that is nowhere near the way she happens to be pointing.
+            let middle = race.line.0.lerp(race.line.1, 0.5);
+            let off = middle - here;
             format!(
-                "{:.0}:{:02.0} to the gun — {:.0} m to the line, {:.0} s at this speed",
+                "{:.0}:{:02.0} to the gun — line bears {:03.0}, {:.0} m, {:.0} s at this speed",
                 left / 60.0,
                 left % 60.0,
+                off.x
+                    .atan2(off.y)
+                    .rem_euclid(std::f64::consts::TAU)
+                    .to_degrees(),
                 to_line,
                 run
             )
@@ -537,11 +547,12 @@ pub fn draw(
         Stage::Recalled => "OVER EARLY — go back across the line".to_string(),
         Stage::Racing => {
             let legs = race.marks.len().saturating_sub(race.at);
+            let (place, of) = standing(&race, here);
             match race.marks.get(race.at) {
                 Some(mark) => {
                     let off = *mark - here;
                     format!(
-                        "mark bears {:03.0}, {:.0} m — {} to go",
+                        "mark bears {:03.0}, {:.0} m — {} to go, lying {} of {of}",
                         off.x
                             .atan2(off.y)
                             .rem_euclid(std::f64::consts::TAU)
@@ -551,6 +562,12 @@ pub fn draw(
                             "one leg".into()
                         } else {
                             format!("{legs} legs")
+                        },
+                        match place {
+                            1 => "1st".to_string(),
+                            2 => "2nd".to_string(),
+                            3 => "3rd".to_string(),
+                            n => format!("{n}th"),
                         }
                     )
                 }
@@ -613,4 +630,244 @@ pub fn distance_to_the_line(line: (DVec2, DVec2), at: DVec2) -> f64 {
     let along = pin - boat;
     let t = ((at - boat).dot(along) / along.length_squared().max(1e-9)).clamp(0.0, 1.0);
     (at - (boat + along * t)).length()
+}
+
+// ---------------------------------------------------------------------------------------
+// Somebody to race against.
+// ---------------------------------------------------------------------------------------
+
+/// How many boats come out with you.
+///
+/// **Three, which is a fleet.** Two is a match race and one is a time trial; three means
+/// there is always somebody ahead and somebody behind, which is the thing racing has and
+/// sailing alone does not — a reason to take the shift you would otherwise have ignored.
+const RIVALS: usize = 3;
+
+/// How close to the wind a yacht of this kind will lie, radians.
+const CLOSE_HAULED: f64 = rad(42.0);
+
+/// One of the other boats, sailed by something simple and honest.
+///
+/// **She is not simulated**, any more than the brig is: a polar, a course to steer, and
+/// the two decisions that make up a beat — which tack to be on, and when the mark is far
+/// enough forward to go for it. What she must not do is cheat, and the one way a boat
+/// like this cheats is by pointing closer than the rig allows, which is why the layline
+/// is worked out from the same angle her speed comes from.
+#[derive(Clone, Debug)]
+pub struct Rival {
+    pub name: &'static str,
+    pub at: DVec2,
+    pub heading: f64,
+    pub speed: f64,
+    pub way: DVec2,
+    /// Which mark she is going to, counting the start as nought.
+    pub at_mark: usize,
+    pub started: bool,
+    pub finished: Option<f64>,
+    /// How good she is: a small penalty on her speed and a slop on her laylines, so the
+    /// three of them are not one boat drawn three times.
+    pub skill: f64,
+}
+
+/// What she can do at a given angle to the wind, m/s.
+///
+/// A thirty-six footer's shape: nothing inside forty-two degrees, best speed on a reach,
+/// and a touch slower dead before it than on a broad reach, which is why nobody sails a
+/// run dead square.
+pub fn yacht_polar(twa: f64, tws: f64) -> f64 {
+    let off = twa.abs();
+    if off < CLOSE_HAULED {
+        return 0.0;
+    }
+    let shape = match off {
+        o if o < rad(80.0) => 0.78 + 0.22 * (o - CLOSE_HAULED) / rad(38.0),
+        o if o < rad(120.0) => 1.0,
+        o => 1.0 - 0.18 * (o - rad(120.0)) / rad(60.0),
+    };
+    let wind = (ms_to_kn(tws) / 14.0).clamp(0.15, 1.35);
+    kn_to_ms(6.6 * shape * wind.powf(0.6))
+}
+
+/// Which tack to be on, and the course to steer, for a mark that may be dead upwind.
+///
+/// **This is the whole of a beat.** If the mark can be laid, steer at it; if it cannot,
+/// take the tack that makes ground towards it and hold until it comes onto the layline.
+/// The slop is what stops three boats tacking in the same second for ever.
+pub fn steer_for(
+    at: DVec2,
+    mark: DVec2,
+    wind_from: f64,
+    on_starboard: bool,
+    slop: f64,
+) -> (f64, bool) {
+    let off = mark - at;
+    let bearing = off.x.atan2(off.y);
+    let twa = wrap_pi(bearing - wind_from);
+    if twa.abs() > CLOSE_HAULED + slop {
+        // She can lay it: steer at it and the question of tacks does not arise.
+        return (bearing, on_starboard);
+    }
+    // Close-hauled on one tack or the other. The one that makes ground is the one whose
+    // course is nearer the mark's bearing.
+    let port = wrap_tau(wind_from - CLOSE_HAULED);
+    let starboard = wrap_tau(wind_from + CLOSE_HAULED);
+    let gain = |course: f64| wrap_pi(course - bearing).abs();
+    // Hold the tack she is on until the other one is better by more than the slop —
+    // which is a boat that tacks on a shift rather than one that dithers.
+    let keep = if on_starboard { starboard } else { port };
+    let other = if on_starboard { port } else { starboard };
+    if gain(other) + slop < gain(keep) {
+        (other, !on_starboard)
+    } else {
+        (keep, on_starboard)
+    }
+}
+
+/// Sail the other boats, and put them in the fleet so they get drawn.
+pub fn rivals(
+    time: Res<Time>,
+    sim: Res<Sim>,
+    mut race: ResMut<Race>,
+    mut fleet: ResMut<crate::fleet::Fleet>,
+) {
+    if !race.running() {
+        race.rivals.clear();
+        return;
+    }
+    let now = sim.sim.state.time;
+    let dt = time.delta_secs_f64();
+    let wind = sim.sim.wind.sample(sim.sim.state.pos, now);
+    let from = sail_core::wind::direction_of(wind);
+    let tws = wind.length();
+    if race.rivals.is_empty() {
+        // Laid out along the line, a few lengths apart, as a fleet mills about before a
+        // start — which is also what tells you where the line *is*.
+        let middle = race.line.0.lerp(race.line.1, 0.5);
+        let along = (race.line.1 - race.line.0).normalize_or_zero();
+        for (n, name) in ["Varg", "Tern", "Mew"].into_iter().take(RIVALS).enumerate() {
+            let at = middle + along * ((n as f64 - 1.0) * 40.0)
+                - DVec2::new(from.sin(), from.cos()) * -60.0;
+            race.rivals.push(Rival {
+                name,
+                at,
+                heading: wrap_tau(from + rad(100.0)),
+                speed: kn_to_ms(2.0),
+                way: DVec2::ZERO,
+                at_mark: 0,
+                started: false,
+                finished: None,
+                skill: 0.94 + 0.04 * n as f64,
+            });
+        }
+    }
+
+    let line = race.line;
+    let marks = race.marks.clone();
+    let gun = race.gun_at;
+    let mut tacks: Vec<bool> = Vec::new();
+    for (n, rival) in race.rivals.iter_mut().enumerate() {
+        // Where she is going: the favoured end before the gun, the next mark after it.
+        let target = if !rival.started {
+            let favour = favoured_by(line, from);
+            let end = if favour > 0.0 { line.0 } else { line.1 };
+            // Hanging about to leeward of her end until it is time to go for it, which
+            // is what the last minute of a start looks like from another boat.
+            let to_go = gun - now;
+            let run = (end - rival.at).length() / rival.speed.max(0.5);
+            if to_go > run + 6.0 {
+                end - DVec2::new(from.sin(), from.cos()) * 60.0
+            } else {
+                end + DVec2::new(from.sin(), from.cos()) * 40.0
+            }
+        } else {
+            marks
+                .get(rival.at_mark)
+                .copied()
+                .unwrap_or(line.0.lerp(line.1, 0.5))
+        };
+        let on_starboard = wrap_pi(rival.heading - from) > 0.0;
+        let (course, _) = steer_for(
+            rival.at,
+            target,
+            from,
+            on_starboard,
+            rad(4.0) + n as f64 * rad(2.0),
+        );
+        tacks.push(on_starboard);
+        // She comes round at a yacht's rate, not a ship's.
+        let error = wrap_pi(course - rival.heading);
+        let swing = rad(14.0) * dt;
+        rival.heading = wrap_tau(rival.heading + error.clamp(-swing, swing));
+        let twa = wrap_pi(rival.heading - from);
+        let want = yacht_polar(twa, tws) * rival.skill;
+        rival.speed += (want - rival.speed) * (1.0 - (-dt / 6.0).exp());
+        let head = DVec2::new(rival.heading.sin(), rival.heading.cos());
+        let lee = DVec2::new(head.y, -head.x) * twa.signum();
+        let crab = rad(4.0) * (1.0 - smoothstep(rad(55.0), rad(120.0), twa.abs()));
+        let going = (head * crab.cos() + lee * crab.sin()) * rival.speed;
+        rival.way += (going - rival.way) * (1.0 - (-dt / 4.0).exp());
+        rival.at += rival.way * dt;
+
+        // The line and the marks, by the same rules the player sails under.
+        let side = across(line, rival.at, from);
+        if !rival.started {
+            if now >= gun && side > 0.0 && between_the_ends(line, rival.at) {
+                rival.started = true;
+            }
+        } else if let Some(&mark) = marks.get(rival.at_mark) {
+            if (rival.at - mark).length() < ROUNDED * 2.0 {
+                rival.at_mark += 1;
+            }
+        } else if rival.finished.is_none() && side < 0.0 && between_the_ends(line, rival.at) {
+            rival.finished = Some(now - gun);
+        }
+    }
+
+    // And into the fleet, so the renderer that draws another boat draws these.
+    const RACERS: u16 = 61_000;
+    for (n, rival) in race.rivals.iter().enumerate() {
+        let drawn = sail_net::Drawn {
+            pos: [rival.at.x as f32, rival.at.y as f32],
+            heading: rival.heading as f32,
+            heel: (0.18 * wrap_pi(rival.heading - from).sin()) as f32,
+            surge: rival.speed as f32,
+            boom_angle: (wrap_pi(rival.heading - from).abs() * 0.5).min(rad(75.0)) as f32
+                * if wrap_pi(rival.heading - from) > 0.0 {
+                    -1.0
+                } else {
+                    1.0
+                } as f32,
+            main_sheet: (wrap_pi(rival.heading - from).abs() / std::f64::consts::PI) as f32,
+            jib_sheet: (wrap_pi(rival.heading - from).abs() / std::f64::consts::PI) as f32,
+            genoa_car: 0.5,
+            ..Default::default()
+        };
+        let _ = fleet.heard(RACERS + n as u16, rival.name, drawn);
+    }
+}
+
+/// Where she lies in the fleet, counting boats that have finished first.
+pub fn standing(race: &Race, me: DVec2) -> (usize, usize) {
+    let mine = how_far_round(race, me, race.at, race.stage == Stage::Finished(0.0));
+    let mut ahead = 0;
+    for rival in &race.rivals {
+        let theirs = how_far_round(race, rival.at, rival.at_mark, rival.finished.is_some());
+        if theirs > mine {
+            ahead += 1;
+        }
+    }
+    (ahead + 1, race.rivals.len() + 1)
+}
+
+/// How far round the course somebody is, as marks rounded plus the leg they are on.
+fn how_far_round(race: &Race, at: DVec2, mark: usize, finished: bool) -> f64 {
+    if finished {
+        return 1e6;
+    }
+    let leg = race
+        .marks
+        .get(mark)
+        .map(|m| -(at - *m).length())
+        .unwrap_or(0.0);
+    mark as f64 * 10_000.0 + leg
 }
