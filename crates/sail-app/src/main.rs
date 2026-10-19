@@ -242,6 +242,8 @@ fn main() {
         weather.cover as f32,
     ))
     .init_resource::<sky::Baking>()
+    // The sky as the water reads it, rebuilt whenever the sky itself is repainted.
+    .init_resource::<sky::Dome>()
     .init_resource::<settings::Settings>()
     .init_resource::<help::Help>()
     .init_resource::<logbook::Logbook>()

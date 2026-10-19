@@ -754,6 +754,86 @@ fn horizon_average(sky: &Sky) -> Vec3 {
     (sum / N as f32).min(Vec3::splat(1.0))
 }
 
+/// The sky as the *water* sees it.
+///
+/// **The sea is a mirror and it was painted from two constants.** Its two ends — the
+/// colour a trough shows and the colour a crest shows — were `ZENITH` and `HORIZON`,
+/// which are a fine blue afternoon and nothing else: the same water at seven in the
+/// morning, at noon and under a squall, with the sun anywhere it liked. Reported from
+/// the deck as the sun's position not reaching the water, and it did not, because
+/// nothing connected them.
+///
+/// What a patch of sea shows is the sky it reflects, and that depends on the bearing:
+/// looking towards a low sun the water is a sheet of light and the same water over your
+/// shoulder is nearly black. So the dome is sampled round the horizon and fitted to a
+/// constant and a direction — `mean + x·east + z·south`, which is the first spherical
+/// harmonic and is exactly the "bright one way, dark the other" that a low sun does.
+/// Two multiplies and two adds at a vertex, against an arc tangent and a table lookup.
+///
+/// Built when the sky is repainted and not before: these are the expensive samples, the
+/// ones that walk the cloud decks, and the sky only moves half a degree at a time.
+#[derive(bevy::prelude::Resource, Clone, Copy, Debug)]
+pub struct Dome {
+    mean: Vec3,
+    east: Vec3,
+    south: Vec3,
+    zenith: Vec3,
+}
+
+impl Dome {
+    /// How many bearings are sampled round the horizon.
+    const POINTS: usize = 24;
+    /// How far up to sample: the band a wave face actually mirrors.
+    const BAND: f32 = 0.12;
+
+    pub fn of(sky: &Sky) -> Self {
+        let mut mean = Vec3::ZERO;
+        let (mut east, mut south) = (Vec3::ZERO, Vec3::ZERO);
+        for i in 0..Self::POINTS {
+            let a = std::f32::consts::TAU * i as f32 / Self::POINTS as f32;
+            let dir = Vec3::new(a.cos(), Self::BAND, a.sin()).normalize();
+            // The sun's own disc would drag a sample to white and is not what the sea
+            // is showing; the glitter is drawn separately and from the real mirror
+            // condition.
+            let c = sky_colour(dir, sky).min(Vec3::splat(1.2));
+            mean += c;
+            east += c * a.cos();
+            south += c * a.sin();
+        }
+        let n = Self::POINTS as f32;
+        Self {
+            mean: mean / n,
+            east: east * 2.0 / n,
+            south: south * 2.0 / n,
+            zenith: sky_colour(Vec3::Y, sky),
+        }
+    }
+
+    /// What arrives from near the horizon on this bearing. `dir` is a Bevy direction;
+    /// only its horizontal part is read, and it need not be normalised.
+    #[inline]
+    pub fn towards(&self, dir: Vec3) -> Vec3 {
+        let flat = Vec3::new(dir.x, 0.0, dir.z);
+        let len = flat.length();
+        if len < 1e-6 {
+            return self.mean;
+        }
+        (self.mean + self.east * (flat.x / len) + self.south * (flat.z / len)).max(Vec3::ZERO)
+    }
+
+    /// Straight up, which is what a trough shows.
+    #[inline]
+    pub fn zenith(&self) -> Vec3 {
+        self.zenith
+    }
+}
+
+impl Default for Dome {
+    fn default() -> Self {
+        Self::of(&Sky::default())
+    }
+}
+
 pub fn haze_colour(sky: &Sky) -> Color {
     let c = horizon_average(sky);
     Color::linear_rgb(c.x, c.y, c.z)
@@ -842,6 +922,7 @@ pub fn drift(
     sim: bevy::prelude::Res<crate::sim::Sim>,
     time: bevy::prelude::Res<Time>,
     mut sky: bevy::prelude::ResMut<Sky>,
+    mut dome: bevy::prelude::ResMut<Dome>,
     mut baking: bevy::prelude::ResMut<Baking>,
     mut images: bevy::prelude::ResMut<Assets<Image>>,
     held: bevy::prelude::Query<&SkyImage>,
@@ -883,6 +964,10 @@ pub fn drift(
     if moved {
         let want = *sky;
         baking.baked = Some(want);
+        // The water's own copy of the sky, rebuilt on the same trigger and from the same
+        // state — which is the only arrangement in which the sea can be trusted to be
+        // the colour of what is above it.
+        *dome = Dome::of(&want);
         baking.task =
             Some(bevy::tasks::AsyncComputeTaskPool::get().spawn(async move { cubemap(&want) }));
     }

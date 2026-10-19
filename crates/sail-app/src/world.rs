@@ -719,6 +719,7 @@ pub fn apply_ink(
 pub fn update_sea(
     ink: Res<Ink>,
     sky_state: Res<sky::Sky>,
+    dome: Res<sky::Dome>,
     clouds: Option<Res<crate::clouds::Clouds>>,
     origin: Res<frame::RenderOrigin>,
     time: Res<Time>,
@@ -759,19 +760,28 @@ pub fn update_sea(
         // a quarter of a kilometre out to the horizon, which is most of the sea there
         // is. One palette now, and both halves of the grid read it.
         let body = Vec3::new(0.02, 0.07, 0.06);
-        let (deep, shallow) = if ink {
+        // **The sea's two ends come from the sky that is actually up there.**
+        //
+        // They were `ZENITH` and `HORIZON`, two constants: a fine blue afternoon, drawn
+        // the same at seven in the morning, at noon and under a squall, with the sun
+        // wherever it liked. Water is a mirror and this is what it mirrors — a trough
+        // sees the narrow strip of sky overhead and a crest sees the whole dome, so the
+        // dark end is the zenith and the light end the horizon, as before, but both of
+        // them now move with the hour and the cover.
+        //
+        // The horizon end is also a *direction*: looking towards a low sun the water is
+        // a sheet of light and the same water over your shoulder is nearly black, which
+        // is most of what the sea looks like at the ends of the day. `Dome` carries that
+        // as a constant plus a bearing term; it is applied per vertex below.
+        // Only the dark end is worked out once a frame now: the light end is a bearing
+        // and belongs at the vertex.
+        let deep = if ink {
             // Mixed towards the pigment rather than from the sky, but not all the way:
             // the weather still has to be able to put a grey afternoon on the water,
             // and a print that never changes with the light is wallpaper.
-            (
-                PRUSSIAN.lerp(crate::sky::ZENITH * 0.34 + body, 0.30),
-                PAPER.lerp(crate::sky::HORIZON * 0.62 + body, 0.34),
-            )
+            PRUSSIAN.lerp(dome.zenith() * 0.34 + body, 0.30)
         } else {
-            (
-                crate::sky::ZENITH * 0.16 + body * 0.6,
-                crate::sky::HORIZON * 0.17 + body * 1.4,
-            )
+            dome.zenith() * 0.16 + body * 0.6
         };
         let far = if ink { deep } else { DEEP };
         // The bank, where there is one to see. Only asked for in the drawn sea, where
@@ -857,6 +867,23 @@ pub fn update_sea(
                 positions.push(Vec3::new(offset.x, 0.0, offset.y));
                 normals.push(Vec3::Y);
                 tangents.push(Vec4::new(1.0, 0.0, 0.0, -1.0));
+                // The far water is nearly all horizon reflection — it is seen at a
+                // grazing angle — so it takes the sky on its own bearing rather than one
+                // flat colour for the whole ring. This is where a low sun shows most: the
+                // bright road to the sun and the dark water either side of it are both
+                // out there, beyond anything the near grid draws.
+                let look = Vec3::new(offset.x - eye.x, 0.0, offset.y - eye.z);
+                let from_sky = dome.towards(look);
+                let lit = if ink {
+                    far
+                } else {
+                    // A third of the way towards the sky it reflects and no further.
+                    // At a grazing angle the sea really is close to the colour of the
+                    // horizon, but drawn that way the horizon stops being a line: in an
+                    // evening overcast the far water went the same pale grey as the sky
+                    // above it and the two became one field with a boat in the middle.
+                    far.lerp(from_sky * 0.17 + body * 1.4, 0.3)
+                };
                 let flat = st.pos + glam::DVec2::new(offset.x as f64, -offset.y as f64) - uv_base;
                 uvs.push(if ink {
                     // Past the near field there is no wave to shade and nothing to
@@ -865,7 +892,7 @@ pub fn update_sea(
                 } else {
                     sea_texture::ripple_uv(Vec2::new(flat.x as f32, flat.y as f32))
                 });
-                colours.push([far.x, far.y, far.z, 1.0]);
+                colours.push([lit.x, lit.y, lit.z, 1.0]);
                 continue;
             }
             // Sample at the true world position. Bevy's -Z is sim north, so the
@@ -988,6 +1015,17 @@ pub fn update_sea(
                 // because afterwards the information is gone.
                 edge = on_step;
             }
+            // The light end on *this* bearing. A crest shows the sky it faces, and at
+            // the ends of the day the sky it faces is a different colour every way you
+            // look: a low sun lays a sheet of light on the water one way and leaves it
+            // nearly black the other.
+            let look = Vec3::new(offset.x - eye.x, 0.0, offset.y - eye.z);
+            let from_sky = dome.towards(look);
+            let shallow = if ink {
+                PAPER.lerp(from_sky * 0.62 + body, 0.34)
+            } else {
+                from_sky * 0.17 + body * 1.4
+            };
             let mut base = deep.lerp(shallow, tone);
             if ink {
                 // How thin the water is here, from the two things that thin it.
