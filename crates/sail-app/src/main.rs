@@ -39,6 +39,7 @@ mod navigation;
 mod net;
 mod orders;
 mod panel;
+mod race;
 mod rain;
 mod retro;
 mod rig;
@@ -252,6 +253,7 @@ fn main() {
     .init_resource::<mission::Pilotage>()
     .init_resource::<mission::WantsPilotage>()
     .init_resource::<orders::Orders>()
+    .init_resource::<race::Race>()
     .init_resource::<navigation::Navigation>()
     .init_resource::<sight::Sighting>()
     .init_resource::<marks::Coast>()
@@ -403,6 +405,8 @@ fn main() {
                         mission::discharge,
                         mission::fly_the_flag,
                         mission::lay_off_the_route,
+                        race::run,
+                        race::dress,
                         mission::run,
                         ship::sail_her,
                         ship::work_her,
@@ -448,9 +452,17 @@ fn main() {
             navigation::adrift_card,
             chart::glass,
             boathook::draw,
-            mission::draw,
         )
             .chain(),
+    )
+    // The two missions' deck lines, in their own call because a tuple of systems has a
+    // length and that one is at it. Ordered after the boathook's prompt for the same
+    // reason everything in the list above is ordered: the last thing drawn is the thing
+    // on top, and a mission's one line belongs over the instruments rather than under
+    // them.
+    .add_systems(
+        EguiPrimaryContextPass,
+        (mission::draw, race::draw).chain().after(boathook::draw),
     );
     // A picture of herself on a timer, when one was asked for: see `shot`.
     if let Some(shot) = shot::wanted() {

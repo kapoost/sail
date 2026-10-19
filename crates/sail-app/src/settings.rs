@@ -168,6 +168,7 @@ pub fn draw(
     mut lesson: ResMut<crate::tutorial::Tutorial>,
     mut wants: ResMut<crate::mission::WantsPilotage>,
     job: Res<crate::mission::Pilotage>,
+    mut race: ResMut<crate::race::Race>,
     mut course: ResMut<crate::course::Course>,
 ) -> Result {
     if !settings.open {
@@ -425,7 +426,7 @@ pub fn draw(
                     passage(ui, &mut course);
                 }
                 if settings.tab == Tab::Drill {
-                    drill(ui, &mut lesson, &mut wants, &job);
+                    drill(ui, &mut lesson, &mut wants, &job, &mut race);
                 }
                 if settings.tab == Tab::Network {
                     together(ui, &mut net, &fleet, sim.sim.state.pos);
@@ -490,6 +491,61 @@ fn passage(ui: &mut egui::Ui, course: &mut crate::course::Course) {
     }
 }
 
+/// **A race, which is the one thing sailing has that nothing else does.**
+///
+/// Not because winning matters — there is nobody to beat yet — but because a start is a
+/// manoeuvre and a good one is the hardest thing in this game that does not involve
+/// somebody going over the side. You cannot stop a sailing boat: the five minutes before
+/// the gun are spent making her arrive at a line she must not touch early, at speed, at
+/// the end you have decided is favoured.
+fn regatta(ui: &mut egui::Ui, race: &mut crate::race::Race) {
+    heading(ui, "RACE — FIVE MINUTES AND A WINDWARD-LEEWARD");
+    ui.label(
+        egui::RichText::new(
+            "A line laid across the wind two cables to leeward of you, a gun in five \
+             minutes, and twice round a buoy eight hundred metres upwind.\n\nOver the \
+             line early and you come back and cross again, which is the rule that makes \
+             a start a start. The committee end or the pin: the panel says which is \
+             favoured and by how many metres, and ten seconds of that is the whole first \
+             beat.",
+        )
+        .color(egui::Color32::from_rgb(176, 182, 190))
+        .monospace()
+        .size(11.0),
+    );
+    ui.add_space(8.0);
+    if race.running() {
+        if let Some(took) = race.time() {
+            ui.label(
+                egui::RichText::new(format!(
+                    "finished in {:.0}:{:02.0}",
+                    took / 60.0,
+                    took % 60.0
+                ))
+                .color(egui::Color32::from_rgb(230, 198, 120))
+                .monospace()
+                .size(11.0),
+            );
+            ui.add_space(6.0);
+        }
+        if ui
+            .button(egui::RichText::new("ABANDON").monospace().size(12.0))
+            .clicked()
+        {
+            race.wants_stop = true;
+        }
+    } else if ui
+        .button(
+            egui::RichText::new("START THE SEQUENCE — FIVE MINUTES")
+                .monospace()
+                .size(12.0),
+        )
+        .clicked()
+    {
+        race.wants_start = true;
+    }
+}
+
 /// **The job, offered the way a job is offered**: here is a ship, here is what is wrong,
 /// and here is what it will take. Not a difficulty setting and not a list of objectives —
 /// the whole of it fits in four lines because the whole of it is seamanship you already
@@ -550,7 +606,12 @@ fn drill(
     lesson: &mut crate::tutorial::Tutorial,
     wants: &mut crate::mission::WantsPilotage,
     job: &crate::mission::Pilotage,
+    race: &mut crate::race::Race,
 ) {
+    regatta(ui, race);
+    ui.add_space(14.0);
+    ui.separator();
+    ui.add_space(10.0);
     pilotage(ui, wants, job);
     ui.add_space(14.0);
     ui.separator();

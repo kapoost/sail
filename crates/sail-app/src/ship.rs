@@ -30,7 +30,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use glam::DVec2;
-use sail_core::units::{kn_to_ms, ms_to_kn, rad, wrap_pi, wrap_tau};
+use sail_core::units::{kn_to_ms, ms_to_kn, rad, smoothstep, wrap_pi, wrap_tau};
 
 #[allow(unused_imports)]
 use crate::frame;
@@ -90,6 +90,13 @@ pub struct Brig {
     pub speed: f64,
     /// Positive to starboard, radians.
     pub heel: f64,
+    /// Where she is actually going, as against where she is pointed.
+    ///
+    /// **A vessel has way, and the way is a vector.** Hers lags her heading through a
+    /// turn and sits a few degrees to leeward of it under sail; the difference between
+    /// the two is the crab you can see from another boat, and its absence is what made
+    /// her look like she was sliding.
+    pub way: DVec2,
     /// How far the yards are braced round from square, radians, signed: positive swings
     /// the starboard yardarms aft.
     pub braced: f64,
@@ -110,6 +117,7 @@ impl Default for Brig {
             heading: 0.0,
             speed: 0.0,
             heel: 0.0,
+            way: DVec2::ZERO,
             braced: 0.0,
             set: [1.0, 1.0, 1.0],
             afloat: false,
@@ -1060,8 +1068,32 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>) {
     let want_heel = -apparent.signum() * rad(9.0) * press;
     brig.heel += (want_heel - brig.heel) * (1.0 - (-dt / 6.0).exp());
 
+    // --- How she actually moves, which is not along her own head -------------------
+    //
+    // **Reported from the deck as sliding, and it was: she had no way of her own.** Her
+    // position was stepped straight along her heading, so a turn moved her sideways the
+    // instant the helm went over and she crabbed not at all — a ship on rails, which
+    // from another boat looks exactly like skating.
+    //
+    // Two things were missing and they are the two things that make a vessel look like
+    // one. The first is **way**: three hundred tons carry their velocity through a turn,
+    // so her track lags her head and swings round to it over ten seconds or so, which is
+    // what you are watching when a ship alters course and her wake bends behind her
+    // rather than kinking. The second is **leeway**: nothing under sail goes where it is
+    // pointed, and a square-rigger is the worst of all of them — six or seven degrees
+    // close-hauled, which is most of why she cannot work to windward and is visible from
+    // half a mile as the angle between her hull and her wake.
     let head = DVec2::new(brig.heading.sin(), brig.heading.cos());
-    let run = head * brig.speed * dt;
+    let lee = DVec2::new(head.y, -head.x) * twa.signum();
+    // Most of it close-hauled, none of it running: the sideways force is what makes it
+    // and there is none of that before the wind.
+    let crab = rad(7.0) * (1.0 - smoothstep(rad(60.0), rad(140.0), twa.abs()));
+    let want = (head * crab.cos() + lee * crab.sin()) * brig.speed;
+    // A ship's way: ten seconds to come round to a new direction, which is the number
+    // that turns a kink into a curve.
+    let was = brig.way;
+    brig.way = was + (want - was) * (1.0 - (-dt / 10.0).exp());
+    let run = brig.way * dt;
     brig.at += run;
 }
 

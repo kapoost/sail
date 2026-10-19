@@ -582,6 +582,53 @@ mod the_pilotage {
         );
     }
 
+    /// **She carries her way, and she crabs.**
+    ///
+    /// Reported from the deck as sliding, and it was: her position was stepped straight
+    /// along her heading, so a turn moved her sideways the instant the helm went over
+    /// and she crabbed not at all. A ship on rails, which from another boat looks
+    /// exactly like skating.
+    #[test]
+    fn her_track_lags_her_head_and_lies_to_leeward_of_it() {
+        let mut app = with_a_brig();
+        standing_in(&mut app, 300.0);
+        // Let her settle on a course first, so the way is hers rather than nothing.
+        for _ in 0..80 {
+            app.update();
+        }
+        let (heading, way) = {
+            let brig = app.world().resource::<Brig>();
+            (brig.heading, brig.way)
+        };
+        assert!(way.length() > 0.5, "she is not moving at all");
+        let track = way.x.atan2(way.y);
+        let crab = sail_core::units::deg(sail_core::units::wrap_pi(track - heading)).abs();
+        assert!(
+            (0.5..12.0).contains(&crab),
+            "she is making {crab:.1} degrees of leeway, which is {}",
+            if crab < 0.5 {
+                "a boat on rails"
+            } else {
+                "a boat sideways"
+            }
+        );
+
+        // Put the helm over hard and watch the track follow rather than jump.
+        let before = way.normalize();
+        {
+            let mut brig = app.world_mut().resource_mut::<Brig>();
+            brig.heading = sail_core::units::wrap_pi(heading + rad(60.0));
+        }
+        app.update();
+        let after = app.world().resource::<Brig>().way.normalize();
+        let swung = sail_core::units::deg(before.angle_to(after)).abs();
+        assert!(
+            swung < 8.0,
+            "her track swung {swung:.0} degrees in a quarter of a second — three hundred \
+             tons do not do that"
+        );
+    }
+
     /// And she does not follow a boat under her own stern, however close it is.
     #[test]
     fn a_boat_astern_of_her_is_not_leading_her() {
