@@ -1,0 +1,80 @@
+name: pages
+
+# The page is generated rather than written, and this is where that happens. The key
+# list comes out of `crates/sail-app/src/help.rs`, the polar and the model table out of
+# `README.md`, the version out of `Cargo.toml` — so a page that disagrees with the
+# program is a build failure here rather than something a reader finds first.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "README.md"
+      - "crates/sail-app/src/help.rs"
+      - "crates/*/Cargo.toml"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A half-published site is worse than an old one: let a run finish rather than
+# cancelling it partway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # WeasyPrint draws the PDF. It needs pango and cairo from the system rather than
+      # from pip, and the runner image has neither by default.
+      - name: the things that draw a PDF
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libffi-dev
+          python -m pip install --upgrade pip
+          python -m pip install weasyprint
+
+      # Before building anything: does the parse still understand help.rs? This is the
+      # check that stops a renamed constant from quietly publishing half a key list.
+      - name: the key list still parses
+        run: python3 site/keys.py
+
+      - name: build
+        run: python3 site/build.py --pdf
+
+      # A page that built but came out empty is the failure this catches.
+      - name: the output is not a shell
+        run: |
+          test -s _site/index.html
+          test -s _site/manual.html
+          test -s _site/manual.pdf
+          grep -q "AT THE HELM" _site/index.html
+          grep -q "AT THE HELM" _site/manual.html
+          echo "index $(wc -c < _site/index.html) bytes, pdf $(wc -c < _site/manual.pdf) bytes"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

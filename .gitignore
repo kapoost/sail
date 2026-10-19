@@ -20,3 +20,10 @@
 # Generated hulls under evaluation: provenance and licence not settled, and they
 # are an experiment rather than the boat. The knobs that load them are in boat.rs.
 assets/*-hull.glb
+
+# The built page. Generated from site/ by site/build.py and published by the pages
+# workflow; checking it in would be checking in a copy of the key list, which is the
+# one thing this arrangement exists to avoid.
+/_site/
+/.playwright-mcp/
+__pycache__/

@@ -7,6 +7,11 @@ The non-negotiable requirement is that sailing and handling the boat are modelle
 real — apparent wind, sail trim, heel and righting moment, leeway, the hull-speed
 wall, rudder stall, weather helm. Not a wind arrow and a speed multiplier.
 
+**[kapoost.github.io/sail](https://kapoost.github.io/sail)** — what it looks like, how to
+get it, and [the manual](https://kapoost.github.io/sail/manual.html)
+([PDF](https://kapoost.github.io/sail/manual.pdf)). The page is generated from this
+repository, key list included, so it cannot drift from the program; see `site/`.
+
 ## Where things stand
 
 `crates/sail-core` — the dynamics, and nothing else. No renderer, no input handling,
