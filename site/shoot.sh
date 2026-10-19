@@ -113,7 +113,7 @@ scene_env () {
     # cloud in front of it are two things and a 90% day hides the first behind the
     # second. 18:06 is six degrees up — late enough for the fire, early enough that the
     # sea still has light on it.
-    sunset)   echo "SAIL_SEED=42 SAIL_HOUR=18.4 SAIL_COVER=0.2 SAIL_SHOT_AFTER=78" ;;
+    sunset)   echo "SAIL_SEED=42 SAIL_HOUR=19.1 SAIL_COVER=0.25 SAIL_SHOT_AFTER=78" ;;
     *) return 1 ;;
   esac
 }
