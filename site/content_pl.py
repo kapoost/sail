@@ -20,14 +20,14 @@ STANDFIRST = (
 
 WHAT_IT_IS = [
     (
-        "Pętla to samo żeglowanie",
+        "Pętlą jest samo żeglowanie",
         """Wiatr rzeczywisty wyznacza trym; trym daje napęd i dryf; napęd przesuwa wiatr
         pozorny; i trymujesz od nowa. Wszystko inne — kotwiczenie, silnik pomocniczy,
         kabestany, refowanie — jest przedłużeniem tej pętli, a nie czymś obok niej.""",
     ),
     (
         "Kąt natarcia, nie kąt wiatru",
-        """Program liczący prędkość może założyć idealny trym i stabelaryzować wszystko
+        """Program liczący prędkość może założyć idealny trym i ująć wszystko w tabelę
         według samego kąta wiatru. Gra nie może, bo trymowanie jest robotą gracza. Szot
         ustawia kąt cięciwy, cięciwa ustawia kąt natarcia, a kąt natarcia decyduje, czy
         żagiel ciągnie, łopocze, czy jest przeciągnięty.""",
@@ -145,15 +145,15 @@ MANUAL = [
         jedna linijka w terminalu; ze źródeł jedno polecenie <code>cargo</code>. Linie
         instalacyjne są na stronie głównej i w pliku README repozytorium.</p>
 
-        <p><b>Gamepad jest zamierzonym sterowaniem, klawiatura działa.</b> Zasada
-        projektowa brzmi: mapuje się <em>zamiary</em>, a nie liny, i dopasowuje naturę
-        każdego sterowania do sprzętu, który reprezentuje — ster i szot grota to pozycje
+        <p><b>Gra jest pisana pod gamepada; klawiatura też działa.</b> Reguła jest taka:
+        przypisuje się <em>zamiary</em>, a nie liny, i dobiera naturę każdego
+        sterowania do sprzętu, który ono zastępuje — ster i szot grota to pozycje
         trzymane ręką, szot genui to kabestan, który się kręci, a ref to robota do
         wykonania.</p>
 
         <p><b>Kamera w kokpicie przechyla się razem z łodzią.</b> To jest celowe. Przechył
-        jest podstawowym kanałem informacji zwrotnej na jachcie, a widok, który trzyma
-        poziom, tę informację wyrzuca.</p>
+        jest pierwszą rzeczą, po której poznaje się, co dzieje się z łodzią, a widok
+        trzymający poziom tę informację wyrzuca.</p>
 
         <p><b>Obraz ma ziarno i możesz wybrać, jak grube.</b> <code>Esc</code>, potem
         <b>PICTURE</b>: wiersz <em>pixels</em> daje 720, 960 i <em>sharp</em>. Świat jest
@@ -179,7 +179,7 @@ MANUAL = [
         """<p>Seryjny slup czarterowy około trzydziestu czterech stóp: 9,20 m linii wodnej,
         5500 kg wyporności, 64 m² ożaglowania, prędkość kadłubowa 7,36 węzła. Ma grota z
         trzema refami i garderobę przednich żagli — genuę, code&nbsp;0, gennakera,
-        spinakera — z których jeden jest postawiony naraz.</p>
+        spinakera — stawia się jeden naraz.</p>
 
         <p><b>Nie jest szybka i nie ma być.</b> Najlepsze VMG pod wiatr przy dwunastu
         węzłach wypada na 40 stopniach od wiatru: 5,6 węzła przez wodę, 4,1 zyskane, 21
@@ -196,7 +196,7 @@ MANUAL = [
         <ol>
         <li><b>Najpierw spójrz na barometr, zanim spojrzysz na cokolwiek innego.</b>
         OUTLOOK na konsoli mówi, co robi ciśnienie, a to decyduje, czy zaraz będziesz
-        przeciążony. Rosnące i równe to miłe popołudnie; spadające i cofające to ref, który
+        przeciążony. Rosnące i stałe to miłe popołudnie; spadające i cofające to ref, który
         trzeba założyć teraz, a nie za dwadzieścia minut.</li>
 
         <li><b>Postaw przedni żagiel i wybierz grota.</b> <code>X</code> i <code>Z</code>
@@ -205,7 +205,7 @@ MANUAL = [
         ile trwa. <code>W</code> i <code>S</code> to szot grota; <code>Q</code> i
         <code>E</code> to kabestan genui.</li>
 
-        <li><b>Steruj rumplem i patrz na telltale.</b> Rumpel trzyma kąt, w jakim go
+        <li><b>Steruj rumplem i patrz na nitki.</b> Rumpel trzyma kąt, w jakim go
         zostawisz — to nie jest sprężyna. <code>Space</code> ustawia go na wprost.</li>
 
         <li><b>Oddaj żagle komuś, kiedy chcesz nawigować.</b> <code>Shift&nbsp;T</code>
@@ -238,9 +238,9 @@ MANUAL = [
         własnej polary, nie z książki, więc zwęża się przy refie i otwiera, kiedy łódź
         odpada.</p>
 
-        <p><b>Nic nie jest napisane obok swojego rysunku.</b> Jej kurs to róża, wiatr
+        <p><b>Nic nie jest napisane obok swojego rysunku.</b> Kurs łodzi to róża, wiatr
         pozorny to wskazówka, przechył to linia w dolnej połowie — więc te trzy liczby nie
-        są <em>jeszcze</em> wypisane cyframi obok, co jest najstarszym sposobem na zrobienie
+        są <em>dodatkowo</em> wypisane cyframi obok, co jest najstarszym sposobem na zrobienie
         nieczytelnego pulpitu. Wypisane jest wszystko, czego kotwiczka pokazać nie może:
         log, siła obu wiatrów, prędkość zyskana, woda pod kilem i to, co robi
         barometr.</p>
@@ -291,7 +291,7 @@ MANUAL = [
         stoi na nich.</p>
 
         <p><b>Potem wróć do niego i podejmij go.</b> Bosak sięga sam — nie celujesz nim — a
-        <code>Enter</code> bierze chwyt. <em>Kiedy</em> jest w tym wszystkim: bosak założony,
+        <code>Enter</code> bierze chwyt. Cała rzecz polega na tym, <em>kiedy</em>: bosak założony,
         gdy pokład spada, to bosak wyrwany z rąk, a o tym, kiedy to jest, decyduje morze, a
         nie gracz.</p>
 
@@ -340,7 +340,7 @@ MANUAL = [
     (
         "navigation",
         "Ustalanie pozycji",
-        """<p><b>Jeden przyrząd naraz, i masz jedną rękę.</b> <code>Shift&nbsp;B</code> to
+        """<p><b>Jeden przyrząd naraz — i masz jedną rękę.</b> <code>Shift&nbsp;B</code> to
         lornetka, a <code>Shift&nbsp;N</code> kompas ręczny; wzięcie jednego odkłada drugi,
         bo siedem na pięćdziesiąt trzyma się dwiema rękami na kołyszącej się łodzi, a kompas
         wyciąga się na odległość ramienia. Każde z nich stawia cię w kokpicie. Rozłożenie
@@ -352,9 +352,9 @@ MANUAL = [
         z dwóch kątów poziomych między nimi.</p>
 
         <p><b>Potem bierz namiary.</b> <code>N</code>, ze szczerbinką trzymaną na znaku.
-        Odpowiada tak czy inaczej: nazwą i liczbą, jeśli złapał, i tym, o ile chybiłeś, jeśli
+        Odpowiada w obu przypadkach: nazwą i liczbą, jeśli złapał, i tym, o ile chybiłeś, jeśli
         nie. Utrzymanie szczerbinki szerokiej na stopień z ćwiercią na znaku z kołyszącego się
-        pokładu jest tym drobnym aktem spokoju, dla którego ten przyrząd istnieje.</p>
+        pokładu jest tą odrobiną opanowania, dla której ten przyrząd istnieje.</p>
 
         <p><b>Dziennik jest miejscem, w którym nawigator zapisuje — nie mapa.</b> Każdy
         namiar, każdy rozpoznany znak, każdy odczyt logu idzie na stronę obok papieru z
@@ -368,22 +368,21 @@ MANUAL = [
 
         <p><b>WHY</b>, na końcu rzędu przyrządów, każe każdej linii na papierze powiedzieć,
         czym jest i po co tam jest — linia pozycyjna, przeniesiona, pociągnięta ręcznie,
-        odcinek z logu, zliczenie, droga nad dnem. Plot to sześć rodzajów linii w dwóch
+        odcinek z logu, zliczenie, droga nad dnem. Nakres to sześć rodzajów linii w dwóch
         kolorach bez legendy, a odróżnianie ich jest większością tej sztuki.</p>
 
         <div class="caveat"><b>Papier nie wie, że zrobiłeś zwrot</b><p>Zliczenie jest ciągiem
-        kursów, a nie linią, i plot jest tak stary, jak twoja ostatnia wizyta przy stole
+        kursów, a nie linią, a nakres jest tak stary, jak twoja ostatnia wizyta przy stole
         nawigacyjnym. Łódź doskonale wie, że zrobiła zwrot — kompas jest na grodzi — ale
         papier nie wie, więc dalej odkłada kurs, który mu ostatnio podano, z milami z logu, a
-        ołówkowa pozycja odchodzi od niej. Dziesięć minut niezapisanego dziennika po zwrocie o
+        ołówkowa pozycja odchodzi od łodzi. Dziesięć minut niezapisanego dziennika po zwrocie o
         dziewięćdziesiąt stopni to półtorej mili błędu ołówka, zmierzone. Rozłożenie mapy
         dopisuje dziennik.</p></div>""",
     ),
     (
         "racing",
         "Start",
-        """<p><b>Jedyną rzeczą, którą żeglarstwo ma, a nie ma jej nic innego, jest
-        start.</b> Nie da się zatrzymać jachtu ani go zaparkować — zawsze gdzieś idzie —
+        """<p><b>Start jest tym, co żeglarstwo ma, a czego nie ma nic innego.</b> Nie da się zatrzymać jachtu ani go zaparkować — zawsze gdzieś idzie —
         więc start wyścigu nie jest przyciskiem, tylko manewrem. Ostatnie pięć minut spędzasz
         na doprowadzeniu łodzi do linii, której nie wolno przeciąć za wcześnie, z pełną
         prędkością i na tym jej końcu, który uznałeś za uprzywilejowany. Każdy, kto się
@@ -391,7 +390,7 @@ MANUAL = [
         tym zdumiony.</p>
 
         <p><b>Uprzywilejowany koniec jest policzony, nie wymyślony.</b> Linia długa na sto
-        czterdzieści metrów, ustawiona dziesięć stopni krzywo do wiatru, daje na jednym
+        czterdzieści metrów, odchylona o dziesięć stopni od prostopadłej do wiatru, daje na jednym
         końcu dwadzieścia parę metrów darmowej drogi — a panel mówi, który to koniec i o ile
         metrów, bo metry są jedyną jednostką, w której da się o tym myśleć na wodzie. Za
         wcześnie za linią i wracasz, co jest tą jedną regułą, która czyni start startem.</p>
@@ -419,7 +418,7 @@ MANUAL = [
         """<p>Do 1964 roku była otwartą łodzią rybacką, więc na lewej ćwiartce rufy stoi
         wędka w uchwycie. To nie jest minigra obok żeglowania; jest do niego przyspawana, a
         spoiną jest jeden fakt: <b>ryba na żyłce przy sześciu węzłach to ryba, którą
-        stracisz.</b> Woda ciągnąca dziewięciokilowego molwę bokiem z taką prędkością
+        stracisz.</b> Woda ciągnąca dziewięciokilową molwę bokiem z taką prędkością
         szarpie mocniej, niż żyłka wytrzyma, więc pierwszą rzeczą, kiedy coś weźmie, jest
         wytracenie prędkości — a sprzętem do tego jest szot grota, zrzut, zabackowany
         przedni żagiel i ster, który już masz. Wędka nie ma regulacji prędkości. Łódź jest
@@ -429,20 +428,20 @@ MANUAL = [
         w pierwszym metrze czy dwóch; wytrać prędkość, a opada ostro — dziewięć metrów przy
         dwóch węzłach i trzydzieści przy jednym. Dlatego makrele łowi się szybko i płytko, a
         dorsze wolno i głęboko: łódź wybiera zdobycz wcześniej niż zestaw. Plusk za rufą jest
-        głębokościomierzem i znika powyżej czterech metrów.</p>
+        głębokościomierzem i znika, kiedy przynęta zejdzie na cztery metry.</p>
 
         <p><b>Hamulec jest całą grą i myli się w obie strony.</b> Za mocno i haczyk wychodzi
         rybie z pyska, bo to obciążenie rozpycha dziurę, w której siedzi. Za słabo i ryba w
         ogóle się nie męczy — zmęczenie liczy się z pracy wykonanej przeciw żyłce, więc
         popuszczony hamulec to ryba, której nie pokonujesz. Reguła wydrukowana na każdej
-        szpuli mówi o ćwiartce do jednej trzeciej wytrzymałości żyłki, i ten zakres jest
+        szpuli mówi o jednej czwartej do jednej trzeciej wytrzymałości żyłki, i ten zakres jest
         namalowany na tarczy.</p>
 
-        <p><b>Naciśnij ją, a pójdzie.</b> Ryba, która ma jeszcze siłę, nie wisi i nie
-        przyjmuje mocnego nacisku; ucieka. Ciągnij mocniej, a dostaniesz dłuższą walkę — co
+        <p><b>Przyciśnij ją, a ucieknie.</b> Ryba, która ma jeszcze siłę, nie wisi i nie
+        przyjmuje mocnego nacisku. Ciągnij mocniej, a dostaniesz dłuższą walkę — co
         jest pierwszą rzeczą, jaką każdemu mówią na łodzi.</p>
 
-        <p><b>Nic nie przychodzi spokojnie, a ostatni ruch jest na czas.</b> Każda ryba,
+        <p><b>Nic nie przychodzi spokojnie, a ostatni ruch trzeba wyczuć w czasie.</b> Każda ryba,
         choćby pokonana, znajduje jeszcze jeden zryw na widok burty. To, co zostaje potem, nie
         jest kwestią siły, tylko wyczucia: rybę przy burcie podnosi się <em>na wznoszeniu</em>,
         pozwalając morzu podnieść ją do relingu. Przerzucona na pokład, kiedy burta opada,
@@ -457,14 +456,14 @@ MANUAL = [
         <pre>sail-server --seed 42</pre>
 
         <p>Reszta naciska <code>Esc</code> i otwiera stronę <b>TOGETHER</b>. Gra w tej samej
-        sieci jest na liście. Świat pochodzi od tego, kto gości — dołączasz i jesteś w jego
+        sieci jest na liście. Świat pochodzi od gospodarza — dołączasz i jesteś w jego
         archipelagu, jego pogodzie i jego porze dnia. Łódź każdego jest na mapie z nazwą
         obok.</p>
 
         <p>Gra na serwerze, a nie na laptopie, ma adres i <b>słowo</b>, i oba wpisuje się na
         tej stronie. <b>KNOCK</b> pyta, co tam jest, bez dołączania — jaka gra, ilu na
         pokładzie, które morze — a kiedy nic nie odpowiada, mówi, która z trzech rzeczy to
-        jest: słowo, port, czy serwer, który nie działa. Wszystkie trzy wyglądały kiedyś tak
+        jest: słowo, port czy serwer, który nie działa. Wszystkie trzy wyglądały kiedyś tak
         samo, a są trzema różnymi wieczorami.</p>
 
         <p>Przez internet działa to tak samo z wpisanym adresem gospodarza, a najmniej
@@ -590,8 +589,8 @@ SHOTS = [
 
 REEL_CAPTION = (
     "Trzydzieści klatek szkwału",
-    "Przechyla się, morze idzie pod nią, a przyrządy odpowiadają — czyli ta połowa tej "
-    "rzeczy, której nie powie żadne zdjęcie. Nagrane przez grę fotografującą samą siebie, "
+    "Przechyla się, morze idzie pod nią, a przyrządy odpowiadają — czyli ta połowa, "
+    "której nie powie żadne zdjęcie. Nagrane przez grę fotografującą samą siebie, "
     "bo przechwytywanie ekranu wymaga uprawnienia, którego serwer budujący nie ma.",
 )
 
