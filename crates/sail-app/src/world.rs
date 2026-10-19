@@ -14,6 +14,7 @@
 //! shows the wave shape even where the mesh is too coarse to.
 
 use bevy::asset::RenderAssetUsages;
+use bevy::light::CascadeShadowConfigBuilder;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
@@ -133,6 +134,28 @@ pub fn setup(
             shadow_maps_enabled: true,
             ..default()
         },
+        // **Shadows had a reach of a hundred and fifty metres, which is the boat and
+        // nothing else.** That is Bevy's default and it is the right one for a scene
+        // the size of a room; here it meant the islands neither cast a shadow nor
+        // received one, so a headland with the sun behind it was lit exactly like a
+        // headland with the sun on it. A hill with no dark side does not read as a
+        // hill — it reads as a cut-out, which is what the far shore has always looked
+        // like in this game.
+        //
+        // Two and a half kilometres instead, which covers the islands you are actually
+        // sailing among. The cost is resolution: four cascades spread over that much
+        // ground are coarser than four over a hundred and fifty metres, so the near
+        // bound is pushed out to thirty — the boat's own shadows get the whole first
+        // cascade to themselves and stay sharp, and the distant ones can afford to be
+        // soft because a cliff's shadow a mile off has no edge to speak of anyway.
+        CascadeShadowConfigBuilder {
+            num_cascades: 4,
+            minimum_distance: 0.1,
+            maximum_distance: 2_500.0,
+            first_cascade_far_bound: 30.0,
+            overlap_proportion: 0.2,
+        }
+        .build(),
         // Pointed from the one definition of where the sun is, so the drawn disc and
         // the light cannot drift apart.
         // Pointed from the one definition of where the sun is, and followed every frame
@@ -387,10 +410,22 @@ const STREAK_RUN: f32 = 0.55;
 
 /// How far from the boat cloud shadows are drawn on the water, metres.
 ///
-/// As much an honesty as an economy. The eye is two metres above the water: at three
-/// kilometres the surface is foreshortened into the horizon and a shadow out there is a
-/// line rather than a patch. Two kilometres is where it stops being worth asking.
-const SHADOW_REACH: f32 = 1900.0;
+/// **Raised from 1900 when visibility stopped being 2600.** The old number was honest
+/// against the old haze: with the far water fading out at two and a half kilometres
+/// there was nothing past two for a shadow to fall on. On a clear day you can now see
+/// ten kilometres of sea, and cloud shadow that stops dead at nineteen hundred metres
+/// draws a circle on the water with the boat at its centre — the one artefact that
+/// says "this is a patch of geometry around you" louder than the hard edge the haze
+/// was added to hide.
+///
+/// Five kilometres is the compromise. The eye is two metres above the water, so past
+/// about three the surface is foreshortened into the horizon and a shadow out there is
+/// a line rather than a patch — which means the far half of this range buys very
+/// little, and buys it cheaply: the field is rasterised into a fixed grid, so a longer
+/// reach costs resolution rather than time. At five kilometres the grid is 64 nodes
+/// across 10 km, which is 157 m a node against a cloud shadow a few hundred metres
+/// wide — coarse, and still finer than the thing it is drawing.
+const SHADOW_REACH: f32 = 5000.0;
 
 /// How many tones the drawn sea is allowed.
 ///
