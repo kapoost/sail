@@ -64,8 +64,8 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             ("A D", "and work the one you picked"),
             (
                 "X Z",
-                "headsail: genoa, code 0, gennaker, spinnaker — roll the old one away \
-                 first",
+                "order a headsail: genoa, code 0, gennaker, spinnaker — the foredeck \
+                 rolls the old one away, bends the new one on and sets it",
             ),
             ("T", "a hand on the sheet: once for the sail that leads"),
             (
@@ -176,7 +176,7 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
                 "the same key alongside: the boathook reaches by itself, and the catch \
                  is timed to the sea — take it as she comes level",
             ),
-            ("Esc", "then DRILL practises the whole thing on Oscar"),
+            ("Esc", "then MISSIONS practises the whole thing on Oscar"),
         ],
     ),
     (

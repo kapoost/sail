@@ -141,6 +141,24 @@ const TONGUE_SPECKS: usize = 10;
 /// down the face, and the throw is the only part that is about breaking.
 const THROWN_FORWARD: f64 = 1.8;
 
+/// What fraction of the wave's own speed the white water runs at while it breaks.
+///
+/// **Most of it.** A breaking crest's foam is not floating debris, it is a roller being
+/// pushed along by the wave that made it: it rides the front face at close to the wave's
+/// speed until the break is over, and then it stops and becomes a patch of foam the sea
+/// carries at its own slow pace. Two thirds, which in a six-second sea is six metres a
+/// second — fast enough to be a thing coming at you, and not so fast that it outruns the
+/// crest it belongs to.
+const ROLLER_RIDES: f64 = 0.66;
+
+/// How long the roller keeps running, seconds.
+///
+/// A break in a wind sea lasts about a second: the crest curls, the white water surges
+/// down the face with the wave, and then it is a patch of foam the sea is carrying. The
+/// surge decays with this as its time constant, so by a second and a half there is
+/// nothing left of it but the water's own drift.
+const ROLLER_DIES: f64 = 0.55;
+
 /// How far out breaking crests are drawn, metres.
 ///
 /// Ninety: far enough that the sea has whitecaps in it rather than a ring of them round
@@ -153,6 +171,20 @@ const CREST_REACH: f64 = 90.0;
 struct Speck {
     at: glam::DVec2,
     drift: glam::DVec2,
+    /// **The roller**, and it only belongs to foam that is breaking.
+    ///
+    /// Corrected from the deck, and the correction is about which thing is being drawn.
+    /// Foam that has *finished* breaking is dead water: it sits where it was made,
+    /// moving at the orbital velocity, and the wave sails out from under it. But the
+    /// white water of a breaker **while it is breaking** is a roller riding the front of
+    /// the wave, and it goes forward with it at a good fraction of the wave's own speed
+    /// — which is what makes a breaker a thing that comes *at* you rather than a patch
+    /// you pass.
+    ///
+    /// So a breaking mark is born with both: the water's velocity, which it keeps, and
+    /// this surge, which dies away over about the time the break lasts and leaves the
+    /// foam lying where the roller gave up.
+    surge: glam::DVec2,
     age: f32,
     /// Varies, or a hundred identical blobs read as a texture rather than as water.
     scale: f32,
@@ -247,6 +279,7 @@ impl Spray {
             self.live.push(Speck {
                 at: at + glam::DVec2::new(spread.cos(), spread.sin()) * out,
                 drift,
+                surge: glam::DVec2::ZERO,
                 // Born a little old, which is how they get the short life this wants
                 // without a second lifetime constant and a second branch in the ageing
                 // loop. A lure's swirl closes up in a second or so; the hull's foam has
@@ -343,7 +376,11 @@ pub fn update(
     let mut keep = Vec::with_capacity(budget());
     for mut s in spray.live.drain(..) {
         s.age += dt;
-        s.at += s.drift * dt as f64;
+        // The water's own motion, plus whatever is left of the roller. A breaker's
+        // white water runs forward with the wave while the break lasts and then stops;
+        // half a second of time constant is about the length of one.
+        s.at += (s.drift + s.surge) * dt as f64;
+        s.surge *= (-(dt as f64) / ROLLER_DIES).exp();
         if s.age < if s.claw { CLAW_LIFE } else { LIFE } {
             keep.push(s);
         }
@@ -505,6 +542,7 @@ pub fn update(
                 live.push(Speck {
                     at: at + glam::DVec2::new(spread.cos(), spread.sin()) * out,
                     drift: blow + glam::DVec2::new(a.cos(), a.sin()) * 0.25,
+                    surge: glam::DVec2::ZERO,
                     age: 0.0,
                     scale: 2.0 + 2.6 * r.next_f64() as f32,
                     phase: r.next_f64() as f32 * std::f32::consts::TAU,
@@ -530,8 +568,11 @@ pub fn update(
     // the dominant wavelength. In a long swell nothing here fires at all, however big
     // the waves are, and that is correct — a four-metre swell does not break in deep
     // water and a metre and a half of short wind sea breaks everywhere.
+    let period = sim.sim.water.peak_period_or(6.0);
+    // How fast the waves themselves are going: `gT/2π` in deep water, which is the
+    // speed the breaking front rides at and nothing else in here moves at.
+    let phase_speed = 9.81 * period / std::f64::consts::TAU;
     let steepness = {
-        let period = sim.sim.water.peak_period_or(6.0);
         let wavelength = 9.81 * period * period / std::f64::consts::TAU;
         hs / wavelength.max(1.0)
     };
@@ -593,12 +634,21 @@ pub fn update(
                 // face. The first is why the foam stays with the sea instead of
                 // sliding over it; the second is the breaking.
                 let orbital = sim.sim.water.velocity(spot, t);
-                let drift = glam::DVec2::new(orbital.x, orbital.y)
-                    + forward * THROWN_FORWARD * (0.6 + 0.8 * r.next_f64())
-                    + downwind * blown.min(1.2) as f64 * 0.6;
+                // What it keeps: the water's own motion and the wind's push on it.
+                let drift =
+                    glam::DVec2::new(orbital.x, orbital.y) + downwind * blown.min(1.2) as f64 * 0.6;
+                // And what dies away: the roller. White water on a breaking crest runs
+                // forward **with the wave**, at a good part of the wave's own speed,
+                // for as long as the break lasts — that is what makes a breaker a thing
+                // that comes at you instead of a patch you sail past. The throw down
+                // the face is in here too, because it is the same second of the wave's
+                // life.
+                let roller = phase_speed * ROLLER_RIDES * (0.7 + 0.5 * r.next_f64());
+                let surge = forward * (roller + THROWN_FORWARD * (0.3 + 0.5 * r.next_f64()));
                 live.push(Speck {
                     at: spot,
                     drift,
+                    surge,
                     age: 0.0,
                     // Bigger than a whitecap speck: this is the front of a breaker, and
                     // at two metres across it is one of the larger things on the water.
@@ -689,6 +739,7 @@ pub fn update(
         live.push(Speck {
             at,
             drift,
+            surge: glam::DVec2::ZERO,
             age: 0.0,
             scale: 0.55 + 0.9 * r.next_f64() as f32,
             phase: r.next_f64() as f32 * std::f32::consts::TAU,
@@ -910,18 +961,37 @@ mod when_a_sea_breaks {
         );
     }
 
-    /// The water is thrown at a fraction of the wave's own speed, not at it.
+    /// **The roller rides with the wave and then stops**, which is the difference
+    /// between a breaker and a patch of foam.
     ///
-    /// A six-second sea runs at nine and a half metres a second; foam given that speed
-    /// crosses the sea like something with an engine in it. What travels at the wave's
-    /// speed is where the next breaking line is *born*, which is a position and not a
-    /// velocity.
+    /// Corrected from the deck: white water on a breaking crest is pushed along by the
+    /// wave that made it and goes forward at most of the wave's own speed for as long
+    /// as the break lasts — that is what makes a breaker come *at* you. What it must
+    /// not do is keep going: after the break it is dead water the sea carries at its
+    /// own slow pace, and foam that kept the wave's speed would cross the sea like
+    /// something with an engine in it.
     #[test]
-    fn foam_is_not_given_the_speed_of_the_wave() {
+    fn the_roller_runs_with_the_wave_and_then_gives_up() {
         let phase = 9.81 * 6.0 / std::f64::consts::TAU;
+        let roller = phase * ROLLER_RIDES;
         assert!(
-            THROWN_FORWARD < phase * 0.25,
-            "the throw is {THROWN_FORWARD} m/s against a wave doing {phase:.1}"
+            roller > phase * 0.4 && roller < phase,
+            "a roller doing {roller:.1} against a wave doing {phase:.1}"
+        );
+        // Half of it is gone in less than a second, and by two there is nothing left:
+        // what the foam does after the break is sit in the water.
+        let left = |after: f64| (-after / ROLLER_DIES).exp();
+        assert!(
+            left(1.0) < 0.25,
+            "still {:.0}% of it after a second",
+            left(1.0) * 100.0
+        );
+        assert!(left(2.0) < 0.05);
+        // And how far it got: a few metres down the face, not a hundred.
+        let run = roller * ROLLER_DIES;
+        assert!(
+            (2.0..12.0).contains(&run),
+            "the roller ran {run:.1} m before it gave up"
         );
     }
 }
