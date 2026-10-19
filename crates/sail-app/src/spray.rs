@@ -485,7 +485,9 @@ pub fn update(
     mut spray: ResMut<Spray>,
     mut meshes: ResMut<Assets<Mesh>>,
     camera: Query<&Transform, With<crate::camera::MainCamera>>,
+    mut spent: ResMut<crate::world::Spent>,
 ) {
+    let clock = crate::world::Spent::wanted().then(std::time::Instant::now);
     let Ok(view) = camera.single() else {
         return;
     };
@@ -1194,6 +1196,9 @@ pub fn update(
             "spray: {born_breaking} of {darts_thrown} darts found a crest; alive {}              = {drops} hull, {claws} crest, {bubbles} bubbles",
             spray.live.len()
         );
+    }
+    if let Some(clock) = clock {
+        spent.foam += clock.elapsed().as_secs_f32() * 1000.0;
     }
 }
 

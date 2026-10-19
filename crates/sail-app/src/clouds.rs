@@ -609,7 +609,9 @@ pub fn update(
     mut clouds: ResMut<Clouds>,
     mut meshes: ResMut<Assets<Mesh>>,
     camera: Query<&Transform, With<crate::camera::MainCamera>>,
+    mut spent: ResMut<crate::world::Spent>,
 ) {
+    let clock = crate::world::Spent::wanted().then(std::time::Instant::now);
     let Ok(view) = camera.single() else {
         return;
     };
@@ -887,6 +889,9 @@ pub fn update(
     beam_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     beam_mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
     beam_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    if let Some(clock) = clock {
+        spent.cloud += clock.elapsed().as_secs_f32() * 1000.0;
+    }
 }
 
 /// Where a puff is this instant, in render coordinates.

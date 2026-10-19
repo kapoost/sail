@@ -113,6 +113,39 @@ the server restarts underneath somebody.
 The polar is the most useful instrument here. One screen says whether the physics is
 sane; run it after touching `sail.rs`, `hull.rs` or `boat.rs`.
 
+### What it needs, and what gives out first
+
+Measured rather than guessed, on an Apple M5 at the default drawn width of 960, with
+`SAIL_FRAMES=1` — which reports the frame rate and, beside it, where the processor's
+share of the frame went:
+
+| | light airs | gale, overcast, squall |
+|---|---|---|
+| sea mesh | 4.4 ms | 5.7 ms |
+| foam | 0.3 ms | 1.9 ms |
+| cloud | 0.1 ms | 0.2 ms |
+| **of a 16.7 ms frame** | **29 %** | **47 %** |
+
+Around 370 MB resident, 50 MB of which is the ripple film — thirty-six key frames of
+normal map at 512, blended on the processor so the water moves continuously rather than
+in twelve steps a second. About 160 MB on disk.
+
+**The bottleneck is one thread building the sea.** The mesh is 201 × 201 vertices
+rebuilt every frame, and each vertex asks the spectrum for its height, its slope and its
+parcel drift — twenty-one components, one `sin_cos` each. That is three quarters of the
+processor's share of the frame and it is single-threaded.
+
+The graphics card is not the limit and the measurement says so: the frame rate is the
+same at a drawn width of 480 and at 1920, because the world is rendered into a small
+image and blown up. What that means for requirements is that **single-core speed is what
+to look at**, not the GPU — any card with Metal 3, Vulkan 1.2 or DX12 will do, including
+integrated ones. A core half the speed of this one still makes sixty; a quarter does not.
+
+The fix, when it is wanted, is to spread the vertex loop across cores: it is pure per
+vertex and the machine this was measured on was using 1.7 of its ten. Moving the sum to
+the graphics card would be faster still and would cost the thing that makes this sea
+trustworthy — the hull and the drawn surface asking the same water the same question.
+
 ### Knobs, and the demo reel
 
 Every question about what the water looks like in a given condition otherwise starts

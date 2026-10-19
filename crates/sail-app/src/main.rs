@@ -244,6 +244,7 @@ fn main() {
     .init_resource::<sky::Baking>()
     // The sky as the water reads it, rebuilt whenever the sky itself is repainted.
     .init_resource::<sky::Dome>()
+    .init_resource::<world::Spent>()
     .init_resource::<settings::Settings>()
     .init_resource::<help::Help>()
     .init_resource::<logbook::Logbook>()
@@ -332,7 +333,7 @@ fn main() {
             // so the whole frame agrees on one mark.
             frame::rebase_origin,
             world::report_vitals,
-            world::report_frame_times,
+            (world::report_frame_times, world::report_time_spent),
             chart::record,
             (
                 islands::follow_origin,

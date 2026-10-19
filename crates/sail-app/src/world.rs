@@ -791,7 +791,9 @@ pub fn update_sea(
     mut meshes: ResMut<Assets<Mesh>>,
     chase: Res<camera::ChaseState>,
     mut q: Query<(&SeaSurface, &mut Transform)>,
+    mut spent: ResMut<crate::world::Spent>,
 ) {
+    let clock = crate::world::Spent::wanted().then(std::time::Instant::now);
     let ink = ink.0;
     let sun = sky_state.sun.normalize();
     let st = &sim.render_state();
@@ -1283,6 +1285,9 @@ pub fn update_sea(
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     }
+    if let Some(clock) = clock {
+        spent.sea += clock.elapsed().as_secs_f32() * 1000.0;
+    }
 }
 
 /// How much of what you are looking at came *through* the water rather than off it.
@@ -1371,6 +1376,66 @@ pub fn report_vitals(
         sim.sim.wind.squalls().len(),
         rain.fall * 100.0,
     );
+}
+
+/// Where the frame goes, on the processor's side of it.
+///
+/// **A frame rate pinned to the display says nothing about headroom.** Every
+/// measurement in this session came back at sixty on this machine, in a gale with the
+/// sky overcast and the sea full of white water, which answers "is it fast enough here"
+/// and not "what would give out first on a slower one". So the three things that build
+/// geometry every frame time themselves: the sea mesh, the foam, and the cloud.
+///
+/// Each is wall clock inside the system, summed over a couple of seconds and reported as
+/// milliseconds a frame against the budget — sixteen and a half at sixty, thirty-three at
+/// thirty. It is on with `SAIL_FRAMES`, beside the frame-time report, because the two
+/// questions are asked together.
+#[derive(Resource, Default)]
+pub struct Spent {
+    pub sea: f32,
+    pub foam: f32,
+    pub cloud: f32,
+    frames: u32,
+    since: f32,
+}
+
+impl Spent {
+    /// Time one piece of the frame. Costs two clock reads when nobody is asking.
+    pub fn timing<T>(at: Option<&mut f32>, work: impl FnOnce() -> T) -> T {
+        let Some(at) = at else {
+            return work();
+        };
+        let started = std::time::Instant::now();
+        let out = work();
+        *at += started.elapsed().as_secs_f32() * 1000.0;
+        out
+    }
+
+    /// Whether anybody is asking.
+    pub fn wanted() -> bool {
+        std::env::var("SAIL_FRAMES").is_ok()
+    }
+}
+
+/// Say where it went, once every couple of seconds.
+pub fn report_time_spent(time: Res<Time>, mut spent: ResMut<Spent>) {
+    if !Spent::wanted() {
+        return;
+    }
+    spent.frames += 1;
+    spent.since += time.delta_secs();
+    if spent.since < 2.0 {
+        return;
+    }
+    let n = spent.frames.max(1) as f32;
+    info!(
+        "frame: sea {:.1} ms, foam {:.1} ms, cloud {:.1} ms a frame over {} frames",
+        spent.sea / n,
+        spent.foam / n,
+        spent.cloud / n,
+        spent.frames
+    );
+    *spent = Spent::default();
 }
 
 pub fn report_frame_times(time: Res<Time>, mut window: Local<(f32, u32, f32)>) {
