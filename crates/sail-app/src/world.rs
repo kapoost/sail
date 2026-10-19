@@ -552,7 +552,7 @@ pub struct SeaFilm {
     /// holding: the handle never changes now, only the bytes behind it.
     live: Option<Handle<Image>>,
     /// Which pair was last written, so an unchanged blend is not written again.
-    blended: Option<(usize, u16)>,
+    blended: Option<(usize, u16, u16)>,
     /// Blends written since the last report, and when that was.
     writes: u32,
     reported: f32,
@@ -563,8 +563,23 @@ pub struct SeaFilm {
 /// The material is only touched when the frame actually changes — twelve times a second
 /// rather than sixty — because writing a material marks it changed and its bind group is
 /// rebuilt, and there is no reason to pay that for a frame that is already up.
+/// How strong the drawn ripples are, against the wind that makes them, in knots.
+///
+/// **A ripple is a wind product and the map had one strength for every day.** Under nine
+/// knots with half a metre of sea the water came out as a field of hard bright specks —
+/// reported from the deck as wanting smoothing, and quite right: that is the texture of
+/// a fresh breeze painted on a morning that has not got one. Capillary ripples are the
+/// first thing the wind raises and the first thing it stops raising, so the map is faded
+/// towards flat as the breeze drops and the water goes glassy.
+const RIPPLES_FROM: f32 = 4.0;
+const RIPPLES_FULL: f32 = 20.0;
+/// And what is left of them in a calm: not nothing, because a glassy sea still has the
+/// oiliest of swell texture on it, and a mirror-flat sea reads as a bug.
+const RIPPLES_LEAST: f32 = 0.28;
+
 pub fn roll_sea_film(
     time: Res<Time>,
+    sim: Res<Sim>,
     mut film: ResMut<SeaFilm>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -580,11 +595,17 @@ pub fn roll_sea_film(
     // Quantised to a few hundred steps, which is the only reason this is cheap: a blend
     // that has not visibly changed is not written, so standing still costs nothing and
     // the texture is rewritten at most a few times a frame's worth of motion.
+    let tws = sail_core::units::ms_to_kn(sim.sim.telemetry.tws) as f32;
+    let strength =
+        RIPPLES_LEAST + (1.0 - RIPPLES_LEAST) * smoothstep(RIPPLES_FROM, RIPPLES_FULL, tws);
+    // Quantised like the blend, and for the same reason: the wind wanders a tenth of a
+    // knot a second and nobody can see a hundredth of a ripple.
+    let strength = (strength * 16.0).round() / 16.0;
     let step = (f * BLEND_STEPS as f32) as u16;
-    if film.blended == Some((i, step)) {
+    if film.blended == Some((i, step, (strength * 16.0) as u16)) {
         return;
     }
-    film.blended = Some((i, step));
+    film.blended = Some((i, step, (strength * 16.0) as u16));
     let f = step as f32 / BLEND_STEPS as f32;
 
     let Some(handle) = film.live.clone() else {
@@ -617,8 +638,19 @@ pub fn roll_sea_film(
     // megabyte and a half, no shader, and the motion is continuous rather than
     // thirty-six positions.
     let mix = (f * 256.0) as u32;
-    for ((o, &x), &y) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
-        *o = (((x as u32) * (256 - mix) + (y as u32) * mix) >> 8) as u8;
+    // Towards flat by the same pass. A tangent-space normal map is flat at (128, 128,
+    // 255) — straight up out of the surface — so fading the ripples is a lerp towards
+    // that, and because it is linear it goes through the mip chain with everything else
+    // and costs one more multiply a texel.
+    let keep = (strength * 256.0) as u32;
+    for (n, ((o, &x), &y)) in out.iter_mut().zip(a.iter()).zip(b.iter()).enumerate() {
+        let blend = ((x as u32) * (256 - mix) + (y as u32) * mix) >> 8;
+        let flat = match n % 4 {
+            0 | 1 => 128,
+            2 => 255,
+            _ => 255,
+        };
+        *o = ((blend * keep + flat * (256 - keep)) >> 8) as u8;
     }
 
     // A pulse, so a stopped animation says so instead of looking like a decision. The
@@ -673,6 +705,37 @@ impl Ink {
 // Nothing else had to change when it went, which is the part worth recording: `apply_ink`
 // has always watched the *flag* rather than the keypress, so the settings panel was
 // already the other way in.
+
+/// How polished the water is, which is the wind's business and not a constant.
+///
+/// Roughness in a microfacet model *is* the spread of the small slopes — the capillary
+/// ripple the wind raises and nothing else. Pinned at one, the water answered a nine
+/// knot morning with the specular of a gale: a hard bright speck on every facet, which
+/// is the thing that wanted smoothing. Light air is nearer a mirror, which is why a calm
+/// shows the sky and a long soft path to the sun instead of a field of sparks.
+pub fn polish(
+    ink: Res<Ink>,
+    sim: Res<Sim>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    q: Query<&MeshMaterial3d<StandardMaterial>, With<SeaSurface>>,
+) {
+    if ink.0 {
+        return;
+    }
+    let tws = sail_core::units::ms_to_kn(sim.sim.telemetry.tws) as f32;
+    let want = GLASSY + (CHOPPY - GLASSY) * smoothstep(RIPPLES_FROM, RIPPLES_FULL, tws);
+    for handle in &q {
+        if let Some(m) = materials.get_mut(&handle.0).as_deref_mut() {
+            if (m.perceptual_roughness - want).abs() > 0.01 {
+                m.perceptual_roughness = want;
+            }
+        }
+    }
+}
+
+/// The two ends of it: glassy in a calm, fully rough in a blow.
+const GLASSY: f32 = 0.46;
+const CHOPPY: f32 = 1.0;
 
 /// Take the lighting off the water, or put it back, whenever the flag moves.
 pub fn apply_ink(
@@ -789,6 +852,26 @@ pub fn update_sea(
         // the light instead.
         let land = ink.then(|| sim.sim.land.clone()).flatten();
         let typical = (sim.sim.water.characteristic_slope() as f32).max(1e-4);
+        // **Whether this sea breaks at all**, which is a property of the whole spectrum
+        // and not of the facet under a vertex. The same significant steepness the spray
+        // is judged by, from the same two numbers and the same thresholds — one
+        // definition, so the white water on the mesh and the white water in the air
+        // agree about what the day is doing.
+        //
+        // Without it the foam term was relative all the way down: it asked only whether
+        // *this* facet was steeper than usual, so a glassy nine-knot morning came out
+        // stippled with pale green crests exactly as a gale did. Reported from the deck
+        // as wanting smoothing in those conditions, and this is the half of it that is
+        // in the mesh.
+        let whitecapping = {
+            let period = sim.sim.water.peak_period_or(6.0) as f32;
+            let wavelength = 9.81 * period * period / std::f32::consts::TAU;
+            smoothstep(
+                crate::spray::PLUNGES_ABOVE as f32,
+                crate::spray::PLUNGES_HARD as f32,
+                hs / wavelength.max(1.0),
+            )
+        };
         // Steady surface drift: about two and a half percent of the wind speed,
         // downwind, which is the usual rule of thumb. This is a real current and it
         // accumulates honestly with time.
@@ -1052,7 +1135,8 @@ pub fn update_sea(
             // all — which is what was happening, since the fixed 0.16 sat almost at
             // this sea's maximum — or a sea of milk on the other.
             let steepness = (sx * sx + sz * sz).sqrt() / typical;
-            let mut foam = ((steepness - 1.25) / 0.75).clamp(0.0, 1.0) * crest_weight(lift);
+            let mut foam =
+                ((steepness - 1.25) / 0.75).clamp(0.0, 1.0) * crest_weight(lift) * whitecapping;
             if ink {
                 // Foam becomes ink: on or off, no half measures, because a drawn
                 // whitecap is a shape with an outline rather than a soft bloom. And
@@ -1098,7 +1182,16 @@ pub fn update_sea(
             //
             // Three things have to agree for it: thin water, a face turned towards you,
             // and the sun on the other side of it.
-            let thin = crest_weight(lift) * smoothstep(0.7, 1.8, steepness);
+            // **And how much water there is to shine through.**
+            //
+            // The rest of this is relative — how near a crest, how steep against this
+            // sea's own typical — so it fired exactly as hard on a thirty centimetre
+            // morning as in a gale, and what that looks like is a jade stipple laid over
+            // the whole surface. A wave is held up to the light when there is a wave:
+            // half a metre and up, which is where a crest has a face thick enough to
+            // carry colour and thin enough to pass any.
+            let enough_sea = smoothstep(0.35, 1.0, hs);
+            let thin = crest_weight(lift) * smoothstep(0.7, 1.8, steepness) * enough_sea;
             if thin > 0.01 && shade < 0.6 {
                 let view = (eye - point).normalize_or_zero();
                 // Light arriving through the wave rather than off it: the sun opposite

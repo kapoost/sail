@@ -100,6 +100,14 @@ const LAND_LIFT: f32 = 90.0;
 /// ray reads as a ray because it is narrow, and a single wedge as wide as the cloud is a
 /// grey smear.
 const BEAMS: usize = 3;
+/// How long a drawn shaft may be, metres.
+const SHAFT_LONGEST: f32 = 1_400.0;
+/// Where the shafts fade out as the sun goes down, sine of the elevation.
+///
+/// Below about four degrees there are no shafts to draw: the light is coming along the
+/// water rather than down through the deck, every ray is end-on to the eye, and what is
+/// left of the picture is the general glow the sky already paints. Full value by eight.
+const SHAFT_SUN: (f32, f32) = (0.07, 0.14);
 
 /// One cloud.
 struct Cell {
@@ -824,8 +832,16 @@ pub fn update(
         let across = Vec3::new(-sun.z, 0.0, sun.x).normalize_or_zero();
         let head = origin.to_bevy(cell.at, cell.base);
         // Where it reaches the water. The whole visible length of a shaft is the bit
-        // between the cloud and the sea, and with the sun this low that is long.
-        let length = cell.base / sun.y.max(0.05);
+        // between the cloud and the sea, and with the sun this low that is long —
+        // which is true of the air and a lie about the quad.
+        //
+        // **A shaft is drawn as one flat ribbon, and a ribbon two kilometres long is a
+        // bar.** At seven in the morning the sun is a few degrees up, `base / sin h`
+        // runs to kilometres, and what came out was a hard pale plank laid across the
+        // sky and over the sail — reported from the deck, and quite right. Capped at
+        // what a shaft can be drawn as, and the quad's own fade takes the far end out
+        // before the cap can show as an edge.
+        let length = (cell.base / sun.y.max(0.05)).min(SHAFT_LONGEST);
         for &(offset, width) in &cell.beams {
             let start = head + across * (offset * cell.spread) + axis * (cell.spread * 0.25);
             let end = start + axis * length;
@@ -839,7 +855,11 @@ pub fn update(
             // Shadowed air: the haze colour with the light taken out of it. Not black,
             // and not a colour of its own — a shaft is the same sky, unlit.
             let mut tone = haze * 0.58;
-            let mut alpha = 0.16 * side_on * side_on * cell.presence;
+            let mut alpha = 0.16
+                * side_on
+                * side_on
+                * cell.presence
+                * step_between(SHAFT_SUN.0, SHAFT_SUN.1, sun.y);
             if ink.0 {
                 // Two levels and a touch stronger, because a drawn beam is a wedge with
                 // an edge and not an airbrushed gradient.

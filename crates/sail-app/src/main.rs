@@ -443,7 +443,7 @@ fn main() {
                 retro::stress.run_if(|| std::env::var("SAIL_RETRO_STRESS").is_ok()),
                 music::compose,
                 world::apply_ink,
-                world::roll_sea_film,
+                (world::roll_sea_film, world::polish),
                 ink::apply,
                 retro::apply,
             ),

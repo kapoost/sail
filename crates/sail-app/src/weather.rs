@@ -131,6 +131,16 @@ impl Weather {
         let u = rng.next_f64().clamp(1e-9, 1.0 - 1e-9);
         let knots =
             (scale * (-(1.0 - u).ln()).powf(1.0 / WIND_SHAPE)).clamp(WIND_MIN_KN, WIND_MAX_KN);
+        // `SAIL_WIND=9` for a day with nine knots in it, whatever the draw said.
+        //
+        // The same family as `SAIL_SQUALL` and `SAIL_SEA`: every question about what the
+        // water looks like in a given breeze begins with hunting for a seed that happens
+        // to have that breeze in it, which is a slow way to ask a question with a number
+        // in it.
+        let knots = std::env::var("SAIL_WIND")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .map_or(knots, |k| k.clamp(WIND_MIN_KN, WIND_MAX_KN));
         let tws = kn_to_ms(knots);
 
         let wind_from = rng.next_f64() * std::f64::consts::TAU;

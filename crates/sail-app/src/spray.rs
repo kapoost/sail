@@ -169,8 +169,8 @@ const CREST_LONGEST: f64 = 16.0;
 /// hundredths, an ordinary working sea of a metre and a quarter on a six-second period
 /// came out at 0.021 and never broke at all — which is not a sea anybody has been out
 /// in. Measured against the three cases in the test below before they were changed.
-const PLUNGES_ABOVE: f64 = 0.018;
-const PLUNGES_HARD: f64 = 0.045;
+pub const PLUNGES_ABOVE: f64 = 0.018;
+pub const PLUNGES_HARD: f64 = 0.045;
 
 /// How far ahead of the crest the water lands, as a fraction of the significant height.
 ///
