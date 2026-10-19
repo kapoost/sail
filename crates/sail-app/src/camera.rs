@@ -471,14 +471,30 @@ pub fn setup(
         // this anyway.
         DistanceFog {
             color: crate::sky::haze_colour(&sky_state),
+            // Both of these are set again by `dress` whenever the view changes, and
+            // this is the pair that was left behind when visibility stopped being a
+            // constant: the camera starts in the chase view and `dress` returns early
+            // until something switches, so the opening scene kept the old 2600 m and
+            // every judgement about the change was made against an unchanged picture.
+            directional_light_color: crate::sky::glow_colour(&sky_state),
+            directional_light_exponent: 3.0,
             falloff: FogFalloff::from_visibility_colors(
-                2600.0,
+                crate::sky::visibility(&sky_state),
                 crate::sky::haze_near(&sky_state),
                 crate::sky::haze_colour(&sky_state),
             ),
             ..default()
         },
     ));
+    // Worth a line in the log, now that it is weather rather than a constant: "why can
+    // I not see the island" and "why can I see for miles" are both answered by it, and
+    // neither is answerable from the picture alone.
+    info!(
+        "haze: visibility {:.0} m, cover {:.0}%, sun {:.0} deg",
+        crate::sky::visibility(&sky_state),
+        sky_state.cover * 100.0,
+        sky_state.elevation().to_degrees()
+    );
     commands.init_resource::<View>();
     commands.init_resource::<ChaseState>();
     commands.init_resource::<HeadMotion>();
@@ -544,11 +560,30 @@ pub fn dress(
         } else {
             crate::sky::haze_colour(&sky)
         };
+        // **Haze is not the same brightness in every direction, and treating it as if
+        // it were is what flattened the islands.** Light scatters forward: looking
+        // towards the sun through four kilometres of air you are looking at lit
+        // moisture, and looking away from it you are looking at moisture in its own
+        // shade. That difference is most of what tells an eye which side of a hill is
+        // which at a distance — so with the fog isotropic, the far shore came out as a
+        // single pale band with no sunlit face and no dark one.
+        //
+        // Off underwater, where there is no sun to scatter and the whole point is that
+        // the light comes from one flat direction above.
+        fog.directional_light_color = if under {
+            Color::NONE
+        } else {
+            crate::sky::glow_colour(&sky)
+        };
+        // Broad rather than tight: this is the whole lit half of the sky, not a disc.
+        // Eight — Bevy's default — is a glow around the sun; three is the difference
+        // between the sunward and shadowed quarters of a seascape.
+        fog.directional_light_exponent = 3.0;
         fog.falloff = if under {
             FogFalloff::from_visibility_colors(UNDER_VISIBILITY, UNDER_WATER, UNDER_WATER)
         } else {
             FogFalloff::from_visibility_colors(
-                2600.0,
+                crate::sky::visibility(&sky),
                 crate::sky::haze_near(&sky),
                 crate::sky::haze_colour(&sky),
             )

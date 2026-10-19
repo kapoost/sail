@@ -130,6 +130,7 @@ fn scatter(rng: &mut sail_core::rng::Pcg32, top: f32) -> Vec3 {
 pub fn update(
     ink: Res<crate::world::Ink>,
     sim: Res<Sim>,
+    sky: Res<crate::sky::Sky>,
     origin: Res<crate::frame::RenderOrigin>,
     time: Res<Time>,
     mut rain: ResMut<Rain>,
@@ -145,7 +146,21 @@ pub fn update(
 
     // How hard it is raining where the boat is. Eased, because a squall's edge is a
     // kilometre of thickening drizzle and not a line you cross.
-    let want = sim.sim.wind.squall_at(st.pos) as f32;
+    //
+    // **Squalls were the only thing that made it rain, and that is not this coast.** A
+    // squall is the dramatic case — a cell you can see coming, with a hard edge and
+    // four hundred metres of visibility inside it — but the ordinary way it rains at
+    // fifty-seven north is a sky that has been solid for hours quietly drizzling on
+    // you. A sky at eight oktas that never produces a drop is the kind of wrong that
+    // nobody points at and everybody feels.
+    //
+    // So overcast contributes too, well under what a squall does: it starts only when
+    // the cover is nearly complete, and at its hardest it is a third of squall rain.
+    // Enough to wet the deck, soften the horizon and put streaks in the air; not
+    // enough to be mistaken for weather you should be reefing for.
+    let squall = sim.sim.wind.squall_at(st.pos) as f32;
+    let overcast = ((sky.cover - 0.82) / 0.18).clamp(0.0, 1.0) * 0.34;
+    let want = squall.max(overcast);
     let ease = (dt / 2.5).min(1.0);
     rain.fall += (want - rain.fall) * ease;
 
@@ -255,9 +270,15 @@ pub fn update(
 /// The visibility, which is the other half of rain and the half that matters at sea.
 ///
 /// You do not fear a squall because of the water coming out of the sky; you fear it
-/// because the island you were steering for goes away. Two and a half kilometres in the
-/// clear down to about four hundred metres in the heart of one, which is a real figure
-/// for heavy rain and quite enough to lose a coastline in.
+/// because the island you were steering for goes away. Down to about four hundred
+/// metres in the heart of one, which is a real figure for heavy rain and quite enough
+/// to lose a coastline in.
+///
+/// **What it closes *from* is the weather's own visibility, not a constant.** This used
+/// to start at a hard 2600 m and it ran every frame, so it quietly overwrote whatever
+/// the camera had been given — the clear-weather visibility could be changed anywhere
+/// else in the program and nothing would happen, because this put it back. Two numbers
+/// for one quantity, and the one that won was the one nobody was editing.
 pub fn shroud(
     sky: Res<crate::sky::Sky>,
     rain: Res<Rain>,
@@ -267,7 +288,8 @@ pub fn shroud(
         return;
     };
     let shut = rain.fall.clamp(0.0, 1.0);
-    let visibility = 2600.0 * (1.0 - shut) + 420.0 * shut;
+    let clear_range = crate::sky::visibility(&sky);
+    let visibility = clear_range * (1.0 - shut) + 420.0 * shut;
     // Darker as well as thicker. Rain does not only hide the distance, it takes the
     // light out of it, and a squall that closes the view without dimming it looks like
     // fog on a sunny day.
@@ -275,6 +297,14 @@ pub fn shroud(
     let wet = Color::linear_rgb(clear.red * 0.62, clear.green * 0.66, clear.blue * 0.74);
     let colour = mix(crate::sky::haze_colour(&sky), wet, shut);
     fog.color = colour;
+    // The forward scattering goes with it: rain kills the glow as well as the distance,
+    // because the light that would have scattered towards you is being absorbed on the
+    // way. Keeping it lit through a squall is what makes rain look like a grey filter.
+    fog.directional_light_color = {
+        let g = crate::sky::glow_colour(&sky).to_linear();
+        let keep = 1.0 - shut * 0.85;
+        Color::linear_rgb(g.red * keep, g.green * keep, g.blue * keep)
+    };
     fog.falloff =
         FogFalloff::from_visibility_colors(visibility, crate::sky::haze_near(&sky), colour);
 }

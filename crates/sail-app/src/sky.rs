@@ -760,6 +760,45 @@ pub fn haze_colour(sky: &Sky) -> Color {
 }
 
 /// Slightly deeper, for the near end of the fog gradient.
+/// How far you can see, metres.
+///
+/// **This was 2600 and a constant, and it is the reason islands had no shape in them.**
+/// Aerial perspective is what tells an eye how far away a hill is, and at two and a half
+/// kilometres of visibility an island four kilometres off is one flat pale band: the
+/// haze has eaten the difference between its sunlit side and its shadowed one before
+/// either reaches you. The far shore read as a cut-out rather than as land.
+///
+/// Real visibility at sea is weather. A clear day on this coast is ten miles and more —
+/// you see the next island's cliffs and the cloud standing over it — and the same water
+/// in drizzle is two thousand metres, in a squall a few hundred, and in fog less than
+/// you would like. So it follows the sky rather than sitting still:
+///
+/// * **Cover closes it**, because the weather that puts cloud over you is the weather
+///   that puts moisture between you and everything else.
+/// * **A low sun closes it further**, which is the sideways path through the haze: the
+///   same reason the sun reddens is the reason you cannot see far along the water at
+///   dusk.
+/// * **And it never opens past about twelve kilometres**, because the sea patch ends
+///   somewhere and haze is what hides the edge. That bound is the renderer's, not the
+///   weather's, and it is worth saying so.
+/// What colour the haze glows where you are looking towards the sun through it.
+///
+/// The sun's own tint, dimmed by whatever is in front of it: this is scattered light,
+/// so it is never brighter than the source and it goes when the source does.
+pub fn glow_colour(sky: &Sky) -> Color {
+    let tint = Vec3::new(1.0, 0.94, 0.82).lerp(SUN_LOW, sky.low_sun());
+    let strength = 0.55 * (1.0 - 0.6 * sky.cover) * sky.daylight();
+    let c = tint * strength;
+    Color::linear_rgb(c.x, c.y, c.z)
+}
+
+pub fn visibility(sky: &Sky) -> f32 {
+    let clear = 12_000.0;
+    let thick = 1_400.0;
+    let shut = sky.cover.powf(0.75) * 0.72 + sky.low_sun() * 0.25;
+    clear + (thick - clear) * shut.clamp(0.0, 1.0)
+}
+
 pub fn haze_near(sky: &Sky) -> Color {
     let c = horizon_average(sky) * 0.88;
     Color::linear_rgb(c.x, c.y, c.z)
