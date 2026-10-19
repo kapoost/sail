@@ -61,15 +61,24 @@ jobs:
       # both 404, because nothing copied them and nothing looked.
       - name: the output is not a shell
         run: |
-          test -s _site/index.html
-          test -s _site/manual.html
-          test -s _site/manual.pdf
-          grep -q "AT THE HELM" _site/index.html
-          grep -q "AT THE HELM" _site/manual.html
+          # Both languages, because checking only the English one would let a Polish
+          # build that produced nothing go out green — the same shape of failure as a
+          # picture that is referenced and never copied.
+          for dir in "" "pl/"; do
+            test -s "_site/${dir}index.html"
+            test -s "_site/${dir}manual.html"
+            test -s "_site/${dir}manual.pdf"
+            # The key list is English in both versions on purpose; its presence is
+            # what says the generated half of the page actually ran.
+            grep -q "AT THE HELM" "_site/${dir}index.html"
+            grep -q "AT THE HELM" "_site/${dir}manual.html"
+            echo "${dir:-en/}: index $(wc -c < "_site/${dir}index.html") bytes, pdf $(wc -c < "_site/${dir}manual.pdf") bytes"
+          done
+          # And the Polish page is in Polish rather than a copy of the English one.
+          grep -q "symulator" _site/pl/index.html || { echo "pl/index.html is not Polish"; exit 1; }
           for f in $(grep -o 'shots/[a-z]*\.webp' _site/index.html | sort -u); do
             test -s "_site/$f" || { echo "missing: $f"; exit 1; }
           done
-          echo "index $(wc -c < _site/index.html) bytes, pdf $(wc -c < _site/manual.pdf) bytes"
           echo "pictures: $(ls _site/shots | tr '\n' ' ')"
 
       - uses: actions/upload-pages-artifact@v3
