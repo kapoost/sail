@@ -529,12 +529,12 @@ mod tests {
     /// step that is no longer there. `width()` clamps; this is what says so.
     #[test]
     fn every_step_resolves_to_a_width() {
-        for i in 0..WIDTHS.len() {
+        for (i, width) in WIDTHS.iter().enumerate() {
             let retro = Retro {
                 step: Some(i),
                 ..Retro::default()
             };
-            assert_eq!(retro.width(), Some(WIDTHS[i]));
+            assert_eq!(retro.width(), Some(*width));
         }
         // A step past the end of the list is the coarsest picture, not a panic.
         let stale = Retro {

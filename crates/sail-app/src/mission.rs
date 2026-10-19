@@ -42,9 +42,6 @@ pub const SHE_DRAWS: f64 = crate::ship::DRAFT as f64;
 /// that she is *in*, far enough that nobody is asked to park her.
 const ARRIVED: f64 = 550.0;
 
-/// Deep water, for the offing the job starts from.
-const SAFE_WATER: f64 = 18.0;
-
 /// How often she loses another cask while her lashings are going, seconds.
 const A_CASK_EVERY: f64 = 70.0;
 
@@ -651,24 +648,74 @@ pub fn find_her_a_job(sim: &Sim, from: DVec2) -> Option<(DVec2, DVec2)> {
         })
         .min_by(|a, b| (*a - from).length().total_cmp(&(*b - from).length()))?;
 
-    // Out to sea from there: whichever bearing has the most water under it for five
-    // kilometres is the one she would have come in on.
+    // **Where she is when you take the job**, which is a question about being seen and
+    // not about the geometry of the coast.
+    //
+    // It was written the other way round — five kilometres seaward of the anchorage,
+    // along whichever bearing had the most water — and that is correct about where a
+    // ship comes from and useless about where she *is*: measured between three and a
+    // half and seven and a half kilometres from the boat, past the camera's far plane at
+    // the top of that, over the horizon at all of it, and three quarters of an hour of
+    // sailing. Reported from the deck as *I take the job and there is no brig*, which is
+    // exactly what there was.
+    //
+    // So the search is round the *pilot boat* instead: a ring at about a mile, which is
+    // where a ship waiting for a pilot stands — hull down with her rig showing, which is
+    // what a pilot looks for and what the bearing and range on the deck line are for.
+    // The coast still has its say, as two conditions rather than as the objective: she
+    // must be in water she can lie in, and the way from her to the anchorage must be
+    // water she could have come in by. Among the places that satisfy both, the deepest
+    // channel wins.
+    const IN_SIGHT_AT: f64 = 1_700.0;
+    // The rings are tried from the inside out and the first one that works wins: a ship
+    // in sight beats a deeper channel two miles away, and an empty sea beats neither.
+    // Some days the water round the boat simply does not allow it, and then she is where
+    // she can be — hull down with a bearing on the deck line, which is a worse start and
+    // still a start.
     let mut best: Option<(DVec2, f64)> = None;
-    for step in 0..24 {
-        let bearing = step as f64 / 24.0 * std::f64::consts::TAU;
-        let dir = DVec2::new(bearing.sin(), bearing.cos());
-        let offing = bound_for + dir * 5_200.0;
-        // The worst water anywhere along the way, which is what decides whether a ship
-        // could have come in this way at all.
-        let least = (1..=26)
-            .map(|i| land.depth(bound_for + dir * (i as f64 * 200.0)))
-            .fold(f64::INFINITY, f64::min);
-        // She has to *start* in deep water; the pinch in the middle is the job.
-        if land.depth(offing) > SAFE_WATER && best.as_ref().is_none_or(|(_, had)| least > *had) {
-            best = Some((offing, least));
+    for reach in [
+        IN_SIGHT_AT * 0.75,
+        IN_SIGHT_AT,
+        IN_SIGHT_AT * 1.25,
+        IN_SIGHT_AT * 1.7,
+        IN_SIGHT_AT * 2.2,
+    ] {
+        for step in 0..36 {
+            let bearing = step as f64 / 36.0 * std::f64::consts::TAU;
+            let dir = DVec2::new(bearing.sin(), bearing.cos());
+            let at = from + dir * reach;
+            // Outside the place she is going, or there is nothing left to pilot.
+            // Water she can lie in, which is not the same as the offing's eighteen
+            // metres: she is waiting off a coast, not hove to in the Atlantic.
+            if (at - bound_for).length() < 1_200.0 || land.depth(at) < SHE_DRAWS + CLEARANCE * 2.0 {
+                continue;
+            }
+            // And the water between her and it: the worst of it is the pinch the job is
+            // about, and it has to be water a ship could be taken through at all.
+            // Stopping short of the anchorage itself, which is shoal by definition —
+            // that is what makes it an anchorage, and the same exemption the route
+            // search needed. What is being asked is whether she could have come in,
+            // not whether she could anchor in six inches.
+            let run = (at - bound_for).length() - ARRIVED;
+            let legs = (run / 200.0).ceil().max(1.0) as i32;
+            let least = (0..=legs)
+                .map(|i| {
+                    let along = i as f64 / legs as f64 * run;
+                    land.depth(at.lerp(bound_for, along / (at - bound_for).length()))
+                })
+                .fold(f64::INFINITY, f64::min);
+            if least < SHE_DRAWS + CLEARANCE {
+                continue;
+            }
+            if best.as_ref().is_none_or(|(_, had)| least > *had) {
+                best = Some((at, least));
+            }
+        }
+        if best.is_some() {
+            break;
         }
     }
-    best.map(|(offing, _)| (offing, bound_for))
+    best.map(|(at, _)| (at, bound_for))
 }
 
 /// Start and stop the job from the menu.
@@ -1097,9 +1144,76 @@ mod can_the_job_even_end {
             }
             println!(
                 "seed {seed}: harbour {at_harbour:.1} m, deepest within {:.0} m is {deepest:.1} m \
-                 at {:.0} m off — SAFE_WATER is {SAFE_WATER}",
+                 at {:.0} m off",
                 ARRIVED * 3.0,
                 (best_at - bound_for).length()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod how_far_off_she_starts {
+    use super::*;
+
+    /// **She has to be there when you go out to her.**
+    ///
+    /// The fault this holds: she was placed five kilometres beyond the anchorage, which
+    /// came out between three and a half and seven and a half kilometres from the boat
+    /// — past the camera's far plane at the top of that, over the horizon at all of it,
+    /// and three quarters of an hour of sailing. Taking the job showed you an empty sea.
+    #[test]
+    fn she_starts_within_sight_of_the_pilot_boat() {
+        let (mut jobs, mut in_sight) = (0, 0);
+        for seed in 0..24u64 {
+            let sim = Sim::new(crate::weather::Weather::draw(seed));
+            let here = sim.sim.state.pos;
+            let Some((offing, bound_for)) = find_her_a_job(&sim, here) else {
+                continue;
+            };
+            jobs += 1;
+            let range = (offing - here).length();
+            // Never over the horizon. This is the fault: five kilometres seaward of the
+            // anchorage measured out at three and a half to seven and a half from the
+            // boat, and taking the job showed an empty sea.
+            assert!(
+                range < 3_800.0,
+                "seed {seed}: she starts {:.1} km off, which is a sail nobody can see",
+                range / 1000.0
+            );
+            if range < 2_200.0 {
+                in_sight += 1;
+            }
+            // And still outside the place she is going, or there is nothing to pilot.
+            assert!(
+                (offing - bound_for).length() > 1_100.0,
+                "seed {seed}: she starts inside her own destination"
+            );
+        }
+        assert!(jobs > 0, "no seed produced a job to check");
+        // Most days she is a mile off; some days the water round the boat does not allow
+        // it and she is further, which is a worse start and still a start.
+        assert!(
+            in_sight * 4 >= jobs * 3,
+            "only {in_sight} of {jobs} starts were inside a mile and a quarter"
+        );
+    }
+
+    /// PROBE: where does she actually appear, relative to the boat.
+    #[test]
+    #[ignore]
+    fn probe_start_range() {
+        for seed in 28..44u64 {
+            let sim = Sim::new(crate::weather::Weather::draw(seed));
+            let here = sim.sim.state.pos;
+            let Some((offing, bound_for)) = find_her_a_job(&sim, here) else {
+                println!("seed {seed}: no job at all");
+                continue;
+            };
+            println!(
+                "seed {seed}: harbour {:.1} km off, she starts {:.1} km from the boat",
+                (bound_for - here).length() / 1000.0,
+                (offing - here).length() / 1000.0
             );
         }
     }

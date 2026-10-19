@@ -988,10 +988,19 @@ mod tests {
         let mut retro = crate::retro::Retro::default();
         let said = words(|ui| super::pixels(ui, &mut retro));
         for w in crate::retro::Retro::widths() {
-            assert!(said.contains(&w.to_string()), "{w} is not on the row: {said}");
+            assert!(
+                said.contains(&w.to_string()),
+                "{w} is not on the row: {said}"
+            );
         }
-        assert!(said.contains("sharp"), "no sharp picture on the row: {said}");
-        assert!(said.contains("pixels"), "the row has lost its label: {said}");
+        assert!(
+            said.contains("sharp"),
+            "no sharp picture on the row: {said}"
+        );
+        assert!(
+            said.contains("pixels"),
+            "the row has lost its label: {said}"
+        );
     }
 
     /// Clicking is not tested — this is: whatever step is set, the row can draw it.
@@ -1000,7 +1009,10 @@ mod tests {
     /// row, and the index is a plain `usize` that several things write.
     #[test]
     fn every_step_can_be_drawn() {
-        for step in (0..crate::retro::Retro::widths().len()).map(Some).chain([None]) {
+        for step in (0..crate::retro::Retro::widths().len())
+            .map(Some)
+            .chain([None])
+        {
             // Built and then set, rather than with struct update syntax: the rest of
             // `Retro` is render state and rightly private to it.
             let mut retro = crate::retro::Retro::default();
