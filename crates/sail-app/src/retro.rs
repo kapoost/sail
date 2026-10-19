@@ -78,6 +78,17 @@ use crate::camera::MainCamera;
 /// costs this renderer its frames is forty thousand sea vertices rebuilt on the CPU,
 /// not the size of the thing they are drawn into.
 ///
+/// Checked again on a second machine rather than taken on trust, which matters because
+/// the first set was measured on a laptop with other work on it: 49/49/44/43/42 at 720
+/// against 41/47/47/41/47 at 960, worst frame 78.7 ms against 76.8. Different absolute
+/// numbers, same conclusion. Two machines disagreeing about the rate and agreeing about
+/// the comparison is what makes this a measurement rather than an anecdote.
+///
+/// One thing that run turned up and this one did not: the *first* sample after starting
+/// at 960 was 103.8 ms. That is the textures being baked rather than anything being
+/// drawn, so it does not bear on the width — but if the stutter on entering a game is
+/// ever worth chasing, it is a place to start.
+///
 /// What each width does cost is a texture size and a code path that has to be right on
 /// somebody else's machine. Two is the most this should carry. If a third is ever
 /// wanted, it should displace one of these rather than join them.
