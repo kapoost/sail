@@ -461,7 +461,15 @@ def manual(v: str, for_print: bool = False) -> str:
 # ---- the PDF ---------------------------------------------------------------
 
 PRINT_CSS = """/* Paper wants the opposite of a screen: ink on white, and page breaks that do
-   not cut a section off at the knees. The palette survives as accents only. */
+   not cut a section off at the knees. The palette survives as accents only.
+
+   The body text is whatever serif the building machine has — Iowan Old Style on the
+   Mac this was written on, DejaVu Serif on the runner — so the PDF runs to eight pages
+   here and nine there. The published file is the one CI builds, and that is the
+   canonical one; a local build is a preview of the words rather than of the pagination.
+   Pinning it would mean committing a text face to the repository, and the only font
+   this project ships is the one the instruments are set in. VT323 *is* embedded, so
+   the headings are the same everywhere. */
 @page { size: A4; margin: 18mm 16mm 16mm;
         @bottom-right { content: counter(page) " / " counter(pages);
                         font-family: "VT323", monospace; font-size: 9pt; color: #8a8578; }
