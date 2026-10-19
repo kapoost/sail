@@ -508,3 +508,36 @@ footer a {
 .reel img {
   border-color: var(--brass);
 }
+
+/* ---- the language switcher ----------------------------------------------
+
+   Top of the masthead, before the title: somebody who has landed on the wrong
+   language wants out of it before they read anything, not after. Small, because it
+   is a correction rather than a feature. */
+
+.langs {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  margin: 0 0 1.2rem;
+  font-family: "VT323", monospace;
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+}
+
+.langs span {
+  color: var(--ivory-dim);
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.langs a {
+  color: var(--brass-bright);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(198, 155, 74, 0.4);
+}
+
+.langs a:hover {
+  color: var(--ivory);
+  border-bottom-color: var(--ivory);
+}

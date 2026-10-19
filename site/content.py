@@ -502,3 +502,125 @@ MANUAL = [
         </ul>""",
     ),
 ]
+
+
+# ---- the pictures, in the order they tell the story ------------------------
+
+SHOTS = [
+        (
+            "brig.webp",
+            "A brig wants a pilot",
+            "She comes in from the open sea and will not come to you. Pilotage is leading, "
+            "not boarding: catch her up, get out in front, and she follows your water from "
+            "there — in a hull that draws more than yours and cannot turn like yours.",
+        ),
+        (
+            "chart.webp",
+            "The chart table",
+            "Dividers, a plain ruler, a parallel rule, a protractor, a pencil, a "
+            "stopwatch, a hand log and a rubber — and the deck log beside the paper, "
+            "because a chart is not where a navigator writes things down. The coast is "
+            "read off the same field the boat runs aground on, so it cannot lie about "
+            "the depths.",
+        ),
+        (
+            "lost.webp",
+            "Somewhere at sea, with no idea where",
+            "The names come off the marks and the chart stops following her; getting them "
+            "back is the exercise. Seeing a thing and knowing which thing it is are "
+            "different questions, and the second is the whole difficulty — three marks "
+            "well spread apart are a shape that belongs in one place on the coast and "
+            "nowhere else.",
+        ),
+        (
+            "squall.webp",
+            "A squall, announced",
+            "Bearing, distance, and whether it is passing or coming for you — on the "
+            "console before it is on the boat. The wind in it both builds and veers, and a "
+            "squall that has been announced and ignored is the commonest way to be knocked "
+            "down here.",
+        ),
+        (
+            "gennaker.webp",
+            "The wardrobe",
+            "Genoa, code 0, gennaker, spinnaker. Asking for one is an order rather than a "
+            "switch: the foredeck rolls the old sail away, bends the new one on and sets "
+            "it, which is a job with stages and takes the time it takes.",
+        ),
+        (
+            "race.webp",
+            "Fifteen seconds to the gun",
+            "You cannot stop a sailing boat and you cannot park her, so the start of a "
+            "race is not a button but a manoeuvre: five minutes to sail away from the "
+            "line, read the wind, pick the favoured end and arrive at full speed without "
+            "being early. The panel here is saying you will not make it — 233 m to the "
+            "line and 124 seconds of sailing to cover it — and that the line is square, "
+            "so neither end is worth the detour.",
+        ),
+        (
+            "drill.webp",
+            "Taught, not announced",
+            "The overboard drill coaches the figure of eight — the reach, tack, reach the "
+            "RYA and US Sailing both teach — one instruction at a time, with a target "
+            "heading and a mark in the water for each leg. When something has to be done "
+            "in the next two seconds it is four words across the screen.",
+        ),
+        (
+            "below.webp",
+            "Under the surface, beside the lure",
+            "This project argued against the view on the grounds that the sea is opaque "
+            "and there would be nothing to see — which was an argument about the "
+            "surface. Ten metres of visibility, green rather than blue because this is a "
+            "shelf sea with a spring bloom in it.",
+        ),
+        (
+            "rod.webp",
+            "A rod over the stern",
+            "Not a minigame beside the sailing. A fish on the line at six knots is a fish "
+            "you are going to lose, so the first thing you do when something takes is get "
+            "the way off her — with the mainsheet, the dump and the helm you already have.",
+        ),
+]
+
+# Captions for the three pictures that are not part of the gallery sequence.
+REEL_CAPTION = (
+    "Thirty frames of a squall",
+    "She heels, the sea runs under her, and the instruments answer — which is the half "
+    "of this that a still photograph cannot say. Recorded by the game photographing "
+    "itself, because screen capture wants a permission a build server does not have.",
+)
+
+HELP_SHOT_CAPTION = (
+    "The same list, in the program",
+    "Behind a mark in the corner, which is the first thing anybody tries. The page "
+    "above is generated from the source of this screen.",
+)
+
+WIDTHS_CAPTION = (
+    "720 on the left, 960 on the right",
+    "The same shrouds, the same moment, enlarged equally. On open water the two are "
+    "indistinguishable; it is rigging that shows the difference, which is also what the "
+    "coarsest width used to lose.",
+)
+
+REEL_ALT = "The boat sailing in a squall, heeled over"
+HELP_SHOT_ALT = "The help screen in the game"
+WIDTHS_ALT = "The same rigging drawn at 720 pixels across and at 960"
+
+
+# ---- the install section, which is prose round two commands ---------------
+
+INSTALL_MAC = """A line in a terminal rather than a download on purpose: macOS
+quarantines what a <em>browser</em> saves and not what <code>curl</code> fetches, and
+since macOS 15 removed right-click-Open there is otherwise no straightforward way past
+<em>&ldquo;Sail is damaged and can't be opened&rdquo;</em> on an application nobody has
+paid Apple to vouch for."""
+
+INSTALL_WINDOWS = """Same idea: <em>&ldquo;Windows protected your PC&rdquo;</em> comes
+from the mark of the web, which the program doing the downloading attaches — a browser
+does, <code>Invoke-WebRequest</code> does not. <code>Sail.exe</code> from the releases
+page works too, if you would rather click <b>More info</b> and <b>Run anyway</b>."""
+
+SOURCE_GAME = "the game"
+SOURCE_TESTS = "the validation suite"
+SOURCE_POLAR = "the speed polar"

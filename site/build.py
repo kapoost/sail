@@ -32,9 +32,16 @@ OUT = ROOT / "_site"
 
 sys.path.insert(0, str(HERE))
 import content  # noqa: E402
+import content_pl  # noqa: E402
+import i18n  # noqa: E402
 import keys as keylist  # noqa: E402
 
+# The prose, by language. Everything else — the key list, the polar, the model table —
+# is generated from the program or the README and stays in English; `i18n` says why.
+TEXT = {"en": content, "pl": content_pl}
+
 REPO = "https://github.com/kapoost/sail"
+RAW = REPO.replace("github.com", "raw.githubusercontent.com")
 
 
 # ---- facts read out of the repository -------------------------------------
@@ -122,6 +129,7 @@ def key_rows(rows: list[tuple[str, str]]) -> str:
 
 
 def keys_html() -> str:
+    # English on purpose — see `i18n`.
     keylist.check()
     groups = []
     for heading, rows in keylist.sections():
@@ -156,92 +164,45 @@ def size_of(path: pathlib.Path) -> tuple[int, int]:
     raise SystemExit(f"{path}: unrecognised WebP chunk {chunk!r}")
 
 
-def shots() -> list[tuple[str, str, str]]:
+def shots(lang: str = "en") -> list[tuple[str, str, str]]:
     """The pictures, in the order they tell the story. Missing ones are skipped."""
-    captions = [
-        (
-            "brig.webp",
-            "A brig wants a pilot",
-            "She comes in from the open sea and will not come to you. Pilotage is leading, "
-            "not boarding: catch her up, get out in front, and she follows your water from "
-            "there — in a hull that draws more than yours and cannot turn like yours.",
-        ),
-        (
-            "chart.webp",
-            "The chart table",
-            "Dividers, a plain ruler, a parallel rule, a protractor, a pencil, a "
-            "stopwatch, a hand log and a rubber — and the deck log beside the paper, "
-            "because a chart is not where a navigator writes things down. The coast is "
-            "read off the same field the boat runs aground on, so it cannot lie about "
-            "the depths.",
-        ),
-        (
-            "lost.webp",
-            "Somewhere at sea, with no idea where",
-            "The names come off the marks and the chart stops following her; getting them "
-            "back is the exercise. Seeing a thing and knowing which thing it is are "
-            "different questions, and the second is the whole difficulty — three marks "
-            "well spread apart are a shape that belongs in one place on the coast and "
-            "nowhere else.",
-        ),
-        (
-            "squall.webp",
-            "A squall, announced",
-            "Bearing, distance, and whether it is passing or coming for you — on the "
-            "console before it is on the boat. The wind in it both builds and veers, and a "
-            "squall that has been announced and ignored is the commonest way to be knocked "
-            "down here.",
-        ),
-        (
-            "gennaker.webp",
-            "The wardrobe",
-            "Genoa, code 0, gennaker, spinnaker. Asking for one is an order rather than a "
-            "switch: the foredeck rolls the old sail away, bends the new one on and sets "
-            "it, which is a job with stages and takes the time it takes.",
-        ),
-        (
-            "race.webp",
-            "Fifteen seconds to the gun",
-            "You cannot stop a sailing boat and you cannot park her, so the start of a "
-            "race is not a button but a manoeuvre: five minutes to sail away from the "
-            "line, read the wind, pick the favoured end and arrive at full speed without "
-            "being early. The panel here is saying you will not make it — 233 m to the "
-            "line and 124 seconds of sailing to cover it — and that the line is square, "
-            "so neither end is worth the detour.",
-        ),
-        (
-            "drill.webp",
-            "Taught, not announced",
-            "The overboard drill coaches the figure of eight — the reach, tack, reach the "
-            "RYA and US Sailing both teach — one instruction at a time, with a target "
-            "heading and a mark in the water for each leg. When something has to be done "
-            "in the next two seconds it is four words across the screen.",
-        ),
-        (
-            "below.webp",
-            "Under the surface, beside the lure",
-            "This project argued against the view on the grounds that the sea is opaque "
-            "and there would be nothing to see — which was an argument about the "
-            "surface. Ten metres of visibility, green rather than blue because this is a "
-            "shelf sea with a spring bloom in it.",
-        ),
-        (
-            "rod.webp",
-            "A rod over the stern",
-            "Not a minigame beside the sailing. A fish on the line at six knots is a fish "
-            "you are going to lose, so the first thing you do when something takes is get "
-            "the way off her — with the mainsheet, the dump and the helm you already have.",
-        ),
-    ]
+    captions = TEXT[lang].SHOTS
     return [(f, t, c) for f, t, c in captions if (HERE / "shots" / f).exists()]
 
 
 # ---- the pages -------------------------------------------------------------
 
 
-def head(title: str, description: str, css_extra: str = "") -> str:
+def up(lang: str) -> str:
+    """How to reach the site root from this language's directory."""
+    return "../" if lang != "en" else ""
+
+
+def alternates(lang: str, page: str) -> str:
+    """`hreflang` links, so a search engine knows these are the same page twice."""
+    out = []
+    for other in i18n.LANGS:
+        href = f"{up(lang)}{i18n.LANG_PATH[other]}{page}"
+        out.append(f'<link rel="alternate" hreflang="{other}" href="{href}">')
+    out.append(f'<link rel="alternate" hreflang="x-default" href="{up(lang)}{page}">')
+    return "\n".join(out)
+
+
+def switcher(lang: str, page: str) -> str:
+    """The other language, as a link. Two languages need a link, not a menu."""
+    others = [l for l in i18n.LANGS if l != lang]
+    links = " ".join(
+        f'<a href="{up(lang)}{i18n.LANG_PATH[o]}{page}" hreflang="{o}" '
+        f'lang="{o}">{i18n.LANG_NAMES[o]}</a>'
+        for o in others
+    )
+    return f'<div class="langs"><span>{i18n.UI[lang]["switch_label"]}</span>{links}</div>'
+
+
+def head(title: str, description: str, lang: str = "en", page: str = "index.html",
+         css_extra: str = "") -> str:
     return f"""<!doctype html>
-<html lang="en">
+<html lang="{lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -250,29 +211,30 @@ def head(title: str, description: str, css_extra: str = "") -> str:
 <meta property="og:title" content="{html.escape(title)}">
 <meta property="og:description" content="{html.escape(description)}">
 <meta property="og:type" content="website">
-<link rel="stylesheet" href="style.css">
-<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="{up(lang)}style.css">
+<link rel="icon" href="{up(lang)}favicon.svg" type="image/svg+xml">
+{alternates(lang, page)}
 {css_extra}
 </head>
 <body>"""
 
 
-def help_shot() -> str:
+def help_shot(lang: str = "en") -> str:
     """The help screen itself, which is where this list actually lives."""
     f = HERE / "shots" / "keys.webp"
     if not f.exists():
         return ""
     w, h = size_of(f)
+    t = TEXT[lang]
+    head_, body = t.HELP_SHOT_CAPTION
     return (
-        f'<figure><img src="shots/keys.webp" alt="The help screen in the game" '
+        f'<figure><img src="{up(lang)}shots/keys.webp" alt="{html.escape(t.HELP_SHOT_ALT)}" '
         f'loading="lazy" width="{w}" height="{h}">'
-        "<figcaption><b>The same list, in the program</b>Behind a mark in the corner, "
-        "which is the first thing anybody tries. The page above is generated from the "
-        "source of this screen.</figcaption></figure>"
+        f"<figcaption><b>{html.escape(head_)}</b>{html.escape(body)}</figcaption></figure>"
     )
 
 
-def picture_pair() -> str:
+def picture_pair(lang: str = "en") -> str:
     """The two drawn widths, same frame, side by side.
 
     Put in because the option is new and the only question worth asking about it is
@@ -284,87 +246,89 @@ def picture_pair() -> str:
     if not f.exists():
         return ""
     w, h = size_of(f)
+    t = TEXT[lang]
+    head_, body = t.WIDTHS_CAPTION
     return (
-        f'<figure><img src="shots/widths.webp" '
-        f'alt="The same rigging drawn at 720 pixels across and at 960" '
+        f'<figure><img src="{up(lang)}shots/widths.webp" '
+        f'alt="{html.escape(t.WIDTHS_ALT)}" '
         f'loading="lazy" width="{w}" height="{h}">'
-        "<figcaption><b>720 on the left, 960 on the right</b>The same shrouds, the same "
-        "moment, enlarged equally. On open water the two are indistinguishable; it is "
-        "rigging that shows the difference, which is also what the coarsest width used "
-        "to lose.</figcaption></figure>"
+        f"<figcaption><b>{html.escape(head_)}</b>{html.escape(body)}</figcaption></figure>"
     )
 
 
-def reel_html() -> str:
+def reel_html(lang: str = "en") -> str:
     """The loop, if there is one. Silence rather than a broken image if not."""
     f = HERE / "shots" / "sailing.webp"
     if not f.exists():
         return ""
     w, h = size_of(f)
+    t = TEXT[lang]
+    head_, body = t.REEL_CAPTION
     return (
-        f'<figure class="hero reel"><img src="shots/sailing.webp" '
-        f'alt="The boat sailing in a squall, heeled over" width="{w}" height="{h}">'
-        "<figcaption><b>Thirty frames of a squall</b>She heels, the sea runs under her, "
-        "and the instruments answer — which is the half of this that a still photograph "
-        "cannot say. Recorded by the game photographing itself, because screen capture "
-        "wants a permission a build server does not have.</figcaption></figure>"
+        f'<figure class="hero reel"><img src="{up(lang)}shots/sailing.webp" '
+        f'alt="{html.escape(t.REEL_ALT)}" width="{w}" height="{h}">'
+        f"<figcaption><b>{html.escape(head_)}</b>{html.escape(body)}</figcaption></figure>"
     )
 
 
-def index(v: str) -> str:
+def index(v: str, lang: str = "en") -> str:
     core, workspace = test_counts()
-    pictures = shots()
+    t = TEXT[lang]
+    u = i18n.UI[lang]
+    root = up(lang)
+    pictures = shots(lang)
     hero = ""
     gallery = ""
     if pictures:
-        f, t, c = pictures[0]
+        f, title, caption = pictures[0]
         w, h = size_of(HERE / "shots" / f)
         hero = (
-            f'<figure class="hero"><img src="shots/{f}" alt="{html.escape(t)}" '
+            f'<figure class="hero"><img src="{root}shots/{f}" alt="{html.escape(title)}" '
             f'width="{w}" height="{h}">'
-            f"<figcaption><b>{html.escape(t)}</b>{html.escape(c)}</figcaption></figure>"
+            f"<figcaption><b>{html.escape(title)}</b>{html.escape(caption)}</figcaption>"
+            "</figure>"
         )
         gallery = "\n".join(
-            f'<figure><img src="shots/{f}" alt="{html.escape(t)}" loading="lazy" '
-            f'width="{size_of(HERE / "shots" / f)[0]}" '
+            f'<figure><img src="{root}shots/{f}" alt="{html.escape(title)}" '
+            f'loading="lazy" width="{size_of(HERE / "shots" / f)[0]}" '
             f'height="{size_of(HERE / "shots" / f)[1]}">'
-            f"<figcaption><b>{html.escape(t)}</b>{html.escape(c)}</figcaption></figure>"
-            for f, t, c in pictures[1:]
+            f"<figcaption><b>{html.escape(title)}</b>{html.escape(caption)}</figcaption>"
+            "</figure>"
+            for f, title, caption in pictures[1:]
         )
 
     what = "\n".join(
-        f"<h3>{html.escape(h)}</h3><p>{b.strip()}</p>" for h, b in content.WHAT_IT_IS
+        f"<h3>{html.escape(h)}</h3><p>{b.strip()}</p>" for h, b in t.WHAT_IT_IS
     )
     nav_points = "\n".join(
-        f"<h3>{html.escape(h)}</h3><p>{b.strip()}</p>" for h, b in content.NAVIGATION_POINTS
+        f"<h3>{html.escape(h)}</h3><p>{b.strip()}</p>" for h, b in t.NAVIGATION_POINTS
     )
     model = "\n".join(
         f"<tr><td>{md_inline(part)}</td><td>{md_inline(how)}</td></tr>"
         for part, how in model_rows()
     )
+    manual_href = "manual.html"
+    pdf_href = "manual.pdf"
 
-    return f"""{head(
-        "sail — a sailing simulator",
-        "A sailing simulator in the spirit of a long-haul truck sim: engine-free yacht "
-        "dynamics in Rust, validated against real boat numbers.",
-    )}
+    return f"""{head(u["page_title"], u["page_desc"], lang, "index.html")}
 <header class="mast">
   <div class="wrap">
+    {switcher(lang, "index.html")}
     <h1 class="title">sail<span>.</span></h1>
-    <p class="standfirst">{content.STANDFIRST}</p>
+    <p class="standfirst">{t.STANDFIRST}</p>
     <div class="buttons">
-      <a class="button" href="#get-it">Get it</a>
-      <a class="button quiet" href="manual.html">Read the manual</a>
-      <a class="button quiet" href="{REPO}">Source</a>
+      <a class="button" href="#get-it">{u["get_it"]}</a>
+      <a class="button quiet" href="{manual_href}">{u["read_manual"]}</a>
+      <a class="button quiet" href="{REPO}">{u["source"]}</a>
     </div>
     <nav class="top">
-      <a href="#pictures">Pictures</a>
-      <a href="#the-model">The model</a>
-      <a href="#navigation">Navigation</a>
-      <a href="#sound">Sound</a>
-      <a href="#together">Together</a>
-      <a href="#keys">Keys</a>
-      <a href="#polar">Polar</a>
+      <a href="#pictures">{u["nav"]["pictures"]}</a>
+      <a href="#the-model">{u["nav"]["model"]}</a>
+      <a href="#navigation">{u["nav"]["navigation"]}</a>
+      <a href="#sound">{u["nav"]["sound"]}</a>
+      <a href="#together">{u["nav"]["together"]}</a>
+      <a href="#keys">{u["nav"]["keys"]}</a>
+      <a href="#polar">{u["nav"]["polar"]}</a>
     </nav>
     {hero}
   </div>
@@ -372,161 +336,153 @@ def index(v: str) -> str:
 
 <section id="what-it-is">
   <div class="wrap">
-    <div class="heading"><h2>What it is</h2></div>
+    <div class="heading"><h2>{u["what_it_is"]}</h2></div>
     <div class="narrow">{what}</div>
     <div class="stats">
-      <div class="stat"><b>{workspace}</b><span>tests across the workspace</span></div>
-      <div class="stat"><b>{core}</b><span>in the dynamics alone</span></div>
-      <div class="stat"><b>200&nbsp;Hz</b><span>fixed physics substeps</span></div>
-      <div class="stat"><b>4 DOF</b><span>surge, sway, roll, yaw — with added mass</span></div>
+      <div class="stat"><b>{workspace}</b><span>{u["tests_workspace"]}</span></div>
+      <div class="stat"><b>{core}</b><span>{u["tests_core"]}</span></div>
+      <div class="stat"><b>200&nbsp;Hz</b><span>{u["substeps"]}</span></div>
+      <div class="stat"><b>4 DOF</b><span>{u["dof"]}</span></div>
     </div>
   </div>
 </section>
 
 <section id="pictures">
   <div class="wrap">
-    <div class="heading"><h2>Pictures</h2></div>
-    <p class="lede narrow">{content.WHY_NOT_BROWSER}</p>
-    {reel_html()}
+    <div class="heading"><h2>{u["pictures"]}</h2></div>
+    <p class="lede narrow">{t.WHY_NOT_BROWSER}</p>
+    {reel_html(lang)}
     <div class="gallery">{gallery}</div>
   </div>
 </section>
 
 <section id="the-model">
   <div class="wrap">
-    <div class="heading"><h2>The model</h2></div>
-    <p class="lede narrow">{content.MODEL_INTRO}</p>
+    <div class="heading"><h2>{u["the_model"]}</h2></div>
+    <p class="lede narrow">{t.MODEL_INTRO}</p>
     <div class="table-scroll">
-      <table><thead><tr><th>Part</th><th>Treatment</th></tr></thead>
+      <table><thead><tr><th>{u["part"]}</th><th>{u["treatment"]}</th></tr></thead>
       <tbody>{model}</tbody></table>
     </div>
-    <div class="caveat narrow">{content.NOT_IN_THE_BOX}</div>
+    <div class="caveat narrow">{t.NOT_IN_THE_BOX}</div>
   </div>
 </section>
 
 <section id="navigation">
   <div class="wrap">
-    <div class="heading"><h2>Navigation</h2></div>
-    <p class="lede narrow">{content.NAVIGATION}</p>
+    <div class="heading"><h2>{u["the_navigation"]}</h2></div>
+    <p class="lede narrow">{t.NAVIGATION}</p>
     <div class="narrow">{nav_points}</div>
   </div>
 </section>
 
 <section id="sound">
   <div class="wrap">
-    <div class="heading"><h2>Sound</h2></div>
-    <div class="narrow"><p>{content.SOUND}</p><p>{content.SOUND_BAND}</p></div>
+    <div class="heading"><h2>{u["the_sound"]}</h2></div>
+    <div class="narrow"><p>{t.SOUND}</p><p>{t.SOUND_BAND}</p></div>
   </div>
 </section>
 
 <section id="together">
   <div class="wrap">
-    <div class="heading"><h2>Sailing together</h2></div>
-    <div class="narrow"><p>{content.TOGETHER}</p></div>
+    <div class="heading"><h2>{u["sailing_together"]}</h2></div>
+    <div class="narrow"><p>{t.TOGETHER}</p></div>
     <pre>sail-server --seed 42</pre>
   </div>
 </section>
 
 <section id="get-it">
   <div class="wrap">
-    <div class="heading"><h2>Get it</h2></div>
+    <div class="heading"><h2>{u["get_it_heading"]}</h2></div>
     <div class="two">
       <div>
-        <h3>macOS</h3>
-        <pre>curl -fsSL {REPO.replace("github.com", "raw.githubusercontent.com")}/main/dist/install.sh | sh</pre>
-        <p>A line in a terminal rather than a download on purpose: macOS quarantines what a
-        <em>browser</em> saves and not what <code>curl</code> fetches, and since macOS 15
-        removed right-click-Open there is otherwise no straightforward way past
-        <em>“Sail is damaged and can't be opened”</em> on an application nobody has paid
-        Apple to vouch for.</p>
+        <h3>{u["macos"]}</h3>
+        <pre>curl -fsSL {RAW}/main/dist/install.sh | sh</pre>
+        <p>{t.INSTALL_MAC}</p>
       </div>
       <div>
-        <h3>Windows</h3>
-        <pre>irm {REPO.replace("github.com", "raw.githubusercontent.com")}/main/dist/install.ps1 | iex</pre>
-        <p>Same idea: <em>“Windows protected your PC”</em> comes from the mark of the web,
-        which the program doing the downloading attaches — a browser does,
-        <code>Invoke-WebRequest</code> does not. <code>Sail.exe</code> from the releases
-        page works too, if you would rather click <b>More info</b> and <b>Run anyway</b>.</p>
+        <h3>{u["windows"]}</h3>
+        <pre>irm {RAW}/main/dist/install.ps1 | iex</pre>
+        <p>{t.INSTALL_WINDOWS}</p>
       </div>
     </div>
-    <h3>From source</h3>
-    <pre>cargo run -p sail-app --release      # the game
-cargo test -p sail-core              # the validation suite
-cargo run -p sail-core --release --example polar   # the speed polar</pre>
+    <h3>{u["from_source"]}</h3>
+    <pre>cargo run -p sail-app --release      # {t.SOURCE_GAME}
+cargo test -p sail-core              # {t.SOURCE_TESTS}
+cargo run -p sail-core --release --example polar   # {t.SOURCE_POLAR}</pre>
     <div class="buttons">
-      <a class="button" href="{REPO}/releases/latest">Releases</a>
-      <a class="button quiet" href="manual.html">The manual</a>
-      <a class="button quiet" href="manual.pdf">Manual as PDF</a>
+      <a class="button" href="{REPO}/releases/latest">{u["releases"]}</a>
+      <a class="button quiet" href="{manual_href}">{u["the_manual"]}</a>
+      <a class="button quiet" href="{pdf_href}">{u["manual_pdf"]}</a>
     </div>
   </div>
 </section>
 
 <section id="keys">
   <div class="wrap">
-    <div class="heading"><h2>The keys</h2></div>
-    <p class="lede narrow">Generated from the program's own help screen — press
-    <code>?</code> or <code>F1</code> in the game for the same list. It is not copied here
-    by hand, because the one time a key list was written from memory on a download page,
-    three of the keys were wrong.</p>
-    {help_shot()}
+    <div class="heading"><h2>{u["the_keys"]}</h2></div>
+    <p class="lede narrow">{u["keys_lede"]}</p>
+    {help_shot(lang)}
     {keys_html()}
   </div>
 </section>
 
 <section id="polar">
   <div class="wrap">
-    <div class="heading"><h2>The polar</h2></div>
-    <p class="lede narrow">Boat speed in knots, by true wind angle and true wind speed —
-    generated by the simulation rather than drawn. Best upwind VMG in twelve knots lands at
-    40 degrees true: 5.6 knots through the water, 4.1 made good, 21 degrees of heel, 3.6 of
-    leeway. Those are the numbers off a real boat.</p>
+    <div class="heading"><h2>{u["the_polar"]}</h2></div>
+    <p class="lede narrow">{u["polar_lede"]}</p>
     <pre class="polar">{html.escape(polar())}</pre>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
-    <p>sail {html.escape(v)} — MIT or Apache-2.0. Built by one person with an agent, in
-    the open: <a href="{REPO}">{REPO.replace("https://", "")}</a>.</p>
-    <p>Type is <a href="https://fonts.google.com/specimen/VT323">VT323</a> under the SIL
-    Open Font License.</p>
+    <p>sail {html.escape(v)} — {u["footer_built"]}
+    <a href="{REPO}">{REPO.replace("https://", "")}</a>.</p>
+    <p>{u["footer_type"]}</p>
   </div>
 </footer>
 </body></html>"""
 
 
-def manual(v: str, for_print: bool = False) -> str:
+def manual(v: str, lang: str = "en", for_print: bool = False) -> str:
+    t = TEXT[lang]
+    u = i18n.UI[lang]
     toc = "\n".join(
-        f'<li><a href="#{k}">{html.escape(t)}</a></li>' for k, t, _ in content.MANUAL
-    ) + '<li><a href="#every-key">Every key</a></li>'
+        f'<li><a href="#{k}">{html.escape(title)}</a></li>' for k, title, _ in t.MANUAL
+    ) + f'<li><a href="#every-key">{u["every_key"]}</a></li>'
 
     body_parts = []
-    for k, t, b in content.MANUAL:
-        body_parts.append(f'<h2 id="{k}">{html.escape(t)}</h2>\n{b.strip()}')
+    for k, title, b in t.MANUAL:
+        body_parts.append(f'<h2 id="{k}">{html.escape(title)}</h2>\n{b.strip()}')
         # The comparison belongs with the prose that describes the option, and the
         # print stylesheet has to carry it too — a manual that mentions a difference it
         # does not show is the thing this picture exists to prevent.
         if k == "before-you-start":
-            body_parts.append(picture_pair())
+            body_parts.append(picture_pair(lang))
     body = "\n".join(part for part in body_parts if part)
 
     extra = '<link rel="stylesheet" href="print.css">' if for_print else ""
-    back = "" if for_print else '<nav class="top"><a href="index.html">&larr; sail</a></nav>'
-    # On paper the reader is holding the thing these would link to.
+    root = up(lang)
+    home = "index.html"
+    back = "" if for_print else f'<nav class="top"><a href="{home}">{u["back"]}</a></nav>'
+    # On paper the reader is holding the thing these would link to, and the language
+    # switcher has nowhere to go.
     buttons = "" if for_print else (
         '<div class="buttons">'
-        '<a class="button" href="manual.pdf">Download as PDF</a>'
-        '<a class="button quiet" href="index.html#get-it">Get the game</a>'
+        f'<a class="button" href="manual.pdf">{u["download_pdf"]}</a>'
+        f'<a class="button quiet" href="{home}#get-it">{u["get_the_game"]}</a>'
         "</div>"
     )
+    switch = "" if for_print else switcher(lang, "manual.html")
 
-    return f"""{head(f"sail — the manual", "How to sail her: the passage, the instruments, "
-                     "the chart, and what to do when it goes wrong.", extra)}
+    return f"""{head(u["manual_title"], u["manual_desc"], lang, "manual.html", extra)}
 <header class="mast">
   <div class="wrap">
+    {switch}
     {back}
-    <h1 class="title" style="font-size:clamp(3rem,9vw,5.5rem)">The manual<span>.</span></h1>
-    <p class="standfirst">{content.MANUAL_STANDFIRST}</p>
+    <h1 class="title" style="font-size:clamp(3rem,9vw,5.5rem)">{u["manual_heading"]}<span>.</span></h1>
+    <p class="standfirst">{t.MANUAL_STANDFIRST}</p>
     <p class="lede">sail {html.escape(v)}</p>
     {buttons}
     <ul class="toc">{toc}</ul>
@@ -541,16 +497,14 @@ def manual(v: str, for_print: bool = False) -> str:
 
 <section id="every-key">
   <div class="wrap">
-    <div class="heading"><h2>Every key</h2></div>
-    <p class="lede narrow">The same list the program shows on <code>?</code> or
-    <code>F1</code>, generated from its source. A row with no key against it is a sentence
-    belonging to the key above it.</p>
+    <div class="heading"><h2>{u["every_key"]}</h2></div>
+    <p class="lede narrow">{u["every_key_lede"]}</p>
     {keys_html()}
   </div>
 </section>
 
 <footer>
-  <div class="wrap"><p>sail {html.escape(v)} — MIT or Apache-2.0 —
+  <div class="wrap"><p>sail {html.escape(v)} — {u["footer_built"]}
   <a href="{REPO}">{REPO.replace("https://", "")}</a></p></div>
 </footer>
 </body></html>"""
@@ -571,7 +525,7 @@ PRINT_CSS = """/* Paper wants the opposite of a screen: ink on white, and page b
 @page { size: A4; margin: 18mm 16mm 16mm;
         @bottom-right { content: counter(page) " / " counter(pages);
                         font-family: "VT323", monospace; font-size: 9pt; color: #8a8578; }
-        @bottom-left { content: "sail — the manual";
+        @bottom-left { content: "FOOTER_TEXT";
                        font-family: "VT323", monospace; font-size: 9pt; color: #8a8578; } }
 @page :first { @bottom-left { content: ""; } @bottom-right { content: ""; } }
 body { background: #fff; color: #15181d; font-size: 10.5pt; line-height: 1.5; }
@@ -613,29 +567,38 @@ code { background: #f4f1ea; padding: 0 2px; }
 .toc { font-size: 9.5pt; }
 .toc a { color: #3d434c; text-decoration: none; }
 footer { border-top: 1px solid #d8d2c4; margin-top: 1.5rem; font-size: 8.5pt; }
-nav.top { display: none; }
+nav.top, .langs { display: none; }
 p, li { orphans: 2; widows: 2; }
 .stats, figure { break-inside: avoid; }
 .heading::after { background: #d8d2c4; }
 """
 
 
-def build_pdf() -> bool:
-    """Render the manual to A4. Returns False if weasyprint is not here."""
-    (OUT / "print.css").write_text(PRINT_CSS, encoding="utf-8")
-    (OUT / "manual-print.html").write_text(manual(version(), for_print=True), encoding="utf-8")
+def build_pdf(lang: str = "en") -> bool:
+    """Render that language's manual to A4. False if weasyprint is not here."""
+    where = OUT / i18n.LANG_PATH[lang]
+    where.mkdir(parents=True, exist_ok=True)
+    # The running foot is the one piece of the print stylesheet that is prose, so the
+    # sheet is written per language rather than shared.
+    foot = i18n.UI[lang]["running_foot"]
+    (where / "print.css").write_text(
+        PRINT_CSS.replace("FOOTER_TEXT", foot), encoding="utf-8"
+    )
+    src = where / "manual-print.html"
+    src.write_text(manual(version(), lang, for_print=True), encoding="utf-8")
     if not shutil.which("weasyprint"):
         print("  no weasyprint on PATH — skipping the PDF", file=sys.stderr)
+        src.unlink()
         return False
     run = subprocess.run(
-        ["weasyprint", str(OUT / "manual-print.html"), str(OUT / "manual.pdf")],
+        ["weasyprint", str(src), str(where / "manual.pdf")],
         capture_output=True,
         text=True,
     )
     if run.returncode != 0:
         print(run.stderr[-2000:], file=sys.stderr)
-        raise SystemExit("weasyprint failed")
-    (OUT / "manual-print.html").unlink()
+        raise SystemExit(f"weasyprint failed on the {lang} manual")
+    src.unlink()
     return True
 
 
@@ -648,15 +611,27 @@ def every_reference_resolves(expect_pdf: bool = True) -> None:
     broken — the page still loads, still scrolls, still looks deliberate.
     """
     missing = []
-    for page in ("index.html", "manual.html"):
+    pages = [
+        f"{i18n.LANG_PATH[lang]}{name}"
+        for lang in i18n.LANGS
+        for name in ("index.html", "manual.html")
+    ]
+    for page in pages:
         html_text = (OUT / page).read_text(encoding="utf-8")
         for ref in re.findall(r'(?:src|href)="([^"]+)"', html_text):
             if ref.startswith(("http://", "https://", "mailto:", "#", "data:")):
                 continue
             target = ref.split("#", 1)[0]
+            # Resolve relative to the page, not the site root: the Polish pages sit a
+            # directory down and reach their assets with "../".
+            import posixpath
+
+            target = posixpath.normpath(
+                posixpath.join(posixpath.dirname(page), target)
+            )
             # A build without `--pdf` links to a PDF it did not make; that is a
             # preview, not a publish, and the workflow always passes `--pdf`.
-            if target == "manual.pdf" and not expect_pdf:
+            if target.endswith("manual.pdf") and not expect_pdf:
                 continue
             if target and not (OUT / target).exists():
                 missing.append(f"{page} -> {target}")
@@ -670,8 +645,11 @@ def main() -> None:
         shutil.rmtree(OUT)
     (OUT / "shots").mkdir(parents=True)
 
-    (OUT / "index.html").write_text(index(v), encoding="utf-8")
-    (OUT / "manual.html").write_text(manual(v), encoding="utf-8")
+    for lang in i18n.LANGS:
+        where = OUT / i18n.LANG_PATH[lang]
+        where.mkdir(parents=True, exist_ok=True)
+        (where / "index.html").write_text(index(v, lang), encoding="utf-8")
+        (where / "manual.html").write_text(manual(v, lang), encoding="utf-8")
     shutil.copy(HERE / "style.css", OUT / "style.css")
     shutil.copy(HERE / "favicon.svg", OUT / "favicon.svg")
     shutil.copy(ROOT / "assets/VT323-Regular.ttf", OUT / "VT323-Regular.ttf")
@@ -694,9 +672,12 @@ def main() -> None:
     # `AttributeError: 'NoneType' object has no attribute 'children'`, which names
     # nothing a person could act on.
     every_reference_resolves(expect_pdf=False)
-    pdf = "--pdf" in sys.argv and build_pdf()
+    pdf = False
+    if "--pdf" in sys.argv:
+        pdf = all(build_pdf(lang) for lang in i18n.LANGS)
     every_reference_resolves(expect_pdf=pdf)
-    print(f"built _site/ — sail {v}, {len(pictures)} pictures"
+    langs = "+".join(i18n.LANGS)
+    print(f"built _site/ — sail {v}, {langs}, {len(pictures)} pictures"
           f"{', manual.pdf' if pdf else ''}")
 
 
