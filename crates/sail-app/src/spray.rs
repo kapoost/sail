@@ -53,6 +53,16 @@ const COUNT: usize = 9000;
 /// `SAIL_SPRAY=4`. "Can there be a great many more marks on the crests, or is that
 /// expensive?" is a question with a number for an answer, and the only way to get the
 /// number is to run the same gale twice with two budgets.
+/// What the open sea may spend, leaving the rest for the boat.
+///
+/// The crests are scattered over a disc a hundred and seventy metres across and the
+/// hull's foam is a few hundred marks in a band along her side — so when the sea filled
+/// the budget, the thing that vanished was the bow wave, which is the one piece of white
+/// water the player is always looking at. The sea gets four fifths and no more.
+fn sea_budget() -> usize {
+    budget() * 4 / 5
+}
+
 fn budget() -> usize {
     let scale: f32 = std::env::var("SAIL_SPRAY")
         .ok()
@@ -75,7 +85,7 @@ const LIFE: f32 = 3.4;
 /// that gets bigger while it gets fainter reads as something dispersing rather than
 /// something being turned off. The two together are most of what makes it look like
 /// foam and not like a sprite.
-const CLAW_LIFE: f32 = 4.0;
+const CLAW_LIFE: f32 = 2.6;
 /// How fast foam spreads outward from where it was thrown, m/s.
 const SPREAD: f64 = 0.55;
 /// How near the top of a wave a dart has to land, as a fraction of the significant
@@ -107,7 +117,7 @@ const CREST_TOP: f64 = 0.30;
 /// Raised with the reach: the darts are scattered over the whole disc, so taking that
 /// disc from ninety metres to two hundred and sixty is eight times the water and eight
 /// times as few crests found in any part of it.
-const CREST_DARTS: f32 = 1600.0;
+const CREST_DARTS: f32 = 3200.0;
 /// How many bubbles are drawn in a patch of foam.
 ///
 /// Four, which is not how many there are — a square metre of fresh foam has thousands —
@@ -216,7 +226,7 @@ const ROLLER_DIES: f64 = 0.55;
 /// shading on the water carries it, which is the right division of labour — a speck at
 /// three hundred metres is a sub-pixel dot and the tone it would contribute is already
 /// there.
-const CREST_REACH: f64 = 260.0;
+const CREST_REACH: f64 = 170.0;
 
 /// How many marks a crest is drawn with, by how far off it is, and how much bigger each
 /// one gets to make up for there being fewer.
@@ -608,7 +618,7 @@ pub fn update(
         let Spray {
             live, seed, darts, ..
         } = &mut *spray;
-        while *darts >= 1.0 && live.len() < budget() {
+        while *darts >= 1.0 && live.len() < sea_budget() {
             *darts -= 1.0;
             darts_thrown += 1;
             let r = &mut *seed;
@@ -645,7 +655,7 @@ pub fn update(
             let long = (CREST_LONG.0 + CREST_LONG.1 * hs).min(CREST_LONGEST);
             let (marks, fatter) = detail_at(range);
             for i in 0..marks {
-                if live.len() >= budget() {
+                if live.len() >= sea_budget() {
                     break;
                 }
                 // Spaced along the streak rather than scattered in it, with enough
@@ -678,7 +688,7 @@ pub fn update(
             // a thousand marks of budget and fill spent on nothing at all.
             let close = range < BUBBLES_WITHIN;
             for _ in 0..(if close { BUBBLES_IN_A_PATCH } else { 0 }) {
-                if live.len() >= budget() {
+                if live.len() >= sea_budget() {
                     break;
                 }
                 let along = (r.next_f64() - 0.5) * long;
@@ -740,7 +750,7 @@ pub fn update(
             ..
         } = &mut *spray;
         *plunges += CREST_DARTS as f64 * 0.22 * plunging * dt as f64;
-        while *plunges >= 1.0 && live.len() < budget() {
+        while *plunges >= 1.0 && live.len() < sea_budget() {
             *plunges -= 1.0;
             let r = &mut *seed;
             let a = r.next_f64() * std::f64::consts::TAU;
@@ -761,7 +771,7 @@ pub fn update(
             // The line, laid along the crest rather than scattered round a point.
             let width = TONGUE_WIDE * (0.5 + 0.5 * r.next_f64());
             for n in 0..TONGUE_SPECKS {
-                if live.len() >= budget() {
+                if live.len() >= sea_budget() {
                     break;
                 }
                 // Along the crest at even spacing would be a string of beads, which

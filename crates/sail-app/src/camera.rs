@@ -450,19 +450,26 @@ pub fn setup(
         // in the light, which is a photograph of grass and not grass.
         //
         // Scaling by luminance instead keeps the proportions between the channels, so a
-        // thing that is green and over-lit comes out *greener* rather than whiter —
-        // which is how the eye reports a hillside in spring and why the memory of one is
-        // the colour and not the brightness.
+        // thing that is green and over-lit comes out *greener* rather than whiter.
         //
-        // `SAIL_TONEMAP=tony|aces|agx|neutral|reinhard` for the others, because this is
-        // the sort of choice that wants looking at rather than arguing about.
+        // **And it was tried and put back**, because of what else it did: the foam is
+        // drawn additively, so a whitecap is a bright thing on a dark sea, and a curve
+        // that never reaches white crushes every one of them into the water's own tone.
+        // Measured on the same gale: the film curve puts 0.78 % of the picture above
+        // three quarters brightness and the luminance curve 0.07 %. The sea went bare.
+        //
+        // So the film curve stays and the hillside wants fixing where the hillside is.
+        // `SAIL_TONEMAP=tony|aces|agx|neutral|reinhard|luminance` to look at the others
+        // — `neutral` keeps hue in the highlights without flattening them, and is the
+        // one to try next.
         match std::env::var("SAIL_TONEMAP").as_deref() {
             Ok("tony") => bevy::core_pipeline::tonemapping::Tonemapping::TonyMcMapface,
             Ok("aces") => bevy::core_pipeline::tonemapping::Tonemapping::AcesFitted,
             Ok("agx") => bevy::core_pipeline::tonemapping::Tonemapping::AgX,
             Ok("neutral") => bevy::core_pipeline::tonemapping::Tonemapping::KhronosPbrNeutral,
             Ok("reinhard") => bevy::core_pipeline::tonemapping::Tonemapping::Reinhard,
-            _ => bevy::core_pipeline::tonemapping::Tonemapping::ReinhardLuminance,
+            Ok("luminance") => bevy::core_pipeline::tonemapping::Tonemapping::ReinhardLuminance,
+            _ => bevy::core_pipeline::tonemapping::Tonemapping::TonyMcMapface,
         },
         crate::sky::SkyImage(sky.clone()),
         Skybox {
