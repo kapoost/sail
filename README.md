@@ -121,19 +121,23 @@ share of the frame went:
 
 | | light airs | gale, overcast, squall |
 |---|---|---|
-| sea mesh | 4.4 ms | 5.7 ms |
+| sea mesh | 1.5 ms | 2.3 ms |
 | foam | 0.3 ms | 1.9 ms |
 | cloud | 0.1 ms | 0.2 ms |
-| **of a 16.7 ms frame** | **29 %** | **47 %** |
+| **of a 16.7 ms frame** | **12 %** | **27 %** |
 
 Around 370 MB resident, 50 MB of which is the ripple film — thirty-six key frames of
 normal map at 512, blended on the processor so the water moves continuously rather than
 in twelve steps a second. About 160 MB on disk.
 
-**The bottleneck is one thread building the sea.** The mesh is 201 × 201 vertices
-rebuilt every frame, and each vertex asks the spectrum for its height, its slope and its
-parcel drift — twenty-one components, one `sin_cos` each. That is three quarters of the
-processor's share of the frame and it is single-threaded.
+**The sea mesh is the largest single cost and it is spread across cores.** The mesh is
+201 × 201 vertices rebuilt every frame, and each vertex asks the spectrum for its height,
+its slope and its parcel drift — twenty-one components, one `sin_cos` each. It was 5.7 ms
+on one thread until the loop was written as a function from a grid offset to a finished
+vertex, which is what let a task pool have it: 2.3 ms now, and the stitch back into the
+five attribute vectors is 0.2 of that. The speed-up is two and a half rather than the ten
+the core count suggests, because half of those cores are efficiency cores and the far
+half of the grid is nearly free work however it is divided.
 
 The graphics card is not the limit and the measurement says so: the frame rate is the
 same at a drawn width of 480 and at 1920, because the world is rendered into a small
@@ -141,10 +145,11 @@ image and blown up. What that means for requirements is that **single-core speed
 to look at**, not the GPU — any card with Metal 3, Vulkan 1.2 or DX12 will do, including
 integrated ones. A core half the speed of this one still makes sixty; a quarter does not.
 
-The fix, when it is wanted, is to spread the vertex loop across cores: it is pure per
-vertex and the machine this was measured on was using 1.7 of its ten. Moving the sum to
-the graphics card would be faster still and would cost the thing that makes this sea
-trustworthy — the hull and the drawn surface asking the same water the same question.
+What is left to win is on the graphics card: the sum could live in a vertex shader and
+the processor would be out of it altogether. That would cost the thing which makes this
+sea trustworthy — the hull and the drawn surface asking the same water the same question
+— so it is a trade rather than an improvement, and it is written up in `docs/browser.md`
+where it actually matters.
 
 ### Knobs, and the demo reel
 

@@ -17,6 +17,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use bevy::tasks::ParallelSliceMut;
 
 use crate::camera;
 use crate::curve::smoothstep;
@@ -947,11 +948,22 @@ pub fn update_sea(
         // On a grid that runs to the horizon that is most of the vertices, and it is
         // what pays for the fine spacing close in.
         let longest = sim.sim.water.longest_wavelength();
-        for (offset, &min_wavelength) in sea.offsets.iter().zip(&sea.resolutions) {
+        // **One vertex at a time, and nothing shared.**
+        //
+        // This is the frame's largest single cost — forty thousand vertices, each asking
+        // a twenty-one component spectrum for height, slope and drift — and it was one
+        // thread while the machine had ten. What kept it there was the shape rather than
+        // the arithmetic: five attribute vectors being pushed into are five pieces of
+        // shared mutable state, and a loop that grows them cannot be split.
+        //
+        // Written as a function from a grid offset to a finished vertex it splits itself.
+        // Everything it reads — the water, the sky's dome, the cloud shadows, the day's
+        // own numbers — is read-only for the length of the pass.
+        let dress = |offset: Vec2, min_wavelength: f64| -> Dressed {
             if min_wavelength >= longest {
-                positions.push(Vec3::new(offset.x, 0.0, offset.y));
-                normals.push(Vec3::Y);
-                tangents.push(Vec4::new(1.0, 0.0, 0.0, -1.0));
+                let position = Vec3::new(offset.x, 0.0, offset.y);
+                let normal = Vec3::Y;
+                let tangent = Vec4::new(1.0, 0.0, 0.0, -1.0);
                 // The far water is nearly all horizon reflection — it is seen at a
                 // grazing angle — so it takes the sky on its own bearing rather than one
                 // flat colour for the whole ring. This is where a low sun shows most: the
@@ -970,15 +982,20 @@ pub fn update_sea(
                     far.lerp(from_sky * 0.17 + body * 1.4, 0.3)
                 };
                 let flat = st.pos + glam::DVec2::new(offset.x as f64, -offset.y as f64) - uv_base;
-                uvs.push(if ink {
+                let uv = if ink {
                     // Past the near field there is no wave to shade and nothing to
                     // hatch: the top row of the map is blank paper.
                     Vec2::ZERO
                 } else {
                     sea_texture::ripple_uv(Vec2::new(flat.x as f32, flat.y as f32))
-                });
-                colours.push([lit.x, lit.y, lit.z, 1.0]);
-                continue;
+                };
+                return Dressed {
+                    position,
+                    normal,
+                    tangent,
+                    uv,
+                    colour: [lit.x, lit.y, lit.z, 1.0],
+                };
             }
             // Sample at the true world position. Bevy's -Z is sim north, so the
             // horizontal offset flips sign on the way across.
@@ -1008,8 +1025,6 @@ pub fn update_sea(
             let swell = water.drift;
             let point = Vec3::new(offset.x + swell.x as f32, height, offset.y - swell.y as f32);
             let normal = Vec3::new(-sx, 1.0, -sz).normalize();
-            positions.push(point);
-            normals.push(normal);
 
             // World-locked UVs, so the detail stays with the sea rather than with the
             // boat: the grid recentres every frame and the texture must not.
@@ -1021,15 +1036,12 @@ pub fn update_sea(
             // that the vertex goes where the parcel goes, its mean position is its own
             // grid point and the correction would be applying the drift twice.
             let parcel = world - current - uv_base;
-            uvs.push(sea_texture::ripple_uv(Vec2::new(
-                parcel.x as f32,
-                parcel.y as f32,
-            )));
+            let mut uv = sea_texture::ripple_uv(Vec2::new(parcel.x as f32, parcel.y as f32));
 
             // Tangent along +U, which is world +X, lying in the surface. Handedness is
             // negative because cross(normal, tangent) points at -Z while V runs to +Z.
             let tangent = Vec3::new(1.0, sx, 0.0).normalize();
-            tangents.push(Vec4::new(tangent.x, tangent.y, tangent.z, -1.0));
+            let tangent = Vec4::new(tangent.x, tangent.y, tangent.z, -1.0);
 
             // Colour per vertex: troughs darker, crests lighter, and foam where the
             // surface is steep enough to be breaking. That is the depth shading and
@@ -1233,12 +1245,10 @@ pub fn update_sea(
                 // is the one thing this is for.
                 let tilt = (sx * downwind.x as f32 - sz * downwind.y as f32) / typical;
                 let face = tilt.tanh();
-                if let Some(uv) = uvs.last_mut() {
-                    *uv = Vec2::new(
-                        height / (STREAK_OF_HEIGHT * hs) + face * STREAK_RUN * t as f32,
-                        1.0 - tone,
-                    );
-                }
+                uv = Vec2::new(
+                    height / (STREAK_OF_HEIGHT * hs) + face * STREAK_RUN * t as f32,
+                    1.0 - tone,
+                );
             }
             if ink && edge > 0.0 {
                 // The line along the step between two tones, struck as hard as the
@@ -1277,7 +1287,41 @@ pub fn update_sea(
                     colour = Vec3::new(1.0, 1.0, 0.97);
                 }
             }
-            colours.push([colour.x, colour.y, colour.z, 1.0]);
+            Dressed {
+                position: point,
+                normal,
+                tangent,
+                uv,
+                colour: [colour.x, colour.y, colour.z, 1.0],
+            }
+        };
+        // A thousand vertices to a task: small enough that every core gets work and large
+        // enough that handing it over is not most of it.
+        const CHUNK: usize = 1024;
+        let pool = bevy::tasks::ComputeTaskPool::get();
+        let mut dressed = vec![Dressed::default(); count];
+        dressed.par_chunk_map_mut(pool, CHUNK, |piece, slots| {
+            let base = piece * CHUNK;
+            for (k, slot) in slots.iter_mut().enumerate() {
+                let i = base + k;
+                *slot = dress(sea.offsets[i], sea.resolutions[i]);
+            }
+        });
+        // And back into the five attribute vectors, in order, on one thread — which is a
+        // memory copy and nothing else.
+        let stitching = clock.map(|_| std::time::Instant::now());
+        for v in &dressed {
+            positions.push(v.position);
+            normals.push(v.normal);
+            tangents.push(v.tangent);
+            uvs.push(v.uv);
+            colours.push(v.colour);
+        }
+        if let Some(stitching) = stitching {
+            debug!(
+                "sea: stitched in {:.2} ms",
+                stitching.elapsed().as_secs_f32() * 1000.0
+            );
         }
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -1288,6 +1332,22 @@ pub fn update_sea(
     if let Some(clock) = clock {
         spent.sea += clock.elapsed().as_secs_f32() * 1000.0;
     }
+}
+
+/// One vertex of the drawn sea, as the parallel pass hands it back.
+///
+/// The loop that fills these used to push straight into five attribute vectors, which is
+/// why it had to be one thread: five growing `Vec`s are five pieces of shared mutable
+/// state. Writing a whole vertex into a slot that is already there makes the work what it
+/// always was underneath — a pure function of the grid offset — and a pure function is
+/// something a task pool can be handed.
+#[derive(Clone, Copy, Default)]
+struct Dressed {
+    position: Vec3,
+    normal: Vec3,
+    tangent: Vec4,
+    uv: Vec2,
+    colour: [f32; 4],
 }
 
 /// How much of what you are looking at came *through* the water rather than off it.

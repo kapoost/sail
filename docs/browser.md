@@ -57,15 +57,16 @@ without quarantine.
 The browser question used to be about what panics and what cannot find a UDP socket.
 Those are the easy half. The hard half is one loop:
 
-| | native, one thread, M5 |
+| | native, M5 |
 |---|---|
-| sea mesh | 4.4 ms light airs, 5.7 ms in a gale |
+| sea mesh | 1.5 ms light airs, 2.3 ms in a gale — 4.4 and 5.7 before it was spread across cores |
 | foam | 0.3 to 1.9 ms |
 | cloud | 0.1 ms |
 
 The frame is 16.7 ms at sixty. In a tab, scalar `f64` with a transcendental in the inner
-loop runs somewhere between one and a half and three times slower than native, so 5.7 ms
-becomes nine to seventeen — **the sea alone is the frame**. Nothing else on the list is
+loop runs somewhere between one and a half and three times slower than native — and a tab
+without the headers below gets one thread, which is the 5.7 ms figure and not the 2.3.
+Nine to seventeen milliseconds, then: **the sea alone is the frame**. Nothing else on the list is
 close: the world is rendered at 960 and blown up, so the graphics card has almost nothing
 to do, and every texture in the game is generated at startup rather than downloaded,
 which is the one place a tab normally loses.
@@ -76,7 +77,10 @@ drift, once a frame, on one thread.
 
 ### Does spreading it across cores help in a tab?
 
-**In shape, yes. In effect, only with the right hosting.** Threads in wasm need
+**In shape, yes — it is done. In effect in a tab, only with the right hosting.**
+
+The loop is a function from a grid offset to a finished vertex now, handed to a task
+pool: 5.7 ms to 2.3 natively. That is exactly the shape wasm threads want. Threads in wasm need
 `SharedArrayBuffer`, which needs the `Cross-Origin-Opener-Policy` and
 `Cross-Origin-Embedder-Policy` headers, and **GitHub Pages cannot send headers** — so a
 parallel build served from where this project's page lives would run the single-threaded
