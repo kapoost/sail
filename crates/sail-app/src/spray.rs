@@ -853,7 +853,19 @@ pub fn update(
         // quarter of its life and settles back, and because it is faded in across the
         // skin rather than clipped by it, the arrival is a fade and not a switch.
         let rise = (life * 4.0).min(1.0) * (1.0 - life * 0.55);
-        let height = surface + 0.02 + (0.3 + 0.9 * rise as f64) * size as f64;
+        // **And it sits in the water, not on it.** The lift was a fraction of the
+        // mark's own size with nothing holding it down, which is harmless while every
+        // mark is a few centimetres across and wrong as soon as one is not: a breaking
+        // crest's marks are the better part of a metre, and at three tenths of that
+        // they were floating a foot clear of the sea with daylight under them.
+        //
+        // Foam is air in water rather than something resting on top of it, so the lift
+        // is a small part of the mark and stops growing once a mark is big: a hand's
+        // breadth proud as it arrives, settling to a few centimetres. The cap is what
+        // makes a two-metre breaker and a two-centimetre speck both look like they are
+        // *in* the sea.
+        let swim = (size as f64).min(0.5);
+        let height = surface + 0.02 + (0.14 + 0.30 * rise as f64) * swim;
         // Foam is not white. It starts as the sea with air beaten into it and whitens as
         // the bubbles rise, so a fresh speck carries the water's own colour and an old
         // one is nearly white — and between them is the whole range you see along a bow
