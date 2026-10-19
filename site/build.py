@@ -200,6 +200,16 @@ def shots() -> list[tuple[str, str, str]]:
             "it, which is a job with stages and takes the time it takes.",
         ),
         (
+            "race.webp",
+            "Fifteen seconds to the gun",
+            "You cannot stop a sailing boat and you cannot park her, so the start of a "
+            "race is not a button but a manoeuvre: five minutes to sail away from the "
+            "line, read the wind, pick the favoured end and arrive at full speed without "
+            "being early. The panel here is saying you will not make it — 233 m to the "
+            "line and 124 seconds of sailing to cover it — and that the line is square, "
+            "so neither end is worth the detour.",
+        ),
+        (
             "drill.webp",
             "Taught, not announced",
             "The overboard drill coaches the figure of eight — the reach, tack, reach the "

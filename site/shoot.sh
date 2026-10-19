@@ -11,11 +11,17 @@
 # them, and get her moving. A picture taken at eight seconds is a boat sitting still
 # with her genoa rolled up, which is a true photograph of nothing.
 #
-# **It checks that each picture arrived.** Two of the first eight runs ended early with
-# nothing written and nothing in the log to say so — the window had lost its place on a
-# busy machine. A series that quietly produces six files out of eight looks exactly like
-# a series that produced eight, and the page then ships whatever was left over from last
-# time. So every scene is verified and retried once.
+# **It checks that each picture arrived, and that it has a picture in it.** Two of the
+# first eight runs ended early with nothing written and nothing in the log to say so —
+# the window had lost its place on a busy machine. A series that quietly produces six
+# files out of eight looks exactly like one that produced eight, and the page then ships
+# whatever was left over from last time.
+#
+# The second half of that test was learned the expensive way: a run can also finish and
+# write a **completely black frame**, which happens when the capture lands before the
+# world is lit. A black 2880x1760 PNG is about 78 kB — not empty, so `test -s` passes it,
+# and it went to the page as a scene. So the check is on the brightness of the thing, not
+# on the existence of the file.
 #
 #     bash site/shoot.sh            # every scene
 #     bash site/shoot.sh brig rod   # just these
@@ -29,6 +35,19 @@
 #
 # Needs the release binary (`cargo build --release -p sail-app`) and Python with Pillow
 # for the conversion. It opens a window per scene; it is not a headless tool.
+
+# True when the capture is black, or nearly — the failure that passes `test -s`.
+blank () {
+  python3 - "$1" <<'PY'
+import sys
+from PIL import Image, ImageStat
+try:
+    mean = ImageStat.Stat(Image.open(sys.argv[1]).convert("L")).mean[0]
+except Exception:
+    sys.exit(0)          # unreadable counts as blank
+sys.exit(0 if mean < 8 else 1)
+PY
+}
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -73,6 +92,22 @@ scene_env () {
     # Three presses walks the view round to under the water, beside the lure.
     below)    echo "SAIL_SEED=3 SAIL_ROD=30 SAIL_SHOT_KEYS=70:c;71:c;72:c SAIL_SHOT_AFTER=76" ;;
     keys)     echo "SAIL_SEED=42 SAIL_SHOT_KEYS=70:f1 SAIL_SHOT_AFTER=73" ;;
+    # The start, with eleven seconds on the clock and the boat too far off to make it.
+    # `SAIL_RACE=<seconds>` lays the course and puts that much on the countdown, so the
+    # moment is chosen rather than waited for — the full sequence is five minutes.
+    #
+    # The clock is set so that the photograph lands with about fifteen seconds on it:
+    # that is where the panel stops being arithmetic and starts saying you cannot get
+    # there — a couple of hundred metres to the line and more sailing than there is time
+    # for. 85 on the countdown and the shot at 70 gets that.
+    #
+    # It cannot simply be `SAIL_RACE=15` with an early shot: the world is not lit for the
+    # first half-minute or so, and a capture before then is a black frame — which is why
+    # the blank test above exists. The clock has to be long enough to outlast the sunrise.
+    #
+    # The course is laid off the wind when the sequence starts, so the seed decides
+    # where it lies; 42 is the one these pictures are taken in.
+    race)     echo "SAIL_SEED=42 SAIL_RACE=85 SAIL_SHOT_AFTER=70" ;;
     *) return 1 ;;
   esac
 }
@@ -82,7 +117,7 @@ reel_env () {
   echo "SAIL_SEED=19 SAIL_SQUALL=70 SAIL_SHOT_EVERY=0.22 SAIL_SHOT_FRAMES=30 SAIL_SHOT_AFTER=116"
 }
 
-SCENES=${*:-"brig squall gennaker rod drill chart lost below keys"}
+SCENES=${*:-"brig race squall gennaker rod drill chart lost below keys"}
 failed=()
 
 # `widths` is a comparison rather than a scene: the same rigging at both drawn widths,
@@ -183,16 +218,21 @@ fi
 
 for name in $SCENES; do
   env_line=$(scene_env "$name") || { echo "unknown scene: $name"; exit 1; }
-  for attempt in 1 2; do
+  for attempt in 1 2 3; do
     printf '%-9s attempt %d ... ' "$name" "$attempt"
     # shellcheck disable=SC2086
     env $env_line SAIL_SHOT="$RAW/$name.png" SAIL_SHOT_EXIT=1 "$BIN" >"$RAW/$name.log" 2>&1
-    if [ -s "$RAW/$name.png" ]; then
+    if [ -s "$RAW/$name.png" ] && ! blank "$RAW/$name.png"; then
       echo "ok"
       break
     fi
-    echo "no picture written"
-    [ "$attempt" = 2 ] && failed+=("$name")
+    if [ -s "$RAW/$name.png" ]; then
+      echo "black frame"
+      rm -f "$RAW/$name.png"
+    else
+      echo "no picture written"
+    fi
+    [ "$attempt" = 3 ] && failed+=("$name")
   done
 done
 

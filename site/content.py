@@ -382,6 +382,41 @@ MANUAL = [
         chart writes it up.</p></div>""",
     ),
     (
+        "racing",
+        "The start",
+        """<p><b>The one thing sailing has that nothing else does is the start.</b> You
+        cannot stop a sailing boat and you cannot park her — she is always going
+        somewhere — so the start of a race is not a button but a manoeuvre. You spend the
+        last five minutes making the boat arrive at a line she must not touch early, at
+        full speed, at the end of it you have decided is favoured. Everybody who has
+        raced knows the race is usually decided there, and everybody who has not is
+        astonished by it.</p>
+
+        <p><b>The favoured end is calculated, not invented.</b> A line a hundred and
+        forty metres long that is ten degrees off square to the wind hands you twenty-odd
+        metres of free distance at one end of it, and the panel says which end and by how
+        many metres — metres being the only unit you can think in on the water. Over
+        early and you come back, which is the one rule that makes a start a start.</p>
+
+        <p><b>Four legs, windward and leeward, about twenty minutes.</b> The course is
+        laid off the wind at the moment it is set: one buoy dead upwind, another dead
+        downwind, so every leg is a beat or a run and nothing in between. That is
+        deliberate — those are the two points of sail with something to decide on them.
+        A reach is a lovely thing to sail and there is nothing to do on it but steer, and
+        a course made of reaches is a course where the boat that started first wins.</p>
+
+        <p>The marks are rounded by being near them — twenty-five metres — because which
+        side you passed is a question this game cannot answer honestly, and a rule it
+        cannot enforce is better left to the sailor.</p>
+
+        <div class="caveat"><b>What is not in it yet</b><p>No other boats. The fleet
+        exists and the times that would make it a race are two fields on the wire, but
+        there is nobody to start against, and so no rules of the road either — boats here
+        do not collide, and a protest nobody can lodge is a rule nobody has. What is here
+        is the clock, the line, the marks, and being sent back when you are over
+        early.</p></div>""",
+    ),
+    (
         "fishing",
         "The rod",
         """<p>She was an open fishing boat until 1964, so there is a rod in a holder on her
