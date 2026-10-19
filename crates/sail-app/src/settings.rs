@@ -270,47 +270,7 @@ pub fn draw(
                     if ui.selectable_label(ink.0, "the ink drawing").clicked() {
                         ink.0 = !ink.0;
                     }
-                    // Resolution. Named in pixels of height, because that is what the old
-                    // machines were sold as and it is what the look is.
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("pixels")
-                                .color(egui::Color32::from_rgb(150, 150, 130))
-                                .monospace()
-                                .size(11.0),
-                        );
-                        // The drawn widths, then the sharp picture. The widths come
-                        // from `retro` rather than being written out here, because two
-                        // lists of the same thing is how a settings panel comes to offer
-                        // a size the renderer does not have.
-                        //
-                        // Named by their number. "drawn" alone was honest when there was
-                        // one of them; with two, a name that does not say which is which
-                        // makes the player click both to find out.
-                        for (i, w) in crate::retro::Retro::widths().iter().enumerate() {
-                            let step = Some(i);
-                            if ui
-                                .selectable_label(retro.step == step, format!("{w}"))
-                                .on_hover_text(if i == 0 {
-                                    "the drawn picture — pixels you can count"
-                                } else {
-                                    "the same picture, finer: for a large screen, where \
-                                     the coarse one reads as low resolution rather than \
-                                     as drawn"
-                                })
-                                .clicked()
-                            {
-                                retro.step = step;
-                            }
-                        }
-                        if ui
-                            .selectable_label(retro.step.is_none(), "sharp")
-                            .on_hover_text("no pixel grid at all — what is actually on the deck")
-                            .clicked()
-                        {
-                            retro.step = None;
-                        }
-                    });
+                    pixels(ui, &mut retro);
                     if ui.selectable_label(hud.0, "the diagnostic panel").clicked() {
                         hud.0 = !hud.0;
                     }
@@ -625,6 +585,49 @@ fn drill(
     {
         lesson.wants_start = true;
     }
+}
+
+/// How many pixels across the world is drawn, as a row of choices.
+///
+/// Its own function for the reason `tabs` is: it can then be read without a window, and
+/// what this row needs checking for is exactly what a person reads off it — which widths
+/// are on offer and whether the one in use is the one lit up. The widths come from
+/// `retro` rather than being listed again here, because two lists of the same thing is
+/// how a settings panel comes to offer a size the renderer does not have.
+pub fn pixels(ui: &mut egui::Ui, retro: &mut crate::retro::Retro) {
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("pixels")
+                .color(egui::Color32::from_rgb(150, 150, 130))
+                .monospace()
+                .size(11.0),
+        );
+        // Named by their number. "drawn" alone was honest while there was one of them;
+        // with two, a name that does not say which is which makes the player click both
+        // to find out.
+        for (i, w) in crate::retro::Retro::widths().iter().enumerate() {
+            let step = Some(i);
+            if ui
+                .selectable_label(retro.step == step, format!("{w}"))
+                .on_hover_text(if i == 0 {
+                    "the drawn picture — pixels you can count"
+                } else {
+                    "the same picture, finer: for a large screen, where the coarse one \
+                     reads as low resolution rather than as drawn"
+                })
+                .clicked()
+            {
+                retro.step = step;
+            }
+        }
+        if ui
+            .selectable_label(retro.step.is_none(), "sharp")
+            .on_hover_text("no pixel grid at all — what is actually on the deck")
+            .clicked()
+        {
+            retro.step = None;
+        }
+    });
 }
 
 /// The pages, as a row of labels.
@@ -974,6 +977,41 @@ mod tests {
     use super::*;
     use crate::fleet::{Fleet, Ghost};
     use crate::net::Net;
+
+    /// The picture row offers every width the renderer has, and the sharp picture.
+    ///
+    /// Reported as the thing that was missing: one drawn size, and a large screen has
+    /// no way to ask for a finer one. The failure this guards is the quiet half of that
+    /// — a panel listing sizes of its own, which then drift from the renderer's.
+    #[test]
+    fn the_picture_row_offers_every_width() {
+        let mut retro = crate::retro::Retro::default();
+        let said = words(|ui| super::pixels(ui, &mut retro));
+        for w in crate::retro::Retro::widths() {
+            assert!(said.contains(&w.to_string()), "{w} is not on the row: {said}");
+        }
+        assert!(said.contains("sharp"), "no sharp picture on the row: {said}");
+        assert!(said.contains("pixels"), "the row has lost its label: {said}");
+    }
+
+    /// Clicking is not tested — this is: whatever step is set, the row can draw it.
+    ///
+    /// A step the panel cannot render is how a remembered setting turns into a blank
+    /// row, and the index is a plain `usize` that several things write.
+    #[test]
+    fn every_step_can_be_drawn() {
+        for step in (0..crate::retro::Retro::widths().len()).map(Some).chain([None]) {
+            // Built and then set, rather than with struct update syntax: the rest of
+            // `Retro` is render state and rightly private to it.
+            let mut retro = crate::retro::Retro::default();
+            retro.step = step;
+            let said = words(|ui| super::pixels(ui, &mut retro));
+            assert!(
+                said.contains("pixels"),
+                "step {step:?} drew nothing readable: {said}"
+            );
+        }
+    }
 
     /// Every word the panel actually draws, in one string.
     ///
