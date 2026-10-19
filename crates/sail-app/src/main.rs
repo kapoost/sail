@@ -457,5 +457,18 @@ fn main() {
         app.insert_resource(shot)
             .add_systems(Update, shot::on_a_timer);
     }
+    // Or a run of them, when the thing worth showing is motion.
+    if let Some(reel) = shot::reel() {
+        app.insert_resource(reel).add_systems(Update, shot::on_a_reel);
+    }
+    // And the keys to press before it, for the views that live behind one. In
+    // `PreUpdate` after the input plugin, so a scripted key is indistinguishable from
+    // a real one to everything in `Update`.
+    if let Some(score) = shot::scored() {
+        app.insert_resource(score).add_systems(
+            PreUpdate,
+            shot::on_a_schedule.after(bevy::input::InputSystems),
+        );
+    }
     app.run();
 }
