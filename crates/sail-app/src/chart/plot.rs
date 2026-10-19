@@ -1242,54 +1242,97 @@ pub(crate) fn the_course(t: &Table, race: &crate::race::Race) {
     if !race.running() {
         return;
     }
-    const INK: egui::Color32 = egui::Color32::from_rgb(190, 86, 24);
+    const INK: egui::Color32 = egui::Color32::from_rgb(214, 92, 20);
     let (boat, pin) = race.line;
-    let (a, b) = (t.to_screen(boat), t.to_screen(pin));
-    // The line itself, drawn heavier than anything else on the paper: for five minutes
-    // it is the only thing on the chart that matters.
-    t.p.line_segment([a, b], egui::Stroke::new(2.2, INK));
-    for (end, name) in [(a, "committee"), (b, "pin")] {
-        t.p.circle_filled(end, 3.0, INK);
-        t.note(end + egui::vec2(6.0, -12.0), name, INK);
+    let (mut a, mut b) = (t.to_screen(boat), t.to_screen(pin));
+    // **A chart symbol has a size of its own.**
+    //
+    // The course is eight hundred metres on a chart five miles across, so drawn to
+    // scale the start line is six pixels and the whole thing is a smudge — which is
+    // what *I cannot see the line on the map* meant. Every paper chart in the world
+    // solves this the same way: a buoy is drawn at the size of the symbol and not at
+    // the size of the buoy. So the line is never shorter on the paper than a symbol
+    // somebody can aim at, and it grows into a true-scale drawing as the chart is
+    // zoomed in on it.
+    const LEAST_LINE: f32 = 26.0;
+    let middle_on_paper = ((a.to_vec2() + b.to_vec2()) * 0.5).to_pos2();
+    let span = b - a;
+    if span.length() < LEAST_LINE {
+        let along = if span.length() > 0.1 {
+            span / span.length()
+        } else {
+            egui::vec2(1.0, 0.0)
+        };
+        a = middle_on_paper - along * LEAST_LINE * 0.5;
+        b = middle_on_paper + along * LEAST_LINE * 0.5;
     }
-    // The marks, numbered in the order they are rounded — which is the thing that is
-    // argued about in the dinghy park and never on the water.
+    // The line itself, heavier than anything else on the paper: for five minutes it is
+    // the only thing on the chart that matters.
+    t.p.line_segment([a, b], egui::Stroke::new(2.4, INK));
+    // Ends: the committee boat is a square and the pin is a circle, which is how a
+    // sailing instruction draws them and how everybody tells the two apart.
+    t.p.rect_filled(
+        egui::Rect::from_center_size(a, egui::vec2(6.0, 6.0)),
+        1.0,
+        INK,
+    );
+    t.p.circle_filled(b, 3.2, INK);
+    t.p.text(
+        middle_on_paper + egui::vec2(0.0, 9.0),
+        egui::Align2::CENTER_TOP,
+        "START",
+        egui::FontId::monospace(8.0),
+        INK,
+    );
+
+    // The legs, in the order they are sailed, with the marks numbered on them. Drawn
+    // from the middle of the line out and back, which is the shape of the course and
+    // the thing a list of positions cannot say.
+    let mut was = boat.lerp(pin, 0.5);
     for (n, mark) in race.marks.iter().enumerate() {
+        let (from, to) = (t.to_screen(was), t.to_screen(*mark));
+        let along = to - from;
+        let len = along.length();
+        if len > 2.0 {
+            let step = along / len;
+            let mut at = 0.0;
+            while at < len {
+                let end = (at + 4.0).min(len);
+                t.p.line_segment(
+                    [from + step * at, from + step * end],
+                    egui::Stroke::new(1.2, INK),
+                );
+                at = end + 4.0;
+            }
+            // An arrow at the middle of the leg: which way round a course goes is the
+            // thing that gets argued about in the dinghy park and never on the water.
+            let mid = from + step * (len * 0.5);
+            let wing = egui::vec2(-step.y, step.x) * 3.0;
+            t.p.line_segment([mid - step * 4.0 + wing, mid], egui::Stroke::new(1.2, INK));
+            t.p.line_segment([mid - step * 4.0 - wing, mid], egui::Stroke::new(1.2, INK));
+        }
+        // The mark, at symbol size whatever the scale is, with its number beside it.
         let at = t.to_screen(*mark);
-        t.p.circle_stroke(at, 5.0, egui::Stroke::new(1.6, INK));
+        t.p.circle_stroke(at, 4.5, egui::Stroke::new(1.6, INK));
+        t.p.circle_filled(at, 1.4, INK);
         t.p.text(
-            at + egui::vec2(8.0, -8.0),
+            at + egui::vec2(6.0, -7.0),
             egui::Align2::LEFT_TOP,
             format!("{}", n + 1),
             egui::FontId::monospace(9.0),
             INK,
         );
-    }
-    // And the legs between them, so the way round is a shape rather than a list.
-    let middle = boat.lerp(pin, 0.5);
-    let mut was = middle;
-    for mark in &race.marks {
-        let (from, to) = (t.to_screen(was), t.to_screen(*mark));
-        let along = to - from;
-        let len = along.length();
-        if len > 1.0 {
-            let step = along / len;
-            let mut at = 0.0;
-            while at < len {
-                let end = (at + 3.0).min(len);
-                t.p.line_segment(
-                    [from + step * at, from + step * end],
-                    egui::Stroke::new(1.0, INK),
-                );
-                at = end + 4.0;
-            }
-        }
         was = *mark;
     }
-    // The other boats, as the little marks a committee puts on a sketch — enough to
-    // say who is where, which is the whole of what a chart can say about a fleet.
+    // Home again: the last leg ends at the line it started from.
+    let (from, to) = (t.to_screen(was), middle_on_paper);
+    t.p.line_segment([from, to], egui::Stroke::new(1.0, INK.gamma_multiply(0.6)));
+
+    // The other boats, as the marks a committee puts on a sketch — enough to say who is
+    // where, which is the whole of what a chart can say about a fleet.
     for rival in &race.rivals {
         let at = t.to_screen(rival.at);
-        t.p.circle_filled(at, 2.0, INK);
+        t.p.circle_filled(at, 2.2, INK);
+        t.note(at + egui::vec2(4.0, -10.0), rival.name, INK);
     }
 }
