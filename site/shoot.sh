@@ -44,7 +44,25 @@ OUT=site/shots
 # these are development knobs, and they stay out of the page.
 scene_env () {
   case $1 in
-    brig)     echo "SAIL_SEED=42 SAIL_BRIG_SHOW=140 SAIL_SHOT_AFTER=80" ;;
+    # **Not scriptable yet — `site/shots/brig.webp` is kept by hand.** Left here with
+    # what was tried, because the next person will try the same things.
+    #
+    # `SAIL_BRIG=350` is the right start: it takes the job, so the line across the top
+    # says a brig wants a pilot and the flag goes up in our rigging. What it does not do
+    # is put her where a camera can see her. She is placed forty degrees off the bow and
+    # then sails her own course for the anchorage while the watch sails ours, so within
+    # half a minute she is astern — measured at 28 s, 45 s and 72 s, and she was behind
+    # us at all three.
+    #
+    # `SAIL_BRIG_SHOW=250` pins her and holds her, which sounds like the answer and is
+    # not: it pins her thirty-eight degrees off the bow, and that is outside the frame of
+    # both the chase camera and the cockpit one. The bearing line reads "the brig bears
+    # 258, 0.1 nm" while the picture is empty water — checked in both views.
+    #
+    # The kept photograph has her bearing 345 on a heading of 345: dead ahead, where the
+    # camera is looking. Until there is a knob that puts her near the eye's axis rather
+    # than beside it, a scripted brig scene is a photograph of a promise.
+    brig)     echo "" ;;
     squall)   echo "SAIL_SEED=19 SAIL_SQUALL=70     SAIL_SHOT_AFTER=120" ;;
     gennaker) echo "SAIL_SEED=11 SAIL_HEADSAIL=gennaker SAIL_SHOT_AFTER=80" ;;
     rod)      echo "SAIL_SEED=3  SAIL_ROD=30 SAIL_HOOK=ling SAIL_FISH=20 SAIL_SHOT_AFTER=85" ;;
@@ -68,7 +86,9 @@ reel_env () {
   echo "SAIL_SEED=19 SAIL_SQUALL=70 SAIL_SHOT_EVERY=0.22 SAIL_SHOT_FRAMES=30 SAIL_SHOT_AFTER=116"
 }
 
-SCENES=${*:-"brig squall gennaker rod drill chart lost below keys"}
+# `brig` is deliberately absent from the default sweep: see the note beside it. A plain
+# `shoot.sh` must not overwrite the one picture here that was not taken by this script.
+SCENES=${*:-"squall gennaker rod drill chart lost below keys"}
 failed=()
 
 # `widths` is a comparison rather than a scene: the same rigging at both drawn widths,
