@@ -127,6 +127,7 @@ fn scatter(rng: &mut sail_core::rng::Pcg32, top: f32) -> Vec3 {
     Vec3::new(r * a.cos(), rng.next_f64() as f32 * top, r * a.sin())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     ink: Res<crate::world::Ink>,
     sim: Res<Sim>,

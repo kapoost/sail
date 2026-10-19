@@ -483,7 +483,6 @@ pub fn setup(
                 crate::sky::haze_near(&sky_state),
                 crate::sky::haze_colour(&sky_state),
             ),
-            ..default()
         },
     ));
     // Worth a line in the log, now that it is weather rather than a constant: "why can

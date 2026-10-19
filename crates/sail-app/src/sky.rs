@@ -781,6 +781,7 @@ pub fn haze_colour(sky: &Sky) -> Color {
 /// * **And it never opens past about twelve kilometres**, because the sea patch ends
 ///   somewhere and haze is what hides the edge. That bound is the renderer's, not the
 ///   weather's, and it is worth saying so.
+///
 /// What colour the haze glows where you are looking towards the sun through it.
 ///
 /// The sun's own tint, dimmed by whatever is in front of it: this is scattered light,
