@@ -366,16 +366,26 @@ pub fn hatch_map() -> Image {
 /// may overlap without anybody having to sort them back to front.
 pub fn spray_marks() -> Image {
     const W: u32 = 128;
-    let mut data = vec![0u8; (W * 2 * W * 4) as usize];
+    // Six cells in a row: a drop, a bubble, and four frames of a handful of foam coming
+    // apart.
+    //
+    // **The four are the animation.** A mark that only fades out is a mark that keeps
+    // its shape while it disappears, which is not what foam does: foam *tears* — the
+    // holes in it open, the edges go ragged, and what is left is a scatter of smaller
+    // patches. A flipbook of four says that in the one channel this sheet has, and it
+    // costs nothing at all because the frame is chosen by the vertex's own age when the
+    // quad is laid down.
+    pub const CELLS: u32 = 6;
+    let mut data = vec![0u8; (W * CELLS * W * 4) as usize];
     for y in 0..W {
-        for x in 0..W * 2 {
-            let claw = x >= W;
+        for x in 0..W * CELLS {
+            let cell = x / W;
             let u = ((x % W) as f32 + 0.5) / W as f32 * 2.0 - 1.0;
             let v = (y as f32 + 0.5) / W as f32 * 2.0 - 1.0;
-            let value = if claw {
-                claw_mark(u, v)
-            } else {
-                drop_mark(u, v)
+            let value = match cell {
+                0 => drop_mark(u, v),
+                1 => bubble_mark(u, v),
+                frame => torn_claw(u, v, frame - 2),
             };
             let i = ((y * W * 2 + x) * 4) as usize;
             let byte = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -387,7 +397,7 @@ pub fn spray_marks() -> Image {
     }
     let mut image = Image::new(
         Extent3d {
-            width: W * 2,
+            width: W * CELLS,
             height: W,
             depth_or_array_layers: 1,
         },
@@ -436,6 +446,55 @@ fn claw_mark(u: f32, v: f32) -> f32 {
     // Soft all the way out. The hard outer edge was half of why it read as a drawn
     // shape rather than as foam; what an edge of foam does is get thinner.
     1.0 - smoothstep(rim * 0.35, rim, r)
+}
+
+/// A bubble: a rim with the light bent round it and a highlight where the sky is.
+///
+/// **This is the thing foam is made of**, and at the scale where you can see one at all
+/// — alongside, in the wake, in a patch that has just stopped breaking — it is not a
+/// white blob but a little sphere: dark in the middle where you are looking through it
+/// into the water, bright round the edge where the surface turns away from you, and with
+/// one hard glint high on it where the sky is reflected. The mark is drawn additively,
+/// so the dark middle is simply nothing added and the sea shows through it, which is
+/// exactly right and costs no sorting.
+fn bubble_mark(u: f32, v: f32) -> f32 {
+    let r = (u * u + v * v).sqrt();
+    if r > 0.98 {
+        return 0.0;
+    }
+    // The rim: brightest just inside the edge, where a sphere's surface is most nearly
+    // side-on to the eye.
+    let rim = smoothstep(0.52, 0.86, r) * (1.0 - smoothstep(0.86, 0.99, r));
+    // The glint, up and to the left of centre, small and hard. A bubble has one and
+    // only one, which is how the eye knows it is a sphere and not a ring.
+    let (gx, gy) = (u + 0.33, v - 0.36);
+    let glint = 1.0 - smoothstep(0.0, 0.20, (gx * gx + gy * gy).sqrt());
+    // And the faintest wash across the whole of it, so it is a thing rather than an
+    // outline.
+    let body = 0.10 * (1.0 - smoothstep(0.2, 0.95, r));
+    (rim * 0.55 + glint * 0.95 + body).clamp(0.0, 1.0)
+}
+
+/// A handful of foam, torn apart in four stages.
+///
+/// The holes are the animation: the same mark with more of it eaten away each frame, and
+/// eaten in a fixed pattern rather than at random, so one speck's four frames are four
+/// stages of the same patch rather than four different patches.
+fn torn_claw(u: f32, v: f32, frame: u32) -> f32 {
+    let whole = claw_mark(u, v);
+    if frame == 0 {
+        return whole;
+    }
+    // Lace: two fields of lumps at different scales, which is what the gaps in foam
+    // look like — big holes with small ones through the webs between them.
+    let big = ((u * 3.1 + 0.7).sin() * (v * 2.7 - 0.4).sin()).abs();
+    let small = ((u * 7.3 - 1.1).sin() * (v * 6.1 + 0.9).cos()).abs();
+    let lace = big * 0.65 + small * 0.35;
+    // Each frame takes more: a third gone, then two thirds, then all but the thickest
+    // of it.
+    let eats = [0.0, 0.30, 0.52, 0.72][frame.min(3) as usize];
+    let kept = smoothstep(eats, eats + 0.22, lace);
+    whole * kept
 }
 
 /// Rafts of foam, for the wake: four of them, so a bandful is not one mark repeated.
@@ -609,4 +668,62 @@ pub fn build_mipmaps(image: &mut Image, renormalise: bool) {
 #[inline]
 pub fn encode_normal(component: f32) -> u8 {
     (((component * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0)) as u8
+}
+
+#[cfg(test)]
+mod the_marks {
+    use super::*;
+
+    /// **A bubble is a sphere, and the sheet has to say so in one channel.**
+    ///
+    /// Dark in the middle, because that is where you are looking through it into the
+    /// water; bright at the rim, where its surface turns away from you; and one hard
+    /// glint high on it, which is the thing that tells the eye it is a sphere and not a
+    /// ring. Drawn additively, so the dark middle adds nothing and the sea shows
+    /// through — which is the whole reason it can be drawn this cheaply.
+    #[test]
+    fn a_bubble_is_dark_in_the_middle_and_bright_round_the_edge() {
+        let middle = bubble_mark(0.05, 0.05);
+        let rim = bubble_mark(0.0, 0.72);
+        let glint = bubble_mark(-0.33, 0.36);
+        let outside = bubble_mark(1.2, 0.0);
+        assert!(
+            middle < 0.2,
+            "the middle of a bubble came out at {middle:.2}"
+        );
+        assert!(
+            rim > middle * 1.5,
+            "the rim is not brighter than the middle"
+        );
+        assert!(glint > rim, "the glint is not the brightest thing on it");
+        assert_eq!(outside, 0.0, "there is nothing outside a bubble");
+    }
+
+    /// And foam tears: each frame keeps less of the same patch than the last.
+    ///
+    /// Not four different patches — four stages of one, which is what makes a flipbook
+    /// read as a thing coming apart rather than as a thing being replaced.
+    #[test]
+    fn foam_comes_apart_frame_by_frame() {
+        let mut was = f32::MAX;
+        for frame in 0..4u32 {
+            // How much of the mark is left, over a grid of it.
+            let mut kept = 0.0;
+            for i in 0..21 {
+                for j in 0..21 {
+                    let u = i as f32 / 10.0 - 1.0;
+                    let v = j as f32 / 10.0 - 1.0;
+                    kept += torn_claw(u, v, frame);
+                }
+            }
+            assert!(
+                kept < was,
+                "frame {frame} kept {kept:.1} against {was:.1} before it"
+            );
+            was = kept;
+        }
+        // And the last frame still has something in it: foam thins out, it does not
+        // blink off.
+        assert!(was > 0.0);
+    }
 }

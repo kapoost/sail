@@ -84,6 +84,14 @@ const CREST_TOP: f64 = 0.42;
 
 /// How many looks at the water a fully whitecapped sea gets a second.
 const CREST_DARTS: f32 = 4200.0;
+/// How many bubbles are drawn in a patch of foam.
+///
+/// Four, which is not how many there are — a square metre of fresh foam has thousands —
+/// but how many it takes for the eye to read *bubbles* rather than *white*. Past that
+/// they stop being individuals and go back to being a texture, which the foam marks are
+/// already doing better and more cheaply.
+const BUBBLES_IN_A_PATCH: usize = 4;
+
 /// Marks in one breaking crest, and how far they are scattered, metres.
 const CREST_SPECKS: usize = 6;
 const CREST_PATCH: f64 = 1.5;
@@ -168,6 +176,47 @@ const ROLLER_DIES: f64 = 0.55;
 /// there.
 const CREST_REACH: f64 = 90.0;
 
+/// The three things in the water that catch the light.
+#[derive(Clone, Copy, PartialEq)]
+enum Mark {
+    /// Thrown off the bow: a drop of water in the air.
+    Drop,
+    /// Torn off a breaking crest: a handful of foam, which tears as it dies.
+    Claw,
+    /// **A bubble**, which is what foam is actually made of.
+    ///
+    /// Not a third size of blob: a little sphere, dark in the middle where you are
+    /// looking through it into the water, bright round the rim, with one hard glint
+    /// where the sky is. Alongside and in the wake the eye is close enough to resolve
+    /// them, and a patch of foam drawn without any is a patch of white paint.
+    Bubble,
+}
+
+impl Mark {
+    /// Which cell of the sheet, and how many frames that cell has.
+    fn cell(self, life: f32) -> f32 {
+        const CELLS: f32 = 6.0;
+        let n = match self {
+            Mark::Drop => 0.0,
+            Mark::Bubble => 1.0,
+            // Four frames of coming apart, walked through over the mark's own life.
+            Mark::Claw => 2.0 + (life * 4.0).floor().clamp(0.0, 3.0),
+        };
+        n / CELLS
+    }
+
+    /// How long it lasts, seconds.
+    fn life(self) -> f32 {
+        match self {
+            Mark::Drop => LIFE,
+            Mark::Claw => CLAW_LIFE,
+            // Longer than the foam it came out of: the patch tears apart and the
+            // bubbles in it go on sitting there until they pop.
+            Mark::Bubble => CLAW_LIFE * 1.6,
+        }
+    }
+}
+
 struct Speck {
     at: glam::DVec2,
     drift: glam::DVec2,
@@ -194,9 +243,9 @@ struct Speck {
     /// How blue this one is to begin with, 0 white and 1 the colour of the sea it came
     /// out of.
     tint: f32,
-    /// Whether this one is foam torn off a breaking crest rather than spray thrown off
-    /// the bow, which decides which mark it is drawn with — see `spray_marks`.
-    claw: bool,
+    /// What kind of thing it is, which decides the mark it is drawn with, how long it
+    /// lives and how big it gets — see `spray_marks`.
+    kind: Mark,
     /// How fast this one breathes, radians a second.
     ///
     /// Its own, which is the correction: every speck used the same two beats and
@@ -288,7 +337,7 @@ impl Spray {
                 scale: scale * (0.7 + 0.8 * r.next_f64() as f32),
                 phase: r.next_f64() as f32 * std::f32::consts::TAU,
                 tint: 0.45 + 0.55 * r.next_f64() as f32,
-                claw: false,
+                kind: Mark::Drop,
                 beat: beat_of(r.next_f64() as f32),
                 sparkle: sparkle_of(r.next_f64() as f32),
             });
@@ -381,7 +430,7 @@ pub fn update(
         // half a second of time constant is about the length of one.
         s.at += (s.drift + s.surge) * dt as f64;
         s.surge *= (-(dt as f64) / ROLLER_DIES).exp();
-        if s.age < if s.claw { CLAW_LIFE } else { LIFE } {
+        if s.age < s.kind.life() {
             keep.push(s);
         }
     }
@@ -547,9 +596,40 @@ pub fn update(
                     scale: 2.0 + 2.6 * r.next_f64() as f32,
                     phase: r.next_f64() as f32 * std::f32::consts::TAU,
                     tint: 0.2 * r.next_f64() as f32,
-                    claw: true,
+                    kind: Mark::Claw,
                     beat: beat_of(r.next_f64() as f32),
                     sparkle: sparkle_of(r.next_f64() as f32),
+                });
+            }
+            // **And the bubbles in it**, which are what the foam is made of.
+            //
+            // Near enough to be resolved, a patch of foam is not a white shape: it is a
+            // few hundred little spheres, each with the sky in it, sitting in water
+            // that is merely pale. They are spawned with the patch and outlive it — the
+            // handful tears apart and the bubbles go on sitting there — which is why a
+            // whitecap leaves a trail behind it instead of simply vanishing.
+            for _ in 0..BUBBLES_IN_A_PATCH {
+                if live.len() >= budget() {
+                    break;
+                }
+                let spread = r.next_f64() * std::f64::consts::TAU;
+                let out = CREST_PATCH * 1.4 * r.next_f64().sqrt();
+                live.push(Speck {
+                    at: at + glam::DVec2::new(spread.cos(), spread.sin()) * out,
+                    // They go with the water and not with the wind: a bubble is in the
+                    // sea rather than on it, and that difference is visible the moment
+                    // there are both kinds in one patch.
+                    drift: blow * 0.25,
+                    surge: glam::DVec2::ZERO,
+                    age: 0.0,
+                    scale: 0.8 + 1.8 * r.next_f64() as f32,
+                    phase: r.next_f64() as f32 * std::f32::consts::TAU,
+                    tint: 0.0,
+                    kind: Mark::Bubble,
+                    beat: beat_of(0.55 + 0.45 * r.next_f64() as f32),
+                    // Every one of them twinkles: a bubble is a sphere with the sky on
+                    // it, and the glint moves as the water turns under it.
+                    sparkle: 0.5 + 0.5 * r.next_f64() as f32,
                 });
             }
             born_breaking += 1;
@@ -655,7 +735,7 @@ pub fn update(
                     scale: (3.2 + 3.0 * r.next_f64() as f32) * taper,
                     phase: r.next_f64() as f32 * std::f32::consts::TAU,
                     tint: 0.12 * r.next_f64() as f32,
-                    claw: true,
+                    kind: Mark::Claw,
                     beat: beat_of(r.next_f64() as f32),
                     sparkle: sparkle_of(r.next_f64() as f32),
                 });
@@ -744,7 +824,7 @@ pub fn update(
             scale: 0.55 + 0.9 * r.next_f64() as f32,
             phase: r.next_f64() as f32 * std::f32::consts::TAU,
             tint: r.next_f64() as f32,
-            claw: false,
+            kind: Mark::Drop,
             beat: beat_of(r.next_f64() as f32),
             sparkle: sparkle_of(r.next_f64() as f32),
         });
@@ -790,7 +870,7 @@ pub fn update(
             }
             continue;
         }
-        let life = (s.age / if s.claw { CLAW_LIFE } else { LIFE }).clamp(0.0, 1.0);
+        let life = (s.age / s.kind.life()).clamp(0.0, 1.0);
         // Thrown up bright, spreading and thinning as it settles. The brightness falls
         // faster than the size grows, which is what foam does: it goes from white to a
         // patch of bubbles to nothing, getting wider the whole time.
@@ -811,7 +891,13 @@ pub fn update(
         // is a splodge of paint however good its shape: the claw now starts at three
         // centimetres and ends under twenty, which at the distance a crest breaks from
         // the boat is a handful of foam rather than a bedsheet.
-        let size = if s.claw {
+        let size = if s.kind == Mark::Bubble {
+            // A bubble is a bubble: a centimetre or two, and it does not grow. What it
+            // does is sit there until it is gone, which is the other half of why a
+            // patch of foam does not read as paint — the big marks spread and tear
+            // while the small bright ones stay exactly the size they are.
+            (0.012 + 0.004 * life) * s.scale
+        } else if s.kind == Mark::Claw {
             (0.03 + 0.16 * life) * s.scale
         } else {
             (0.04 + 0.06 * life) * s.scale * 0.62
@@ -831,7 +917,11 @@ pub fn update(
         // And they go out faster than they grow, or a bloom is a cloud that swells to
         // fill the sea. The claws are given a steeper curve than the specks for the same
         // reason they are given a bigger one: the mark is the *arrival* of the foam.
-        let fade = if s.claw { 2.6 } else { 1.7 };
+        let fade = match s.kind {
+            Mark::Claw => 2.6,
+            Mark::Bubble => 3.1,
+            Mark::Drop => 1.7,
+        };
         let alpha = (1.0 - life).powf(fade) * 0.95 * twinkle.clamp(0.0, 1.4);
         // The surface this mark has to sit on is the one that is *drawn*, which is not
         // the one the water has. The mesh carries nothing finer than four samples
@@ -915,11 +1005,13 @@ pub fn update(
         // drop of water and a mark torn off a crest is a handful of foam, and until now
         // both were the same white square — which is what "I still cannot see the
         // whitecaps, and they are squares" was about from two directions at once.
-        let cell = if s.claw { 0.5 } else { 0.0 };
+        // Which cell of the sheet, and for foam which frame of its coming apart.
+        let cell = s.kind.cell(life);
+        const ACROSS: f32 = 1.0 / 6.0;
         for (u, v) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
             positions.push(centre + right * (size * u) + up * (size * v));
             colours.push([colour.x, colour.y, colour.z, alpha]);
-            uvs.push(Vec2::new(cell + (u * 0.5 + 0.5) * 0.5, v * 0.5 + 0.5));
+            uvs.push(Vec2::new(cell + (u * 0.5 + 0.5) * ACROSS, v * 0.5 + 0.5));
         }
     }
 
