@@ -508,6 +508,15 @@ MANUAL = [
 
 SHOTS = [
         (
+            "sunset.webp",
+            "The end of the day",
+            "Dawn and dusk used to be the same grey as noon: only the sunlight warmed, "
+            "so the water carried a gold path under a sky with no colour in it. The "
+            "gradient moves with the sun now — deep towards violet overhead, burning "
+            "where the sun is, with the anti-twilight arch on the far side — and the "
+            "cloud bases catch what the sea throws back up at them.",
+        ),
+        (
             "brig.webp",
             "A brig wants a pilot",
             "She comes in from the open sea and will not come to you. Pilotage is leading, "

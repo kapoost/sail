@@ -506,6 +506,15 @@ MANUAL = [
 
 SHOTS = [
     (
+        "sunset.webp",
+        "Koniec dnia",
+        "Świt i zmierzch były dotąd tak samo szare jak południe: ocieplało się tylko "
+        "światło słońca, więc po wodzie szła złota ścieżka pod niebem bez żadnej barwy. "
+        "Teraz gradient idzie za słońcem — nad głową ciemnieje ku fioletowi, pali się "
+        "tam, gdzie jest słońce, a po przeciwnej stronie zostaje łuk "
+        "przeciwzmierzchowy — a spody chmur łapią to, co morze odbija w górę.",
+    ),
+    (
         "brig.webp",
         "Bryg szuka pilota",
         "Wchodzi z pełnego morza i sam do ciebie nie podejdzie. Pilotaż to prowadzenie, "
