@@ -104,7 +104,10 @@ const CREST_TOP: f64 = 0.30;
 /// Fewer and bigger is also what the frame can afford: these are additive quads and what
 /// they cost is area, so the same white water in a tenth as many marks is most of a
 /// millisecond back.
-const CREST_DARTS: f32 = 1400.0;
+/// Raised with the reach: the darts are scattered over the whole disc, so taking that
+/// disc from ninety metres to two hundred and sixty is eight times the water and eight
+/// times as few crests found in any part of it.
+const CREST_DARTS: f32 = 1600.0;
 /// How many bubbles are drawn in a patch of foam.
 ///
 /// Four, which is not how many there are — a square metre of fresh foam has thousands —
@@ -213,7 +216,29 @@ const ROLLER_DIES: f64 = 0.55;
 /// shading on the water carries it, which is the right division of labour — a speck at
 /// three hundred metres is a sub-pixel dot and the tone it would contribute is already
 /// there.
-const CREST_REACH: f64 = 90.0;
+const CREST_REACH: f64 = 260.0;
+
+/// How many marks a crest is drawn with, by how far off it is, and how much bigger each
+/// one gets to make up for there being fewer.
+///
+/// **Coverage is what reads, and coverage is marks times area.** Ninety metres of white
+/// water around the boat and bare sea beyond it is a sea with a lid on; the eye finds
+/// the edge of the foam long before it counts the marks. But keeping the near field's
+/// nine marks a crest out to a quarter of a mile is eight times the water and eight
+/// times the quads, which the frame will not have.
+///
+/// So a crest at distance is drawn with fewer and larger marks — the same white water in
+/// a third of the geometry. At two hundred metres a whitecap is a few pixels across and
+/// nobody can tell how many pieces it is in.
+fn detail_at(range: f64) -> (usize, f32) {
+    if range < 70.0 {
+        (CREST_SPECKS, 1.0)
+    } else if range < 160.0 {
+        (5, 1.35)
+    } else {
+        (3, 1.75)
+    }
+}
 
 /// The three things in the water that catch the light.
 #[derive(Clone, Copy, PartialEq)]
@@ -618,13 +643,14 @@ pub fn update(
             let run = downwind.normalize_or_zero();
             let crest = glam::DVec2::new(-run.y, run.x);
             let long = (CREST_LONG.0 + CREST_LONG.1 * hs).min(CREST_LONGEST);
-            for i in 0..CREST_SPECKS {
+            let (marks, fatter) = detail_at(range);
+            for i in 0..marks {
                 if live.len() >= budget() {
                     break;
                 }
                 // Spaced along the streak rather than scattered in it, with enough
                 // jitter that the spacing is not a row of beads.
-                let step = i as f64 / (CREST_SPECKS - 1).max(1) as f64 - 0.5;
+                let step = i as f64 / (marks - 1).max(1) as f64 - 0.5;
                 let along = (step + (r.next_f64() - 0.5) * 0.12) * long;
                 let across = (r.next_f64() - 0.5) * 2.0 * CREST_WIDE;
                 live.push(Speck {
@@ -632,7 +658,7 @@ pub fn update(
                     drift: blow + glam::DVec2::new(a.cos(), a.sin()) * 0.25,
                     surge: glam::DVec2::ZERO,
                     age: 0.0,
-                    scale: 2.0 + 2.6 * r.next_f64() as f32,
+                    scale: (2.0 + 2.6 * r.next_f64() as f32) * fatter,
                     phase: r.next_f64() as f32 * std::f32::consts::TAU,
                     tint: 0.2 * r.next_f64() as f32,
                     kind: Mark::Claw,
@@ -1097,11 +1123,29 @@ pub fn update(
         // hid its bottom half and what was left read as something sunk rather than
         // something floating.
         let centre = origin.to_bevy(afloat, height as f32);
-        // Facing the eye, so a speck is a speck from everywhere rather than a flake
-        // lying on the water that vanishes edge-on.
+        // **Lying on the water, not standing up in front of the camera.**
+        //
+        // A billboard is right for a drop of water in the air off the bow — it has no
+        // orientation of its own and turning it to face the eye is the only honest
+        // thing to do with it. It is wrong for foam: a whitecap is a patch floating on
+        // a surface, and drawn upright it reads as a sheet of paper stood on edge,
+        // which is why the white sat *on top of* the sea instead of *in* it.
+        //
+        // So the quad's normal is leaned from the eye towards straight up, by kind: the
+        // foam nearly all the way, the bubbles half — a bubble is a sphere and looks the
+        // same from anywhere — and the drops not at all. `right` stays horizontal and
+        // across the view whatever the lean is, which keeps the quad stable and never
+        // degenerates except looking straight down.
         let to_eye = (view.translation - centre).normalize_or_zero();
-        let right = to_eye.cross(Vec3::Y).normalize_or_zero();
-        let up = right.cross(to_eye).normalize_or_zero();
+        let lies_flat = match s.kind {
+            Mark::Claw => 0.85,
+            Mark::Bubble => 0.5,
+            Mark::Drop => 0.0,
+        };
+        let right = Vec3::new(-to_eye.z, 0.0, to_eye.x)
+            .normalize_or(to_eye.cross(Vec3::Y).normalize_or_zero());
+        let face = to_eye.lerp(Vec3::Y, lies_flat).normalize_or(to_eye);
+        let up = face.cross(right).normalize_or_zero();
         // Which half of the sheet this one is drawn from. A speck off the bow is a
         // drop of water and a mark torn off a crest is a handful of foam, and until now
         // both were the same white square — which is what "I still cannot see the

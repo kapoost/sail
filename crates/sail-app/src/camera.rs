@@ -440,6 +440,30 @@ pub fn setup(
         // giving the sky its real luminance is the fix; dimming the sky to suit an
         // indoor exposure would only have hidden it.
         Exposure::SUNLIGHT,
+        // **What the sun does to grass when it is too bright to draw.**
+        //
+        // A tone curve has to get a sunlit hillside — several thousand candela — into a
+        // screen that stops at one, and the whole question is what it throws away on the
+        // way. The film curves, Bevy's default among them, throw away *colour*: they
+        // walk a bright hue towards white, because that is what film emulsion does and
+        // what a photograph of a bright thing looks like. The island went pale grey-green
+        // in the light, which is a photograph of grass and not grass.
+        //
+        // Scaling by luminance instead keeps the proportions between the channels, so a
+        // thing that is green and over-lit comes out *greener* rather than whiter —
+        // which is how the eye reports a hillside in spring and why the memory of one is
+        // the colour and not the brightness.
+        //
+        // `SAIL_TONEMAP=tony|aces|agx|neutral|reinhard` for the others, because this is
+        // the sort of choice that wants looking at rather than arguing about.
+        match std::env::var("SAIL_TONEMAP").as_deref() {
+            Ok("tony") => bevy::core_pipeline::tonemapping::Tonemapping::TonyMcMapface,
+            Ok("aces") => bevy::core_pipeline::tonemapping::Tonemapping::AcesFitted,
+            Ok("agx") => bevy::core_pipeline::tonemapping::Tonemapping::AgX,
+            Ok("neutral") => bevy::core_pipeline::tonemapping::Tonemapping::KhronosPbrNeutral,
+            Ok("reinhard") => bevy::core_pipeline::tonemapping::Tonemapping::Reinhard,
+            _ => bevy::core_pipeline::tonemapping::Tonemapping::ReinhardLuminance,
+        },
         crate::sky::SkyImage(sky.clone()),
         Skybox {
             image: Some(sky.clone()),
