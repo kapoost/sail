@@ -89,6 +89,8 @@ pub struct Race {
     crossed_at: Option<f64>,
     /// What the deck is told, and until when.
     pub said: Option<(String, f64)>,
+    /// Seconds to put on the clock instead of five minutes, for the knob below.
+    shorten_to: Option<f64>,
     /// Asked for from the menu, and read by `run` on the next frame.
     ///
     /// The wish lives on the thing it is a wish about rather than in a resource of its
@@ -200,8 +202,19 @@ impl Race {
 }
 
 /// The clock, the line and the marks, a frame at a time.
-pub fn run(sim: Res<Sim>, mut race: ResMut<Race>) {
+pub fn run(sim: Res<Sim>, mut race: ResMut<Race>, mut first: Local<bool>) {
     let now = sim.sim.state.time;
+    // `SAIL_RACE=90` lays the course at the start and puts ninety seconds on the clock.
+    // The same kind of knob as `SAIL_BRIG`, and for the same reason: the five minutes
+    // before a gun are the part worth looking at, and a scripted camera cannot click a
+    // menu. A bare `SAIL_RACE=1` gives the full sequence.
+    if !*first {
+        *first = true;
+        if let Ok(value) = std::env::var("SAIL_RACE") {
+            race.wants_start = true;
+            race.shorten_to = value.parse::<f64>().ok().filter(|s| *s > 1.0);
+        }
+    }
     if std::mem::take(&mut race.wants_stop) {
         *race = Race::default();
         return;
@@ -210,6 +223,10 @@ pub fn run(sim: Res<Sim>, mut race: ResMut<Race>) {
         let wind = sim.sim.wind.sample(sim.sim.state.pos, now);
         let from = sail_core::wind::direction_of(wind);
         race.lay_out(sim.sim.state.pos, from, now);
+        if let Some(left) = race.shorten_to.take() {
+            race.gun_at = now + left;
+            race.stage = Stage::Before(left);
+        }
         return;
     }
     if !race.running() {
