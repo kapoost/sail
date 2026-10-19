@@ -991,7 +991,11 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>) {
         .and_then(|v| v.parse::<f64>().ok())
     {
         let st = &sim.sim.state;
-        let off = st.heading - rad(38.0);
+        // Ten degrees off the bow, not thirty-eight: the chase camera's field is
+        // narrower than it looks and a ship pinned out on the beam sits outside every
+        // view in the game, which is how a knob for *looking* at her managed to be a
+        // knob that never showed her.
+        let off = st.heading - rad(10.0);
         brig.at = st.pos + DVec2::new(off.sin(), off.cos()) * range;
         brig.heading = st.heading;
         brig.speed = kn_to_ms(5.0);
