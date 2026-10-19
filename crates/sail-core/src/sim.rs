@@ -1186,8 +1186,16 @@ impl Simulation {
         // depth and the hull feels the average over its own immersion rather than the
         // value at the surface. The length averaging is already exact: for a sinusoid
         // the bow-to-stern height difference *is* the mean gradient over the hull.
-        let depth_factor = self.water.depth_attenuation(cfg.form.canoe_draft);
-        let water_accel = -self.water.slope(st.pos, st.time) * GRAVITY * depth_factor;
+        // Asked of the hull rather than of the point she floats on: every component
+        // attenuated over her draft and averaged over her length and beam. A one metre
+        // ripple under an eleven metre boat has a gradient and no force.
+        let hull = crate::water::Hull {
+            along: DVec2::new(st.heading.sin(), st.heading.cos()),
+            length: cfg.form.lwl,
+            beam: cfg.form.waterline_beam,
+            draft: cfg.form.canoe_draft,
+        };
+        let water_accel = -self.water.felt_slope(st.pos, st.time, hull) * GRAVITY;
         let accel_body = st.to_body(water_accel);
         let surf = m_x * accel_body.x;
         let sway_wave = m_y * accel_body.y;

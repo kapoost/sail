@@ -93,7 +93,13 @@ const CREST_DARTS: f32 = 4200.0;
 const BUBBLES_IN_A_PATCH: usize = 4;
 
 /// Marks in one breaking crest, and how far they are scattered, metres.
-const CREST_SPECKS: usize = 6;
+///
+/// Four rather than six, because the marks themselves got bigger. A whitecap is drawn
+/// with additive blending, so what it costs is its *area* — six marks a third of a metre
+/// across and four marks of a metre are the same number of quads and nine times the fill,
+/// and that came off the frame rate: fifty down to thirty-seven. Fewer and larger is both
+/// the cheaper picture and the truer one.
+const CREST_SPECKS: usize = 4;
 const CREST_PATCH: f64 = 1.5;
 
 // ---------------------------------------------------------------------------------------
@@ -816,15 +822,29 @@ pub fn update(
         };
         let drift =
             outward * SPREAD * (0.6 + 0.8 * r.next_f64()) + forward * speed * 0.12 * r.next_f64();
+        // **Some of it is bubbles, and this is where they can be seen.**
+        //
+        // Bubbles were born only in breaking crests, which are scattered over ninety
+        // metres of sea — and at that distance a bubble is a fraction of a pixel. The
+        // one patch of broken water that is always within a few metres of the eye is the
+        // one the boat is making herself, so a fifth of the foam along the hull is now
+        // bubbles rather than foam, at a size that has pixels: a bow wave seen from the
+        // cockpit is a mass of them, each with the sky in it.
+        const BUBBLES_AT_THE_HULL: f64 = 0.2;
+        let bubbly = r.next_f64() < BUBBLES_AT_THE_HULL;
+        let scale = 0.55 + 0.9 * r.next_f64() as f32;
         live.push(Speck {
             at,
             drift,
             surge: glam::DVec2::ZERO,
             age: 0.0,
-            scale: 0.55 + 0.9 * r.next_f64() as f32,
+            // A bubble's size does not come from how hard the water was beaten, so the
+            // spread of hull scales would make most of them too small to resolve. Held
+            // up to the size the eye reads as a bubble at arm's length over the rail.
+            scale: if bubbly { scale * 2.4 } else { scale },
             phase: r.next_f64() as f32 * std::f32::consts::TAU,
             tint: r.next_f64() as f32,
-            kind: Mark::Drop,
+            kind: if bubbly { Mark::Bubble } else { Mark::Drop },
             beat: beat_of(r.next_f64() as f32),
             sparkle: sparkle_of(r.next_f64() as f32),
         });
@@ -892,13 +912,24 @@ pub fn update(
         // centimetres and ends under twenty, which at the distance a crest breaks from
         // the boat is a handful of foam rather than a bedsheet.
         let size = if s.kind == Mark::Bubble {
-            // A bubble is a bubble: a centimetre or two, and it does not grow. What it
-            // does is sit there until it is gone, which is the other half of why a
-            // patch of foam does not read as paint — the big marks spread and tear
-            // while the small bright ones stay exactly the size they are.
-            (0.012 + 0.004 * life) * s.scale
+            // A bubble does not grow. What it does is sit there until it is gone, which
+            // is the other half of why a patch of foam does not read as paint — the big
+            // marks spread and tear while the small bright ones stay exactly the size
+            // they are.
+            //
+            // **And it has to be a size the screen has pixels for.** At a centimetre
+            // and a half, a bubble twenty metres off — which is where the camera sits —
+            // is six hundredths of a pixel wide on a nine-hundred-and-sixty-pixel
+            // picture. It was drawn, it was in the mesh, and it could not be seen, which
+            // is "nie widzę particles" exactly. Three to fifteen centimetres is still a
+            // bubble and is two or three pixels at the stern rail.
+            (0.03 + 0.012 * life) * s.scale
         } else if s.kind == Mark::Claw {
-            (0.03 + 0.16 * life) * s.scale
+            // The same arithmetic for the foam itself. A whitecap is a patch of white
+            // water a couple of metres across, not a scatter of coins: at a third of a
+            // metre a mark forty metres out was a pixel and a half and the sea's own
+            // texture — which draws white streaks of its own — simply swallowed it.
+            (0.06 + 0.22 * life) * s.scale
         } else {
             (0.04 + 0.06 * life) * s.scale * 0.62
         };

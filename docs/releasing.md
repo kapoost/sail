@@ -45,18 +45,24 @@ cargo fmt --all
 Nothing in CI runs these — the only workflow is the release one. Until that changes, the
 tests passing is a thing a person did, not a thing the repository knows.
 
-### `--release` on that first line is load-bearing
+### `--release` used to be load-bearing, and is not any more
 
-Four tests in `settings.rs` **fail in a debug build and pass in a release one**, and they
-are not flaky: `cargo test -p sail-app` panics in all four with
+Six tests in `settings.rs` **failed in a debug build and passed in a release one**:
+`cargo test -p sail-app` panicked in all six with
 
 ```
 Dropped TexturesDelta with 1 unapplied deltas.
 ```
 
 which is a debug assertion inside `epaint`, fired by the egui harness those tests drive
-and not by anything in this repository. In release the assertion is compiled out, the
-harness behaves, and the suite is clean.
+and not by anything in this repository. In release the assertion is compiled out, which
+is why the rule above was `--release` rather than a fix.
+
+The fix was one line: the harness takes the frame's texture uploads and drops them on
+purpose, which is what an application with a renderer would do with them. The suite is
+clean in both profiles now, and a debug run of `cargo test` is a thing you can believe
+again — which matters, because "those six always fail" is exactly how a seventh failure
+goes unnoticed.
 
 Written down because two people spent an evening reporting those four to each other and
 to the user as a standing failure that "also fails on main" — which was true, and which

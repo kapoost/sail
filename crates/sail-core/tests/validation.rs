@@ -2222,13 +2222,10 @@ fn a_shift_takes_the_sea_round_with_it_but_not_at_once() {
     }
     // Half an hour later the sea is on its way round and nowhere near there — which is
     // the cross sea you actually sail in after a frontal passage.
-    // The component's unit vector, turned back into a compass bearing. It started
-    // running due south, which is where a northerly puts it.
-    let run = sea.components()[0].direction;
-    // As a compass bearing: a unit vector (sin, cos) of a bearing, read back the same
-    // way round. Reading it as a mathematical angle instead flips the sign, which is
-    // its own small lesson about having one convention.
-    let moved = wrap_pi(run.x.atan2(run.y) - std::f64::consts::PI);
+    // The sea's own direction, not the first component's: components are spread either
+    // side of the mean by design, so one of them is never the answer. It started running
+    // due south, which is where a northerly puts it.
+    let moved = wrap_pi(sea.running_towards() - std::f64::consts::PI);
     assert!(
         deg(moved) > 5.0 && deg(moved) < 60.0,
         "the sea should have started round and not arrived: {:.0} deg of 90",

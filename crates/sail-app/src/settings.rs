@@ -1102,6 +1102,11 @@ mod tests {
                 add(ui);
             }
         });
+        // epaint hands back a list of texture uploads with the frame and panics on drop
+        // if nobody took them — a real guard in an application and a nuisance here, where
+        // there is no renderer to upload a font atlas to. Taken and dropped on purpose.
+        let mut output = output;
+        output.textures_delta.clear();
         let mut said = String::new();
         fn walk(shape: &egui::epaint::Shape, into: &mut String) {
             match shape {

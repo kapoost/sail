@@ -939,7 +939,11 @@ pub fn draw(
                                 // The words come back when there is something to say: a helm
                                 // that has gone soft for want of way wants the opposite
                                 // response to one whose blade has stalled.
-                                readout(ui, "BITE", &bite_words(&telemetry));
+                                // Held to a fixed width. The column is as wide as its
+                                // widest block, so a reason that grew by a word pushed
+                                // the whole binnacle out and the sea with it — the
+                                // instrument moving because the helm went soft.
+                                readout(ui, "BITE", &fit(&bite_words(&telemetry), BITE_COLUMNS));
                             });
                         });
                     });
@@ -1709,6 +1713,9 @@ fn readout(ui: &mut egui::Ui, label: &str, value: &str) {
 /// that has gone soft because there is no way on wants the opposite response to one
 /// that has gone soft because the blade is stalled. Only the dominant cause is named:
 /// three reasons at once is a sentence, and an instrument is not read, it is glanced at.
+/// Room for the longest thing it says: `100% stall`.
+const BITE_COLUMNS: usize = 10;
+
 fn bite_words(t: &sail_core::state::Telemetry) -> String {
     let bite = t.rudder_bite;
     if bite > 0.75 {
@@ -1720,12 +1727,13 @@ fn bite_words(t: &sail_core::state::Telemetry) -> String {
     let slow = 1.0 - (ms_to_kn(t.stw) / 5.0).clamp(0.0, 1.0).powi(2);
     let heeled = 1.0 - t.heel.abs().cos();
     let stalled = t.rudder_stalled;
+    // One word each, and short ones: see `BITE_COLUMNS`.
     let worst = if stalled > slow.max(heeled) {
-        "stalled"
+        "stall"
     } else if heeled > slow {
-        "heeled"
+        "heel"
     } else {
-        "no way on"
+        "slow"
     };
     format!("{:.0}% {worst}", bite * 100.0)
 }

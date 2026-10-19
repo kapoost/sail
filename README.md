@@ -128,7 +128,7 @@ sane; run it after touching `sail.rs`, `hull.rs` or `boat.rs`.
 | Stability | GM slope blending into a GZ curve that peaks and gives way |
 | Weather helm | Heel-shifted centre of effort plus the asymmetric heeled waterplane |
 | Wind | Ornstein-Uhlenbeck gusts that veer as they build, with a boundary-layer gradient. `WindField` is where a real GRIB2 forecast replaces it. |
-| Sea | Gerstner components on deep-water dispersion, heights and periods from fetch-limited relations |
+| Sea | Twenty-one Gerstner components on a Pierson-Moskowitz spectrum and deep-water dispersion, heights and periods from fetch-limited relations |
 | Heave and pitch | Distributed buoyancy over nine hull stations against the local surface |
 | Waves on roll | The GZ curve evaluated at heel *relative to the wave slope* |
 | Surfing | Froude-Krylov: displacement times g times the surface slope |

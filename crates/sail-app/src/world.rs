@@ -863,10 +863,7 @@ pub fn update_sea(
                     // hatch: the top row of the map is blank paper.
                     Vec2::ZERO
                 } else {
-                    Vec2::new(
-                        flat.x as f32 / sea_texture::TILE_METRES,
-                        -flat.y as f32 / sea_texture::TILE_METRES,
-                    )
+                    sea_texture::ripple_uv(Vec2::new(flat.x as f32, flat.y as f32))
                 });
                 colours.push([far.x, far.y, far.z, 1.0]);
                 continue;
@@ -875,8 +872,9 @@ pub fn update_sea(
             // horizontal offset flips sign on the way across.
             let world = st.pos + glam::DVec2::new(offset.x as f64, -offset.y as f64);
             // Band-limited to what this vertex can carry — see `resolutions`.
-            let height = sim.sim.water.height_resolved(world, t, min_wavelength) as f32;
-            let slope = sim.sim.water.slope_resolved(world, t, min_wavelength);
+            let water = sim.sim.water.surface_resolved(world, t, min_wavelength);
+            let (lift, slope) = (water.height, water.slope);
+            let height = lift as f32;
             let (sx, sz) = (slope.x as f32, -slope.y as f32);
 
             let point = Vec3::new(offset.x, height, offset.y);
@@ -889,12 +887,11 @@ pub fn update_sea(
             // that the detail rides the water's own orbital displacement, which is
             // bounded — a surface parcel travels a circle of the wave's amplitude — so
             // the ripples go round with the wave instead of being dragged across it.
-            let parcel =
-                world - sim.sim.water.horizontal_displacement(world, t) - current - uv_base;
-            uvs.push(Vec2::new(
-                parcel.x as f32 / sea_texture::TILE_METRES,
-                -parcel.y as f32 / sea_texture::TILE_METRES,
-            ));
+            let parcel = world - water.drift - current - uv_base;
+            uvs.push(sea_texture::ripple_uv(Vec2::new(
+                parcel.x as f32,
+                parcel.y as f32,
+            )));
 
             // Tangent along +U, which is world +X, lying in the surface. Handedness is
             // negative because cross(normal, tangent) points at -Z while V runs to +Z.

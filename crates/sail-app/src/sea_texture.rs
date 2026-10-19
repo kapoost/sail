@@ -36,6 +36,44 @@ const SIZE: u32 = 1024;
 /// lookups in a shader. This is still the honest half-measure, just a bigger one.
 pub const TILE_METRES: f32 = 24.0;
 
+/// How far the texture coordinates are pushed about, in tiles, and over what distance.
+///
+/// **A repeating texture is not seen as repetition — it is seen as a grid.** Twenty-four
+/// metres of ripples across three hundred metres of water is a dozen copies of one
+/// patch, and what gives it away is not that the patches are the same but that their
+/// corners line up: the eye finds the lattice long before it recognises the content.
+/// Reported from the deck as the water being repetitive at the finer drawn width, which
+/// is exactly when a lattice becomes legible.
+///
+/// So the coordinates are warped by a slow swirl before they are used. The same patches
+/// are still there — there is one texture and that does not change — but they no longer
+/// land on a grid: each copy is offset and sheared a little differently from its
+/// neighbours, and a lattice with no straight lines in it stops being a lattice. It
+/// costs two noise samples a vertex and no memory at all.
+///
+/// A third of a tile over a hundred metres: enough to bend the rows out of alignment,
+/// gentle enough that the ripples are stretched by about a tenth, which is under what
+/// the eye reads as distortion in moving water.
+const WARP_TILES: f32 = 0.34;
+const WARP_OVER: f32 = 100.0;
+
+/// Where a patch of water reads its ripples from.
+///
+/// One function because the near field and the far field both ask, and a seam between
+/// two different answers would be a line across the sea — which is the one thing worse
+/// than a repeat.
+pub fn ripple_uv(parcel: Vec2) -> Vec2 {
+    let swirl = |seed: u64, offset: Vec2| -> f32 {
+        let at = (parcel + offset) / WARP_OVER;
+        sail_core::noise::two_octaves(glam::DVec2::new(at.x as f64, at.y as f64), seed) as f32
+    };
+    let warp = Vec2::new(
+        swirl(0x5EA_1A11, Vec2::ZERO),
+        swirl(0x5EA_1A12, Vec2::splat(37.0)),
+    ) * WARP_TILES;
+    Vec2::new(parcel.x / TILE_METRES, -parcel.y / TILE_METRES) + warp
+}
+
 /// Resolution of the animated frames.
 ///
 /// Half the still map's. Forty-eight frames is the whole cost of this feature and it is

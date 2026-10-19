@@ -179,7 +179,17 @@ fn a_passage_in_which_nothing_jumps() {
     // than about value.
     let mut was = (0.0_f64, 0.0_f64, 0.0_f64);
     let mut started = false;
+    // Three counts of the same event, because "the boom went over" turned out to mean
+    // three different things. A *crossing* is the boom past ten degrees the other way. A
+    // *gybe* is a crossing that was not part of the previous one — the boom slammed
+    // across by a released preventer swings past the centreline and settles back a
+    // second or two later, and that is one event seen from the deck, not two. *Chatter*
+    // is crossings inside half a second of each other, which is the fault this test was
+    // written for: a boom in a confused sea changing sides several times a second.
+    let mut crossings = 0u32;
     let mut gybes = 0u32;
+    let mut chatter = 0u32;
+    let mut last_crossing = f64::NEG_INFINITY;
     let mut jib_flips = 0u32;
     let mut preventer_flips = 0u32;
     // Which side things are *settled* on, with a dead band round the centreline.
@@ -303,12 +313,32 @@ fn a_passage_in_which_nothing_jumps() {
 
                 let boom_now = settled(t.boom, boom_side, rad(10.0));
                 if boom_now != boom_side && boom_side != 0.0 {
-                    gybes += 1;
+                    crossings += 1;
+                    // One slam, however many times it passes the centreline. The boom
+                    // is governed at forty-five degrees a second, so a traverse of up to
+                    // a hundred and eighty degrees takes four seconds and a slam that
+                    // goes over and comes back takes eight — which is exactly what a
+                    // preventer let go at dead run with the helm hard over does, and it
+                    // is one event seen from the deck. The fault this test is for looks
+                    // nothing like it: several crossings a second, counted below as
+                    // chatter.
+                    const SAME_SWING: f64 = 8.0;
+                    let since = elapsed - last_crossing;
+                    if since > SAME_SWING {
+                        gybes += 1;
+                    }
+                    if since < 0.5 {
+                        chatter += 1;
+                    }
+                    last_crossing = elapsed;
                     if std::env::var("TRACE").is_ok() {
                         println!(
-                            "   boom went over at {elapsed:6.1} s during \"{}\" (twa {:+.0})",
+                            "   boom went over at {elapsed:6.1} s during \"{}\" (twa {:+.0}, boom {:+.0}, roll {:+.0}, preventer {})",
                             leg.what,
-                            deg(t.twa)
+                            deg(t.twa),
+                            deg(t.boom),
+                            deg(sim.state.heel),
+                            controls.preventer
                         );
                     }
                     if controls.preventer {
@@ -317,26 +347,55 @@ fn a_passage_in_which_nothing_jumps() {
                 }
                 boom_side = boom_now;
             }
+            if std::env::var("WINDOW").is_ok() && (555.0..600.0).contains(&elapsed) {
+                let step = (elapsed * 4.0).round() / 4.0;
+                if (elapsed - step).abs() < 0.003 {
+                    println!(
+                        "{elapsed:7.2} {} twa {:+6.1} boom {:+6.1} sheet {:.2} heel {:+5.1} \
+                         yaw rate {:+5.1} preventer {}",
+                        leg.what,
+                        deg(t.twa),
+                        deg(t.boom),
+                        controls.main_sheet,
+                        deg(sim.state.heel),
+                        deg(sim.state.yaw_rate),
+                        controls.preventer
+                    );
+                }
+            }
             was = (t.boom, t.pole, t.jib_side);
             started = true;
         }
     }
 
     println!(
-        "ten minutes: the boom went over {gybes} times, the headsail {jib_flips}, \
-         worst spar movement {:.2} deg in a substep ({} at {:.0} s)",
+        "ten minutes: {gybes} gybes in {crossings} crossings, {chatter} of them chatter; \
+         the headsail changed sides {jib_flips} times; worst spar movement {:.2} deg in a \
+         substep ({} at {:.0} s)",
         worst.0, worst.1, worst.2
     );
 
     // --- Nothing flickers -----------------------------------------------------
     //
-    // The script asks her across the wind four times — two tacks and two gybes — and the
-    // boom only has a side to change on the two gybes. Anything above that is the
-    // flicker this test exists to catch: before it was fixed, a boom in a confused sea
-    // changed sides several times a second.
+    // The script puts the boom across the centreline five times: the two tacks, the two
+    // gybes, and the held gybe finishing when the preventer is let go on the leg after
+    // it. That fifth one was missing from the count here and from the boat — she failed
+    // to gybe when asked, which left the budget looking generous and hid the omission.
+    // Anything above five is the flicker this test exists to catch: before it was fixed,
+    // a boom in a confused sea changed sides several times a second.
     assert!(
-        gybes <= 4,
-        "the boom went over {gybes} times in a passage with two tacks and two gybes in it"
+        gybes <= 5,
+        "the boom went over {gybes} times in a passage that asks for five"
+    );
+    assert_eq!(
+        chatter, 0,
+        "the boom crossed {chatter} times inside half a second of another crossing, which \
+         is the flicker rather than a swing"
+    );
+    assert!(
+        crossings <= 2 * gybes,
+        "{crossings} crossings for {gybes} gybes: a slammed boom may swing past the \
+         centreline and back once, and not more"
     );
     assert!(
         jib_flips <= 8,
