@@ -113,6 +113,39 @@ the server restarts underneath somebody.
 The polar is the most useful instrument here. One screen says whether the physics is
 sane; run it after touching `sail.rs`, `hull.rs` or `boat.rs`.
 
+### Knobs, and the demo reel
+
+Every question about what the water looks like in a given condition otherwise starts
+with hunting for a seed that happens to have that condition in it, so the conditions are
+knobs:
+
+```sh
+SAIL_WIND=32 SAIL_SEA=built SAIL_HOUR=14 sail      # a gale, already built, mid-afternoon
+SAIL_COVER=0.95 SAIL_SQUALL=25 sail                # overcast, with a squall every 25 s
+SAIL_TONEMAP=neutral sail                          # a different tone curve
+```
+
+`SAIL_WIND` is the day's breeze in knots, `SAIL_SEA=built` opens with the sea that wind
+has already made rather than the two and a half hours it takes to build, `SAIL_COVER` is
+the cloud, `SAIL_HOUR` the time of day, `SAIL_TONEMAP` the tone curve and `SAIL_ORBIT=9`
+sweeps the view round her at nine degrees a second with no hand on the mouse. `sail-bios`
+lists all of them as rows you can change without remembering any of this.
+
+`tools/demo.sh` cuts a reel out of them:
+
+```sh
+tools/demo.sh                 # every scene, into target/demo/sail-demo.mp4
+tools/demo.sh gale light      # only the ones named
+FPS=12 SECONDS=5 tools/demo.sh
+```
+
+Each scene is the real simulation in a stated condition, photographed by the game's own
+`SAIL_SHOT_EVERY` and cut together with ffmpeg; the captions are drawn in VT323, which is
+what the instruments are lettered in. Nothing is staged — if a scene shows whitecaps in a
+gale, that gale is `SAIL_WIND=32` and the whitecaps are the ones the model made. The
+frames are checked for being black before anything is cut, because a window that is
+covered photographs as a sheet of nothing and the files are the right size anyway.
+
 ## Model, and what it approximates
 
 | Part | Treatment |
@@ -259,6 +292,67 @@ enters as an offset to the heel it is evaluated at.
 
 Flat water remains the default, so the polar is unchanged to the last digit and every
 flat-water test still measures what it did before.
+
+### The spectrum, and the sea it reports
+
+The wind sea is twenty-one Gerstner components on a Pierson-Moskowitz spectrum, spread
+about the wind by the Mitsuyasu rule — widest away from the peak, widest of all on the
+short side. It used to be five, and five is not a sea: it is an interference pattern,
+and an interference pattern repeats. Measured, the old surface correlated 0.92 with the
+surface 1164 m downwind. The present one scores 0.50 beyond 250 m across three seeds, and
+`tests/the_sea_repeats.rs` holds it there — the frequencies are spaced geometrically with
+each rung jittered inside its own band, and the directions are placed by the golden angle,
+so no two components share a beat.
+
+**A sea that says a metre is a metre.** Significant height is four times the rms
+elevation and the rms of a sum of sinusoids is the quadrature sum of the amplitudes over
+root two. Both sentences were in the comment and only the first was in the arithmetic, so
+every sea was 41 percent higher than the instruments reported. Fixing it moved two more
+things that were written as fractions of Hs and therefore moved with it: the elevation a
+whitecap needs, and the weight given to a crest. Both are in standard deviations now,
+which do not move.
+
+**The hull gets the slope a hull feels**, not the slope at a point: each component
+attenuated over her draft and averaged over her length and beam, `sinc(k·L/2)`. A
+one-metre ripple under an eleven-metre boat has a gradient and no force. Before this the
+self-steering vane wandered 43 degrees in sheltered water and had the helm at its stop 7
+percent of the time; it is 1.9 degrees and never.
+
+**The drawn surface is Gerstner too.** The mesh used to move its vertices only up and
+down, which is Airy — round humps of exactly the right height and none of the shape.
+Parcels move sideways now, which gathers the water into the crests and flattens the
+troughs, and the foam goes with them.
+
+### Whitecaps
+
+Breaking is judged by significant steepness — `Hs / λp` — because it has to be: a
+four-metre Atlantic swell does not break and a metre and a half of short wind sea breaks
+everywhere, and the same number tells you which. A whitecap is drawn as nine marks laid
+along the crest line, over a length that follows the sea, which is what a breaking crest
+looks like; a circle of marks is a white dot however many are in it. The foam arrives
+bright and hard and then lies there fading, because that is what foam does.
+
+Everything on the water follows the sea state rather than a constant: the ripple normal
+map fades towards flat as the breeze drops, the surface roughness follows it, and the
+jade of light through a wave needs half a metre of wave before it appears. A nine-knot
+morning used to be drawn with the texture of a gale.
+
+### The sky, the cloud and the colour of the water
+
+The water's colour is the sky it reflects. A trough shows the strip overhead and a crest
+shows the dome, so the dark end is the zenith and the light end the horizon — both taken
+from the `Sky` the scene is lit by rather than from two constants, and the light end is a
+bearing: towards a low sun the sea is a sheet of light and over your shoulder it is
+nearly black. `Dome` fits twenty-four samples round the horizon to a constant and a
+direction, rebuilt when the sky is repainted.
+
+Low cloud is drawn once. It is particles out to seven and a half kilometres — parallax,
+shadows thrown down-sun onto the water, shafts between the cloud and its shadow — and the
+cubemap's painted deck fades in from six kilometres, so the near sky belongs to the
+geometry and the far sky to the painting. The particles follow the cover: each cell has a
+rank and is there once the day has reached it, and what is there grows and flattens as
+the cover rises, because fair-weather cumulus are separate lumps and an overcast is the
+same cloud joined up.
 
 ## Navigation
 

@@ -80,7 +80,11 @@ impl Sim {
         // the size of the rollers — begins with half an hour of nothing happening, and
         // a photograph taken in that half hour answers the wrong question. The panel has
         // SETTLE NOW for a person; this is the same thing for a screenshot.
-        if std::env::var("SAIL_SEA").as_deref() == Ok("built") {
+        // `built`, or the `on` the setup screen writes for a flag.
+        if matches!(
+            std::env::var("SAIL_SEA").as_deref(),
+            Ok("built") | Ok("on") | Ok("1")
+        ) {
             sea.settle(weather.tws, 0.0);
             info!(
                 "the sea opens built: {:.1} m at {:.1} s",
