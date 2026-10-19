@@ -1400,18 +1400,11 @@ pub struct Spent {
 }
 
 impl Spent {
-    /// Time one piece of the frame. Costs two clock reads when nobody is asking.
-    pub fn timing<T>(at: Option<&mut f32>, work: impl FnOnce() -> T) -> T {
-        let Some(at) = at else {
-            return work();
-        };
-        let started = std::time::Instant::now();
-        let out = work();
-        *at += started.elapsed().as_secs_f32() * 1000.0;
-        out
-    }
-
     /// Whether anybody is asking.
+    ///
+    /// Read once at the top of each timed system, which is why the clock is an
+    /// `Option<Instant>` there: nobody asking costs one environment lookup and no
+    /// clock reads at all.
     pub fn wanted() -> bool {
         std::env::var("SAIL_FRAMES").is_ok()
     }
