@@ -111,3 +111,17 @@ dziób, a −Z pawęż — stąd `TURN=2`, bo u nas dziób patrzy na −Z.
 
 Pliki `assets/*-hull.glb` są poza gitem: to eksperyment, a nie łódka, i licencja tego,
 co wychodzi z generatora, zależy od tego, czym się go karmiło.
+
+### A dla brygu
+
+Te same cztery pokrętła, z własnym przedrostkiem — bo podmieniany jest **tylko kadłub**:
+
+```
+SAIL_BRIG_HULL=brig.glb SAIL_BRIG_HULL_LOA=1.0 SAIL_BRIG_HULL_TURN=2 SAIL_BRIG_HULL_SINK=-0.4
+```
+
+Omasztowanie, reje, olinowanie i płótno zostają proceduralne i nie wiedzą o podmianie.
+Nie mogą być z pliku: reje się brasują, płótno wybrzusza się i kładzie w kontrę, a to, że
+te rzeczy się ruszają, jest całym powodem, dla którego ona czyta się jako rejowiec. Z
+generatora ma przyjść to, w czym jest dobry i w czym nasze jest najsłabsze — **kadłub z
+podciętą rufą**.

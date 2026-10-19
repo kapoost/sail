@@ -813,6 +813,7 @@ pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    assets: Res<AssetServer>,
 ) {
     // One material for everything with its colour in the mesh — the hull's paintwork,
     // the tarred rigging, the canvas — and a second for the spars, which are varnished
@@ -832,15 +833,55 @@ pub fn setup(
     let hull = meshes.add(hull_mesh());
     let rigging = meshes.add(rigging_mesh());
 
+    // **Which hull she wears.**
+    //
+    // Her rig is not a model and never will be: the yards brace, the cloth bellies and
+    // backs, and the whole of what makes her read as a square-rigger is that those
+    // things move. What *can* come out of a file is the hull — a lofted shape with paint
+    // on it is exactly the kind of object a generator is good at and the one place our
+    // own is weakest, which is her transom. So the hull is a child rather than the root,
+    // and a generated one takes its place without the rigging knowing:
+    //
+    //   SAIL_BRIG_HULL=brig.glb SAIL_BRIG_HULL_LOA=1.0 SAIL_BRIG_HULL_TURN=2 \
+    //   SAIL_BRIG_HULL_SINK=-0.4
+    //
+    // Same four numbers as the boat's, for the same reason: all four are wrong on the
+    // first look at any model, and a rebuild between each guess is the thing that makes
+    // that a bad evening.
+    let knob = |name: &str, fallback: f32| -> f32 {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(fallback)
+    };
+    let bought = std::env::var("SAIL_BRIG_HULL")
+        .ok()
+        .filter(|f| !f.is_empty());
+
     commands
-        .spawn((
-            Hull,
-            Mesh3d(hull),
-            MeshMaterial3d(painted.clone()),
-            Transform::default(),
-            Visibility::Hidden,
-        ))
+        .spawn((Hull, Transform::default(), Visibility::Hidden))
         .with_children(|ship| {
+            match &bought {
+                Some(file) => {
+                    ship.spawn((
+                        bevy::world_serialization::WorldAssetRoot(
+                            assets.load(GltfAssetLabel::Scene(0).from_asset(file.clone())),
+                        ),
+                        Transform::from_xyz(0.0, knob("SAIL_BRIG_HULL_SINK", 0.0), 0.0)
+                            .with_rotation(Quat::from_rotation_y(
+                                knob("SAIL_BRIG_HULL_TURN", 0.0) * std::f32::consts::FRAC_PI_2,
+                            ))
+                            .with_scale(Vec3::splat(LOA / knob("SAIL_BRIG_HULL_LOA", 1.0))),
+                    ));
+                }
+                None => {
+                    ship.spawn((
+                        Mesh3d(hull),
+                        MeshMaterial3d(painted.clone()),
+                        Transform::default(),
+                    ));
+                }
+            }
             ship.spawn((
                 Mesh3d(rigging),
                 MeshMaterial3d(painted.clone()),

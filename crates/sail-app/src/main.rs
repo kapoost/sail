@@ -459,7 +459,8 @@ fn main() {
     }
     // Or a run of them, when the thing worth showing is motion.
     if let Some(reel) = shot::reel() {
-        app.insert_resource(reel).add_systems(Update, shot::on_a_reel);
+        app.insert_resource(reel)
+            .add_systems(Update, shot::on_a_reel);
     }
     // And the keys to press before it, for the views that live behind one. In
     // `PreUpdate` after the input plugin, so a scripted key is indistinguishable from

@@ -56,20 +56,25 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 
 use crate::camera::MainCamera;
 
-/// How many pixels across the world is drawn.
+/// How many pixels across the world is drawn, coarsest first.
 ///
-/// **One width, and the picture is either this or it is sharp.** There were three — 480
-/// for the VGA mode this is remembering, 720, and 960 as a nod — and they were three
-/// variants of one idea with no argument between them: nobody sat down and chose 960,
-/// and 480 lost the rigging, which is half of what there is to look at on a boat. Every
-/// person who has played this has ended up at 720, which is the number that keeps a
-/// shroud legible and still draws the sea as lit pixels rather than as a sheen.
+/// **Two widths now, and the reason the second is back is worth writing down**, because
+/// this list was cut to one on purpose. There were three — 480 for the VGA mode this is
+/// remembering, 720, and 960 — and the argument for dropping two of them still holds for
+/// 480: it loses the rigging, which is half of what there is to look at on a boat.
 ///
-/// Dropping the other two is not only tidying. Each was a texture size, a settings row
-/// and a code path that had to be right on somebody else's machine, and the one thing
-/// this week has taught is that the paths you do not exercise are the ones that fail on
-/// a Mac you have never seen.
-const WIDTH: u32 = 720;
+/// 960 came back on a different argument to the one that removed it. It went because
+/// nobody had *chosen* it — it was a third variant of one idea. It returns because a
+/// screen got bigger: 720 across a laptop and 720 across a large display are not the
+/// same picture, and on the big one the pixels stop reading as a drawn image and start
+/// reading as a low-resolution one. That is a reason to choose a width rather than an
+/// accident of having three.
+///
+/// The cost named when they were cut is real and unchanged: each width is a texture
+/// size and a code path that has to be right on somebody else's machine. Two is the
+/// most this should carry. If a third is ever wanted, it should displace one of these
+/// rather than join them.
+const WIDTHS: [u32; 2] = [720, 960];
 
 /// How many samples across each pixel of the small picture the world is drawn with.
 ///
@@ -93,7 +98,15 @@ pub struct Retro {
 
 impl Retro {
     pub fn width(&self) -> Option<u32> {
-        self.step.map(|_| WIDTH)
+        // Clamped rather than indexed blind: the stress loop and a stale `SAIL_PIXELS`
+        // can both name a step that is no longer there, and a panic in the render path
+        // is a worse answer than the coarsest picture.
+        self.step.map(|i| WIDTHS[i.min(WIDTHS.len() - 1)])
+    }
+
+    /// The widths on offer, coarsest first — for the settings panel to lay out.
+    pub fn widths() -> &'static [u32] {
+        &WIDTHS
     }
 
     /// Start in the pixelated picture, from `SAIL_PIXELS` in the environment.
@@ -101,6 +114,7 @@ impl Retro {
     /// Takes the width you want and picks the nearest step, so `SAIL_PIXELS=480` means
     /// what it says and anything else lands somewhere sensible.
     pub fn from_env() -> Self {
+        let supersample = std::env::var("SAIL_SUPERSAMPLE").is_ok_and(|v| v != "0");
         let Some(want) = std::env::var("SAIL_PIXELS")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
@@ -112,18 +126,29 @@ impl Retro {
             // thing — the drawn horizon, the flat tones, the stepped rigging — is built
             // for a small image. `SAIL_PIXELS=0` still asks for sharp.
             return Self {
-                step: Some(1),
+                step: Some(0),
+                supersample,
                 ..Self::default()
             };
         };
-        // Any number but nought is the drawn picture; nought is sharp. The value used
-        // to pick a width and now picks a side, which is all there is to pick.
+        // Nought is sharp; anything else picks the nearest width we have.
+        //
+        // This is what the line above has claimed since it was written, and for a while
+        // it was not true: with one width left, the number was read and thrown away, so
+        // `SAIL_PIXELS=960` and `SAIL_PIXELS=481` both meant 720. With two widths the
+        // promise has to be kept again.
         if want == 0 {
             return Self::default();
         }
+        let step = WIDTHS
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, w)| w.abs_diff(want))
+            .map(|(i, _)| i)
+            .unwrap_or(0);
         Self {
-            step: Some(0),
-            supersample: std::env::var("SAIL_SUPERSAMPLE").is_ok_and(|v| v != "0"),
+            step: Some(step),
+            supersample,
             ..Self::default()
         }
     }
@@ -139,8 +164,11 @@ impl Retro {
 /// Asked for from the deck in those words.
 #[allow(dead_code)]
 pub fn step(retro: &mut Retro) {
+    // Round the whole list and back to sharp, so the thing it is bound to walks every
+    // picture rather than only the first drawn one.
     retro.step = match retro.step {
         None => Some(0),
+        Some(i) if i + 1 < WIDTHS.len() => Some(i + 1),
         _ => None,
     };
 }
@@ -168,10 +196,12 @@ pub fn stress(
         return;
     }
     *since = 0.0;
+    // Walks the widths that actually exist and then the sharp picture, so this keeps
+    // exercising every path when the list changes length rather than cycling through
+    // steps that were removed years before the fault it is hunting.
     retro.step = match retro.step {
-        None => Some(2),
-        Some(2) => Some(1),
-        Some(1) => Some(0),
+        None => Some(0),
+        Some(i) if i + 1 < WIDTHS.len() => Some(i + 1),
         _ => None,
     };
     info!("stress: now {:?} after {} frames", retro.step, *frames);

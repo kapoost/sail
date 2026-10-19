@@ -223,9 +223,7 @@ pub fn scored() -> Option<Score> {
             .unwrap_or_else(|_| panic!("SAIL_SHOT_KEYS: {at:?} is not a number of seconds"));
         let chord: Vec<KeyCode> = keys
             .split('+')
-            .map(|k| {
-                key_named(k).unwrap_or_else(|| panic!("SAIL_SHOT_KEYS: no key called {k:?}"))
-            })
+            .map(|k| key_named(k).unwrap_or_else(|| panic!("SAIL_SHOT_KEYS: no key called {k:?}")))
             .collect();
         cues.push((at, chord, false));
     }

@@ -80,8 +80,18 @@ impl Default for Settings {
             // the gear and the music come up over it where they can be made out.
             volume: 0.70,
             music: 1.00,
-            sea: 0.08,
-            boat: 0.70,
+            // **Both of them down again, against the band.** Four decibels off the gear
+            // and three off the sea, which is a step you hear rather than one you have
+            // to be told about — and the music is left where it was, so what changes is
+            // the balance and not the loudness of the game.
+            //
+            // The reasoning under this has not changed, it has only been taken further:
+            // a continuous noise at the level of the things that *happen* is not
+            // atmosphere, it is loudness, and it masks the sounds you are supposed to be
+            // sailing by. The sea is something you are in; the gear is something that
+            // speaks when it has something to say.
+            sea: 0.055,
+            boat: 0.42,
             weather_touched: false,
         }
     }
@@ -269,14 +279,36 @@ pub fn draw(
                                 .monospace()
                                 .size(11.0),
                         );
-                        // Two states rather than four: the drawn picture, which is what
-                        // this game looks like, and the sharp one for when you want to
-                        // see what is actually on the deck. The sizes in between were
-                        // variants of one idea with nothing to choose between them.
-                        for (name, step) in [("drawn", Some(0usize)), ("sharp", None)] {
-                            if ui.selectable_label(retro.step == step, name).clicked() {
+                        // The drawn widths, then the sharp picture. The widths come
+                        // from `retro` rather than being written out here, because two
+                        // lists of the same thing is how a settings panel comes to offer
+                        // a size the renderer does not have.
+                        //
+                        // Named by their number. "drawn" alone was honest when there was
+                        // one of them; with two, a name that does not say which is which
+                        // makes the player click both to find out.
+                        for (i, w) in crate::retro::Retro::widths().iter().enumerate() {
+                            let step = Some(i);
+                            if ui
+                                .selectable_label(retro.step == step, format!("{w}"))
+                                .on_hover_text(if i == 0 {
+                                    "the drawn picture — pixels you can count"
+                                } else {
+                                    "the same picture, finer: for a large screen, where \
+                                     the coarse one reads as low resolution rather than \
+                                     as drawn"
+                                })
+                                .clicked()
+                            {
                                 retro.step = step;
                             }
+                        }
+                        if ui
+                            .selectable_label(retro.step.is_none(), "sharp")
+                            .on_hover_text("no pixel grid at all — what is actually on the deck")
+                            .clicked()
+                        {
+                            retro.step = None;
                         }
                     });
                     if ui.selectable_label(hud.0, "the diagnostic panel").clicked() {

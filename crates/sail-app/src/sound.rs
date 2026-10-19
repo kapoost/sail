@@ -1205,7 +1205,12 @@ impl Iterator for SeaStream {
         // music ducks under the run and comes back when the fish stops. Only past unity,
         // which by the reel's own design is exactly "line is going out"; winching a sheet
         // in does not duck anything.
-        let duck = 1.0 / (1.0 + 3.0 * (self.smooth.gear - 1.0).max(0.0));
+        // Deeper than it was, because the gear is quieter than it was. The deck asked
+        // for the boat and the sea down against the band, which is right — and it took
+        // four decibels off the reel, and the reel's scream is the one sound in this
+        // game that must not be level with anything. The answer stays what it was: the
+        // band gets out of the way rather than the reel getting louder.
+        let duck = 1.0 / (1.0 + 7.0 * (self.smooth.gear - 1.0).max(0.0));
         let mix = ((wind + water + thump + rain) * t_sea + (rig + flog + gear + bell) * t_boat)
             * MASTER
             * t_master
