@@ -55,7 +55,10 @@ jobs:
       - name: build
         run: python3 site/build.py --pdf
 
-      # A page that built but came out empty is the failure this catches.
+      # A page that built but came out empty is the failure this catches. The build
+      # itself now refuses to finish if any local reference is missing — added after a
+      # deploy that was green while the moving picture and the help screenshot were
+      # both 404, because nothing copied them and nothing looked.
       - name: the output is not a shell
         run: |
           test -s _site/index.html
@@ -63,7 +66,11 @@ jobs:
           test -s _site/manual.pdf
           grep -q "AT THE HELM" _site/index.html
           grep -q "AT THE HELM" _site/manual.html
+          for f in $(grep -o 'shots/[a-z]*\.webp' _site/index.html | sort -u); do
+            test -s "_site/$f" || { echo "missing: $f"; exit 1; }
+          done
           echo "index $(wc -c < _site/index.html) bytes, pdf $(wc -c < _site/manual.pdf) bytes"
+          echo "pictures: $(ls _site/shots | tr '\n' ' ')"
 
       - uses: actions/upload-pages-artifact@v3
         with:

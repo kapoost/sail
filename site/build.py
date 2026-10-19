@@ -589,6 +589,31 @@ def build_pdf() -> bool:
     return True
 
 
+def every_reference_resolves(expect_pdf: bool = True) -> None:
+    """Every local file the pages point at is actually in the output.
+
+    Written after publishing a page whose moving picture and help screenshot were
+    both 404: they are referenced from code paths that `shots()` does not list, so
+    nothing copied them, and nothing noticed. A missing image is the quietest kind of
+    broken — the page still loads, still scrolls, still looks deliberate.
+    """
+    missing = []
+    for page in ("index.html", "manual.html"):
+        html_text = (OUT / page).read_text(encoding="utf-8")
+        for ref in re.findall(r'(?:src|href)="([^"]+)"', html_text):
+            if ref.startswith(("http://", "https://", "mailto:", "#", "data:")):
+                continue
+            target = ref.split("#", 1)[0]
+            # A build without `--pdf` links to a PDF it did not make; that is a
+            # preview, not a publish, and the workflow always passes `--pdf`.
+            if target == "manual.pdf" and not expect_pdf:
+                continue
+            if target and not (OUT / target).exists():
+                missing.append(f"{page} -> {target}")
+    if missing:
+        raise SystemExit("built page refers to files that are not there:\n  " + "\n  ".join(missing))
+
+
 def main() -> None:
     v = version()
     if OUT.exists():
@@ -605,10 +630,18 @@ def main() -> None:
     pictures = shots()
     for f, _, _ in pictures:
         shutil.copy(HERE / "shots" / f, OUT / "shots" / f)
+    # The two that are not in the gallery and so are not in that list: the loop under
+    # the masthead and the photograph of the help screen. Copying only what `shots()`
+    # names published a page referring to two files that were never put beside it.
+    for extra in ("sailing.webp", "keys.webp"):
+        if (HERE / "shots" / extra).exists():
+            shutil.copy(HERE / "shots" / extra, OUT / "shots" / extra)
     # GitHub Pages would otherwise hand the whole thing to Jekyll.
     (OUT / ".nojekyll").write_text("", encoding="utf-8")
 
     pdf = "--pdf" in sys.argv and build_pdf()
+    # After the PDF, which the pages link to and which is written last.
+    every_reference_resolves(expect_pdf=pdf)
     print(f"built _site/ — sail {v}, {len(pictures)} pictures"
           f"{', manual.pdf' if pdf else ''}")
 
