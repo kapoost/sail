@@ -165,10 +165,7 @@ pub fn draw(
     mut hud: ResMut<crate::hud::HudVisible>,
     mut net: ResMut<crate::net::Net>,
     fleet: Res<crate::fleet::Fleet>,
-    mut lesson: ResMut<crate::tutorial::Tutorial>,
-    mut wants: ResMut<crate::mission::WantsPilotage>,
-    job: Res<crate::mission::Pilotage>,
-    mut race: ResMut<crate::race::Race>,
+    mut missions: Missions,
     mut course: ResMut<crate::course::Course>,
 ) -> Result {
     if !settings.open {
@@ -426,7 +423,7 @@ pub fn draw(
                     passage(ui, &mut course);
                 }
                 if settings.tab == Tab::Drill {
-                    drill(ui, &mut lesson, &mut wants, &job, &mut race);
+                    drill(ui, &mut missions);
                 }
                 if settings.tab == Tab::Network {
                     together(ui, &mut net, &fleet, sim.sim.state.pos);
@@ -601,22 +598,21 @@ fn pilotage(
 /// A page rather than a key, because starting a man-overboard drill by accident in the
 /// middle of a delivery would be a poor joke, and because this is where somebody who has
 /// just opened the game looks for the thing that teaches them to sail it.
-fn drill(
-    ui: &mut egui::Ui,
-    lesson: &mut crate::tutorial::Tutorial,
-    wants: &mut crate::mission::WantsPilotage,
-    job: &crate::mission::Pilotage,
-    race: &mut crate::race::Race,
-) {
-    regatta(ui, race);
+fn drill(ui: &mut egui::Ui, missions: &mut Missions) {
+    sailing_101(ui, missions);
     ui.add_space(14.0);
     ui.separator();
     ui.add_space(10.0);
-    pilotage(ui, wants, job);
+    regatta(ui, &mut missions.race);
+    ui.add_space(14.0);
+    ui.separator();
+    ui.add_space(10.0);
+    pilotage(ui, &mut missions.wants, &missions.job);
     ui.add_space(14.0);
     ui.separator();
     ui.add_space(10.0);
     heading(ui, "MAN OVERBOARD DRILL");
+    let lesson = &mut missions.drill;
     ui.label(
         egui::RichText::new(
             "Getting her sailing is three keys. Getting her back to one spot and stopped \
@@ -646,6 +642,70 @@ fn drill(
     {
         lesson.wants_start = true;
     }
+}
+
+/// **SAILING 101**: the walk round the boat, for somebody who has just arrived.
+///
+/// First on the page because it is the first thing a new reader needs and the last
+/// thing they would think to look for — the key list is behind `H`, and a list of
+/// forty-four keys is a reference rather than an introduction.
+fn sailing_101(ui: &mut egui::Ui, missions: &mut Missions) {
+    heading(ui, "SAILING 101");
+    ui.label(
+        egui::RichText::new(
+            "Thirteen steps round the deck: the tiller, the sheets, the rope bank, the \
+             pilot, the watch, the chart, the glasses, the hand bearing compass, the \
+             log and the rod. One instruction at a time, each about one control and the \
+             instrument that answers it — and nothing moves on until you have done it.\n\n\
+             It stands the watch down and takes the pilot off first, because a lesson \
+             about the mainsheet is nonsense while somebody else is trimming it.",
+        )
+        .color(egui::Color32::from_rgb(176, 182, 190))
+        .monospace()
+        .size(11.0),
+    );
+    ui.add_space(8.0);
+    if missions.basics.running() {
+        if ui
+            .button(
+                egui::RichText::new("STOP THE LESSON")
+                    .monospace()
+                    .size(12.0),
+            )
+            .clicked()
+        {
+            missions.basics.wants_stop = true;
+        }
+    } else {
+        let busy = missions.drill.running();
+        let button = ui.add_enabled(
+            !busy,
+            egui::Button::new(
+                egui::RichText::new("START — WALK ME ROUND HER")
+                    .monospace()
+                    .size(12.0),
+            ),
+        );
+        if busy {
+            button.on_hover_text("the drill is running: one card at a time");
+        } else if button.clicked() {
+            missions.basics.wants_start = true;
+        }
+    }
+}
+
+/// What the missions page works on.
+///
+/// Four resources behind one name, because a system may have sixteen parameters and
+/// this panel wanted seventeen — and because *these four are the page*: the lesson, the
+/// drill, the regatta and the pilot job.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct Missions<'w> {
+    pub basics: ResMut<'w, crate::basics::Basics>,
+    pub drill: ResMut<'w, crate::tutorial::Tutorial>,
+    pub wants: ResMut<'w, crate::mission::WantsPilotage>,
+    pub job: Res<'w, crate::mission::Pilotage>,
+    pub race: ResMut<'w, crate::race::Race>,
 }
 
 /// How many pixels across the world is drawn, as a row of choices.

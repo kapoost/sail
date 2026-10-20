@@ -183,7 +183,11 @@ knobs:
 SAIL_WIND=32 SAIL_SEA=built SAIL_HOUR=14 sail      # a gale, already built, mid-afternoon
 SAIL_COVER=0.95 SAIL_SQUALL=25 sail                # overcast, with a squall every 25 s
 SAIL_TONEMAP=neutral sail                          # a different tone curve
+SAIL_LESSON=1 sail                                 # SAILING 101, from the first frame
+SAIL_CREW=1 SAIL_PILOT=1 sail                      # the watch aboard and the pilot steering
 ```
+
+In a browser the same dials are the query string: `?wind=32&sea=built&hour=14`.
 
 `SAIL_WIND` is the day's breeze in knots, `SAIL_SEA=built` opens with the sea that wind
 has already made rather than the two and a half hours it takes to build, `SAIL_COVER` is

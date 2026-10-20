@@ -822,53 +822,29 @@ pub fn draw(
         Stage::Done => egui::Color32::from_rgb(120, 190, 130),
         _ => egui::Color32::from_rgb(200, 190, 150),
     };
-    let frame = egui::Frame::new()
-        .fill(egui::Color32::from_rgba_unmultiplied(14, 18, 24, 232))
-        .stroke(egui::Stroke::new(1.0, ink))
-        .inner_margin(egui::Margin::symmetric(16, 11));
-    egui::Area::new("tutorial".into())
-        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 18.0))
-        .show(ctx, |ui| {
-            frame.show(ui, |ui| {
-                ui.set_width(430.0);
-                ui.label(
-                    egui::RichText::new(&heading)
-                        .color(ink)
-                        .monospace()
-                        .size(14.0),
-                );
-                if !body.is_empty() {
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(&body)
-                            .color(egui::Color32::from_rgb(196, 202, 208))
-                            .monospace()
-                            .size(11.5),
-                    );
-                }
-                // The helm cue, under the words, because it is the thing you act on.
-                if let Some(want) = target_heading(
-                    lesson.stage,
-                    &sim,
-                    &over,
-                    lesson.tack_from,
-                    lesson.approach_side,
-                ) {
-                    ui.add_space(6.0);
-                    // Never "steady as she goes" onto a course she cannot sail. The cue
-                    // knows what the wind is doing now, which is the difference between
-                    // an arrow and an instrument.
-                    let lay = can_she_lay_him(sim.sim.telemetry.twd, want);
-                    helm_cue(ui, wrap_pi(want - sim.sim.state.heading), lay);
-                }
-                // And how long he has, drawn as something emptying rather than as a
-                // number, because a bar going down is read without being looked at.
-                if over.live() {
-                    ui.add_space(5.0);
-                    endurance_bar(ui, over.endurance_left(now) as f32);
-                }
-            });
-        });
+    card(ctx, ink, &heading, &body, |ui| {
+        // The helm cue, under the words, because it is the thing you act on.
+        if let Some(want) = target_heading(
+            lesson.stage,
+            &sim,
+            &over,
+            lesson.tack_from,
+            lesson.approach_side,
+        ) {
+            ui.add_space(6.0);
+            // Never "steady as she goes" onto a course she cannot sail. The cue knows
+            // what the wind is doing now, which is the difference between an arrow and
+            // an instrument.
+            let lay = can_she_lay_him(sim.sim.telemetry.twd, want);
+            helm_cue(ui, wrap_pi(want - sim.sim.state.heading), lay);
+        }
+        // And how long he has, drawn as something emptying rather than as a number,
+        // because a bar going down is read without being looked at.
+        if over.live() {
+            ui.add_space(5.0);
+            endurance_bar(ui, over.endurance_left(now) as f32);
+        }
+    });
 
     if let Some(shout) = lesson.shout {
         let age = now - shout.since;
@@ -889,6 +865,53 @@ pub fn draw(
         }
     }
     Ok(())
+}
+
+/// **The card the lessons talk through**, at the top of the screen.
+///
+/// One frame, one instruction, and whatever the lesson wants under it. Shared by the
+/// man-overboard drill and by SAILING 101 rather than written twice, because two cards
+/// drift apart in size and colour and then the game has two voices.
+///
+/// **And it is half again the size it was.** At 430 pixels across with eleven-point body
+/// text it was a footnote on a window 1440 wide: the one thing on the screen telling
+/// somebody what to do, set smaller than the labels on the instruments. The words a
+/// beginner is reading while trying to steer have to be readable from where a beginner
+/// sits, which is further back than the person who wrote them.
+pub fn card(
+    ctx: &egui::Context,
+    ink: egui::Color32,
+    heading: &str,
+    body: &str,
+    extra: impl FnOnce(&mut egui::Ui),
+) {
+    let frame = egui::Frame::new()
+        .fill(egui::Color32::from_rgba_unmultiplied(14, 18, 24, 236))
+        .stroke(egui::Stroke::new(1.0, ink))
+        .inner_margin(egui::Margin::symmetric(20, 15));
+    egui::Area::new("lesson".into())
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 20.0))
+        .show(ctx, |ui| {
+            frame.show(ui, |ui| {
+                ui.set_width(600.0);
+                ui.label(
+                    egui::RichText::new(heading)
+                        .color(ink)
+                        .monospace()
+                        .size(18.0),
+                );
+                if !body.is_empty() {
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(body)
+                            .color(egui::Color32::from_rgb(206, 212, 218))
+                            .monospace()
+                            .size(14.0),
+                    );
+                }
+                extra(ui);
+            });
+        });
 }
 
 /// Which way to push the helm, and how hard.

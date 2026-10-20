@@ -617,7 +617,7 @@ pub fn draw(
     mut course: ResMut<Course>,
     nav: Res<crate::navigation::Navigation>,
     polar: Res<crate::hud::Polar>,
-    mut fishing: ResMut<crate::fishing::Fishing>,
+    mut in_hand: InHand,
     mut crew: ResMut<crate::crew::Crew>,
     flotsam: Res<crate::barrels::Flotsam>,
     mut orders: ResMut<crate::orders::Orders>,
@@ -635,6 +635,11 @@ pub fn draw(
     if console.hidden {
         return Ok(());
     }
+    // Disjoint fields of one parameter, taken apart once: a Bevy system may have
+    // sixteen parameters and this one had seventeen, which is a limit worth meeting
+    // with a *name* rather than with a fight — the rod and the glasses are both
+    // things in your hands, and now they say so.
+    let (fishing, sighting) = (&mut in_hand.fishing, &mut in_hand.sighting);
     let ctx = contexts.ctx_mut()?;
     let cfg = sim.config();
     let telemetry = sim.sim.telemetry;
@@ -753,7 +758,71 @@ pub fn draw(
                 // And the gear over the stern, when there is any. Here rather than in a
                 // corner of its own: line out is a reading you glance at continuously
                 // while you are fishing, which makes it an instrument and not a window.
-                crate::rod::gauge(ui, &mut fishing, &sim);
+                crate::rod::gauge(ui, fishing, &sim);
+
+                // **The three things you pick up**, which until now were keys and
+                // nothing else.
+                //
+                // Everything on this console is either a reading or a rope, and these
+                // are neither: the glasses, the compass and the rod are *in your hands*,
+                // and a hand is the one thing a keyboard hides. Somebody who has not
+                // read the key list has no way of discovering that the boat has
+                // binoculars aboard — and a feature nobody finds is a feature that is
+                // not there. They sit under the weather and above the consignment,
+                // because that is where the question *what can I do about it* belongs,
+                // and they light when the thing is in hand.
+                //
+                // What they do not do is *work* the instrument: naming a mark, shooting
+                // a bearing and taking a fish are timing, and timing lives on the keys
+                // the hover text names. These put the thing in your hand and take it
+                // away again, which is the half that was undiscoverable.
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    if tool_button(ui, "GLASSES", sighting.glasses)
+                        .on_hover_text(
+                            "the glasses, for naming what is out there — shift B, then \
+                             B to ask what it is",
+                        )
+                        .clicked()
+                    {
+                        sighting.glasses = !sighting.glasses;
+                        if sighting.glasses {
+                            // One at a time: you have two hands and one of them is
+                            // holding on. The same rule the keys follow.
+                            sighting.up = false;
+                        }
+                        sighting.on = None;
+                    }
+                    if tool_button(ui, "BEARING", sighting.up)
+                        .on_hover_text(
+                            "the hand bearing compass — shift N, aim with the right \
+                             button, N to shoot it",
+                        )
+                        .clicked()
+                    {
+                        sighting.up = !sighting.up;
+                        if sighting.up {
+                            sighting.glasses = false;
+                        }
+                        sighting.on = None;
+                    }
+                    let aboard = fishing.have_a_rod();
+                    if ui
+                        .add_enabled_ui(aboard, |ui| tool_button(ui, "ROD", fishing.out()))
+                        .inner
+                        .on_hover_text(if aboard {
+                            "the rod over the stern — J, and J again to take her aboard \
+                             when there is one alongside"
+                        } else {
+                            "no rod aboard"
+                        })
+                        .clicked()
+                    {
+                        let said = fishing.stow_or_set();
+                        info!("{said}");
+                    }
+                });
 
                 ui.add_space(4.0);
                 ui.separator();
@@ -2280,6 +2349,39 @@ fn hands(ui: &mut egui::Ui, standing: bool) -> egui::Response {
     figure(p, c + egui::vec2(-6.0, 7.0), 24.0, 3.0);
     figure(p, c + egui::vec2(8.0, 9.0), 20.0, -3.0);
     response
+}
+
+/// What is in your hands: the two instruments and the rod.
+///
+/// One parameter rather than three, because a system may have sixteen and the console
+/// wanted seventeen. Grouping them is not a workaround — these three are the same kind
+/// of thing, and the buttons that work them sit together in the same row.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct InHand<'w> {
+    pub fishing: ResMut<'w, crate::fishing::Fishing>,
+    pub sighting: ResMut<'w, crate::sight::Sighting>,
+}
+
+/// A narrow lamp for a thing you pick up: three of them fit the window they live in.
+///
+/// The same material change as `lamp_button` — brass when it is in your hand, dark steel
+/// when it is not — at the width three of them can share.
+fn tool_button(ui: &mut egui::Ui, text: &str, lit: bool) -> egui::Response {
+    ui.add(
+        egui::Button::new(
+            egui::RichText::new(text)
+                .monospace()
+                .size(letter::UNIT)
+                .color(if lit { paint::INK } else { paint::FACE }),
+        )
+        .fill(if lit { paint::LIVE } else { paint::TRACK })
+        .stroke(egui::Stroke::new(
+            if lit { 1.4 } else { 1.0 },
+            if lit { paint::FACE } else { paint::BEZEL },
+        ))
+        .corner_radius(2.0)
+        .min_size(egui::vec2(53.0, 18.0)),
+    )
 }
 
 fn lamp_button(ui: &mut egui::Ui, text: &str, lit: bool) -> egui::Response {

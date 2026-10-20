@@ -6,7 +6,9 @@
 //! a replaceable component, and it is why choosing Bevy here is a decision that can be
 //! revisited for the cost of rewriting this one crate.
 
+mod aboard;
 mod barrels;
+mod basics;
 mod boat;
 mod boathook;
 mod camera;
@@ -325,12 +327,16 @@ fn main() {
     .init_resource::<marks::Coast>()
     // `SAIL_TUTORIAL=1` starts the drill on the first frame, which is how it gets
     // looked at twenty times in an afternoon without clicking through a panel.
+    .insert_resource(basics::Basics::asked_for(
+        crate::knob::var("SAIL_LESSON").is_ok_and(|v| v != "0"),
+    ))
     .insert_resource(tutorial::Tutorial::asked_for(
         crate::knob::var("SAIL_TUTORIAL").is_ok(),
     ))
     .add_systems(
         Startup,
         (
+            aboard::how_she_starts,
             retro::setup_ui_camera,
             world::setup,
             boat::setup,
@@ -442,7 +448,13 @@ fn main() {
                 rain::update,
                 rain::shroud,
                 (settings::toggle, settings::apply),
-                (help::toggle, logbook::toggle, mob::throw, tutorial::run),
+                (
+                    help::toggle,
+                    logbook::toggle,
+                    mob::throw,
+                    tutorial::run,
+                    basics::run,
+                ),
                 (camera::toggle, camera::dress, glance::posts),
                 camera::aim,
                 (
@@ -515,6 +527,7 @@ fn main() {
             logbook::lost,
             hud::draw,
             tutorial::draw,
+            basics::draw,
             sight::draw,
             navigation::adrift_card,
             chart::glass,

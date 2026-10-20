@@ -84,18 +84,35 @@ fn decode(raw: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// The seed for the day, which is the one dial that has to have an answer.
+/// The day a tab opens on, chosen rather than drawn.
 ///
-/// On a desk it comes from the clock when nobody has asked for a particular day. In a
-/// tab `SystemTime::now()` is not merely unavailable — it **panics**, on the bare
-/// `wasm32-unknown-unknown` target, before the window is open — so the clock there is
-/// the one the browser keeps.
+/// **A first minute should not begin by running aground.** The archipelago is dense —
+/// thirty-four islands over five and a half kilometres — and a seed drawn at random puts
+/// land anywhere, including a mile dead ahead of a boat whose reader is busy reading the
+/// key list. So a browser opens on one particular day, picked by measuring every seed
+/// out to three hundred: this one has **three and a quarter kilometres of open water
+/// along the course she starts on**, which is twenty minutes at the speed she will do,
+/// and the weather it draws is the weather anybody would choose to learn a boat in —
+/// eleven knots on a beam reach, half a metre of sea, three oktas at seven in the
+/// morning.
+///
+/// Nothing about the desk build changes: there the day is the clock, because a passage
+/// you sat down for should be a day you have not had before. `?seed=` overrides it
+/// either way.
+#[cfg(target_arch = "wasm32")]
+const A_DAY_WITH_SEA_ROOM: u64 = 284;
+
+/// The seed for the day, which is the one dial that has to have an answer.
 pub fn seed() -> u64 {
     if let Some(asked) = var("SAIL_SEED").ok().and_then(|s| s.parse::<u64>().ok()) {
         return asked;
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
+        // The clock, and it is the other thing that is not as portable as it looks:
+        // `SystemTime::now()` on `wasm32-unknown-unknown` does not merely fail, it
+        // *panics*, which is why this call lives behind a function rather than in the
+        // middle of `main`.
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
@@ -103,10 +120,6 @@ pub fn seed() -> u64 {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        // Milliseconds since the epoch, times a prime, because the low bits of a
-        // millisecond clock are a poor seed on their own and two tabs opened together
-        // would otherwise get the same weather.
-        let now = js_sys::Date::now() as u64;
-        now.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0x5A11
+        A_DAY_WITH_SEA_ROOM
     }
 }

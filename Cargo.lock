@@ -5161,7 +5161,6 @@ dependencies = [
  "bevy_egui",
  "bytemuck",
  "glam 0.34.1",
- "js-sys",
  "pollster",
  "sail-core",
  "sail-net",
