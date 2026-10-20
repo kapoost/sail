@@ -87,9 +87,17 @@ while the *weather* still comes from the clock, because a day you have already s
 replay. Your islands, a new day.
 
 **Landed, with tests:** the file (`~/Library/Application Support/sail/home` and the
-equivalents), the platform and the pile, the two seeds, and the chart mark that says where
-home is. **What is left:** the rest of what a platform is for — somewhere to keep gear,
-something to spend a store on, and a reason to fill it.
+equivalents), the platform and the pile, the two seeds, the chart mark that says where
+home is — and the other half of a store, which is something to spend it on. A chandler's
+list appears when she is lying alongside and nowhere else, priced in casks and in fish
+because those are what there is: a **derrick** that swings casks aboard three times as
+fast, a **drying rack** that hangs the catch where it can be seen from the cockpit, and a
+**lamp** that lights itself through the last eight degrees of dusk. Each one is built on
+the raft and drawn there.
+
+**What is left:** more to build and more to build it with — gear kept ashore, a reason to
+go further out, and the fittings the content list implies once there is night and weather
+to want them in.
 
 **Lands in:** `anchorage.rs`, with `sim.rs` taking the sea as its own argument.
 

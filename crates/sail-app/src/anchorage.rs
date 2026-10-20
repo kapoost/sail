@@ -26,6 +26,7 @@
 //! parse it.
 
 use bevy::prelude::*;
+use bevy_egui::egui;
 use glam::DVec2;
 
 use crate::sim::Sim;
@@ -57,6 +58,73 @@ pub struct Stores {
     pub catch_kg: f64,
 }
 
+/// What has been built on the platform, and what it costs.
+///
+/// **A store with nothing to spend it on is a counter with a longer name.** This is the
+/// other half: three things that can be built out there, each paid for in what the sea
+/// gives up, each one *drawn* on the raft, and each one doing a single thing you can feel
+/// from the water rather than read off a panel.
+///
+/// Priced in casks and in fish because those are what there is. A chandler in an
+/// archipelago takes salvage and he takes the catch; coin is a thing this game does not
+/// have yet, and inventing one to stand between the two halves of a trade would be a
+/// worse answer than the trade itself.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Fitting {
+    /// A boom and a tackle: casks come off the painter three times as fast.
+    Derrick,
+    /// Where the catch hangs. It is the catch, drawn — a season's fishing you can see
+    /// from the cockpit instead of a number in a store.
+    Rack,
+    /// A lamp on a pole, lit when the light goes. Finding your own platform in poor
+    /// visibility is the thing it is for, and it is the first piece of the night.
+    Lamp,
+}
+
+impl Fitting {
+    /// All of them, in the order a chandler would read them out.
+    pub const ALL: [Fitting; 3] = [Fitting::Derrick, Fitting::Rack, Fitting::Lamp];
+
+    /// What it is called, and what it does, in the fewest words that are still true.
+    pub fn name(self) -> &'static str {
+        match self {
+            Fitting::Derrick => "derrick",
+            Fitting::Rack => "drying rack",
+            Fitting::Lamp => "lamp",
+        }
+    }
+
+    pub fn does(self) -> &'static str {
+        match self {
+            Fitting::Derrick => "casks come aboard three times as fast",
+            Fitting::Rack => "the catch hangs where you can see it",
+            Fitting::Lamp => "lit at dusk — you can find her in poor visibility",
+        }
+    }
+
+    /// What it costs: casks, and fish.
+    pub fn costs(self) -> (u32, u32) {
+        match self {
+            Fitting::Derrick => (6, 0),
+            Fitting::Rack => (2, 6),
+            Fitting::Lamp => (9, 0),
+        }
+    }
+
+    /// The word in the file. Short, lower case, and never reused.
+    pub fn key(self) -> &'static str {
+        match self {
+            Fitting::Derrick => "derrick",
+            Fitting::Rack => "rack",
+            Fitting::Lamp => "lamp",
+        }
+    }
+
+    pub fn of(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|f| f.key() == key)
+    }
+}
+
 /// The anchorage, the platform in it, and the seed of the water it all sits in.
 #[derive(Resource, Clone, Debug, Default)]
 pub struct Home {
@@ -67,8 +135,37 @@ pub struct Home {
     /// And the name of the anchorage it is in, for saying where you are going.
     pub harbour: String,
     pub stores: Stores,
+    /// What has been built out there.
+    pub built: Vec<Fitting>,
     /// Whether anything has changed since the last write.
     pub unsaved: bool,
+}
+
+impl Home {
+    pub fn has(&self, fitting: Fitting) -> bool {
+        self.built.contains(&fitting)
+    }
+
+    /// Whether the store can pay for it. Its own function because it is the one piece of
+    /// arithmetic in a trade, and both the panel and the test have to use the same one.
+    pub fn affords(&self, fitting: Fitting) -> bool {
+        let (casks, fish) = fitting.costs();
+        !self.has(fitting) && self.stores.casks >= casks && self.stores.fish >= fish
+    }
+
+    /// Pay for it and put it on the list. Nothing happens if it cannot be paid for, which
+    /// is the only failure mode a chandler has.
+    pub fn buy(&mut self, fitting: Fitting) -> bool {
+        if !self.affords(fitting) {
+            return false;
+        }
+        let (casks, fish) = fitting.costs();
+        self.stores.casks -= casks;
+        self.stores.fish -= fish;
+        self.built.push(fitting);
+        self.unsaved = true;
+        true
+    }
 }
 
 /// The version stamp at the top of the file.
@@ -127,6 +224,9 @@ impl Home {
         out.push_str(&format!("casks {}\n", self.stores.casks));
         out.push_str(&format!("fish {}\n", self.stores.fish));
         out.push_str(&format!("catch {:.2}\n", self.stores.catch_kg));
+        for fitting in &self.built {
+            out.push_str(&format!("built {}\n", fitting.key()));
+        }
         out
     }
 
@@ -154,6 +254,15 @@ impl Home {
                 "casks" => home.stores.casks = value.trim().parse().unwrap_or(0),
                 "fish" => home.stores.fish = value.trim().parse().unwrap_or(0),
                 "catch" => home.stores.catch_kg = value.trim().parse().unwrap_or(0.0),
+                "built" => {
+                    // A fitting this build has never heard of is skipped rather than
+                    // guessed at, the same as any other unknown line.
+                    if let Some(fitting) = Fitting::of(value.trim()) {
+                        if !home.built.contains(&fitting) {
+                            home.built.push(fitting);
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -168,10 +277,14 @@ impl Home {
 /// in sight of it. Any anchorage would do; *the same* anchorage every time is the whole
 /// requirement.
 pub fn moor(mut home: ResMut<Home>, sim: Res<Sim>, course: Res<crate::course::Course>) {
-    if home.moored.is_some() || course.harbours.is_empty() {
+    let from = sim.sim.state.pos;
+    if crate::knob::var("SAIL_PLATFORM").is_ok() && home.harbour != "alongside" {
+        // The drawing knob wins over a berth that is already written down, because the
+        // whole of what it is for is looking at a platform you would otherwise have to
+        // sail to.
+    } else if home.moored.is_some() || course.harbours.is_empty() {
         return;
     }
-    let from = sim.sim.state.pos;
     // `SAIL_PLATFORM=here` moors it where she is, which is the only way to look at a
     // thing that is otherwise two miles away through a day's sailing. A drawing knob and
     // nothing else — the same argument as `SAIL_BRIG_SHOW`, and it is not written to the
@@ -218,6 +331,15 @@ pub fn alongside(here: DVec2, stw_kn: f64, berth: DVec2) -> bool {
 #[derive(Component)]
 pub struct Platform;
 
+/// The lamp, which is the one fitting that is not always on.
+#[derive(Component)]
+pub struct Lamp;
+
+/// Something built on the platform, drawn. Despawned and rebuilt whole when the list
+/// changes, which is a few times in the life of a world.
+#[derive(Component)]
+pub struct Fitted;
+
 /// One cask of the store, drawn.
 ///
 /// The number is which of the pile it is. Nothing reads it — the pile is rebuilt whole
@@ -243,7 +365,9 @@ pub fn build(
     origin: Res<crate::frame::RenderOrigin>,
     platform: Query<Entity, With<Platform>>,
     stack: Query<(Entity, &Stacked)>,
+    fitted: Query<Entity, With<Fitted>>,
     mut built: Local<bool>,
+    mut fittings: Local<usize>,
 ) {
     let Some(at) = home.moored else {
         return;
@@ -299,12 +423,140 @@ pub fn build(
         info!("platform moored at {}", home.harbour);
     }
 
+    // What has been built out there. Same rule as the pile: rebuilt when the list it is
+    // drawing changes, and not otherwise.
+    if *fittings != home.built.len() {
+        *fittings = home.built.len();
+        for entity in &fitted {
+            commands.entity(entity).despawn();
+        }
+        if let Ok(raft) = platform.single() {
+            let timber = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.5, 0.4, 0.28),
+                perceptual_roughness: 0.95,
+                ..default()
+            });
+            let iron = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.22, 0.21, 0.2),
+                perceptual_roughness: 0.75,
+                ..default()
+            });
+            let spar = meshes.add(Cylinder::new(0.11, 4.4));
+            let post = meshes.add(Cylinder::new(0.13, 3.0));
+            let beam = meshes.add(Cuboid::new(3.4, 0.1, 0.1));
+            let fish = meshes.add(Sphere::new(0.16));
+            let silver = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.62, 0.66, 0.68),
+                perceptual_roughness: 0.4,
+                ..default()
+            });
+            let glass = materials.add(StandardMaterial {
+                base_color: Color::srgb(1.0, 0.86, 0.55),
+                emissive: LinearRgba::new(6.0, 4.4, 1.8, 1.0),
+                ..default()
+            });
+            commands.entity(raft).with_children(|raft| {
+                for fitting in &home.built {
+                    match fitting {
+                        // A post at the outboard corner with a boom slung off it, angled
+                        // out over the water where a boat comes alongside.
+                        Fitting::Derrick => {
+                            raft.spawn((
+                                Fitted,
+                                Mesh3d(post.clone()),
+                                MeshMaterial3d(timber.clone()),
+                                Transform::from_xyz(2.8, 1.7, -2.0),
+                            ));
+                            raft.spawn((
+                                Fitted,
+                                Mesh3d(spar.clone()),
+                                MeshMaterial3d(timber.clone()),
+                                Transform::from_xyz(3.9, 2.8, -3.2).with_rotation(
+                                    Quat::from_rotation_x(0.9) * Quat::from_rotation_z(0.35),
+                                ),
+                            ));
+                        }
+                        // Two uprights and a rail, with the catch on it.
+                        Fitting::Rack => {
+                            for end in [-1.0_f32, 1.0] {
+                                raft.spawn((
+                                    Fitted,
+                                    Mesh3d(post.clone()),
+                                    MeshMaterial3d(timber.clone()),
+                                    Transform::from_xyz(-0.4, 1.7, end * 1.6)
+                                        .with_scale(Vec3::new(0.7, 0.75, 0.7)),
+                                ));
+                            }
+                            raft.spawn((
+                                Fitted,
+                                Mesh3d(beam.clone()),
+                                MeshMaterial3d(timber.clone()),
+                                Transform::from_xyz(-0.4, 2.7, 0.0).with_rotation(
+                                    Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+                                ),
+                            ));
+                            // **The catch, hung on it.** A dozen at most: past that a rack
+                            // is a wall of fish, and the point of the thing is that a
+                            // season's fishing is a sight rather than a figure.
+                            for n in 0..home.stores.fish.min(12) {
+                                let along = -1.4 + n as f32 * 0.26;
+                                raft.spawn((
+                                    Fitted,
+                                    Mesh3d(fish.clone()),
+                                    MeshMaterial3d(silver.clone()),
+                                    Transform::from_xyz(-0.4, 2.35, along)
+                                        .with_scale(Vec3::new(0.7, 1.9, 0.5)),
+                                ));
+                            }
+                        }
+                        // A pole with a lamp on it, and the light it actually throws.
+                        Fitting::Lamp => {
+                            raft.spawn((
+                                Fitted,
+                                Mesh3d(post.clone()),
+                                MeshMaterial3d(iron.clone()),
+                                Transform::from_xyz(-3.9, 2.2, 0.0)
+                                    .with_scale(Vec3::new(0.6, 1.3, 0.6)),
+                            ));
+                            raft.spawn((
+                                Fitted,
+                                Lamp,
+                                Mesh3d(meshes.add(Sphere::new(0.26))),
+                                MeshMaterial3d(glass.clone()),
+                                Transform::from_xyz(-3.9, 4.3, 0.0),
+                            ));
+                            raft.spawn((
+                                Fitted,
+                                Lamp,
+                                PointLight {
+                                    // Warm, and not very far: a platform lamp is a thing
+                                    // you steer for, not a floodlight.
+                                    color: Color::srgb(1.0, 0.82, 0.52),
+                                    intensity: 400_000.0,
+                                    range: 120.0,
+                                    shadow_maps_enabled: false,
+                                    ..default()
+                                },
+                                Transform::from_xyz(-3.9, 4.3, 0.0),
+                            ));
+                        }
+                    }
+                }
+            });
+        }
+    }
+
     // The pile. Rebuilt only when the count it is drawing has changed, which is a few
     // times an evening.
     let want = home.stores.casks.min(SHOWS);
     let have = stack.iter().count() as u32;
     if want == have {
         return;
+    }
+    // A fish landed while the rack is up changes the rack too, and the cheapest way to
+    // say that is to make the next landing rebuild both.
+    if home.has(Fitting::Rack) {
+        *fittings = usize::MAX;
     }
     let Ok(raft) = platform.single() else {
         return;
@@ -384,7 +636,14 @@ pub fn land(
         return;
     }
     *passing += time.delta_secs_f64();
-    if *passing < A_CASK_TAKES {
+    // A derrick is a boom and a tackle, and what it buys is the thing it bought on every
+    // quay that ever had one: you are not lifting the cask, you are swinging it.
+    let takes = if home.has(Fitting::Derrick) {
+        A_CASK_TAKES / 3.0
+    } else {
+        A_CASK_TAKES
+    };
+    if *passing < takes {
         return;
     }
     *passing = 0.0;
@@ -398,6 +657,132 @@ pub fn land(
         home.stores.casks,
         flotsam.astern.len()
     );
+}
+
+/// Light it when the light goes, and not before.
+///
+/// **A lamp burning at nine in the morning is a lamp nobody will ever steer by.** The
+/// thing it is for is the half hour either side of dusk and the days when the visibility
+/// shuts down, so it follows the sun: full from the moment the sun is on the horizon,
+/// out well before anybody would call it daylight, and fading between the two rather than
+/// snapping, because that is what the eye does with a light at dusk anyway.
+pub fn the_lamp_at_dusk(
+    sky: Res<crate::sky::Sky>,
+    mut lights: Query<&mut PointLight, With<Lamp>>,
+    mut glass: Query<&mut Visibility, (With<Lamp>, With<Mesh3d>)>,
+) {
+    let lit = lit_at(sky.elevation().to_degrees());
+    for mut light in &mut lights {
+        light.intensity = 400_000.0 * lit;
+    }
+    for mut visible in &mut glass {
+        *visible = if lit > 0.02 {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+/// How bright the lamp is with the sun that many degrees above the horizon.
+///
+/// Its own function so the curve can be read without a sky: out in daylight, full once
+/// the sun is down, and the fade between them over the last eight degrees — which is
+/// about the half hour before sunset at this latitude.
+fn lit_at(elevation_deg: f32) -> f32 {
+    ((8.0 - elevation_deg) / 8.0).clamp(0.0, 1.0)
+}
+
+/// The chandler's list, while she is lying alongside.
+///
+/// **It is only there when she is**, which is the whole of why it is a panel and not a
+/// menu: trading is a place you go to rather than a screen you open, and a list you can
+/// read from the middle of the fairway is a shop that has come to you.
+///
+/// What is on it is what the store can pay for. A thing already built is struck through
+/// rather than hidden — you looked at it last week and wondered what it cost, and a shop
+/// whose shelves change when you are not looking is a shop you cannot plan against.
+pub fn chandler(
+    mut contexts: bevy_egui::EguiContexts,
+    mut home: ResMut<Home>,
+    sim: Res<Sim>,
+) -> Result {
+    let Some(berth) = home.moored else {
+        return Ok(());
+    };
+    let knots = sail_core::units::ms_to_kn(sim.sim.telemetry.stw);
+    if !alongside(sim.sim.state.pos, knots, berth) {
+        return Ok(());
+    }
+    let ctx = contexts.ctx_mut()?;
+    let ink = egui::Color32::from_rgb(230, 198, 120);
+    let quiet = egui::Color32::from_rgb(150, 150, 130);
+    let frame = egui::Frame::new()
+        .fill(egui::Color32::from_rgba_unmultiplied(14, 18, 24, 236))
+        .stroke(egui::Stroke::new(1.0, ink))
+        .inner_margin(egui::Margin::symmetric(16, 12));
+    let mut buying: Option<Fitting> = None;
+    egui::Area::new("platform".into())
+        .anchor(egui::Align2::LEFT_CENTER, egui::vec2(12.0, 0.0))
+        .show(ctx, |ui| {
+            frame.show(ui, |ui| {
+                ui.set_width(300.0);
+                ui.label(
+                    egui::RichText::new(format!("THE PLATFORM — {}", home.harbour.to_uppercase()))
+                        .monospace()
+                        .size(12.0)
+                        .color(ink),
+                );
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} casks · {} fish, {:.0} kg",
+                        home.stores.casks, home.stores.fish, home.stores.catch_kg
+                    ))
+                    .monospace()
+                    .size(11.0)
+                    .color(quiet),
+                );
+                ui.add_space(6.0);
+                for fitting in Fitting::ALL {
+                    let (casks, fish) = fitting.costs();
+                    let price = match (casks, fish) {
+                        (c, 0) => format!("{c} casks"),
+                        (0, f) => format!("{f} fish"),
+                        (c, f) => format!("{c} casks, {f} fish"),
+                    };
+                    if home.has(fitting) {
+                        ui.label(
+                            egui::RichText::new(format!("{} — built", fitting.name()))
+                                .monospace()
+                                .size(11.0)
+                                .color(quiet)
+                                .strikethrough(),
+                        );
+                        continue;
+                    }
+                    let can = home.affords(fitting);
+                    let line = format!("{} — {price}", fitting.name());
+                    let button = ui.add_enabled(
+                        can,
+                        egui::Button::new(
+                            egui::RichText::new(line)
+                                .monospace()
+                                .size(11.0)
+                                .color(if can { ink } else { quiet }),
+                        ),
+                    );
+                    if button.on_hover_text(fitting.does()).clicked() {
+                        buying = Some(fitting);
+                    }
+                }
+            });
+        });
+    if let Some(fitting) = buying {
+        if home.buy(fitting) {
+            info!("built on the platform: {}", fitting.name());
+        }
+    }
+    Ok(())
 }
 
 /// Write it down, when there is something to write and not more often than that.
@@ -429,6 +814,7 @@ mod what_is_kept {
                 fish: 9,
                 catch_kg: 23.456,
             },
+            built: vec![Fitting::Derrick],
             unsaved: true,
         }
     }
@@ -507,5 +893,124 @@ mod what_is_kept {
         let text = a_home().text();
         let second = text.lines().nth(1).unwrap_or("");
         assert!(second.starts_with("sea "), "second line was {second:?}");
+    }
+}
+
+#[cfg(test)]
+mod what_can_be_built {
+    use super::*;
+
+    fn with(casks: u32, fish: u32) -> Home {
+        Home {
+            sea: 1,
+            moored: Some(DVec2::ZERO),
+            harbour: "Testvik".into(),
+            stores: Stores {
+                casks,
+                fish,
+                catch_kg: fish as f64 * 1.4,
+            },
+            built: Vec::new(),
+            unsaved: false,
+        }
+    }
+
+    /// **A store with nothing to spend it on is a counter**, and the first thing a trade
+    /// has to get right is that it cannot be made on credit.
+    #[test]
+    fn nothing_is_built_on_an_empty_store() {
+        let mut home = with(0, 0);
+        for fitting in Fitting::ALL {
+            assert!(!home.affords(fitting), "{} was affordable", fitting.name());
+            assert!(!home.buy(fitting));
+        }
+        assert!(home.built.is_empty());
+        assert!(!home.unsaved, "an empty store wrote a file");
+    }
+
+    /// And when it is paid for, it is paid *out*: the casks that bought the derrick are
+    /// not still on the platform afterwards.
+    #[test]
+    fn building_costs_what_it_says_it_costs() {
+        let mut home = with(8, 0);
+        let (casks, fish) = Fitting::Derrick.costs();
+        assert!(home.buy(Fitting::Derrick));
+        assert_eq!(home.stores.casks, 8 - casks);
+        assert_eq!(home.stores.fish, 0 - fish);
+        assert!(home.has(Fitting::Derrick));
+        assert!(
+            home.unsaved,
+            "a trade did not ask for the file to be written"
+        );
+        // And not twice.
+        assert!(!home.affords(Fitting::Derrick));
+        assert!(!home.buy(Fitting::Derrick));
+        assert_eq!(home.built.len(), 1);
+    }
+
+    /// A rack is paid for in both, which is the point of having two things to pay with.
+    #[test]
+    fn the_rack_wants_fish_as_well_as_salvage() {
+        let mut home = with(9, 2);
+        assert!(
+            !home.affords(Fitting::Rack),
+            "two fish bought a drying rack"
+        );
+        home.stores.fish = 6;
+        assert!(home.buy(Fitting::Rack));
+        assert_eq!(home.stores.fish, 0);
+        assert_eq!(home.stores.casks, 7);
+    }
+
+    /// What is built survives the file, and an older save without the line reads as a
+    /// platform with nothing on it rather than as a broken one.
+    #[test]
+    fn the_fittings_come_back_out_of_the_file() {
+        let mut home = with(20, 20);
+        assert!(home.buy(Fitting::Derrick));
+        assert!(home.buy(Fitting::Lamp));
+        let back = Home::parse(&home.text()).expect("a file it just wrote");
+        assert!(back.has(Fitting::Derrick) && back.has(Fitting::Lamp));
+        assert!(!back.has(Fitting::Rack));
+        let older = format!("sail home {FORMAT}\nsea 1\ncasks 4\n");
+        let older = Home::parse(&older).expect("a save from before any of this");
+        assert!(older.built.is_empty());
+        assert_eq!(older.stores.casks, 4);
+    }
+
+    /// A fitting from a later build is skipped rather than guessed at — the same promise
+    /// the rest of the file makes.
+    #[test]
+    fn a_fitting_this_build_has_never_heard_of_is_skipped() {
+        let text = format!("sail home {FORMAT}\nsea 1\nbuilt smokehouse\nbuilt derrick\n");
+        let home = Home::parse(&text).expect("a file with a stranger in it");
+        assert_eq!(home.built, vec![Fitting::Derrick]);
+    }
+}
+
+#[cfg(test)]
+mod when_the_lamp_burns {
+    use super::*;
+
+    /// **Not at nine in the morning.** A lamp that is always on is not a lamp, it is a
+    /// decoration, and the thing this one is for is the half hour either side of dusk.
+    #[test]
+    fn it_is_out_in_daylight_and_full_once_the_sun_is_down() {
+        assert_eq!(lit_at(40.0), 0.0, "it was burning at noon");
+        assert_eq!(lit_at(24.0), 0.0, "it was burning in the forenoon");
+        assert_eq!(lit_at(0.0), 1.0, "it was not lit at sunset");
+        assert_eq!(lit_at(-6.0), 1.0, "it was not lit after dark");
+    }
+
+    /// And it fades rather than snapping, because a light that appears between one frame
+    /// and the next reads as a bug in the sky.
+    #[test]
+    fn it_comes_up_through_the_dusk() {
+        let half = lit_at(4.0);
+        assert!(
+            (half - 0.5).abs() < 0.01,
+            "halfway through the dusk it was at {half:.2}"
+        );
+        assert!(lit_at(6.0) < lit_at(2.0), "it got dimmer as the sun set");
     }
 }

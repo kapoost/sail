@@ -573,6 +573,7 @@ fn main() {
             anchorage::moor,
             anchorage::build,
             anchorage::land,
+            anchorage::the_lamp_at_dusk,
             anchorage::keep,
         )
             .chain(),
@@ -585,6 +586,7 @@ fn main() {
             retro::install_font.run_if(bevy::ecs::schedule::common_conditions::run_once),
             retro::scale_instruments,
             panel::draw,
+            anchorage::chandler,
             settings::draw,
             help::draw,
             chart::draw,
