@@ -49,6 +49,17 @@ use crate::sim::Sim;
 use crate::sound::SoundHandle;
 use sail_core::units::{deg, ms_to_kn, rad, wrap_pi};
 
+/// The drill, step by step.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck, Paint};
+    app.add_systems(Startup, setup.in_set(Build::Last));
+    app.add_systems(Update, run.in_set(Deck::Weather));
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Cards));
+}
+
 /// The keys the lesson tells the player to press.
 ///
 /// Named here as the input layer's own codes and printed from these, so a prompt cannot

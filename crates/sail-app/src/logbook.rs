@@ -26,6 +26,18 @@ use bevy_egui::egui;
 
 use crate::fishing::{Fishing, Quarry, SPECIES};
 
+/// The log.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Deck, Paint};
+    app.init_resource::<Logbook>();
+    app.add_systems(Update, toggle.in_set(Deck::Weather));
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Cards));
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, lost.in_set(Paint::Cards));
+}
+
 #[derive(Resource, Default)]
 pub struct Logbook {
     pub open: bool,

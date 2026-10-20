@@ -22,6 +22,24 @@ use sail_core::land::OPEN_WATER;
 use crate::course::Course;
 use crate::sim::Sim;
 
+/// The paper, the instruments on it, and the track she has left.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Deck, Paint};
+    app.init_resource::<Chart>();
+    app.init_resource::<Track>();
+    app.init_resource::<DeckLog>();
+    app.add_systems(Update, record.in_set(Deck::Report));
+    app.add_systems(Update, (toggle, stopwatch, by_hand).in_set(Deck::Weather));
+    app.add_systems(
+        bevy_egui::EguiPrimaryContextPass,
+        draw.in_set(Paint::Instruments),
+    );
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, glass.in_set(Paint::Over));
+}
+
 mod book;
 mod instruments;
 mod paper;

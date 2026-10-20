@@ -13,6 +13,17 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 
+/// The key list.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Deck, Paint};
+    app.init_resource::<Help>();
+    app.add_systems(Update, toggle.in_set(Deck::Weather));
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Cards));
+}
+
 #[derive(Resource, Default)]
 pub struct Help {
     pub open: bool,

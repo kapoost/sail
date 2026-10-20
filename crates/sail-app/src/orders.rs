@@ -23,6 +23,16 @@ use sail_core::state::Headsail;
 use crate::clutch::Line;
 use crate::sim::Sim;
 
+/// What the watch has been told to do.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.init_resource::<Orders>();
+    app.add_systems(Update, carry_out.in_set(Deck::Weather));
+}
+
 /// What has been asked for and not yet done.
 #[derive(Resource, Default)]
 pub struct Orders {

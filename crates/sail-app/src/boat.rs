@@ -16,6 +16,38 @@ use bevy::prelude::*;
 use crate::frame;
 use crate::sim::Sim;
 
+/// The hull and everything bolted to it.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    // Her particulars are reported off the boat that has just been built, so they are a
+    // pair rather than two things that happen in the same stage.
+    app.add_systems(Startup, (setup, report).chain().in_set(Build::Boat));
+    app.add_systems(
+        Update,
+        (
+            update_hull,
+            update_rudder,
+            update_boom,
+            update_staysail_boom,
+            update_pole,
+        )
+            .in_set(Deck::Dress),
+    );
+    app.add_systems(
+        Update,
+        (
+            update_windex,
+            update_genoa_cars,
+            update_telltales,
+            update_sails,
+        )
+            .in_set(Deck::Dress),
+    );
+}
+
 #[derive(Component)]
 pub struct BoatRoot;
 

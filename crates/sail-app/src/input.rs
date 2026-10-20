@@ -27,6 +27,17 @@ use sail_core::state::Headsail;
 
 use crate::sim::Sim;
 
+/// The helm, the keys and the pad.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.init_resource::<HelmSource>();
+    app.init_resource::<Pilot>();
+    app.add_systems(Update, gather.in_set(Deck::Intent));
+}
+
 /// Dead zone on the sticks. Analog hardware drifts, and a drifting helm is maddening.
 const STICK_DEADZONE: f32 = 0.12;
 

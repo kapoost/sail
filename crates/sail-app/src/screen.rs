@@ -25,6 +25,16 @@
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
+/// How big the picture is, and whether it fills the display.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.insert_resource(Screen::asked());
+    app.add_systems(Update, (the_key, follow).chain().in_set(Deck::Weather));
+}
+
 /// The smallest window the console can be read in, in logical pixels.
 ///
 /// The strip wants fourteen hundred and fifty points and will shrink to half of that

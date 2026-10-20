@@ -25,6 +25,18 @@ use sail_core::land::Mark;
 use crate::frame;
 use crate::sim::Sim;
 
+/// Lights, spires, beacons and cairns: the things you navigate by.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    app.init_resource::<Coast>();
+    app.add_systems(Startup, setup.in_set(Build::Last));
+    app.add_systems(Update, (follow_origin, keep_the_coast).in_set(Deck::Follow));
+    app.add_systems(Update, flash.in_set(Deck::Weather));
+}
+
 /// The marks, worked out once rather than every frame.
 ///
 /// `Archipelago::landmarks` walks every island, names each mark and builds a `String`

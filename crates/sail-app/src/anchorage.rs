@@ -31,6 +31,24 @@ use glam::DVec2;
 
 use crate::sim::Sim;
 
+/// Her own anchorage: the platform, the store on it, and the chandler's list.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Deck, Paint};
+    app.add_systems(
+        Update,
+        (moor, build, land, the_lamp_at_dusk, keep)
+            .chain()
+            .in_set(Deck::Weather),
+    );
+    app.add_systems(
+        bevy_egui::EguiPrimaryContextPass,
+        chandler.in_set(Paint::Instruments),
+    );
+}
+
 /// How close to the platform she has to be, metres, and how slowly moving.
 ///
 /// The same numbers as handing casks over a rail anywhere else, because it is the same

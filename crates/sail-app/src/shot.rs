@@ -52,6 +52,17 @@ pub fn wanted() -> Option<Shot> {
     })
 }
 
+/// The key that takes a picture.
+///
+/// Only the key: the timed shot, the reel and the scripted keys are asked for from the
+/// outside and are set up in `main` where the asking is read, because a plugin that
+/// installs itself conditionally on an environment variable is a plugin you cannot find
+/// by reading the list of them.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.add_systems(Update, on_a_key.in_set(Deck::Weather));
+}
+
 /// `F12`: a picture, into the pictures folder, named for the moment it was taken.
 pub fn on_a_key(
     mut commands: Commands,

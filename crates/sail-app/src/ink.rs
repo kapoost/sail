@@ -58,6 +58,15 @@ use bevy::prelude::*;
 use crate::boat::{SailSurface, Telltale};
 use crate::world::Ink;
 
+/// The drawn sea, switched on and off.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.add_systems(Update, apply.in_set(Deck::Weather));
+}
+
 /// Put this on anything whose descendants should be inked.
 ///
 /// On the boat's root rather than on each of its pieces, because by the time the hull

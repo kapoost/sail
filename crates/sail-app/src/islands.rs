@@ -18,6 +18,16 @@ use sail_core::land::{Archipelago, Island};
 use crate::frame;
 use crate::sim::Sim;
 
+/// The land, and keeping it where it belongs when the origin moves.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    app.add_systems(Startup, setup.in_set(Build::Scene));
+    app.add_systems(Update, follow_origin.in_set(Deck::Follow));
+}
+
 /// Points round the shoreline of each island.
 const RING: usize = 96;
 /// Rings from the shore to the summit. More than before: the relief needs somewhere

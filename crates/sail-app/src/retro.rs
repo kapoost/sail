@@ -56,6 +56,35 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, T
 
 use crate::camera::MainCamera;
 
+/// The picture's own size: the drawn width, the console's scale, the font.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck, Paint};
+    app.insert_resource(Retro::from_env());
+    app.add_systems(Startup, setup_ui_camera.in_set(Build::Scene));
+    app.add_systems(
+        Update,
+        stress
+            .run_if(|| crate::knob::var("SAIL_RETRO_STRESS").is_ok())
+            .in_set(Deck::Weather),
+    );
+    app.add_systems(Update, apply.in_set(Deck::Weather));
+    app.add_systems(
+        bevy_egui::EguiPrimaryContextPass,
+        (
+            // Once, at the start: `set_fonts` rebuilds the atlas, so it must not be
+            // called every frame — and before the instruments are scaled, because the
+            // scale is in points and a point is a size of type.
+            install_font.run_if(bevy::ecs::schedule::common_conditions::run_once),
+            scale_instruments,
+        )
+            .chain()
+            .in_set(Paint::Setting),
+    );
+}
+
 /// How many pixels across the world is drawn, coarsest first.
 ///
 /// **Two widths now, and the reason the second is back is worth writing down**, because

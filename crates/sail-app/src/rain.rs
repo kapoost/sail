@@ -23,6 +23,17 @@ use bevy::prelude::*;
 
 use crate::sim::Sim;
 
+/// Rain, and what it does to the light.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    app.add_systems(Startup, setup.in_set(Build::Scene));
+    app.add_systems(Update, update.in_set(Deck::Weather));
+    app.add_systems(Update, shroud.in_set(Deck::Weather));
+}
+
 /// Streaks alive at once. They are thin and cheap, and rain is the one thing in the
 /// frame that should look like too much of it.
 const COUNT: usize = 1400;

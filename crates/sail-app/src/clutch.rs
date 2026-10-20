@@ -21,6 +21,16 @@ use sail_core::prelude::*;
 
 use crate::sim::Sim;
 
+/// The bank of clutches, and what is on each of them.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.init_resource::<Bank>();
+    app.add_systems(Update, handle.in_set(Deck::Intent));
+}
+
 /// A line on a clutch.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Line {

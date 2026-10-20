@@ -47,6 +47,16 @@ use crate::course::Leg;
 use crate::sim::Sim;
 use crate::sound::{SoundHandle, Voice};
 
+/// The band aboard.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.init_resource::<Music>();
+    app.add_systems(Update, compose.in_set(Deck::Weather));
+}
+
 /// Semitones above the tonic, for the two modes that matter.
 ///
 /// Aeolian is the minor everyone knows. Dorian raises the sixth, and that one note is

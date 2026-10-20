@@ -25,6 +25,16 @@ use bevy::prelude::*;
 use crate::fishing::{Fishing, Quarry};
 use crate::sim::Sim;
 
+/// The basket over the side, and the catch in it.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    app.add_systems(Startup, setup.in_set(Build::Deck));
+    app.add_systems(Update, update.in_set(Deck::Dress));
+}
+
 /// Where the cleat is, in boat coordinates: on the port quarter, aft of the rod.
 const CLEAT_Z: f32 = 4.35;
 /// How long the lanyard is, metres. It sets the period of the swing and nothing else.

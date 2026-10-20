@@ -1260,8 +1260,15 @@ pub fn setup(mut commands: Commands, mut assets: ResMut<Assets<SeaVoice>>) {
     commands.insert_resource(SoundHandle(params));
 }
 
+/// The sea, the rig and the hull, synthesised — and the voice that plays them.
+///
+/// What this module does in a frame, in one place: see `stages.rs` for why the schedule
+/// is named sets rather than one long chain.
 pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
     app.add_audio_source::<SeaVoice>();
+    app.add_systems(Startup, setup.in_set(Build::Scene));
+    app.add_systems(Update, update.in_set(Deck::Dress));
 }
 
 /// Diameter of a shroud, metres. Sets the pitch of the whine through the Strouhal

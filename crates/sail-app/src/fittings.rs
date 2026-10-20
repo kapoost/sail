@@ -15,6 +15,16 @@ use bevy::prelude::*;
 use crate::deck;
 use crate::sim::Sim;
 
+/// The small gear: the tiller, the compass, the vane, the lamps.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.add_systems(Update, (update_tiller, update_compass).in_set(Deck::Dress));
+    app.add_systems(Update, (update_vane, light_the_lamps).in_set(Deck::Weather));
+}
+
 /// The tiller, so it can be swung with the rudder.
 #[derive(Component)]
 pub struct Tiller;

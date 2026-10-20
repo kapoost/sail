@@ -19,6 +19,17 @@ use bevy::render::render_resource::{
     Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
 };
 
+/// The dome, the sun in it, and the light they throw.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.init_resource::<Baking>();
+    app.init_resource::<Dome>();
+    app.add_systems(Update, (drift, light).in_set(Deck::Weather));
+}
+
 /// Face resolution. Must be a power of two for the GPU filtering that turns this into
 /// an environment light.
 const FACE: u32 = 256;

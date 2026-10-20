@@ -36,6 +36,16 @@ use sail_core::units::{kn_to_ms, ms_to_kn, rad, smoothstep, wrap_pi, wrap_tau};
 use crate::frame;
 use crate::sim::Sim;
 
+/// The brig: a vessel you meet rather than sail.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Build;
+    app.init_resource::<Brig>();
+    app.add_systems(Startup, setup.in_set(Build::Last));
+}
+
 // ---------------------------------------------------------------------------------------
 // Her dimensions. A coasting brig of about three hundred tons.
 // ---------------------------------------------------------------------------------------

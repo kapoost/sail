@@ -33,6 +33,35 @@ use sail_core::units::{kn_to_ms, rad, wrap_pi};
 use crate::ship::{Brig, CLOSEST};
 use crate::sim::Sim;
 
+/// The pilot job: the brig is sailed, told where to go, and drawn, in that order.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Deck, Paint};
+    app.init_resource::<Pilotage>();
+    app.init_resource::<WantsPilotage>();
+    app.add_systems(
+        Update,
+        (
+            take_the_job,
+            discharge,
+            fly_the_flag,
+            lay_off_the_route,
+            crate::race::run,
+            crate::race::rivals,
+            crate::race::dress,
+            run,
+            crate::ship::sail_her,
+            crate::ship::work_her,
+            crate::ship::place,
+        )
+            .chain()
+            .in_set(Deck::Weather),
+    );
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Over));
+}
+
 /// What she is carrying under her, below which she is on the bottom.
 pub const SHE_DRAWS: f64 = crate::ship::DRAFT as f64;
 

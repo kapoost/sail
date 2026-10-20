@@ -12,6 +12,15 @@ use sail_core::wind::SyntheticWind;
 
 use crate::weather::Weather;
 
+/// The simulation, stepped.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.add_systems(Update, advance.in_set(Deck::Step));
+}
+
 #[derive(Resource)]
 pub struct Sim {
     pub sim: Simulation,

@@ -26,6 +26,18 @@ use bevy::prelude::*;
 use crate::frame;
 use crate::sim::Sim;
 
+/// The hook, and what it can reach.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck, Paint};
+    app.init_resource::<Boathook>();
+    app.add_systems(Startup, (setup, mark_setup).chain().in_set(Build::Deck));
+    app.add_systems(Update, (reach, mark_the_water, dress).in_set(Deck::Weather));
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Over));
+}
+
 /// How far the hook reaches from her side, metres.
 ///
 /// Two metres of spar and most of an arm. Deliberately longer than `mob::REACH`, which

@@ -29,6 +29,19 @@ use crate::course::{clock, Course, Leg};
 use crate::input::Pilot;
 use crate::sim::Sim;
 
+/// The console.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Paint};
+    app.add_systems(Startup, setup.in_set(Build::Boat));
+    app.add_systems(
+        bevy_egui::EguiPrimaryContextPass,
+        draw.in_set(Paint::Instruments),
+    );
+}
+
 /// Painted metal, cream dial faces, red needles. A deliberately small palette: the
 /// old panels were cheap to print and that is exactly why they read so well.
 /// The instrument case, and what is painted on it.

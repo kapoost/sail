@@ -39,6 +39,28 @@ use crate::boat::{self, Sail};
 use crate::frame;
 use crate::sim::Sim;
 
+/// Everybody else's boats, told where they are before they are drawn.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.init_resource::<Fleet>();
+    app.add_systems(
+        Update,
+        (
+            crate::net::exchange,
+            crate::net::rebuild,
+            rehearsal,
+            sync,
+            place,
+            dress,
+        )
+            .chain()
+            .in_set(Deck::Fleet),
+    );
+}
+
 /// Everybody else on the water.
 #[derive(Resource, Default)]
 pub struct Fleet {

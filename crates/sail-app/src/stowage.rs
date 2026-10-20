@@ -15,6 +15,16 @@ use crate::boat::MAST_FOOT_Z;
 use crate::sim::Sim;
 use sail_core::state::Headsail;
 
+/// Sail bags and what else is lying about on deck.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    app.add_systems(Startup, setup.in_set(Build::Deck));
+    app.add_systems(Update, (update, flutter).in_set(Deck::Dress));
+}
+
 /// A bag on deck, and which sail is in it.
 #[derive(Component)]
 pub struct SailBag(pub Headsail);

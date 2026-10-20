@@ -66,6 +66,15 @@ use sail_core::rng::Pcg32;
 
 use crate::sim::Sim;
 
+/// The rod worked: the drag, the line, the fish on the end of it.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.add_systems(Update, work.in_set(Deck::Intent));
+}
+
 /// What the line will stand, newtons.
 ///
 /// Twenty pound braid: 0.20 mm, 89 N. Braid rather than monofilament, and the choice

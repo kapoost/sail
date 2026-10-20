@@ -29,6 +29,16 @@ use sail_core::units::{kn_to_ms, ms_to_kn, rad, smoothstep, wrap_pi, wrap_tau};
 
 use crate::sim::Sim;
 
+/// The regatta.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Paint;
+    app.init_resource::<Race>();
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Over));
+}
+
 /// How long from the gun that starts the countdown to the one that starts the race.
 ///
 /// Five minutes, which is the classic sequence and is long enough to be a manoeuvre

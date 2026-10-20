@@ -28,6 +28,17 @@ use bevy_egui::egui;
 use crate::sim::Sim;
 use crate::sound::SoundHandle;
 
+/// The settings panel.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Deck, Paint};
+    app.init_resource::<Settings>();
+    app.add_systems(Update, (toggle, apply).in_set(Deck::Weather));
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Cards));
+}
+
 /// Which page of the panel is showing.
 ///
 /// Tabs rather than one long column, and the reason is the fourth one: the network page

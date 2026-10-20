@@ -40,6 +40,17 @@ use crate::course::Floating;
 use crate::frame;
 use crate::sim::Sim;
 
+/// The man overboard, and the thing you throw him.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    app.add_systems(Startup, setup.in_set(Build::Deck));
+    app.add_systems(Update, update.in_set(Deck::Dress));
+    app.add_systems(Update, throw.in_set(Deck::Weather));
+}
+
 /// The lifebuoy in its lashings at the companionway, where a hand falls on it.
 #[derive(Component)]
 pub struct Stowed;

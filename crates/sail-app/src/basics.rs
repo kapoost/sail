@@ -36,6 +36,16 @@ use bevy_egui::egui;
 
 use crate::sim::Sim;
 
+/// Sailing 101.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Deck, Paint};
+    app.add_systems(Update, run.in_set(Deck::Weather));
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Cards));
+}
+
 /// Where the lesson has got to.
 ///
 /// In the order a hand learns them: steer her, make her go, shorten sail, hand her over,

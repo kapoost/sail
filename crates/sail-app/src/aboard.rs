@@ -23,6 +23,15 @@ use crate::crew::Crew;
 use crate::input::Pilot;
 use crate::sim::Sim;
 
+/// Who is on deck when she starts, and who has the helm.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Build;
+    app.add_systems(Startup, how_she_starts.in_set(Build::Scene));
+}
+
 /// Whether a dial is on, with a different default in a tab.
 ///
 /// `SAIL_CREW=0` turns the watch off in a browser; `SAIL_CREW=1` turns it on at a desk.

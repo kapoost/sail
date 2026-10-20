@@ -22,6 +22,16 @@ use sail_core::prelude::*;
 use crate::camera::MainCamera;
 use crate::sim::Sim;
 
+/// Mast, boom, stays and the sails on them.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    app.add_systems(Startup, setup.in_set(Build::Boat));
+    app.add_systems(Update, update.in_set(Deck::Dress));
+}
+
 /// Segments per line. Enough that a sagging sheet curves smoothly.
 const SEGMENTS: usize = 14;
 

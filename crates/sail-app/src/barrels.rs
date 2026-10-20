@@ -21,6 +21,19 @@ use glam::DVec2;
 
 use crate::sim::Sim;
 
+/// Casks adrift, and the string of them astern.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.init_resource::<Flotsam>();
+    app.add_systems(
+        Update,
+        (scatter, drift, dress, float).chain().in_set(Deck::Weather),
+    );
+}
+
 /// The painter between one cask and the next, metres.
 ///
 /// Three boat lengths of warp is what you would actually bend on — long enough that a

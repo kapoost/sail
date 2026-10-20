@@ -18,6 +18,18 @@ use sail_core::prelude::*;
 use crate::frame;
 use crate::sim::Sim;
 
+/// Where she is bound, and the marks that say so.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    app.add_systems(Startup, setup.in_set(Build::Scene));
+    app.add_systems(Update, update.in_set(Deck::Dress));
+    app.add_systems(Update, float_marks.in_set(Deck::Dress));
+    app.add_systems(Update, restart.in_set(Deck::Weather));
+}
+
 /// How close counts as arrived, metres. An anchorage, not a berth: you are there when
 /// you could reasonably drop the hook.
 const ARRIVAL_RADIUS: f64 = 120.0;

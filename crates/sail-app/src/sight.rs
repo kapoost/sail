@@ -24,6 +24,17 @@ use sail_core::units::wrap_tau;
 use crate::navigation::Navigation;
 use crate::sim::Sim;
 
+/// The glasses, and naming what is in them.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Deck, Paint};
+    app.init_resource::<Sighting>();
+    app.add_systems(Update, (aim, glasses, recognise).in_set(Deck::Weather));
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Over));
+}
+
 /// Whether the compass is up at the eye.
 #[derive(Resource, Default)]
 pub struct Sighting {

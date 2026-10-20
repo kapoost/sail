@@ -41,6 +41,16 @@ use bevy::prelude::*;
 use crate::frame;
 use crate::sim::Sim;
 
+/// What comes over the bow.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    app.add_systems(Startup, setup.in_set(Build::Boat));
+    app.add_systems(Update, update.in_set(Deck::Dress));
+}
+
 /// How many specks of foam are alive at once.
 ///
 /// Nine hundred, which is a great deal, and deliberately so. They cost one quad each

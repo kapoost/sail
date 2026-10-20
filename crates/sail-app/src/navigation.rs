@@ -21,6 +21,30 @@ use sail_core::units::{kn_to_ms, ms_to_kn, rad};
 
 use crate::sim::Sim;
 
+/// Knowing where you are, and the ways of finding out again.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Deck, Paint};
+    app.init_resource::<Navigation>();
+    app.add_systems(
+        Update,
+        (
+            lost_at_sea,
+            enter_in_the_log,
+            write_up_the_log,
+            the_fix_holds,
+            reckon,
+        )
+            .in_set(Deck::Weather),
+    );
+    app.add_systems(
+        bevy_egui::EguiPrimaryContextPass,
+        adrift_card.in_set(Paint::Over),
+    );
+}
+
 /// How long a fix is worth looking at, seconds — **and this is the backstop rather than
 /// the rule.**
 ///

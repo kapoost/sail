@@ -34,6 +34,30 @@ use crate::sea_texture;
 use crate::sim::Sim;
 use crate::sky;
 
+/// The sea itself: the surface, the film of ripples on it, and what a frame cost.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    app.init_resource::<Spent>();
+    app.insert_resource(Ink::from_env());
+    app.init_resource::<SeaFilm>();
+    app.init_resource::<SurfaceDrift>();
+    app.add_systems(Startup, setup.in_set(Build::Scene));
+    app.add_systems(Update, report_vitals.in_set(Deck::Report));
+    app.add_systems(Update, report_frame_times.in_set(Deck::Report));
+    app.add_systems(Update, report_time_spent.in_set(Deck::Report));
+    app.add_systems(Update, update_sea.in_set(Deck::Dress));
+    app.add_systems(Update, apply_ink.in_set(Deck::Weather));
+    app.add_systems(
+        Update,
+        (bake_sea_film, roll_sea_film, polish)
+            .chain()
+            .in_set(Deck::Weather),
+    );
+}
+
 /// How far the ring `i` stands from the boat, metres.
 ///
 /// Free functions rather than closures inside the setup, because the spray has to ask

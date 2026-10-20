@@ -20,6 +20,18 @@ use crate::course::{clock, Course, Leg};
 use crate::input::Pilot;
 use crate::sim::Sim;
 
+/// The diagnostic panel, and the polar behind it.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Deck, Paint};
+    app.insert_resource(HudVisible(false));
+    app.init_resource::<Polar>();
+    app.add_systems(Update, build_polar.in_set(Deck::Weather));
+    app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Cards));
+}
+
 #[derive(Resource, Default)]
 pub struct HudVisible(pub bool);
 

@@ -34,6 +34,15 @@ use bevy::prelude::*;
 use crate::camera::Attention;
 use crate::input::Pilot;
 
+/// What the eye is drawn to.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.add_systems(Update, posts.in_set(Deck::Weather));
+}
+
 /// What each claim is worth. See the module header: urgency, not loudness.
 const ALARM: u8 = 5;
 const DELIBERATE: u8 = 3;

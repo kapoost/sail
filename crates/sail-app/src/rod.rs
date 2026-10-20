@@ -32,6 +32,16 @@ use crate::fishing::{Fishing, Rod};
 use crate::frame;
 use crate::sim::Sim;
 
+/// The rod in its holder.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::{Build, Deck};
+    app.add_systems(Startup, setup.in_set(Build::Deck));
+    app.add_systems(Update, update.in_set(Deck::Dress));
+}
+
 /// Where the rod sits, in boat coordinates: on the port quarter, just inside the rail.
 ///
 /// Port rather than starboard for a reason that is not symmetry. The mainsheet and the

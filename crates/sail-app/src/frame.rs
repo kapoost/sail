@@ -10,6 +10,16 @@
 use bevy::prelude::*;
 use sail_core::state::BoatState;
 
+/// Where the world is drawn from, so the numbers stay small near the boat.
+///
+/// What this module does in a frame, in one place — see `stages.rs` for why the
+/// schedule is named sets rather than one long chain.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.init_resource::<RenderOrigin>();
+    app.add_systems(Update, rebase_origin.in_set(Deck::Origin));
+}
+
 /// Where the rendered world is pinned, in sim coordinates.
 ///
 /// The simulation sails away from its origin without limit; a rendered frame must not.
