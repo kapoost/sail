@@ -65,15 +65,35 @@ const TOPGALLANT: f32 = 7.5;
 const BOWSPRIT: f32 = 9.0;
 const STEEVE: f32 = 0.22;
 
-/// Half-length of each yard, as a fraction of beam. A course yard on a brig this size is
-/// a touch over her beam; everything above is shorter, which is what gives a square
-/// rigger her pyramid.
+/// Where each yard is slung, and how long it is: height above the deck, and half-length
+/// as a fraction of beam.
+///
+/// **A square sail hangs below its yard, not above it**, and that is the whole of what
+/// was wrong with the first set of these numbers: a course yard three metres above the
+/// deck with nine and a half metres of cloth under it put the foot of the mainsail six
+/// metres under water. From a boat alongside she read as a ship sinking tidily.
+///
+/// The real arrangement is a stack, and each sail's foot lands on the yard below it:
+/// the course yard is slung just under the top — fourteen metres here, with the top at
+/// fifteen — and its sail drops to four metres above the deck, which is where the clews
+/// come down to the rail. The topsail yard is in the upper third of the topmast and its
+/// foot lands on the course yard; the topgallant's lands on the topsail's. Five metres
+/// of bare pole above the highest yard, because that is where a royal would go on a ship
+/// that carried one.
+///
+/// A course yard on a brig this size is a touch over her beam; everything above is
+/// shorter, which is what gives a square rigger her pyramid.
 const YARDS: [(f32, f32); 3] = [
     // (height above the deck, half-length)
-    (3.2, 0.62),
-    (14.2, 0.52),
-    (23.0, 0.38),
+    (14.0, 0.62),
+    (22.5, 0.52),
+    (29.5, 0.38),
 ];
+
+/// How deep each sail is, head to foot, metres. The course is the deepest and the
+/// topgallant the shallowest, which is why a square rigger tapers twice: the yards get
+/// shorter going up and so does the cloth under them.
+const DROP: [f32; 3] = [9.5, 8.5, 6.0];
 
 // ---------------------------------------------------------------------------------------
 // What she is doing.
@@ -531,6 +551,50 @@ fn along(t: f32) -> f32 {
 #[cfg(test)]
 mod her_shape {
     use super::*;
+
+    /// **A square sail hangs below its yard**, and where the cloth ends up is the one
+    /// thing about this rig a reader can see from another boat.
+    ///
+    /// Reported from the water: "the brig — her sails are drawn too low". They were.
+    /// The course yard was slung three metres above the deck with nine and a half metres
+    /// of cloth under it, which put the foot of the mainsail six metres *under the sea*
+    /// and left two thirds of the mast bare above it. The rig looked like a ship going
+    /// down tidily.
+    ///
+    /// So the geometry is pinned here: every sail's foot is above the rail, each sail's
+    /// foot lands near the yard below it — which is how the stack of a square rig
+    /// actually goes together — and the highest yard leaves bare pole above it rather
+    /// than poking out of the masthead.
+    #[test]
+    fn the_cloth_hangs_where_a_square_rig_hangs_it() {
+        let masthead = LOWER_MAST + TOPMAST + TOPGALLANT;
+        for (tier, (height, _)) in YARDS.iter().enumerate() {
+            let foot = height - DROP[tier];
+            assert!(
+                foot > BULWARK,
+                "tier {tier}: the foot of the sail is {foot:.1} m above the deck, which                  is below the rail"
+            );
+            assert!(
+                *height < masthead - 3.0,
+                "tier {tier}: a yard {height:.1} m up is out of the top of a {masthead:.1}                  m mast"
+            );
+            if tier > 0 {
+                let below = YARDS[tier - 1].0;
+                assert!(
+                    *height > below,
+                    "tier {tier} is slung below tier {}",
+                    tier - 1
+                );
+                // The foot of each sail comes down to about the yard under it: a metre
+                // and a half either way is the overlap a sailmaker would allow.
+                assert!(
+                    (foot - below).abs() < 1.5,
+                    "tier {tier}: its foot is {:.1} m off the yard below it",
+                    foot - below
+                );
+            }
+        }
+    }
 
     /// **A hull is a shape, and the way to know it is one is to measure it.**
     ///
@@ -1160,11 +1224,7 @@ pub fn work_her(
     let awa = angle_off(brig.heading, from);
     for (sail, mesh) in &canvas {
         let (height, half) = YARDS[sail.tier];
-        let drop = match sail.tier {
-            0 => 9.5,
-            1 => 8.5,
-            _ => 6.0,
-        };
+        let drop = DROP[sail.tier];
         let _ = height;
         // The main's course is the one sail a brig hauls up first when she wants to see
         // where she is going: it is the biggest, the lowest, and the one in the way.
