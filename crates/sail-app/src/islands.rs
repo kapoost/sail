@@ -250,5 +250,11 @@ pub fn generate(seed: u64) -> Archipelago {
     // gives up on the ones that will not fit, so a tighter world with the same count
     // came out with a third fewer islands and six harbours instead of nine. More
     // candidates in means the same number of islands actually land.
+    //
+    // The number is still a ceiling now that the generator walks a chain rather than
+    // scattering: it fills the band it drew and stops where the water runs out, which
+    // over three hundred days lands between twenty-four and thirty-four islands with a
+    // median of thirty-two. Asking for more would not make a denser chain, only a
+    // longer list of berths it refuses.
     Archipelago::generate_around(seed ^ 0x15_1A_4D, 5_600.0, 34, 900.0)
 }

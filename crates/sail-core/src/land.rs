@@ -181,18 +181,41 @@ impl Island {
     }
 }
 
-/// A scatter of islands, and the water between them.
+/// A chain of islands, and the water between them.
 pub struct Archipelago {
     islands: Vec<Island>,
+    /// The grain the whole group was laid on, radians as a bearing. Kept because it is
+    /// not recoverable from the islands afterwards — a bent chain's principal axis is
+    /// not its strike — and because everything that wants to reason about *inside* and
+    /// *outside* this coast wants the same line the generator used.
+    strike: f64,
 }
 
 impl Archipelago {
-    /// Scatter islands over a square of the given half-width, metres.
+    /// Lay a chain of islands over a square of the given half-width, metres.
     ///
-    /// Rejection-sampled so that no two overlap and none is closer to another than a
-    /// navigable channel. A generator that is allowed to merge islands produces one
-    /// continent and a lot of dead ends; keeping a gap is what produces an archipelago
-    /// you can sail *through* rather than around.
+    /// **An archipelago is not a scatter.** Real island groups sit on something — a
+    /// drowned ridge, a fault, a line of old volcanoes — and they run along it: the
+    /// Lofoten, the Aleutians, the Stockholm skerries all read as a band with open
+    /// water either side, and that band is the first thing a chart tells a sailor.
+    /// Points drawn uniformly over a square read as noise, and a sailor can learn
+    /// nothing from noise.
+    ///
+    /// So the generator draws one *strike* for the day, bends a spine along it, and
+    /// **walks** the spine placing islands as it goes, with smaller ones scattered off
+    /// to the sides and a thinner strand outside. Walking rather than drawing-and-
+    /// rejecting is the whole trick: rejection sampling aimed at a band does the
+    /// opposite of what it looks like it does, because the band fills up and every
+    /// later candidate lands in the empty water instead. Measured, the walk comes out
+    /// about two and a half times longer along the grain than across it; rejection
+    /// sampling came out at one point two.
+    ///
+    /// No two islands overlap and none is closer to another than a navigable channel.
+    /// A generator that is allowed to merge islands produces one continent and a lot of
+    /// dead ends; keeping a gap is what produces an archipelago you can sail *through*
+    /// rather than around. A berth that cannot be kept clear is skipped rather than
+    /// squeezed, so the count asked for is a ceiling — ask for thirty-four in this
+    /// square and about thirty land.
     pub fn generate(seed: u64, half_width: f64, count: usize) -> Self {
         Self::generate_around(seed, half_width, count, 0.0)
     }
@@ -206,57 +229,232 @@ impl Archipelago {
         /// Narrowest channel the generator will leave between two islands, metres.
         const CHANNEL: f64 = 420.0;
         let mut rng = Pcg32::new(seed);
+
+        // **The grain of the place, drawn once.**
+        //
+        // Islands are not scattered. They are what is left of something that was one
+        // thing: a drowned ridge, a fault, a moraine, an arc of old volcanoes — so a
+        // real group has a *strike*, a direction everything in it lines up along, and
+        // you can read it off a chart of the Hebrides, the Stockholm skerries or the
+        // Lofoten wall without knowing any geology. A uniform scatter has no strike, and
+        // that is why it read as dots on paper rather than as a coast: there was no
+        // inside and no outside, no line to be on the wrong side of when it blew, and
+        // every passage through it was the same passage.
+        let strike = rng.next_f64() * std::f64::consts::PI;
+        let along = DVec2::new(strike.sin(), strike.cos());
+        let across = DVec2::new(along.y, -along.x);
+
+        // **And the ridge bends**, because nothing in the ground is straight. Two slow
+        // harmonics with their own phases: one long bow across the whole chain and one
+        // kink inside it.
+        let bow = (0.06 + 0.09 * rng.next_f64()) * half_width;
+        let kink = (0.03 + 0.05 * rng.next_f64()) * half_width;
+        let bow_phase = rng.next_f64() * std::f64::consts::TAU;
+        let kink_phase = rng.next_f64() * std::f64::consts::TAU;
+        // Past the corners on both ends, so the chain crosses the whole square rather
+        // than sitting in the middle of it with sea all round.
+        let reach = half_width * 1.45;
+        let spine = |t: f64| -> DVec2 {
+            along * (t * reach)
+                + across * (bow * (t * 1.6 + bow_phase).sin() + kink * (t * 4.3 + kink_phase).sin())
+        };
+
+        // **Walked rather than sampled**, and that is the whole difference.
+        //
+        // The first version of this drew a position, tested it against everything
+        // already placed and threw it away if it was too close — which quietly produces
+        // the opposite of a chain. A narrow band is *crowded*, so nearly every candidate
+        // in it is rejected; the empty water either side accepts everything. Rejection
+        // sampling therefore fills the gaps and starves the line, and the harder you aim
+        // at the band the flatter the result: measured, 34 islands came out 1.4 times
+        // longer than wide and 100 came out 1.2, which is a scatter with a lean on it.
+        //
+        // So the chain is laid out *along* the spine instead, one island at a time, each
+        // step as long as the island just placed plus a channel somebody can sail
+        // through. Nothing is rejected for being where it was asked to be.
+        let band = 0.15 * half_width;
         let mut islands: Vec<Island> = Vec::with_capacity(count);
-        let mut attempts = 0;
-        while islands.len() < count && attempts < count * 200 {
-            attempts += 1;
-            let centre = DVec2::new(
-                (rng.next_f64() * 2.0 - 1.0) * half_width,
-                (rng.next_f64() * 2.0 - 1.0) * half_width,
-            );
-            // A spread of sizes: mostly skerries, a few proper islands to hide behind.
-            let t = rng.next_f64();
-            let radius = 90.0 + t * t * t * 1500.0;
-            let mut candidate = Island {
+
+        let make = |centre: DVec2, radius: f64, rng: &mut Pcg32| -> Island {
+            // **Longer along the strike than across it**, which is the same fact as the
+            // chain itself at the scale of one island: what is left of a drowned ridge
+            // is elongated the way the ridge ran. The second harmonic of the outline is
+            // the ellipse in it, so putting its maximum on the strike is the whole of
+            // the shaping — no new field, and the bays and headlands the other two
+            // harmonics draw still land wherever they land.
+            let stretch = 0.16 + 0.16 * rng.next_f64();
+            let mut island = Island {
                 centre,
-                // Filled in below: it is a property of the shape and the shape is not
-                // finished until the lobes are in.
                 bay: 0.0,
                 radius,
                 // Low islands shelter badly, which is true and is why a fifty-metre
                 // hill matters more to a sailor than a mile of sand.
                 height: 8.0 + radius * (0.03 + 0.05 * rng.next_f64()),
                 lobes: [
-                    (rng.next_f64() - 0.5) * 0.34,
+                    stretch,
                     (rng.next_f64() - 0.5) * 0.22,
                     (rng.next_f64() - 0.5) * 0.14,
                 ],
                 phases: [
-                    rng.next_f64() * std::f64::consts::TAU,
+                    // sin(2θ + φ) peaks where 2θ + φ = π/2, so this puts the long axis
+                    // on the strike.
+                    std::f64::consts::FRAC_PI_2 - 2.0 * strike,
                     rng.next_f64() * std::f64::consts::TAU,
                     rng.next_f64() * std::f64::consts::TAU,
                 ],
                 relief_seed: rng.next_u32() as u64 | ((rng.next_u32() as u64) << 32),
             };
-            candidate.bay = candidate.best_bay();
-            if candidate.centre.length() < clear_radius + radius {
-                continue;
+            island.bay = island.best_bay();
+            island
+        };
+
+        // Room for one more: inside the square, clear of the boat's own water, and a
+        // channel off everything already there.
+        let fits = |islands: &[Island], at: DVec2, radius: f64| -> bool {
+            if at.x.abs() > half_width || at.y.abs() > half_width {
+                return false;
             }
-            let clear = islands.iter().all(|other| {
-                (other.centre - candidate.centre).length()
-                    > other.radius * 1.35 + candidate.radius * 1.35 + CHANNEL
-            });
-            if clear {
-                islands.push(candidate);
+            if at.length() < clear_radius + radius {
+                return false;
+            }
+            islands.iter().all(|other: &Island| {
+                (other.centre - at).length() > other.radius * 1.35 + radius * 1.35 + CHANNEL
+            })
+        };
+
+        // The chain, walked end to end. The step is the island just placed, so a big one
+        // opens a sound behind it and a skerry barely interrupts the line — and when
+        // nothing will fit, the walk shuffles along by a channel's width and tries
+        // again rather than skipping the length of an island that was never there.
+        let walk = |islands: &mut Vec<Island>,
+                    rng: &mut Pcg32,
+                    offset: f64,
+                    spread: f64,
+                    size: (f64, f64),
+                    budget: usize| {
+            let budget = budget.min(count);
+            let mut t = -1.0;
+            while t < 1.0 && islands.len() < budget {
+                let u = rng.next_f64();
+                let radius = size.0 + u * u * u * size.1;
+                let sway = rng.next_f64() * 2.0 - 1.0;
+                let at = spine(t) + across * (offset + sway * sway * sway * spread);
+                if !fits(islands, at, radius) {
+                    t += CHANNEL * 0.9 / reach;
+                    continue;
+                }
+                let island = make(at, radius, rng);
+                t += (radius * 2.0 + CHANNEL * 1.2) / reach;
+                islands.push(island);
+            }
+        };
+
+        // **Pass one: the islands with names on them**, and they get the budget first.
+        //
+        // Every one of them is drawn big enough to be settled — a quarter-kilometre of
+        // land has a beach, a bay to lie in and somewhere for somebody to live, and
+        // those are what the deliveries are *between*. That is not decoration: this
+        // chain is the only thing standing between the passage generator and a coast
+        // with nowhere to go. The version that drew the chain's sizes from the same
+        // skewed range as the rocks put the median day at five harbours where the old
+        // scatter had nine, and one day in a hundred at none at all — so the rocks are
+        // drawn separately, in the passes below, and the line itself is all islands.
+        //
+        // The budget is a ceiling rather than a target. In this square the walk runs out
+        // of spine at a dozen or so, well short of it; it exists so that a longer chain
+        // in a bigger world cannot spend the whole quota before a single skerry is laid.
+        let named = (count * 55) / 100;
+        walk(&mut islands, &mut rng, 0.0, band, (250.0, 900.0), named);
+
+        // **Pass two: a rock or two beside each of them**, which is how a group looks
+        // from a cockpit — one island with a name and two with none. Beside rather than
+        // off the ends, because the ends are where the chain goes next; the first
+        // version put them squarely in the next island's berth and the walk placed three
+        // islands out of thirty-four.
+        for parent in 0..named.min(islands.len()) {
+            let (centre, radius) = (islands[parent].centre, islands[parent].radius);
+            for _ in 0..(rng.next_f64() * 2.9) as usize {
+                if islands.len() >= count {
+                    break;
+                }
+                let small = 90.0 + rng.next_f64() * 170.0;
+                let lean = if rng.next_f64() < 0.5 { 1.0 } else { -1.0 };
+                let out = radius * 1.35 + small * 1.35 + CHANNEL * (1.05 + 0.6 * rng.next_f64());
+                let skew = (rng.next_f64() - 0.5) * 0.9;
+                let dir = (across * lean + along * skew).normalize();
+                let where_ = centre + dir * out;
+                if fits(&islands, where_, small) {
+                    let skerry = make(where_, small, &mut rng);
+                    islands.push(skerry);
+                }
             }
         }
-        Self { islands }
+
+        // Pass three, the outer belt: a second, thinner strand to seaward. Real ground
+        // drowns unevenly, so there is nearly always a line of rock a mile or two
+        // outside the islands anybody lives on — and for a sailor it is the difference
+        // between an inside passage and an outside one.
+        let outer = (0.20 + 0.10 * rng.next_f64())
+            * half_width
+            * if rng.next_f64() < 0.5 { 1.0 } else { -1.0 };
+        walk(
+            &mut islands,
+            &mut rng,
+            outer,
+            band * 0.5,
+            (90.0, 320.0),
+            count,
+        );
+
+        // Pass four and after: back down the line with skerries only, filling what the
+        // earlier passes stepped over, a little further off the ridge each time. A chain
+        // with holes in it reads as a scatter again — and a skerry coast *is* mostly
+        // rocks: the islands with names on them are the minority of what is in the
+        // water, which is exactly why pilotage through one is a skill.
+        for fill in 0..8 {
+            if islands.len() >= count {
+                break;
+            }
+            let wander = band * (0.6 + 0.28 * fill as f64);
+            walk(&mut islands, &mut rng, 0.0, wander, (90.0, 220.0), count);
+        }
+
+        // And a few strays: a single rock out in the open with nothing near it, which is
+        // the thing that makes a chart worth reading carefully. Bounded, because a
+        // generator that fills its quota with strays is the scatter this replaced.
+        // Computed once, and that is not a detail: written as `islands.len() + 3` inside
+        // the condition it is a target that runs away from the loop, and the generator
+        // quietly goes back to filling its whole quota with strays — which is the scatter
+        // this replaced, wearing the new code as a hat. Twenty of thirty-four islands
+        // were strays before this line was moved out of the comparison.
+        let target = count.min(islands.len() + 3);
+        let mut attempts = 0;
+        while islands.len() < target && attempts < 400 {
+            attempts += 1;
+            let at = DVec2::new(
+                (rng.next_f64() * 2.0 - 1.0) * half_width,
+                (rng.next_f64() * 2.0 - 1.0) * half_width,
+            );
+            let radius = 90.0 + rng.next_f64() * 220.0;
+            if fits(&islands, at, radius) {
+                let island = make(at, radius, &mut rng);
+                islands.push(island);
+            }
+        }
+
+        Self { islands, strike }
+    }
+
+    /// The grain of the place: the bearing the chain runs along.
+    pub fn strike(&self) -> f64 {
+        self.strike
     }
 
     /// No land at all, for the validation suite and the open-water polar.
     pub fn empty() -> Self {
         Self {
             islands: Vec::new(),
+            strike: 0.0,
         }
     }
 
@@ -616,6 +814,33 @@ fn place_name(seed: u64) -> String {
     format!("{head}{tail}")
 }
 
+/// A name nobody else on this coast already has.
+///
+/// Sixteen heads and ten tails is a hundred and sixty names, and a seventy-mark coast
+/// draws thirteen collisions out of that by birthday arithmetic alone — which a sailor
+/// cannot work with: two rocks called Fuglvik turn a three-bearing fix into a guess, and
+/// the chart is the one thing in this game that has to be trustworthy. So a taken name
+/// is redrawn, and when the draw keeps colliding the place gets a qualifier instead,
+/// which is what a real coast does: Ytre and Indre, Nord and Sør, Lille and Store are
+/// all over the Norwegian pilot books for exactly this reason.
+fn unique_name(seed: u64, taken: &mut std::collections::HashSet<String>) -> String {
+    for twist in 0..8u64 {
+        let name = place_name(seed ^ twist.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        if taken.insert(name.clone()) {
+            return name;
+        }
+    }
+    const QUALIFIER: [&str; 6] = ["Ytre", "Indre", "Nord", "Sør", "Lille", "Store"];
+    let base = place_name(seed);
+    for (n, qualifier) in QUALIFIER.iter().enumerate() {
+        let name = format!("{qualifier} {}", place_name(seed ^ (n as u64 + 11)));
+        if taken.insert(name.clone()) {
+            return name;
+        }
+    }
+    base
+}
+
 impl Archipelago {
     /// Everywhere worth delivering to.
     ///
@@ -649,6 +874,7 @@ impl Archipelago {
             .iter()
             .map(|i| i.centre.length())
             .fold(0.0_f64, f64::max);
+        let mut taken = std::collections::HashSet::new();
         self.islands
             .iter()
             .enumerate()
@@ -688,7 +914,7 @@ impl Archipelago {
                 };
                 Landmark {
                     at,
-                    name: place_name(seed ^ 0x5BF0_3635),
+                    name: unique_name(seed ^ 0x5BF0_3635, &mut taken),
                     kind,
                     ground,
                     height: ground + structure,
@@ -704,6 +930,7 @@ impl Archipelago {
         // This is still comfortably above a skerry: a quarter-kilometre island has a
         // beach, a bay to lie in and somewhere for somebody to live.
         const SETTLED: f64 = 240.0;
+        let mut taken = std::collections::HashSet::new();
         self.islands
             .iter()
             .enumerate()
@@ -717,14 +944,157 @@ impl Archipelago {
                     // alone collided — two islands eight kilometres apart both came
                     // out "Fuglstad", which on a chart is an error rather than a
                     // coincidence.
-                    name: place_name(
+                    name: unique_name(
                         (i.centre.x.abs() as u64).wrapping_mul(0x9E37_79B9)
                             ^ (i.centre.y.abs() as u64).wrapping_mul(0x85EB_CA6B)
                             ^ (index as u64).wrapping_mul(0xC2B2_AE35),
+                        &mut taken,
                     ),
                     exposed_to: wrap_tau(d.x.atan2(d.y)),
                 }
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod the_shape_of_the_place {
+    use super::*;
+
+    /// Along the grain against across it, for one seed.
+    fn grain_ratio(land: &Archipelago) -> f64 {
+        let strike = land.strike();
+        let along = DVec2::new(strike.sin(), strike.cos());
+        let across = DVec2::new(along.y, -along.x);
+        let (mut sa, mut sc) = (0.0, 0.0);
+        for island in land.islands() {
+            sa += island.centre.dot(along).powi(2);
+            sc += island.centre.dot(across).powi(2);
+        }
+        (sa / sc.max(1.0)).sqrt()
+    }
+
+    /// **The property the whole generator exists for**, and the one a picture cannot
+    /// assert: the group is longer along its own grain than across it.
+    ///
+    /// A uniform scatter comes out at one. The first attempt at a chain came out at 1.4
+    /// and the second, with *more* islands aimed at a narrower band, came out at 1.2 —
+    /// because rejection sampling fills the empty water and starves the crowded line,
+    /// which is the opposite of what it looks like it is doing. Walking the spine
+    /// instead puts the median at two and a half.
+    ///
+    /// Measured over two dozen days rather than one, because any single archipelago can
+    /// be unlucky — and the floor is set below the worst seen rather than at it, since a
+    /// test that fails on a seed nobody has drawn yet is a test that will be deleted.
+    #[test]
+    fn it_is_a_chain_rather_than_a_scatter() {
+        let mut ratios: Vec<f64> = (0..24)
+            .map(|seed| grain_ratio(&Archipelago::generate_around(seed, 5_600.0, 34, 900.0)))
+            .collect();
+        ratios.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let worst = ratios[0];
+        let median = ratios[ratios.len() / 2];
+        assert!(
+            worst > 1.30,
+            "one of these archipelagos is a scatter: {worst:.2} to one"
+        );
+        assert!(
+            median > 1.80,
+            "the median archipelago is {median:.2} to one, which is a lean rather than a chain"
+        );
+    }
+
+    /// Every island is elongated the way the chain runs, which is the same geology at
+    /// the scale of one rock.
+    #[test]
+    fn the_islands_lie_along_the_grain() {
+        let land = Archipelago::generate_around(7, 5_600.0, 34, 900.0);
+        let strike = land.strike();
+        for island in land.islands() {
+            let along = island.shore_radius(strike);
+            let across = island.shore_radius(strike + std::f64::consts::FRAC_PI_2);
+            assert!(
+                along > across,
+                "an island {:.0} m along the grain and {:.0} m across it is lying the \
+                 wrong way",
+                along,
+                across
+            );
+        }
+    }
+
+    /// Nothing merges, and every gap is one a boat can use.
+    ///
+    /// A generator that lets islands touch produces one continent with a lot of dead
+    /// ends; the channel is what makes it a place you sail *through*.
+    #[test]
+    fn every_gap_is_wide_enough_to_sail() {
+        for seed in 0..12 {
+            let land = Archipelago::generate_around(seed, 5_600.0, 34, 900.0);
+            let islands = land.islands();
+            for (i, a) in islands.iter().enumerate() {
+                for b in &islands[i + 1..] {
+                    let gap = (a.centre - b.centre).length() - a.radius * 1.35 - b.radius * 1.35;
+                    assert!(
+                        gap > 400.0,
+                        "seed {seed}: two islands {gap:.0} m apart, which is not a channel"
+                    );
+                }
+            }
+        }
+    }
+
+    /// And she does not start aground.
+    #[test]
+    fn the_water_she_starts_in_is_clear() {
+        for seed in 0..24 {
+            let land = Archipelago::generate_around(seed, 5_600.0, 34, 900.0);
+            assert!(
+                land.depth(DVec2::ZERO) > 20.0,
+                "seed {seed}: {:.1} m under her at the start",
+                land.depth(DVec2::ZERO)
+            );
+        }
+    }
+
+    /// **A coast has to have somewhere to go on it.**
+    ///
+    /// Harbours are islands over a quarter-kilometre, and the chain is what produces
+    /// them: when its sizes were drawn from the same skewed range as the rocks, the
+    /// median day fell from nine harbours to five and one day in a hundred had none at
+    /// all — a world where the delivery that is the whole point of the game cannot be
+    /// generated. The floor is the lowest of a hundred and twenty days, and the median
+    /// is where the old scatter sat, which is the thing the chain had to not cost.
+    #[test]
+    fn a_coast_has_somewhere_to_go() {
+        let mut counts: Vec<usize> = (0..24)
+            .map(|seed| {
+                Archipelago::generate_around(seed, 5_600.0, 34, 900.0)
+                    .harbours()
+                    .len()
+            })
+            .collect();
+        counts.sort_unstable();
+        assert!(
+            counts[0] >= 4,
+            "a day with {} harbours on it is a coast with nowhere to go",
+            counts[0]
+        );
+        let median = counts[counts.len() / 2];
+        assert!(median >= 8, "the median day has only {median} harbours");
+    }
+
+    /// The generator delivers something near what it was asked for — and when it cannot,
+    /// it is because the water ran out rather than because it gave up.
+    #[test]
+    fn it_places_most_of_what_was_asked_for() {
+        for seed in 0..24 {
+            let land = Archipelago::generate_around(seed, 5_600.0, 34, 900.0);
+            let placed = land.islands().len();
+            assert!(
+                placed >= 22,
+                "seed {seed}: only {placed} islands of the thirty-four asked for"
+            );
+        }
     }
 }

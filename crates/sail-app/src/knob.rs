@@ -87,20 +87,27 @@ fn decode(raw: &str) -> String {
 /// The day a tab opens on, chosen rather than drawn.
 ///
 /// **A first minute should not begin by running aground.** The archipelago is dense —
-/// thirty-four islands over five and a half kilometres — and a seed drawn at random puts
-/// land anywhere, including a mile dead ahead of a boat whose reader is busy reading the
-/// key list. So a browser opens on one particular day, picked by measuring every seed
-/// out to three hundred: this one has **three and a quarter kilometres of open water
-/// along the course she starts on**, which is twenty minutes at the speed she will do,
-/// and the weather it draws is the weather anybody would choose to learn a boat in —
-/// eleven knots on a beam reach, half a metre of sea, three oktas at seven in the
-/// morning.
+/// thirty-odd islands over five and a half kilometres, and they lie in a chain, so where
+/// the land is depends entirely on which way the chain runs that day. A seed drawn at
+/// random can put a strand of it a mile dead ahead of a boat whose reader is busy
+/// reading the key list. So a browser opens on one particular day, picked by measuring
+/// every seed out to three hundred.
+///
+/// What was measured, on this generator: **six kilometres of clear water in a
+/// four-hundred-metre corridor along the course she starts on** — a corridor rather than
+/// a line, because she has a beam and a pilot that wanders a few degrees — with the
+/// nearest island **a kilometre off, abeam**, which is the picture worth opening on:
+/// land in sight to tell you where you are, and none of it in the way. The weather it
+/// draws is the weather anybody would choose to learn a boat in: nine knots on a beam
+/// reach, half a metre of sea, three oktas at half past eight in the morning — and the
+/// first harbour of the passage under two miles off the bow, so there is somewhere to
+/// be going as well as something to look at.
 ///
 /// Nothing about the desk build changes: there the day is the clock, because a passage
 /// you sat down for should be a day you have not had before. `?seed=` overrides it
 /// either way.
 #[cfg(target_arch = "wasm32")]
-const A_DAY_WITH_SEA_ROOM: u64 = 284;
+const A_DAY_WITH_SEA_ROOM: u64 = 31;
 
 /// The seed for the day, which is the one dial that has to have an answer.
 pub fn seed() -> u64 {

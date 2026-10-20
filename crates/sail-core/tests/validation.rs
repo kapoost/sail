@@ -3694,13 +3694,17 @@ fn the_marks_are_where_a_coast_puts_them() {
             m.visible_from(2.0)
         );
     }
-    // Names you can call out. Two marks with one name is a cocked hat that lies.
+    // Names you can call out. Two marks with one name is a cocked hat that lies, so the
+    // generator now redraws a taken name and qualifies it if the redraw keeps colliding
+    // — this used to allow a fifth of the coast to be duplicates, which was a threshold
+    // chosen to accommodate a bug rather than to describe a coast.
     let mut names: Vec<&str> = marks.iter().map(|m| m.name.as_str()).collect();
     names.sort();
     let before = names.len();
     names.dedup();
-    assert!(
-        names.len() as f64 > before as f64 * 0.8,
+    assert_eq!(
+        names.len(),
+        before,
         "{} of {before} marks share a name with another",
         before - names.len()
     );
