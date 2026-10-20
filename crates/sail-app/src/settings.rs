@@ -653,12 +653,13 @@ fn sailing_101(ui: &mut egui::Ui, missions: &mut Missions) {
     heading(ui, "SAILING 101");
     ui.label(
         egui::RichText::new(
-            "Thirteen steps round the deck: the tiller, the sheets, the rope bank, the \
-             pilot, the watch, the chart, the glasses, the hand bearing compass, the \
-             log and the rod. One instruction at a time, each about one control and the \
-             instrument that answers it — and nothing moves on until you have done it.\n\n\
-             It stands the watch down and takes the pilot off first, because a lesson \
-             about the mainsheet is nonsense while somebody else is trimming it.",
+            "Fifteen steps round the deck: the tiller, the sheets, the rope bank, the \
+             dump, the preventer, the pilot, the watch, the chart, the glasses, the \
+             hand bearing compass, the log and the rod. One instruction at a time, each \
+             about one control and the instrument that answers it — and nothing moves \
+             on until you have done it.\n\nIt stands the watch down and takes the \
+             pilot off first, because a lesson about the mainsheet is nonsense while \
+             somebody else is trimming it.",
         )
         .color(egui::Color32::from_rgb(176, 182, 190))
         .monospace()

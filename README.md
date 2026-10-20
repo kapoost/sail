@@ -143,6 +143,15 @@ Around 370 MB resident, 50 MB of which is the ripple film — thirty-six key fra
 normal map at 512, blended on the processor so the water moves continuously rather than
 in twelve steps a second. About 160 MB on disk.
 
+**She draws two tenths of a second after the window opens.** That used to be a second and
+a half, and the difference was one system: the speed polar, sixteen steady-state solves
+with a reef search inside each, solved in `Startup` — before anything was on the screen —
+where it cost 1.30 s. Every texture this game bakes comes to two tenths between them, so
+the polar was larger than all of them put together. It is solved while she sails now, as
+many angles at a time as there are cores, and nothing had to wait for it: the compass
+bezel falls back to the figure every pilot book gives for a cruising sloop until the real
+curve lands two frames later.
+
 **The sea was the largest single cost and it is the card's now.** It was 2.3 ms in a gale
 and 7.0 ms in the drawn sea — nearly half the frame — and it is a tenth of a millisecond
 in both. What is left on the processor is not the water: it is the cloud shadow map,
@@ -568,10 +577,11 @@ drawing a green line across the whole console.
 
 ## Sailing 101
 
-`Esc`, then **MISSIONS**, then **SAILING 101**: thirteen steps round the deck, one
+`Esc`, then **MISSIONS**, then **SAILING 101**: fifteen steps round the deck, one
 instruction at a time, each about *one control and the instrument that answers it*.
-Tiller, view, mainsheet, headsail, rope bank, pilot, watch, chart, glasses, hand bearing
-compass, log, rod, lifebuoy — and nothing moves on until the thing has been done.
+Tiller, view, mainsheet, headsail, rope bank, the dump, the preventer and the backed
+genoa, pilot, watch, chart, glasses, hand bearing compass, log, rod, lifebuoy — and
+nothing moves on until the thing has been done.
 
 **The key list is not a lesson.** `H` puts forty-four keys on the screen in six groups,
 which is the right reference and the wrong introduction: somebody who has never sailed

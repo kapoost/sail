@@ -200,11 +200,28 @@ What that leaves, measured in Chromium over WebGPU with a warm cache:
 | compile, 60 MB of module | about four seconds, animated |
 | **the engine's own start** | **about twelve seconds, frozen** |
 
-The last row is the one left to attack, and it is the same fix the ripple film already
-had: the textures, the sky and a ten megabyte hull are all baked or parsed *before* the
-first frame, where on this machine they cost two and a half seconds and on one thread in
-a tab they cost twelve. Baking across frames is what the film does now and what the rest
-of them should do.
+The last row was the one left to attack, and the first thing attacking it did was
+contradict the guess above. **It is not the textures.** Timed one system at a time on a
+desk: every `Startup` system this game has adds up to about two tenths of a second — the
+sea's own setup is 0.027, the hull 0.017, the islands 0.015, the sky's cubemap 0.056 —
+and the thing between the window and the first picture was **`hud::build_polar` at 1.30
+seconds**, sixteen steady-state solves with a reef search inside each, sixty thousand
+substeps apiece.
+
+That is now solved *while she sails* rather than before the window opens, as many angles
+at a time as there are cores to solve them on. On a desk the picture is up **0.19 s**
+after the window instead of a second and a half later, and the curve arrives over the
+next two frames. Nothing needed it to exist first: `Polar::beat` already fell back to the
+figure every pilot book gives for a cruising sloop, which is what the compass bezel draws
+its no-go zone from until the real one lands.
+
+What that leaves in a tab has not been measured since — the browser harness went away
+mid-session — but the shape of it is: a second and a half of pre-picture work on a desk
+has become two tenths, and whatever multiple a tab applies, it applies to the smaller
+number. The rest of those twelve seconds is the engine's own start: adapter and device,
+the pipelines the renderer compiles on its way to a first picture, and a ten megabyte
+hull fetched and parsed. That is the next measurement, and it is the same suspect as the
+nineteen milliseconds of frame.
 
 **The keyboard goes to whatever has focus, and that was the button.** The engine listens
 for keys on the canvas, which is why winit gives it a `tabindex` — but a game started by
@@ -221,8 +238,9 @@ re-laid-out.
 
 * **The engine's frame, not ours.** Nineteen of twenty-one milliseconds. Whether that is
   reducible without threads is the next measurement, not the next assumption.
-* **Twelve seconds of startup**, all of it work done before the first frame that could be
-  done across the first hundred.
+* **The startup, again, with the polar out of it.** The one big thing that was ours has
+  been moved; what is left is the engine's own, and it wants measuring in a tab rather
+  than guessing at from a desk.
 * **Somewhere to put it.** 60 MB is over GitHub Pages' 100 MB per-file limit only if it
   grows, but the repository would have to carry the module or the pages workflow would
   have to build it — six minutes of wasm compile added to a job that takes one.

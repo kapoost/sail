@@ -51,6 +51,8 @@ pub enum Step {
     Main,
     Headsail,
     Clutch,
+    Dump,
+    Preventer,
     Pilot,
     Watch,
     Chart,
@@ -63,12 +65,14 @@ pub enum Step {
 }
 
 /// Every step in order, which is also how the card counts them.
-const WALK: [Step; 13] = [
+const WALK: [Step; 15] = [
     Step::Helm,
     Step::View,
     Step::Main,
     Step::Headsail,
     Step::Clutch,
+    Step::Dump,
+    Step::Preventer,
     Step::Pilot,
     Step::Watch,
     Step::Chart,
@@ -171,6 +175,22 @@ fn instruction(step: Step) -> (&'static str, &'static str) {
              the furling line, the staysail halyard. One line is in your hands at a \
              time: 1 and 2 walk along the bank, A and D haul and ease what you have. \
              That is how a reef goes in.",
+        ),
+        Step::Dump => (
+            "When it blows: press R",
+            "The one key worth knowing before you need it. Once, and the watch eases \
+             until the deck is steady and the pilot can hold her again; pressed again, \
+             or held, everything goes — cloth flogging, and she stops. A boat that is \
+             over too far is not a boat that needs steering, it is a boat that needs \
+             less sail, and this is the fastest way to have less of it.",
+        ),
+        Step::Preventer => (
+            "The two ropes that do the opposite: F and G",
+            "F rigs the preventer — a line from the end of the boom to the bow that \
+             stops it coming across, for a long run downwind. Take it off before you \
+             gybe on purpose. G backs the genoa: the only sail aboard that can be held \
+             to windward, and the way out of irons when she has stopped head to wind \
+             and will not pay off.",
         ),
         Step::Pilot => (
             "Hand her over: press P",
@@ -333,6 +353,11 @@ pub fn run(
         }
         // The state rather than the key, so the console button finishes the step as
         // honestly as the keyboard does.
+        Step::Dump => keys.just_pressed(KeyCode::KeyR),
+        // Either of them: the preventer wants a boom off the centreline and backing
+        // the genoa wants a genoa that is out, and a lesson is not the place to insist
+        // on the conditions for a rope.
+        Step::Preventer => keys.just_pressed(KeyCode::KeyF) || keys.just_pressed(KeyCode::KeyG),
         Step::Pilot => pilot.engaged(),
         Step::Watch => crew.standing,
         Step::Chart => keys.just_pressed(KeyCode::KeyM),

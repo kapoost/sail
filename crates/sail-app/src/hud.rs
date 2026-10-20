@@ -52,30 +52,85 @@ impl Polar {
     }
 }
 
-/// Solve the polar at startup. Fifteen steady-state solves is a fraction of a second
-/// in release, and having the curve on screen from the first frame is worth it.
-pub fn build_polar(mut polar: ResMut<Polar>, sim: Res<Sim>) {
+/// The angles her curve is solved at: close-hauled to dead downwind, coarser as it opens.
+const CURVE: [f64; 16] = [
+    30.0, 35.0, 40.0, 45.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 135.0, 150.0, 165.0,
+    180.0,
+];
+
+/// Solve the polar — **after the first picture, and on every core there is**.
+///
+/// It is sixteen steady-state solves with a reef search inside each, which is sixty
+/// thousand substeps apiece: **1.30 seconds**, measured, and it used to happen in
+/// `Startup`, which means it happened before the window opened. That was the single
+/// largest thing between a double-click and a sea — larger than every texture this game
+/// bakes put together, which are two tenths between them — and in a browser, on one
+/// thread, it was several seconds of a tab that had not drawn anything yet.
+///
+/// Two changes, and the second is the one that matters. The sixteen angles are
+/// independent, so they go to the task pool, as many at a time as there are cores to
+/// solve them on — 1.30 s of solving becomes 0.4 s spread over two frames here. And it
+/// happens *while she sails* rather than before the window opens, so the picture is up
+/// before the solver starts. In a tab, where the pool is one thread, that is the
+/// difference between a page that is sailing with an approximate no-go zone and a page
+/// that is black.
+///
+/// Nothing needs the curve to exist: `beat` falls back to the figure every pilot book
+/// gives for a cruising sloop until the real one arrives, and the overlay draws what it
+/// has. That was already true before this change — it is why this one is cheap.
+pub fn build_polar(
+    mut polar: ResMut<Polar>,
+    sim: Res<Sim>,
+    mut next: Local<usize>,
+    mut spent: Local<f32>,
+) {
+    if *next >= CURVE.len() {
+        return;
+    }
     let cfg = sim.config();
     let tws = sim.nominal_tws;
-    let make = || -> Box<dyn WindField> { Box::new(SteadyWind::new(0.0, tws)) };
+    let started = bevy::platform::time::Instant::now();
 
-    let mut points = Vec::new();
-    let mut max_speed: f64 = 0.0;
-    for twa in [
-        30.0, 35.0, 40.0, 45.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 135.0, 150.0,
-        165.0, 180.0,
-    ] {
+    // **As many angles at a time as there are cores to solve them on**, which is the
+    // one rule that behaves on both sides of the fence: ten here, so the curve is in
+    // after two frames; one in a browser, where the pool is a single thread and the
+    // sixteen arrive over a few seconds of a page that is already drawing the sea.
+    let pool = bevy::tasks::ComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+    let batch = pool.thread_num().max(1).min(CURVE.len() - *next);
+    let mut solved: Vec<Option<(f64, f64)>> = vec![None; batch];
+    let from = *next;
+    bevy::tasks::ParallelSliceMut::par_chunk_map_mut(&mut solved, pool, 1, |i, slot| {
+        let twa = CURVE[from + i];
+        // Each solve gets its own wind: a `WindField` is a trait object and the solver
+        // takes a maker rather than a borrow, which is what lets these run beside each
+        // other at all.
+        let make = || -> Box<dyn WindField> { Box::new(SteadyWind::new(0.0, tws)) };
         let (_, s) = reef_for_heel(cfg, &make, rad(twa), 300.0, rad(22.0));
-        if s.converged {
-            points.push((rad(twa), s.telemetry.stw));
-            max_speed = max_speed.max(s.telemetry.stw);
-        }
+        slot[0] = s.converged.then(|| (rad(twa), s.telemetry.stw));
+    });
+
+    polar.tws = tws;
+    polar.points.extend(solved.into_iter().flatten());
+    polar.max_speed = polar
+        .points
+        .iter()
+        .fold(0.0_f64, |m, (_, speed)| m.max(*speed));
+    // The curve has to be in order for the overlay to draw it as a curve, and a batch
+    // that finished out of order would otherwise put a kink in it.
+    polar
+        .points
+        .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    *next += batch;
+    *spent += started.elapsed().as_secs_f32();
+    if *next >= CURVE.len() {
+        info!(
+            "polar: {} of {} angles in {:.2} s, best {:.1} kn",
+            polar.points.len(),
+            CURVE.len(),
+            *spent,
+            sail_core::units::ms_to_kn(polar.max_speed),
+        );
     }
-    *polar = Polar {
-        tws,
-        points,
-        max_speed,
-    };
 }
 
 // **No key.** The diagnostic panel is a developer's window — the polar, the forces, the
