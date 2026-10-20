@@ -637,8 +637,10 @@ i <b>Run anyway</b>."""
 IN_A_TAB = """Bez instalowania, jeśli wolisz najpierw zobaczyć: ta sama gra zbudowana
 dla przeglądarki, w karcie. Zaczyna z wachtą na pokładzie i pilotem u steru, na otwartej
 wodzie, żeby pierwszą minutę dało się spędzić na patrzeniu — a <b>Esc &rarr; MISSIONS
-&rarr; SAILING 101</b> oprowadza po łódce, jedno urządzenie naraz. Potrzebuje WebGPU —
-Chrome, Edge albo Safari od 18 — i jakichś piętnastu megabajtów po drucie, a chodzi w
+&rarr; SAILING 101</b> oprowadza po łódce, jedno urządzenie naraz. Potrzebuje WebGPU, a w praktyce
+znaczy to Chrome albo Edge — Safari ma WebGPU i maluje wszystko na czarno, co jest sporem
+silnika z przeglądarką, a nie usterką tej gry, i strona mówi o tym, zanim cokolwiek
+pobierze. Jakichś piętnaście megabajtów po drucie, a chodzi w
 niecałych pięćdziesięciu klatkach na sekundę wobec sześćdziesięciu na biurku. Tylko
 samotnie: strona nie znajdzie gry, którą kolega uruchomił w sąsiednim pokoju."""
 

@@ -83,8 +83,9 @@
       </div>
       <button id="go" disabled>press to sail</button>
       <p>
-        Needs a browser with WebGPU — Chrome, Edge, or Safari 18 and up. The dials the
-        desk build reads from the environment are on the query string here:
+        Needs a browser with WebGPU, and in practice that means <b>Chrome or Edge</b>:
+        Safari has WebGPU and draws nothing with it — see below. The dials the desk
+        build reads from the environment are on the query string here:
       </p>
       <ul>
         <li><code>?wind=32&amp;sea=built</code> — a gale that has already blown up</li>
@@ -137,11 +138,37 @@
       // sees is a blank page and a stack trace.
       if (!navigator.gpu) {
         state.innerHTML =
-          'This browser has no WebGPU, which the sea needs — try Chrome, Edge, or ' +
-          'Safari 18 and up. The desk build does not care: ' +
+          'This browser has no WebGPU, which the sea needs — try Chrome or Edge. ' +
+          'The desk build does not care: ' +
           '<a href="https://github.com/kapoost/sail/releases/latest">the latest release</a>.';
         pct.textContent = '—';
         throw new Error('no webgpu');
+      }
+
+      // **Safari has WebGPU and paints black with it**, which is worse than not having
+      // it: the game loads, the sound comes up, the keys work, and the picture never
+      // arrives. Measured rather than assumed — a page of our own that clears a WebGPU
+      // canvas to red shows red in this Safari, and Bevy's *own* published WebGPU
+      // example shows the same black rectangle this does, while its WebGL2 build of the
+      // same scene draws. So it is the engine and the browser disagreeing, not this
+      // game, and there is nothing here to fix until one of them moves. This game
+      // cannot fall back to WebGL2: the sea reads its spectrum out of a storage buffer
+      // in the vertex shader and WebGL2 has no such thing.
+      //
+      // Said in front of the fifteen megabytes rather than after them, and the button
+      // still works — the day Safari starts drawing, nobody has to ship a new page for
+      // it to come back.
+      const safari = /^((?!chrome|chromium|android|crios|edg).)*safari/i.test(navigator.userAgent);
+      if (safari) {
+        const warn = document.createElement('p');
+        warn.style.color = '#e0b070';
+        warn.innerHTML =
+          '<b>Safari draws this black.</b> Its WebGPU and the engine do not agree yet — ' +
+          'the game runs, the sound comes up, and the picture never arrives. ' +
+          'Chrome and Edge are fine, and so is ' +
+          '<a href="https://github.com/kapoost/sail/releases/latest">the desk build</a>. ' +
+          'Press on if you want to see for yourself.';
+        document.getElementById('go').after(warn);
       }
 
       // Fetched by hand rather than handed to `init` as a URL, for one reason: fifteen
