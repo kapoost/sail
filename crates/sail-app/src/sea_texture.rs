@@ -36,61 +36,18 @@ const SIZE: u32 = 1024;
 /// lookups in a shader. This is still the honest half-measure, just a bigger one.
 pub const TILE_METRES: f32 = 24.0;
 
-/// How far the texture coordinates are pushed about, in tiles, and over what distance.
-///
-/// **A repeating texture is not seen as repetition — it is seen as a grid.** Twenty-four
-/// metres of ripples across three hundred metres of water is a dozen copies of one
-/// patch, and what gives it away is not that the patches are the same but that their
-/// corners line up: the eye finds the lattice long before it recognises the content.
-/// Reported from the deck as the water being repetitive at the finer drawn width, which
-/// is exactly when a lattice becomes legible.
-///
-/// So the coordinates are warped by a slow swirl before they are used. The same patches
-/// are still there — there is one texture and that does not change — but they no longer
-/// land on a grid: each copy is offset and sheared a little differently from its
-/// neighbours, and a lattice with no straight lines in it stops being a lattice. It
-/// costs two noise samples a vertex and no memory at all.
-///
-/// Two swirls rather than one, because one was not enough to hide the grid and a single
-/// strong one only trades a lattice for a smear. The long one moves whole tiles about
-/// over two hundred metres; the short one bends their edges over sixty. Between them a
-/// copy of the tile is displaced, rotated a little by the shear, and distorted
-/// differently from its neighbours, which is as close to *not repeating* as one texture
-/// lookup gets.
-///
-/// The stretch between two vertices is what bounds them: 1.1 tiles over two hundred
-/// metres and 0.35 over sixty both come out near a quarter of a tile per ten metres of
-/// water, against a vertex every seventy centimetres. Smooth where it is looked at
-/// closely and scrambled at the distance where the repeat used to be legible.
-const WARP_LONG: f32 = 1.1;
-const WARP_LONG_OVER: f32 = 200.0;
-const WARP_SHORT: f32 = 0.35;
-const WARP_SHORT_OVER: f32 = 60.0;
-
-/// Where a patch of water reads its ripples from.
-///
-/// One function because the near field and the far field both ask, and a seam between
-/// two different answers would be a line across the sea — which is the one thing worse
-/// than a repeat.
-pub fn ripple_uv(parcel: Vec2) -> Vec2 {
-    // One octave, not two. This is asked four times at every one of forty thousand
-    // vertices, and a second octave of a field whose whole job is to be slow buys
-    // nothing anybody can see at eight milliseconds a frame — measured: sixty frames a
-    // second with it gone against forty with it in.
-    let swirl = |seed: u64, offset: Vec2, over: f32| -> f32 {
-        let at = (parcel + offset) / over;
-        sail_core::noise::value(glam::DVec2::new(at.x as f64, at.y as f64), seed) as f32
-    };
-    let warp = Vec2::new(
-        swirl(0x5EA_1A11, Vec2::ZERO, WARP_LONG_OVER),
-        swirl(0x5EA_1A12, Vec2::splat(37.0), WARP_LONG_OVER),
-    ) * WARP_LONG
-        + Vec2::new(
-            swirl(0x5EA_1A13, Vec2::splat(113.0), WARP_SHORT_OVER),
-            swirl(0x5EA_1A14, Vec2::splat(211.0), WARP_SHORT_OVER),
-        ) * WARP_SHORT;
-    Vec2::new(parcel.x / TILE_METRES, -parcel.y / TILE_METRES) + warp
-}
+// **Where a patch of water reads its ripples from has moved to the card.**
+//
+// It was here, next to the map it addresses, which was the right place while the
+// processor was walking the mesh: `ripple_uv` took a parcel of water and gave back a
+// coordinate, warped by two octaves of slow noise so that twenty-four metres of tile
+// stopped reading as a lattice. The vertex shader does that now — `assets/sea_wave.wesl`
+// — and the warp's own dials went with it, because a constant whose only reader is in
+// another language is a constant that will be changed in the wrong file.
+//
+// What stays here is the tile itself: this module bakes the texture, so this module owns
+// how many metres of sea one repeat of it covers. The card is *told* that number once a
+// frame rather than keeping a second copy of it.
 
 /// Resolution of the animated frames.
 ///

@@ -849,22 +849,22 @@ impl Dome {
         }
     }
 
-    /// What arrives from near the horizon on this bearing. `dir` is a Bevy direction;
-    /// only its horizontal part is read, and it need not be normalised.
-    #[inline]
-    pub fn towards(&self, dir: Vec3) -> Vec3 {
-        let flat = Vec3::new(dir.x, 0.0, dir.z);
-        let len = flat.length();
-        if len < 1e-6 {
-            return self.mean;
-        }
-        (self.mean + self.east * (flat.x / len) + self.south * (flat.z / len)).max(Vec3::ZERO)
-    }
-
     /// Straight up, which is what a trough shows.
     #[inline]
     pub fn zenith(&self) -> Vec3 {
         self.zenith
+    }
+
+    /// What the horizon looks like on a bearing, as the three terms it is made of.
+    ///
+    /// A mean plus an east term plus a south term: dotted with a horizontal direction
+    /// they give the colour arriving from near the horizon that way, which is what a
+    /// wave crest shows. The sea's vertex shader evaluates that at forty thousand
+    /// vertices, so it is handed the coefficients rather than the answer — and this is
+    /// the one place that knows what they are.
+    #[inline]
+    pub fn terms(&self) -> (Vec3, Vec3, Vec3) {
+        (self.mean, self.east, self.south)
     }
 }
 

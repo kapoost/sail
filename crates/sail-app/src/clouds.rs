@@ -207,6 +207,19 @@ impl ShadowField {
         }
     }
 
+    /// The map itself, for the card, which does its own reading of it.
+    ///
+    /// Nodes across, the simulation coordinates of node (0, 0), the metres between
+    /// nodes, and the shade at each. Empty when there is no cloud to cast anything —
+    /// and the shader is told that by the node count rather than by a flag.
+    pub fn as_map(&self) -> (usize, glam::DVec2, f64, &[f32]) {
+        if self.map.is_empty() {
+            (0, glam::DVec2::ZERO, 1.0, &[])
+        } else {
+            (MAP, self.corner, self.pitch, &self.map)
+        }
+    }
+
     /// How shaded a point on the water is: 0 in full sun, 1 under the middle of a cloud.
     pub fn shade_at(&self, at: glam::DVec2) -> f32 {
         if self.map.is_empty() {

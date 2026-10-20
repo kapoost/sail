@@ -52,59 +52,65 @@ PC, and a link in a browser says neither. Half of that is now answered by
 `dist/install.sh`, which installs without going through a browser at all and therefore
 without quarantine.
 
-## The number that decides it, measured since
+## The number that decided it is gone
 
 The browser question used to be about what panics and what cannot find a UDP socket.
-Those are the easy half. The hard half is one loop:
+Those were the easy half. The hard half was one loop — 201 × 201 vertices each asking a
+twenty-one component spectrum for height, slope and drift, once a frame, on the
+processor. In a tab, scalar `f64` with a transcendental in the inner loop runs one and a
+half to three times slower than native, so 5.7 ms became nine to seventeen of a 16.7 ms
+frame: **the sea alone was the frame**.
+
+That loop is not on the processor any more. It is `assets/sea_wave.wesl`, a vertex
+shader, and the figures are measured on the same machine as the ones above:
 
 | | native, M5 |
 |---|---|
-| sea mesh | 1.5 ms light airs, 2.3 ms in a gale — 4.4 and 5.7 before it was spread across cores |
-| foam | 0.3 to 1.9 ms |
-| cloud | 0.1 ms |
+| sea | 0.04 ms light airs, 0.12 ms in a gale — 1.5 and 2.3 when it was spread across cores, 4.4 and 5.7 on one |
+| sea, drawn | 0.12 ms — **7.0 ms** before |
+| foam | 0.35 to 1.8 ms |
+| cloud | 0.12 ms |
 
-The frame is 16.7 ms at sixty. In a tab, scalar `f64` with a transcendental in the inner
-loop runs somewhere between one and a half and three times slower than native — and a tab
-without the headers below gets one thread, which is the 5.7 ms figure and not the 2.3.
-Nine to seventeen milliseconds, then: **the sea alone is the frame**. Nothing else on the list is
-close: the world is rendered at 960 and blown up, so the graphics card has almost nothing
-to do, and every texture in the game is generated at startup rather than downloaded,
-which is the one place a tab normally loses.
+Two things follow for a tab, and they point opposite ways.
 
-So the browser does not hinge on wgpu, or on assets, or on WebGPU support. It hinges on
-201 × 201 vertices each asking a twenty-one component spectrum for height, slope and
-drift, once a frame, on one thread.
+**The good one: WGSL is WGSL.** The sea's shader is already written in the language a
+browser runs. WebGPU takes it as it stands; nothing in it is native-only — no 64-bit
+anything (the noise hashes are built out of 32-bit arithmetic by hand, precisely because
+WGSL has no `u64`), no threads, no files. The hard half of the port therefore did not get
+easier: it stopped existing.
 
-### Does spreading it across cores help in a tab?
+**The awkward one: what is left is the startup.** With the sea gone, the largest single
+thing a tab would have to swallow is the ripple bake — thirty-six frames of normal map,
+0.47 s across every core here, which in a single-threaded tab is six to fifteen seconds
+of a page that appears to have hung. That is now *the* blocker rather than one of four,
+and it is the same fix it always was: spread the bake across frames, which is worth doing
+natively too.
 
-**In shape, yes — it is done. In effect in a tab, only with the right hosting.**
+### Does spreading the vertex loop across cores still matter in a tab?
 
-The loop is a function from a grid offset to a finished vertex now, handed to a task
-pool: 5.7 ms to 2.3 natively. That is exactly the shape wasm threads want. Threads in wasm need
-`SharedArrayBuffer`, which needs the `Cross-Origin-Opener-Policy` and
-`Cross-Origin-Embedder-Policy` headers, and **GitHub Pages cannot send headers** — so a
-parallel build served from where this project's page lives would run the single-threaded
-path and gain nothing. A host that can set headers (or the service-worker trick that
-fakes them) unlocks it; that is a hosting decision, not a code one.
+It is moot for the sea and still true for everything else. The work done in October —
+rewriting the loop as a pure function of a grid offset with no shared mutable state —
+turned out to be the same shape a vertex shader wants, which is why the move to the card
+was a translation rather than a redesign. Threads in wasm need `SharedArrayBuffer`, which
+needs the `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers, and
+**GitHub Pages cannot send headers**; that still decides whether the *foam* and the
+*ripple bake* get more than one core in a tab.
 
-What the work buys regardless is the shape: a pure map over the vertex array with no
-shared mutable state and a read-only spectrum is exactly what both wasm threads and a
-vertex shader want. Doing it for the native frame rate leaves the loop in the form the
-browser would need.
+### What is left to settle
 
-### What would actually settle it
-
-* **Put the sum in the vertex shader.** The sea becomes nearly free and the tab stops
-  being the question — at the cost of the property that makes this sea trustworthy: the
-  hull and the drawn surface asking the same water the same question. Survivable, because
-  the hull samples a handful of points a substep rather than forty thousand, so the
-  processor keeps doing *those* — but the WGSL would have to be generated from the same
-  Rust spectrum, with a test pinning the two together at sample points. That is the real
-  cost: not the shader, the agreement.
-* **Fewer vertices.** 201 to 129 is two and a half times less work, 5.7 ms to 2.4, at
-  the price of near-field detail the band limit already grades away with distance.
+* **The ripple bake across frames.** Six to fifteen seconds of frozen page, and the one
+  blocker that is genuinely in the way now.
+* **Fewer vertices, if a weak card needs it.** 201 to 129 is two and a half times less
+  work. It was a processor economy before and it is a card economy now, which is a much
+  cheaper thing to need.
 * **Trim the memory.** 370 MB resident, 50 MB of it thirty-six key frames of ripple map.
   A tab will take it and would rather not.
+* **The knobs.** Twenty `env::var` calls would have to come off the query string.
+
+What this does *not* change is the half of the question that was never about speed:
+sailing together. A tab still has no UDP, still cannot find the game your friend is
+running in the next room, and still needs a certificate and a public host to talk to
+anybody at all.
 
 ## The shape that would make sense
 

@@ -46,6 +46,7 @@ mod rig;
 mod rod;
 mod sail_texture;
 mod scenarios;
+mod sea_card;
 mod sea_texture;
 mod settings;
 mod ship;
@@ -93,6 +94,24 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 /// an interesting way, and leaves the distributed artefact a single file either way.
 const HULL: &[u8] = include_bytes!("../../../assets/venus.glb");
 
+/// And the sea's shaders, for the same reason.
+///
+/// They are read off the disk like any other asset — the renderer loads them by path and
+/// recompiles them if they change, which is what makes a shader something you can work
+/// on by looking — so a binary handed to a friend has to carry them too. Three small
+/// text files against ten megabytes of hull; the mechanism is already here.
+const SHADERS: [(&str, &str); 3] = [
+    ("sea.wesl", include_str!("../../../assets/sea.wesl")),
+    (
+        "sea_prepass.wesl",
+        include_str!("../../../assets/sea_prepass.wesl"),
+    ),
+    (
+        "sea_wave.wesl",
+        include_str!("../../../assets/sea_wave.wesl"),
+    ),
+];
+
 /// Where the asset server should look.
 ///
 /// Three places, in this order, and the order is the development loop: a loose `assets`
@@ -134,6 +153,16 @@ fn unpacked() -> Option<String> {
     if !fresh {
         std::fs::write(&hull, HULL).ok()?;
         println!("sail: unpacked the hull to {}", dir.display());
+    }
+    for (name, source) in SHADERS {
+        let at = dir.join(name);
+        // Length is enough to tell a stale copy from a fresh one here, as it is for the
+        // hull: the directory is named for the version, so the only way to find a file
+        // of the right length that is the wrong file is to have edited it by hand in a
+        // temporary directory, which is a thing somebody doing that would want to work.
+        if !std::fs::metadata(&at).is_ok_and(|m| m.len() == source.len() as u64) {
+            std::fs::write(&at, source).ok()?;
+        }
     }
     Some(dir.to_string_lossy().into_owned())
 }
@@ -227,6 +256,9 @@ fn main() {
         ..default()
     })
     .add_plugins(sound::plugin)
+    // The sea's own material: the standard one with a vertex shader of its own. The
+    // plugin is what builds its pipeline and loads the two shaders beside it.
+    .add_plugins(MaterialPlugin::<sea_card::SeaMaterial>::default())
     .insert_resource(sim::Sim::new(weather))
     .insert_resource(weather)
     // The console is the interface now; the diagnostic panel is the microscope and

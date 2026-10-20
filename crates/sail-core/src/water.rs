@@ -42,6 +42,26 @@ pub struct Parcel {
     pub drift: DVec2,
 }
 
+/// One component of the spectrum as a *drawing* layer needs it.
+///
+/// The amplitude already carries the shelter, and the phase is this component's phase
+/// at the point it was asked about, wrapped into a turn. Both of those are the things
+/// that cannot survive the crossing into single precision: the phase because it grows
+/// without bound with time, and the shelter because applying it afterwards to a sum is
+/// not the same as applying it to each component before the roll-off.
+///
+/// What the card then does is add `k · (direction · offset)` to the phase, and an offset
+/// is a few hundred metres. That is the whole trick that lets the picture and the hull
+/// agree about where the water is while working in different precisions.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Phased {
+    pub amplitude: f64,
+    pub k: f64,
+    pub wavelength: f64,
+    pub phase: f64,
+    pub direction: DVec2,
+}
+
 /// What the hull needs to know about the water underneath it.
 pub trait WaterSurface: Send + Sync {
     /// Surface elevation above mean level, metres.
@@ -220,6 +240,17 @@ pub trait WaterSurface: Send + Sync {
     fn longest_wavelength(&self) -> f64 {
         0.0
     }
+
+    /// The spectrum as it stands at this point and time, for a surface drawn elsewhere.
+    ///
+    /// Written into a buffer the caller owns rather than returned, because a renderer
+    /// asks this once a frame for ever and a sea that allocates once a frame for ever is
+    /// a sea with a leak-shaped hole in it. Flat water writes nothing, which is right:
+    /// there is no spectrum to send.
+    fn phased(&self, pos: DVec2, t: f64, out: &mut Vec<Phased>) {
+        let _ = (pos, t);
+        out.clear();
+    }
 }
 
 /// Dead flat. Every flat-water test and the whole measured polar rest on this.
@@ -311,8 +342,15 @@ impl WaveComponent {
         self.omega / self.k
     }
 
+    /// The phase of this component at a point and a time, in radians.
+    ///
+    /// Public because the drawn surface is worked out on the graphics card now, and the
+    /// one number it cannot work out for itself is this one: after an hour at sea
+    /// `k·x − ωt + φ` is tens of thousands of radians and a single-precision float has
+    /// no room for it. It is evaluated here, in double precision, and handed over
+    /// wrapped — see [`Phased`].
     #[inline]
-    fn theta(&self, pos: DVec2, t: f64) -> f64 {
+    pub fn theta(&self, pos: DVec2, t: f64) -> f64 {
         self.k * self.direction.dot(pos) - self.omega * t + self.phase
     }
 }
@@ -766,6 +804,20 @@ impl WaterSurface for WindSea {
             .iter()
             .map(|c| std::f64::consts::TAU / c.k.max(1e-9))
             .fold(0.0, f64::max)
+    }
+
+    fn phased(&self, pos: DVec2, t: f64, out: &mut Vec<Phased>) {
+        out.clear();
+        out.extend(self.components.iter().map(|c| Phased {
+            // Sheltered here, not at the end of the sum: the card multiplies each
+            // component by its own band-limit weight, and a shelter applied to the
+            // total afterwards would be applied to a different total.
+            amplitude: c.amplitude * self.shelter,
+            k: c.k,
+            wavelength: c.wavelength,
+            phase: crate::units::wrap_tau(c.theta(pos, t)),
+            direction: c.direction,
+        }));
     }
 
     fn depth_attenuation(&self, draft: f64) -> f64 {

@@ -14,3 +14,13 @@ sail-net = { path = "../sail-net" }
 bevy = "=0.20.0"
 bevy_egui = "=0.43.1"
 glam.workspace = true
+# One struct crosses to the card as bytes, and this is the crate that says in the type
+# system when that is allowed. Already in the tree — the renderer is built on it.
+bytemuck = "1"
+
+[dev-dependencies]
+# The sea's shader is compiled and *run* by a test, against the Rust spectrum it has to
+# agree with. Pinned to the version the renderer itself uses, so the test exercises the
+# same compiler the game does.
+wgpu = "=30.0.1"
+pollster = "0.4"

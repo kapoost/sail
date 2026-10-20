@@ -30,8 +30,8 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
 1. **The engine stays a reversible decision.** Bevy, Fyrox and Godot-via-gdext are all
    still on the table; the presentation layer is a few days of work on top of this
    crate, not a rewrite.
-2. **The physics is testable without opening a window.** 140 tests in the core assert
-   against figures a sailor knows from the water — 291 across the workspace. When one
+2. **The physics is testable without opening a window.** 141 tests in the core assert
+   against figures a sailor knows from the water — 350 across the workspace. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
 
@@ -121,35 +121,51 @@ share of the frame went:
 
 | | light airs | gale, overcast, squall |
 |---|---|---|
-| sea mesh | 1.5 ms | 2.3 ms |
-| foam | 0.3 ms | 1.9 ms |
-| cloud | 0.1 ms | 0.2 ms |
-| **of a 16.7 ms frame** | **12 %** | **27 %** |
+| sea | 0.04 ms | 0.12 ms |
+| foam | 0.35 ms | 1.7 ms |
+| cloud | 0.12 ms | 0.14 ms |
+| **of a 16.7 ms frame** | **3 %** | **12 %** |
 
 Around 370 MB resident, 50 MB of which is the ripple film — thirty-six key frames of
 normal map at 512, blended on the processor so the water moves continuously rather than
 in twelve steps a second. About 160 MB on disk.
 
-**The sea mesh is the largest single cost and it is spread across cores.** The mesh is
-201 × 201 vertices rebuilt every frame, and each vertex asks the spectrum for its height,
-its slope and its parcel drift — twenty-one components, one `sin_cos` each. It was 5.7 ms
-on one thread until the loop was written as a function from a grid offset to a finished
-vertex, which is what let a task pool have it: 2.3 ms now, and the stitch back into the
-five attribute vectors is 0.2 of that. The speed-up is two and a half rather than the ten
-the core count suggests, because half of those cores are efficiency cores and the far
-half of the grid is nearly free work however it is divided.
+**The sea was the largest single cost and it is the card's now.** It was 2.3 ms in a gale
+and 7.0 ms in the drawn sea — nearly half the frame — and it is a tenth of a millisecond
+in both. What is left on the processor is not the water: it is the cloud shadow map,
+rasterised once a frame for the whole square around the boat, and that is most of the
+figure above.
 
-The graphics card is not the limit and the measurement says so: the frame rate is the
-same at a drawn width of 480 and at 1920, because the world is rendered into a small
-image and blown up. What that means for requirements is that **single-core speed is what
-to look at**, not the GPU — any card with Metal 3, Vulkan 1.2 or DX12 will do, including
-integrated ones. A core half the speed of this one still makes sixty; a quarter does not.
+The mesh is 201 × 201 vertices and it is written **once, at startup**. Each vertex's
+position slot carries its offset from the boat and nothing else; `assets/sea_wave.wesl`
+turns that offset into a piece of sea — height, slope and parcel drift out of the
+twenty-one component spectrum, and on top of them the colour, the foam, the light coming
+through a crest, and the drawn sea's whole treatment of tone, contour and glint. What
+crosses the bus each frame is eighteen kilobytes: the sky's three bearing terms, the
+cloud shadow map, the grid's own tables, and the spectrum.
 
-What is left to win is on the graphics card: the sum could live in a vertex shader and
-the processor would be out of it altogether. That would cost the thing which makes this
-sea trustworthy — the hull and the drawn surface asking the same water the same question
-— so it is a trade rather than an improvement, and it is written up in `docs/browser.md`
-where it actually matters.
+**The one number a float cannot hold is worked out on this side.** A Gerstner phase is
+`k·x − ωt + φ`, and after an hour at sea that is tens of thousands of radians; in single
+precision it would be worth centimetres of error and the picture would crawl. So each
+component's phase *at the boat* is evaluated in `f64` and handed over wrapped into a
+turn, and the shader only ever adds `k·(direction·offset)` to it — an offset being a few
+hundred metres. Measured against the Rust spectrum at sample points out to a kilometre
+and a half, the two seas agree to about a micron.
+
+That agreement is the cost of this change, stated plainly: **there are two
+implementations of the sea now**, one in Rust that the hull floats on and one in WGSL
+that the eye looks at. Nothing in a type system can hold them together, so a test does —
+`sea_card`'s tests compile the shipped shader, run it on the card, and compare its height,
+slope, drift and band limit against `sail-core`. They also check the drawn sea's own two
+properties on the card: that a creeping tone cannot jump a band, and that a crest glows
+up-sun and not down.
+
+The graphics card was not the limit before and still is not: the frame rate is the same
+at a drawn width of 480 and at 1920, because the world is rendered into a small image and
+blown up. Taking the sea off the processor was therefore spending something the machine
+had spare. **Single-core speed is still what to look at**, not the GPU — though the floor
+has moved: any card with Metal 3, Vulkan 1.2 or DX12 will do, and now it has to run a
+vertex shader with a twenty-one term sum in it, which every one of them can.
 
 ### Knobs, and the demo reel
 
