@@ -246,6 +246,16 @@ than rounding up; `Esc → MISSIONS → SAILING 101` walks a reader round her on
 a time. None of that is web-only — `SAIL_CREW=1 SAIL_PILOT=1` and `SAIL_LESSON=1` are the
 same start on a desk — but a tab is the one place somebody arrives having read nothing.
 
+**Phones are out of scope, on purpose and for now.** A current one has WebGPU — Chrome on
+Android, Safari from iOS 18 — so the question is not whether it starts. It is that there
+is no touch input in this game at all: the console is tappable, the tiller is not, and
+looking round is a held right mouse button. Behind that are two measurements and a
+guess: twelve seconds of frozen startup here becomes most of a minute on a phone's single
+core, forty-eight frames a second becomes ten to fifteen, and sixty megabytes of module
+on a four-gigabyte handset is where Safari starts killing tabs. The order of work, if it
+is ever wanted, is touch controls first, the startup spread across frames second, a
+lighter ripple film third. None of it is a flag; all of it is a day.
+
 What would *not* make sense is porting the game and keeping sailing together, because the
 second half of that sentence costs a certificate, a public host, a second transport and
 the end of hosting from a laptop — all to reach a browser that still cannot find the game
