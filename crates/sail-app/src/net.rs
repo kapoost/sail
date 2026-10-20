@@ -59,7 +59,7 @@ pub fn setup(mut commands: Commands) {
     // the kind of friction that quietly ends a thing like this.
     let (remembered_name, address, word) = sail_net::remembered::read();
     let mut net = Net {
-        name: std::env::var("SAIL_NAME").unwrap_or_else(|_| {
+        name: crate::knob::var("SAIL_NAME").unwrap_or_else(|_| {
             if remembered_name.is_empty() {
                 whoami()
             } else {
@@ -70,7 +70,7 @@ pub fn setup(mut commands: Commands) {
         word,
         ..Default::default()
     };
-    if let Ok(server) = std::env::var("SAIL_JOIN") {
+    if let Ok(server) = crate::knob::var("SAIL_JOIN") {
         let name = net.name.clone();
         net.address = server.clone();
         // Told where to go by the environment — by the setup screen, or by a line in a
@@ -79,7 +79,7 @@ pub fn setup(mut commands: Commands) {
         // the file: one experiment from the launcher should not quietly replace the
         // address a person has been using all week.
         net.borrowed = true;
-        if let Ok(word) = std::env::var("SAIL_WORD") {
+        if let Ok(word) = crate::knob::var("SAIL_WORD") {
             net.word = word;
         }
         let word = net.word.clone();
@@ -174,8 +174,8 @@ pub fn rebuild(
 /// A name over the boat, taken from whatever the machine already knows about its owner
 /// rather than asked for in a dialogue nobody wants to fill in.
 fn whoami() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
+    crate::knob::var("USER")
+        .or_else(|_| crate::knob::var("USERNAME"))
         .unwrap_or_else(|_| "somebody".into())
 }
 

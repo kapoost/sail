@@ -30,6 +30,7 @@ mod hud;
 mod ink;
 mod input;
 mod islands;
+mod knob;
 mod logbook;
 mod marks;
 mod mission;
@@ -120,7 +121,7 @@ const SHADERS: [(&str, &str); 3] = [
 /// the binary, unpacked. `SAIL_ASSETS=embedded` skips straight to the last one, which is
 /// how the path a friend will take gets tested on a machine that has the other two.
 fn asset_root() -> String {
-    let forced = std::env::var("SAIL_ASSETS").is_ok_and(|v| v == "embedded");
+    let forced = crate::knob::var("SAIL_ASSETS").is_ok_and(|v| v == "embedded");
     if !forced {
         if let Ok(exe) = std::env::current_exe() {
             if let Some(beside) = exe.parent().map(|d| d.join("assets")) {
@@ -143,7 +144,9 @@ fn asset_root() -> String {
 }
 
 /// Put the embedded hull somewhere the asset server can read it, and return that
-/// directory. Skipped when the file is already there with the right length, so the
+/// directory.
+///
+/// Skipped when the file is already there with the right length, so the
 /// second run costs a stat.
 fn unpacked() -> Option<String> {
     let dir = std::env::temp_dir().join(concat!("sail-assets-", env!("CARGO_PKG_VERSION")));
@@ -169,7 +172,7 @@ fn unpacked() -> Option<String> {
 
 /// The window, and the knob for looking at a smaller one.
 fn window_size() -> (u32, u32) {
-    let asked = std::env::var("SAIL_WINDOW").ok().and_then(|v| {
+    let asked = crate::knob::var("SAIL_WINDOW").ok().and_then(|v| {
         let (w, h) = v.split_once(['x', 'X'])?;
         Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
     });
@@ -177,15 +180,7 @@ fn window_size() -> (u32, u32) {
 }
 
 fn main() {
-    let seed = std::env::var("SAIL_SEED")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or_else(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(0x5A1Fu64)
-        });
+    let seed = knob::seed();
     // `--licences` before anything else, because it has to work in a build that cannot
     // open a window — and because the single-file build carries the fonts and the hull
     // *inside* it, which is only allowed if the licences travel with them. The OFL says
@@ -309,7 +304,7 @@ fn main() {
     // `SAIL_TUTORIAL=1` starts the drill on the first frame, which is how it gets
     // looked at twenty times in an afternoon without clicking through a panel.
     .insert_resource(tutorial::Tutorial::asked_for(
-        std::env::var("SAIL_TUTORIAL").is_ok(),
+        crate::knob::var("SAIL_TUTORIAL").is_ok(),
     ))
     .add_systems(
         Startup,
@@ -473,10 +468,10 @@ fn main() {
                 chart::toggle,
                 chart::stopwatch,
                 chart::by_hand,
-                retro::stress.run_if(|| std::env::var("SAIL_RETRO_STRESS").is_ok()),
+                retro::stress.run_if(|| crate::knob::var("SAIL_RETRO_STRESS").is_ok()),
                 music::compose,
                 world::apply_ink,
-                (world::roll_sea_film, world::polish),
+                (world::bake_sea_film, world::roll_sea_film, world::polish).chain(),
                 ink::apply,
                 retro::apply,
             ),

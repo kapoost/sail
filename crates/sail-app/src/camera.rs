@@ -252,7 +252,7 @@ const ROLL_HOLDS_THE_EYE: f32 = 2.6;
 
 /// Degrees a second the view sweeps round her on its own, if asked.
 fn orbit() -> Option<f32> {
-    std::env::var("SAIL_ORBIT")
+    crate::knob::var("SAIL_ORBIT")
         .ok()
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| *v > 0.0)
@@ -423,7 +423,7 @@ pub fn setup(
     // One cubemap, two jobs: drawn as the sky, and filtered on the GPU into the
     // environment light the water reflects. Sharing the image is what guarantees the
     // sun you can see and the sun glittering off the wave faces are the same sun.
-    let started = std::time::Instant::now();
+    let started = bevy::platform::time::Instant::now();
     let sky = images.add(crate::sky::cubemap(&sky_state));
     info!(
         "sky: cubemap baked in {:.3} s at {:02.0}:{:02.0}, cover {:.0}%, \
@@ -483,7 +483,7 @@ pub fn setup(
         // `SAIL_TONEMAP=tony|aces|agx|neutral|reinhard|luminance` to look at the others
         // — `neutral` keeps hue in the highlights without flattening them, and is the
         // one to try next.
-        match std::env::var("SAIL_TONEMAP").as_deref() {
+        match crate::knob::var("SAIL_TONEMAP").as_deref() {
             Ok("tony") => bevy::core_pipeline::tonemapping::Tonemapping::TonyMcMapface,
             Ok("aces") => bevy::core_pipeline::tonemapping::Tonemapping::AcesFitted,
             Ok("agx") => bevy::core_pipeline::tonemapping::Tonemapping::AgX,

@@ -174,44 +174,40 @@ pub fn normal_map() -> Image {
     normal_map_at_size(SIZE, 0.0)
 }
 
-/// The whole loop, as one image per frame.
-///
-/// Built on every core there is, because the serial version is the difference between
-/// a game that starts and a game you wait for: thirty-six frames is thirty-six times
-/// the work of the one map this used to make.
-pub fn normal_map_frames() -> Vec<Image> {
-    let threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(RIPPLE_FRAMES);
-    let mut out: Vec<Option<Image>> = (0..RIPPLE_FRAMES).map(|_| None).collect();
-    std::thread::scope(|scope| {
-        let mut handles = Vec::new();
-        for (chunk, slot) in out.chunks_mut(RIPPLE_FRAMES.div_ceil(threads)).enumerate() {
-            let base = chunk * RIPPLE_FRAMES.div_ceil(threads);
-            handles.push(scope.spawn(move || {
-                for (i, cell) in slot.iter_mut().enumerate() {
-                    let t = (base + i) as f32 / RIPPLE_FRAMES as f32 * RIPPLE_LOOP;
-                    *cell = Some(normal_map_at_size(ANIM_SIZE, t));
-                }
-            }));
-        }
-        for h in handles {
-            let _ = h.join();
-        }
-    });
-    out.into_iter().flatten().collect()
+/// Where in the loop frame `i` stands, seconds.
+pub fn frame_time(i: usize) -> f32 {
+    i as f32 / RIPPLE_FRAMES as f32 * RIPPLE_LOOP
 }
 
-/// One frame of it, at a chosen resolution and a chosen moment in the loop.
-pub fn normal_map_at_size(size: u32, t: f32) -> Image {
+/// Bake rows `from .. from + count` of one frame of the loop into a buffer that is
+/// already the right size.
+///
+/// **Rows rather than whole frames, because a browser has one thread.** The loop used to
+/// be baked whole, on every core there was, in `std::thread::scope` — which is the right
+/// shape for a machine with cores to spare and a *panic* on `wasm32-unknown-unknown`,
+/// where `spawn` is not implemented. Written as a function from a range of rows into a
+/// buffer it is both: the task pool takes it a row at a time where there is a pool, and
+/// a caller with a frame budget can stop part way through and come back next frame.
+///
+/// Thirty-six frames is thirty-six times the work of the one still map, which is why
+/// none of it happens before the first picture is drawn any more.
+pub fn bake_rows(base: &mut [u8], size: u32, t: f32, from: u32, count: u32) {
     let spectrum = ripples();
-    let mut data = Vec::with_capacity((size * size * 4) as usize);
     let n = size as f32;
-    for y in 0..size {
-        for x in 0..size {
+    let last = (from + count).min(size);
+    if from >= last {
+        return;
+    }
+    let stride = (size * 4) as usize;
+    let begin = from as usize * stride;
+    let end = last as usize * stride;
+    let pool = bevy::tasks::ComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+    use bevy::tasks::ParallelSliceMut;
+    let mut span: &mut [u8] = &mut base[begin..end];
+    span.par_chunk_map_mut(pool, stride, |row, texels| {
+        let v = (from as usize + row) as f32 / n;
+        for (x, texel) in texels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let u = x as f32 / n;
-            let v = y as f32 / n;
             // Analytic gradient of the summed ripples. Exact, and far cheaper than
             // differencing a rendered height field.
             let mut du = 0.0;
@@ -225,12 +221,27 @@ pub fn normal_map_at_size(size: u32, t: f32) -> Image {
             }
             // Tangent space has z out of the surface.
             let normal = Vec3::new(-du, -dv, 1.0).normalize();
-            data.push(encode_normal(normal.x));
-            data.push(encode_normal(normal.y));
-            data.push(encode_normal(normal.z));
-            data.push(255);
+            texel[0] = encode_normal(normal.x);
+            texel[1] = encode_normal(normal.y);
+            texel[2] = encode_normal(normal.z);
+            texel[3] = 255;
         }
-    }
+    });
+}
+
+/// A finished base level, as the film keeps it: mip chain and all.
+///
+/// The chain is part of the bytes because the film blends two frames into the live image
+/// as it plays, and box filtering is linear — so the mip chain of a blend is the blend
+/// of the mip chains, and there is nothing to rebuild.
+pub fn mipped(base: Vec<u8>, size: u32) -> Vec<u8> {
+    let mut image = frame_image(base, size);
+    build_mipmaps(&mut image, true);
+    image.data.unwrap_or_default()
+}
+
+/// The image a baked frame goes into, before its mips are built.
+fn frame_image(base: Vec<u8>, size: u32) -> Image {
     let mut image = Image::new(
         Extent3d {
             width: size,
@@ -238,13 +249,24 @@ pub fn normal_map_at_size(size: u32, t: f32) -> Image {
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        data,
+        base,
         // Normal maps are vectors, not colour, so they must not be gamma-decoded.
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD,
     );
-    build_mipmaps(&mut image, true);
     image.sampler = repeating();
+    image
+}
+
+/// One frame of it, whole, at a chosen resolution and moment in the loop.
+///
+/// For the still map and for the first live frame, which are the two the game cannot
+/// open without. Everything else arrives in instalments — see `world::bake_sea_film`.
+pub fn normal_map_at_size(size: u32, t: f32) -> Image {
+    let mut base = vec![0u8; (size * size * 4) as usize];
+    bake_rows(&mut base, size, t, 0, size);
+    let mut image = frame_image(base, size);
+    build_mipmaps(&mut image, true);
     image
 }
 

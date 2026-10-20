@@ -857,12 +857,12 @@ pub fn setup(
     // first look at any model, and a rebuild between each guess is the thing that makes
     // that a bad evening.
     let knob = |name: &str, fallback: f32| -> f32 {
-        std::env::var(name)
+        crate::knob::var(name)
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
             .unwrap_or(fallback)
     };
-    let bought = std::env::var("SAIL_BRIG_HULL")
+    let bought = crate::knob::var("SAIL_BRIG_HULL")
         .ok()
         .filter(|f| !f.is_empty());
 
@@ -994,7 +994,7 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>) {
     // there, sailing our course. A drawing knob and nothing else: a ship that is being
     // looked at has to stay where it can be seen, and the alternative is twelve seconds
     // of sailing between every screenshot and the thing you wanted to look at.
-    if let Some(range) = std::env::var("SAIL_BRIG_SHOW")
+    if let Some(range) = crate::knob::var("SAIL_BRIG_SHOW")
         .ok()
         .and_then(|v| v.parse::<f64>().ok())
     {

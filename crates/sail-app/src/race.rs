@@ -212,7 +212,7 @@ pub fn run(sim: Res<Sim>, mut race: ResMut<Race>, mut first: Local<bool>) {
     // menu. A bare `SAIL_RACE=1` gives the full sequence.
     if !*first {
         *first = true;
-        if let Ok(value) = std::env::var("SAIL_RACE") {
+        if let Ok(value) = crate::knob::var("SAIL_RACE") {
             race.wants_start = true;
             race.shorten_to = value.parse::<f64>().ok().filter(|s| *s > 1.0);
         }

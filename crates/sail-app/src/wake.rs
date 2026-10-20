@@ -67,7 +67,7 @@ const LIFETIME: f32 = 35.0;
 const RAFTS: usize = 1100;
 /// Multiply the foam budget, for finding out what it costs: `SAIL_WAKE=3`.
 fn rafts() -> usize {
-    let scale: f32 = std::env::var("SAIL_WAKE")
+    let scale: f32 = crate::knob::var("SAIL_WAKE")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1.0);

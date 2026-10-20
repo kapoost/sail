@@ -184,42 +184,30 @@ pub fn setup(
     //
     // White base colour because the water's own colour is carried per vertex, which
     // is what lets a crest reach foam without overdriving a dark base past one.
-    // The ripple animation, baked here so the first frame is ready before anything is
-    // drawn. `SAIL_WATER_FRAMES=0` turns it off and leaves the still map, which is both
-    // an escape hatch and the way to see what the motion is actually buying.
-    let still = std::env::var("SAIL_WATER_FRAMES").is_ok_and(|v| v == "0");
-    let mut keys: Vec<Vec<u8>> = Vec::new();
-    let mut live = sea_texture::normal_map();
+    // **The ripple animation is baked while the boat sails, not before she launches.**
+    //
+    // Thirty-six frames of normal map is a fifth of a second across every core here —
+    // and four to six seconds on one, which is what a browser has. Baked up front that
+    // is a window that does not open; baked a few rows at a time, with a budget, it is
+    // a sea that starts still and begins to move a second later, on any machine.
+    //
+    // `SAIL_WATER_FRAMES=0` turns it off and leaves the still map, which is both an
+    // escape hatch and the way to see what the motion is actually buying.
+    let still = crate::knob::var("SAIL_WATER_FRAMES").is_ok_and(|v| v == "0");
+    // One frame of the loop to begin with, so the very first picture already has the
+    // right shape of ripple on it rather than a flat sheet.
+    let mut live = if still {
+        sea_texture::normal_map()
+    } else {
+        sea_texture::normal_map_at_size(sea_texture::ANIM_SIZE, 0.0)
+    };
     if !still {
-        let started = std::time::Instant::now();
-        let frames = sea_texture::normal_map_frames();
-        let bytes: usize = frames
-            .first()
-            .and_then(|f| f.data.as_ref())
-            .map_or(0, Vec::len);
-        keys = frames
-            .into_iter()
-            .filter_map(|f| f.data)
-            .filter(|d| d.len() == bytes && bytes > 0)
-            .collect();
-        info!(
-            "water: {} ripple frames over {:.1} s at {:.0} fps, {:.1} MB of key frames, \
-             baked in {:.2} s",
-            keys.len(),
-            sea_texture::RIPPLE_LOOP,
-            keys.len() as f32 / sea_texture::RIPPLE_LOOP,
-            (keys.len() * bytes) as f32 / 1.0e6,
-            started.elapsed().as_secs_f32()
-        );
-        // The live image starts as the first key frame, mip chain and all, so the very
-        // first frame drawn is already the right shape.
-        live = sea_texture::normal_map_at_size(sea_texture::ANIM_SIZE, 0.0);
-        // And it has to keep its bytes on this side of the fence. Every other texture
-        // here is `RENDER_WORLD` — built once, uploaded, and the processor's copy
-        // dropped, which is right for something that never changes. This one is written
-        // every frame, and with that usage Bevy had thrown the data away by the second
-        // frame, so the blend wrote nothing and the ripples stood still on frame zero
-        // while the log cheerfully reported thirty-six frames at twelve a second.
+        // The live image has to keep its bytes on this side of the fence. Every other
+        // texture here is `RENDER_WORLD` — built once, uploaded, and the processor's
+        // copy dropped, which is right for something that never changes. This one is
+        // written every frame, and with that usage Bevy had thrown the data away by the
+        // second frame, so the blend wrote nothing and the ripples stood still on frame
+        // zero while the log cheerfully reported thirty-six frames at twelve a second.
         live.asset_usage = bevy::asset::RenderAssetUsages::MAIN_WORLD
             | bevy::asset::RenderAssetUsages::RENDER_WORLD;
     }
@@ -237,11 +225,12 @@ pub fn setup(
     };
     commands.insert_resource(Hatching(images.add(sea_texture::hatch_map())));
     commands.insert_resource(SeaFilm {
-        keys,
+        keys: Vec::new(),
         live: Some(first),
         blended: None,
         writes: 0,
         reported: 0.0,
+        baking: (!still).then(Baking::default),
     });
 
     // Spacing chosen from what the sea is, not from a convenient curve.
@@ -409,6 +398,87 @@ pub struct SeaFilm {
     /// Blends written since the last report, and when that was.
     writes: u32,
     reported: f32,
+    /// How far through baking the film we are, until it is done.
+    baking: Option<Baking>,
+}
+
+/// The frame being baked, and how much of it stands.
+///
+/// A frame at a time would be the obvious shape and it is the wrong one: on one thread
+/// a single 512-square frame is sixty milliseconds, which is four dropped frames every
+/// time, thirty-six times over. Rows with a budget cost the same in total and are paid
+/// in instalments nobody can see.
+#[derive(Default)]
+struct Baking {
+    frame: usize,
+    row: u32,
+    base: Vec<u8>,
+    bytes: usize,
+}
+
+/// How long a frame is allowed to spend baking the film, milliseconds.
+///
+/// Four. On this machine the task pool gets through a frame and a half of the loop in
+/// that time, so the film is complete in about a second; on one thread it is thirty
+/// rows, and the film arrives in ten seconds instead of freezing the first ten. Either
+/// way what is drawn meanwhile is the still map, which is a sea with ripples on it that
+/// do not move — the thing this feature was added to improve, not a hole in the picture.
+const BAKE_BUDGET_MS: f32 = 4.0;
+
+/// Bake what this frame can afford of the ripple film.
+pub fn bake_sea_film(time: Res<Time>, mut film: ResMut<SeaFilm>) {
+    let Some(mut work) = film.baking.take() else {
+        return;
+    };
+    let size = sea_texture::ANIM_SIZE;
+    if work.base.is_empty() {
+        work.base = vec![0u8; (size * size * 4) as usize];
+    }
+    let clock = bevy::platform::time::Instant::now();
+    // At least one batch, however slow the machine: a budget that can be missed on the
+    // first comparison is a budget that never bakes anything at all.
+    let mut rows = 0;
+    while work.row < size {
+        let batch = 32.min(size - work.row);
+        sea_texture::bake_rows(
+            &mut work.base,
+            size,
+            sea_texture::frame_time(work.frame),
+            work.row,
+            batch,
+        );
+        work.row += batch;
+        rows += batch;
+        if clock.elapsed().as_secs_f32() * 1000.0 > BAKE_BUDGET_MS {
+            break;
+        }
+    }
+    let _ = rows;
+    if work.row >= size {
+        // A finished frame, with its mip chain, into the film.
+        let done = sea_texture::mipped(std::mem::take(&mut work.base), size);
+        if work.bytes == 0 {
+            work.bytes = done.len();
+        }
+        if done.len() == work.bytes {
+            film.keys.push(done);
+        }
+        work.frame += 1;
+        work.row = 0;
+        if work.frame >= sea_texture::RIPPLE_FRAMES {
+            info!(
+                "water: {} ripple frames over {:.1} s at {:.0} fps, {:.1} MB of key \
+                 frames, complete {:.2} s in",
+                film.keys.len(),
+                sea_texture::RIPPLE_LOOP,
+                film.keys.len() as f32 / sea_texture::RIPPLE_LOOP,
+                (film.keys.len() * work.bytes) as f32 / 1.0e6,
+                time.elapsed_secs()
+            );
+            return;
+        }
+    }
+    film.baking = Some(work);
 }
 
 /// Show the frame the clock is on.
@@ -436,7 +506,11 @@ pub fn roll_sea_film(
     mut film: ResMut<SeaFilm>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    if film.keys.len() < 2 {
+    // Not until the whole film is in. A part of it would still animate — the frames
+    // arrive in order — but over a shorter loop, so the ripples would run fast and then
+    // slow down as the rest arrived, which is a worse thing to watch than water that is
+    // still for a second and then moves.
+    if film.keys.len() < sea_texture::RIPPLE_FRAMES {
         return;
     }
     let count = film.keys.len();
@@ -546,7 +620,7 @@ impl Ink {
     /// chosen resolution: a look you have settled on should not need a keypress every
     /// time the boat is launched.
     pub fn from_env() -> Self {
-        Self(std::env::var("SAIL_INK").is_ok_and(|v| v != "0"))
+        Self(crate::knob::var("SAIL_INK").is_ok_and(|v| v != "0"))
     }
 }
 
@@ -647,7 +721,7 @@ pub fn update_sea(
     mut q: Query<&mut Transform, With<SeaSurface>>,
     mut spent: ResMut<crate::world::Spent>,
 ) {
-    let clock = crate::world::Spent::wanted().then(std::time::Instant::now);
+    let clock = crate::world::Spent::wanted().then(bevy::platform::time::Instant::now);
     let ink = ink.0;
     let sun = sky_state.sun.normalize();
     let st = &sim.render_state();
@@ -880,7 +954,7 @@ impl Spent {
     /// `Option<Instant>` there: nobody asking costs one environment lookup and no
     /// clock reads at all.
     pub fn wanted() -> bool {
-        std::env::var("SAIL_FRAMES").is_ok()
+        crate::knob::var("SAIL_FRAMES").is_ok()
     }
 }
 
@@ -919,7 +993,7 @@ pub fn report_frame_times(time: Res<Time>, mut window: Local<(f32, u32, f32)>) {
         // line that matters, and the whole value of this is that it answered "is the
         // sea badly sampled or is the application not making its frames" with a
         // number instead of an afternoon.
-        if window.2 > 0.025 || std::env::var("SAIL_FRAMES").is_ok() {
+        if window.2 > 0.025 || crate::knob::var("SAIL_FRAMES").is_ok() {
             warn!(
                 "slow frames: {:.0} per second mean, worst {:.1} ms",
                 window.1 as f32 / window.0,

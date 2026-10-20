@@ -365,7 +365,7 @@ fn apparent(sim: &Sim, drawn: &Drawn) -> (f64, f64) {
 /// which is the milestone, and it would be a poor test if it needed the physics to be
 /// correct as well.
 pub fn rehearsal(time: Res<Time>, sim: Res<Sim>, mut fleet: ResMut<Fleet>) {
-    let how_many: u16 = match std::env::var("SAIL_FLEET")
+    let how_many: u16 = match crate::knob::var("SAIL_FLEET")
         .ok()
         .and_then(|v| v.parse().ok())
     {

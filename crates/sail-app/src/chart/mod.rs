@@ -447,7 +447,7 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut chart: ResMut<Chart>) {
         } else {
             chart.open = !chart.open;
         }
-        if std::env::var("SAIL_KEYS").is_ok() {
+        if crate::knob::var("SAIL_KEYS").is_ok() {
             info!("chart: M -> open {} spread {}", chart.open, chart.spread);
         }
     }

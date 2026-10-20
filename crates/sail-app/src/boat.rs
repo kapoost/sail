@@ -303,12 +303,12 @@ pub fn setup(
             // `TURN` is in quarter circles about the mast, because a model's bow lands
             // on one of four axes and never anywhere between them.
             let knob = |name: &str, fallback: f32| -> f32 {
-                std::env::var(name)
+                crate::knob::var(name)
                     .ok()
                     .and_then(|v| v.parse::<f32>().ok())
                     .unwrap_or(fallback)
             };
-            let (file, scan_loa, quarters, sink) = match std::env::var("SAIL_HULL") {
+            let (file, scan_loa, quarters, sink) = match crate::knob::var("SAIL_HULL") {
                 Ok(file) if !file.is_empty() => (
                     file,
                     knob("SAIL_HULL_LOA", 1.0),
@@ -340,7 +340,7 @@ pub fn setup(
             // A generated hull arrives with its own deck, coachroof and cockpit on it,
             // and ours built over the top of those is two decks. `SAIL_DECK=off` takes
             // the drawn one away so the model can be looked at as it is.
-            let our_deck = std::env::var("SAIL_DECK")
+            let our_deck = crate::knob::var("SAIL_DECK")
                 .map(|v| v != "off")
                 .unwrap_or(true);
             let (walked_on, painted) = crate::deck::structure_mesh();
@@ -1261,7 +1261,7 @@ pub fn main_foot(cfg: &sail_core::boat::BoatConfig, controls: &sail_core::state:
 /// a mast shorter than its own mainsail's luff, a boom longer than its area allows, a
 /// Code 0 whose foot does not reach the mast, a sail plan belonging to a different boat.
 pub fn report(sim: Res<Sim>) {
-    if !std::env::var("SAIL_RIG").is_ok_and(|v| v != "0") {
+    if !crate::knob::var("SAIL_RIG").is_ok_and(|v| v != "0") {
         return;
     }
     let cfg = sim.config();
@@ -2994,7 +2994,7 @@ mod cloth_stays_cloth {
                 }
             }
         }
-        if std::env::var("SAIL_FOLD").is_ok() {
+        if crate::knob::var("SAIL_FOLD").is_ok() {
             let (u, v, dir) = where_;
             if worst < 24.0 {
                 turns.sort_by(|a, b| a.partial_cmp(b).unwrap());

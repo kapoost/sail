@@ -137,7 +137,7 @@ impl Weather {
         // water looks like in a given breeze begins with hunting for a seed that happens
         // to have that breeze in it, which is a slow way to ask a question with a number
         // in it.
-        let knots = std::env::var("SAIL_WIND")
+        let knots = crate::knob::var("SAIL_WIND")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .map_or(knots, |k| k.clamp(WIND_MIN_KN, WIND_MAX_KN));
@@ -191,7 +191,7 @@ impl Weather {
         // sunset is not a way to work on one. Read here rather than where the sky is
         // drawn so that everything downstream of the hour — the light, the cloud
         // tones, the haze, the sea's own glints — agrees about what time it is.
-        let start_hour = std::env::var("SAIL_HOUR")
+        let start_hour = crate::knob::var("SAIL_HOUR")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .map(|h| h.rem_euclid(24.0))
@@ -204,7 +204,7 @@ impl Weather {
         // sky and the cloud in front of it are two things to look at and they have to
         // be separable, or every judgement about one is really a judgement about how
         // much of the other happened to be drawn.
-        let cover = std::env::var("SAIL_COVER")
+        let cover = crate::knob::var("SAIL_COVER")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .map(|c| c.clamp(0.0, 1.0))

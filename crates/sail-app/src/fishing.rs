@@ -972,12 +972,12 @@ impl Fishing {
         // playing the other is an afternoon's work per change. It multiplies the rate
         // and nothing else: what takes, where, and how it fights are all unaltered, so
         // what you are looking at is the real thing arriving oftener.
-        let plenty = std::env::var("SAIL_FISH")
+        let plenty = crate::knob::var("SAIL_FISH")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(1.0)
             .clamp(0.0, 500.0);
-        let streamed = std::env::var("SAIL_ROD")
+        let streamed = crate::knob::var("SAIL_ROD")
             .ok()
             .map(|v| v.parse::<f64>().unwrap_or(16.0).clamp(1.0, SPOOL));
         Self {
@@ -999,7 +999,7 @@ impl Fishing {
             quiet: 0.0,
             straining: 0.0,
             gone_for: 0.0,
-            forced: std::env::var("SAIL_HOOK").ok().and_then(|name| {
+            forced: crate::knob::var("SAIL_HOOK").ok().and_then(|name| {
                 let found = Quarry::named(name.trim());
                 if found.is_none() {
                     println!(
@@ -1834,7 +1834,7 @@ pub fn work(
     // question is always whether it *is* wrong or merely invisible, and that question
     // should cost nothing to answer.
     *since_report += time.delta_secs();
-    if gear.out() && *since_report >= 1.0 && std::env::var("SAIL_ROD").is_ok() {
+    if gear.out() && *since_report >= 1.0 && crate::knob::var("SAIL_ROD").is_ok() {
         *since_report = 0.0;
         info!(
             "rod: line {:.1} m, lure {:.1} m down over {:.0} m, load {:.0} N, \

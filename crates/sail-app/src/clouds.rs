@@ -624,7 +624,7 @@ pub fn update(
     camera: Query<&Transform, With<crate::camera::MainCamera>>,
     mut spent: ResMut<crate::world::Spent>,
 ) {
-    let clock = crate::world::Spent::wanted().then(std::time::Instant::now);
+    let clock = crate::world::Spent::wanted().then(bevy::platform::time::Instant::now);
     let Ok(view) = camera.single() else {
         return;
     };

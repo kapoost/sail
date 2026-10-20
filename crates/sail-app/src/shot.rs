@@ -37,17 +37,17 @@ pub fn wanted() -> Option<Shot> {
     // A run of frames reads the same variable and has its own timing; two systems both
     // photographing and both calling for the window to close is a race with a
     // half-written picture at the end of it.
-    if std::env::var("SAIL_SHOT_EVERY").is_ok() {
+    if crate::knob::var("SAIL_SHOT_EVERY").is_ok() {
         return None;
     }
-    let path = std::env::var("SAIL_SHOT").ok()?;
+    let path = crate::knob::var("SAIL_SHOT").ok()?;
     Some(Shot {
         path,
-        after: std::env::var("SAIL_SHOT_AFTER")
+        after: crate::knob::var("SAIL_SHOT_AFTER")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(8.0),
-        quit: std::env::var("SAIL_SHOT_EXIT").is_ok(),
+        quit: crate::knob::var("SAIL_SHOT_EXIT").is_ok(),
         taken: false,
     })
 }
@@ -80,7 +80,7 @@ pub fn on_a_key(
 
 /// Where a Mac keeps pictures, and failing that where the game was started from.
 fn pictures() -> String {
-    match std::env::var("HOME") {
+    match crate::knob::var("HOME") {
         Ok(home) if std::path::Path::new(&format!("{home}/Pictures")).is_dir() => {
             format!("{home}/Pictures")
         }
@@ -211,7 +211,7 @@ fn key_named(name: &str) -> Option<KeyCode> {
 /// than skipped: a scene that silently did not happen is a photograph of the wrong
 /// thing, and it looks exactly like a photograph of the right thing.
 pub fn scored() -> Option<Score> {
-    let text = std::env::var("SAIL_SHOT_KEYS").ok()?;
+    let text = crate::knob::var("SAIL_SHOT_KEYS").ok()?;
     let mut cues = Vec::new();
     for entry in text.split(';').filter(|s| !s.trim().is_empty()) {
         let (at, keys) = entry
@@ -294,23 +294,23 @@ pub struct Reel {
 
 /// Set up from the environment, if a run was asked for.
 pub fn reel() -> Option<Reel> {
-    let every: f32 = std::env::var("SAIL_SHOT_EVERY").ok()?.parse().ok()?;
-    let path = std::env::var("SAIL_SHOT").expect("SAIL_SHOT_EVERY needs SAIL_SHOT");
+    let every: f32 = crate::knob::var("SAIL_SHOT_EVERY").ok()?.parse().ok()?;
+    let path = crate::knob::var("SAIL_SHOT").expect("SAIL_SHOT_EVERY needs SAIL_SHOT");
     let stem = path.strip_suffix(".png").unwrap_or(&path).to_string();
     Some(Reel {
         stem,
         every,
-        frames: std::env::var("SAIL_SHOT_FRAMES")
+        frames: crate::knob::var("SAIL_SHOT_FRAMES")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(24),
         taken: 0,
         since: 0.0,
-        next: std::env::var("SAIL_SHOT_AFTER")
+        next: crate::knob::var("SAIL_SHOT_AFTER")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(8.0),
-        quit: std::env::var("SAIL_SHOT_EXIT").is_ok(),
+        quit: crate::knob::var("SAIL_SHOT_EXIT").is_ok(),
     })
 }
 

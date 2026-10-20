@@ -733,7 +733,7 @@ pub fn take_the_job(
     // every look costs twenty minutes.
     if !*first {
         *first = true;
-        if std::env::var("SAIL_BRIG").is_ok() {
+        if crate::knob::var("SAIL_BRIG").is_ok() {
             wants.start = true;
         }
     }
@@ -749,7 +749,7 @@ pub fn take_the_job(
         job.said = Some("no anchorage near enough to pilot anybody into".into());
         return;
     };
-    let offing = match std::env::var("SAIL_BRIG")
+    let offing = match crate::knob::var("SAIL_BRIG")
         .ok()
         .and_then(|v| v.parse::<f64>().ok())
     {

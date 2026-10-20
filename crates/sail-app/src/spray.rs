@@ -64,7 +64,7 @@ fn sea_budget() -> usize {
 }
 
 fn budget() -> usize {
-    let scale: f32 = std::env::var("SAIL_SPRAY")
+    let scale: f32 = crate::knob::var("SAIL_SPRAY")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1.0);
@@ -487,7 +487,7 @@ pub fn update(
     camera: Query<&Transform, With<crate::camera::MainCamera>>,
     mut spent: ResMut<crate::world::Spent>,
 ) {
-    let clock = crate::world::Spent::wanted().then(std::time::Instant::now);
+    let clock = crate::world::Spent::wanted().then(bevy::platform::time::Instant::now);
     let Ok(view) = camera.single() else {
         return;
     };

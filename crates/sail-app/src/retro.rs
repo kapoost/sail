@@ -132,8 +132,8 @@ impl Retro {
     /// Takes the width you want and picks the nearest step, so `SAIL_PIXELS=480` means
     /// what it says and anything else lands somewhere sensible.
     pub fn from_env() -> Self {
-        let supersample = std::env::var("SAIL_SUPERSAMPLE").is_ok_and(|v| v != "0");
-        let Some(want) = std::env::var("SAIL_PIXELS")
+        let supersample = crate::knob::var("SAIL_SUPERSAMPLE").is_ok_and(|v| v != "0");
+        let Some(want) = crate::knob::var("SAIL_PIXELS")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
         else {
@@ -226,7 +226,7 @@ pub fn stress(
 ) {
     *frames += 1;
     *since += time.delta_secs_f64();
-    let gap: f64 = std::env::var("SAIL_RETRO_STRESS")
+    let gap: f64 = crate::knob::var("SAIL_RETRO_STRESS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.4);

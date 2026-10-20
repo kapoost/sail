@@ -34,7 +34,7 @@ impl Sim {
         // `SAIL_SQUALL=120` for a squall every two minutes. The same kind of switch as
         // `SAIL_HEADSAIL`: you cannot look at a thing that happens every twenty-five
         // minutes often enough to get it right, and a knob beats sitting and waiting.
-        if let Some(interval) = std::env::var("SAIL_SQUALL")
+        if let Some(interval) = crate::knob::var("SAIL_SQUALL")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
         {
@@ -47,7 +47,7 @@ impl Sim {
         // and find out whether that reads as a passage or as a sine wave. Off by
         // default, because every validated number in this engine was measured in a
         // world with one wind in it.
-        if let Some(km) = std::env::var("SAIL_BANDS")
+        if let Some(km) = crate::knob::var("SAIL_BANDS")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .filter(|km| *km > 0.1)
@@ -82,7 +82,7 @@ impl Sim {
         // SETTLE NOW for a person; this is the same thing for a screenshot.
         // `built`, or the `on` the setup screen writes for a flag.
         if matches!(
-            std::env::var("SAIL_SEA").as_deref(),
+            crate::knob::var("SAIL_SEA").as_deref(),
             Ok("built") | Ok("on") | Ok("1")
         ) {
             sea.settle(weather.tws, 0.0);
@@ -111,7 +111,7 @@ impl Sim {
         // Which sail to start with, so one can be looked at without furling and
         // changing first. `SAIL_HEADSAIL=code0` or `=gennaker`; anything else is the
         // genoa.
-        let headsail = match std::env::var("SAIL_HEADSAIL").as_deref() {
+        let headsail = match crate::knob::var("SAIL_HEADSAIL").as_deref() {
             Ok("code0") => Headsail::Code0,
             Ok("gennaker") => Headsail::Gennaker,
             Ok("spinnaker") => Headsail::Spinnaker,
