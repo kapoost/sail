@@ -7,6 +7,7 @@
 //! revisited for the cost of rewriting this one crate.
 
 mod aboard;
+mod anchorage;
 mod barrels;
 mod basics;
 mod boat;
@@ -197,7 +198,24 @@ fn window_size() -> (u32, u32) {
 }
 
 fn main() {
+    // **The sea she is moored in, and a day that has not been sailed before.**
+    //
+    // Two seeds, because they answer two questions. The archipelago is the place you come
+    // back to — the platform at `anchorage.rs` is moored in it, so a fresh draw every
+    // launch would move the water out from under it. The *day* is the opposite: weather
+    // you have already had is a replay. So the islands take the saved sea and the weather
+    // takes the clock, and `SAIL_SEED=` pins both together, which is what makes a reported
+    // bug reproducible and how a new world is asked for.
     let seed = knob::seed();
+    #[cfg(not(target_arch = "wasm32"))]
+    let home = anchorage::Home::read();
+    #[cfg(not(target_arch = "wasm32"))]
+    let sea = match (knob::var("SAIL_SEED").is_ok(), &home) {
+        (false, Some(home)) if home.moored.is_some() => home.sea,
+        _ => seed,
+    };
+    #[cfg(target_arch = "wasm32")]
+    let sea = seed;
     // `--licences` before anything else, because it has to work in a build that cannot
     // open a window — and because the single-file build carries the fonts and the hull
     // *inside* it, which is only allowed if the licences travel with them. The OFL says
@@ -281,7 +299,7 @@ fn main() {
     // The sea's own material: the standard one with a vertex shader of its own. The
     // plugin is what builds its pipeline and loads the two shaders beside it.
     .add_plugins(MaterialPlugin::<sea_card::SeaMaterial>::default())
-    .insert_resource(sim::Sim::new(weather))
+    .insert_resource(sim::Sim::new(weather, sea))
     .insert_resource(weather)
     // The console is the interface now; the diagnostic panel is the microscope and
     // starts put away. Tab brings it back, or the switch on the console does.
@@ -300,6 +318,31 @@ fn main() {
     .init_resource::<sky::Dome>()
     .init_resource::<world::Spent>()
     .insert_resource(screen::Screen::asked())
+    // What is on the platform, and which sea it is moored in. On a desk it is read from
+    // a file; a tab has nowhere to keep it and starts with nothing, which is what a
+    // first minute should do anyway.
+    .insert_resource({
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // A home from another sea is not this home: `SAIL_SEED=` means a different
+            // archipelago, and a platform moored at a position in that one would be in
+            // open water or inside a hill. It is left on disk and ignored.
+            match home {
+                Some(home) if home.sea == sea => home,
+                _ => anchorage::Home {
+                    sea,
+                    ..Default::default()
+                },
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            anchorage::Home {
+                sea,
+                ..Default::default()
+            }
+        }
+    })
     .init_resource::<settings::Settings>()
     .init_resource::<help::Help>()
     .init_resource::<logbook::Logbook>()
@@ -469,7 +512,6 @@ fn main() {
                         barrels::drift,
                         barrels::dress,
                         barrels::float,
-                        barrels::land_them,
                     )
                         .chain(),
                     navigation::lost_at_sea,
@@ -522,6 +564,19 @@ fn main() {
     // the twenty the scheduler allows, and this pair has nothing to say to the
     // order the rest of them run in.
     .add_systems(Update, (screen::the_key, screen::follow).chain())
+    // Her own anchorage: pick the berth once, build the platform there, land what she
+    // has brought, and write it down. Not part of the chain above for the same reason —
+    // nothing else in the frame is waiting on it.
+    .add_systems(
+        Update,
+        (
+            anchorage::moor,
+            anchorage::build,
+            anchorage::land,
+            anchorage::keep,
+        )
+            .chain(),
+    )
     .add_systems(
         EguiPrimaryContextPass,
         (

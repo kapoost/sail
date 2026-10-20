@@ -63,18 +63,35 @@ reads as one column at every size.
 What is left of this item: a resolution picker for the windowed case, which is the window
 manager's job on every platform we ship to, and only worth adding if somebody asks.
 
-### 2. Nothing is ever saved
+### 2. Nothing is ever saved — and only one thing should be
 
-There is no code in the tree that writes a passage to disk. For a game whose clock runs
-at one to one and whose legs are measured in nautical miles, that is not an inconvenience
-— it is the reason somebody plays for twenty minutes and never comes back.
+There is no code in the tree that writes anything to disk, which for a long time read as
+the obvious gap. It is half a gap. **This game does not save at sea and it is not going
+to**: a passage is an evening, the clock runs at one to one, and a boat that can be put
+down mid-gale and picked up next week is a boat nothing can go wrong to.
 
-What it needs: the day's seed, the boat's state, the mission in progress, the logbook, the
-settings, and a version stamp so an old save fails politely rather than strangely. One
-slot is enough to start; Steam Cloud wants the same file.
+What persists is what you brought home. The player keeps a **floating platform moored in
+one anchorage** — a raft with a hut on it and the casks stacked where they can be seen
+from the water — and every mechanic this game already has gains its second half: casks
+fished out of the sea were collected and handed over at any anchorage, which made them a
+number, and the creel filled and then emptied into nothing. Both of them have somewhere to
+go now, and the pile is *drawn*, because a store you cannot see from the helm is a figure
+on a panel.
 
-**Lands in:** a new `crates/sail-app/src/anchorage.rs` (or `passage.rs`) plus `serde` on
-the few state structs that cross the line, `settings.rs` for the UI.
+That forces one more thing, and it is the interesting one: **the sea has to stay the same
+sea**. The archipelago is a pure function of its seed and a desk build has always drawn a
+new one from the clock, which is right for a simulator you sit down at and wrong the
+moment something belongs to you. So the saved file records the seed, and from the second
+launch the islands, the names and the berth are the ones your platform is moored in —
+while the *weather* still comes from the clock, because a day you have already sailed is a
+replay. Your islands, a new day.
+
+**Landed, with tests:** the file (`~/Library/Application Support/sail/home` and the
+equivalents), the platform and the pile, the two seeds, and the chart mark that says where
+home is. **What is left:** the rest of what a platform is for — somewhere to keep gear,
+something to spend a store on, and a reason to fill it.
+
+**Lands in:** `anchorage.rs`, with `sim.rs` taking the sea as its own argument.
 
 ### 3. ~~No pause, no time compression~~ — not for this game
 
@@ -257,10 +274,11 @@ Each ends with a sentence that is either true or false — no "mostly done".
 **M0 — Decisions.** The list at the bottom of this document is answered. *Ends when the
 Steam partner account exists and the app is created.*
 
-**M1 — A game you can leave and come back to.** ~~Window and video settings~~ (done —
-the window resizes, goes full screen on `F11`, and the chart in the corner now takes its
-width from the instrument case under it), save and resume. *Ends when somebody can sail
-for twenty minutes, quit mid-passage, and pick it up the next evening.*
+**M1 — A game you can leave and come back to.** ~~Window and video settings~~ and ~~the
+thing that persists~~ — both landed: the window resizes and goes full screen, and the
+platform at the anchorage keeps the sea, the berth and the store across launches. *Ends
+when there is something worth filling the store for*, which is the next piece of work
+rather than this one.
 
 **M2 — The shop skeleton.** Depots, CI upload, cloud saves, ten achievements, store page
 live, wishlists open, demo app built from the same binary. *Ends when a stranger can

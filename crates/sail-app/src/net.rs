@@ -143,7 +143,12 @@ pub fn rebuild(
     weather.hs = hs;
     weather.tp = tp;
 
-    *sim = Sim::new(weather);
+    // Their sea, not ours: joining somebody means sailing in the archipelago their copy
+    // generated, and the islands have to be the same islands or nothing either of us says
+    // about the water is true. Your own platform is moored in your own sea and is not
+    // here — which is honest, and is the thing a shared world will have to answer when
+    // there is more than one of them in it.
+    *sim = Sim::new(weather, world.seed);
     sky.hour = weather.start_hour as f32;
     track.clear();
     // Out with the old archipelago. The marks go with it: a consignment to a harbour that

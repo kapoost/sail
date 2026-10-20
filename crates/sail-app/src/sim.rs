@@ -23,7 +23,15 @@ pub struct Sim {
 }
 
 impl Sim {
-    pub fn new(weather: Weather) -> Self {
+    /// The day's weather, and the sea it happens in.
+    ///
+    /// **Two seeds, because they answer two different questions.** The archipelago is the
+    /// place you keep coming back to — the platform at `anchorage.rs` is moored in it, and
+    /// it has to be the same water next week. The day is not: a passage you have sailed
+    /// before in weather you have had before is a replay. So the islands take the sea from
+    /// the saved home and the weather takes the clock, and `SAIL_SEED=` still pins both
+    /// together, which is what makes a reported bug reproducible.
+    pub fn new(weather: Weather, archipelago: u64) -> Self {
         let cfg = BoatConfig::archipelago_packet();
         let mut wind = SyntheticWind::new(weather.wind_from, weather.tws, weather.seed ^ 0x5A11);
         wind.squall_interval = weather.squall_interval;
@@ -94,7 +102,7 @@ impl Sim {
         }
         // The archipelago, and a wind that knows it is there. The land goes in before
         // the first substep so the boat is never started on a rock.
-        let land = std::sync::Arc::new(crate::islands::generate(weather.seed));
+        let land = std::sync::Arc::new(crate::islands::generate(archipelago));
         let wind = sail_core::land::ShelteredWind::new(Box::new(wind), land.clone());
         let mut sim = Simulation::new(cfg, state, Box::new(wind))
             .with_water(Box::new(sea))

@@ -1037,7 +1037,7 @@ mod the_pilots_water {
     fn the_way_in_is_water_she_can_float_in() {
         let mut found = 0;
         for seed in 0..6u64 {
-            let sim = Sim::new(crate::weather::Weather::draw(seed));
+            let sim = Sim::new(crate::weather::Weather::draw(seed), seed);
             let Some(land) = sim.sim.land.as_ref() else {
                 continue;
             };
@@ -1093,7 +1093,7 @@ mod can_the_job_even_end {
     #[test]
     fn there_is_water_off_every_anchorage_to_let_her_go_in() {
         for seed in 0..6u64 {
-            let sim = Sim::new(crate::weather::Weather::draw(seed));
+            let sim = Sim::new(crate::weather::Weather::draw(seed), seed);
             let Some(land) = sim.sim.land.as_ref() else {
                 continue;
             };
@@ -1120,7 +1120,7 @@ mod can_the_job_even_end {
     #[ignore]
     fn probe_clear_water() {
         for seed in 0..6u64 {
-            let sim = Sim::new(crate::weather::Weather::draw(seed));
+            let sim = Sim::new(crate::weather::Weather::draw(seed), seed);
             let Some(land) = sim.sim.land.as_ref() else {
                 continue;
             };
@@ -1166,7 +1166,7 @@ mod how_far_off_she_starts {
     fn she_starts_within_sight_of_the_pilot_boat() {
         let (mut jobs, mut in_sight) = (0, 0);
         for seed in 0..24u64 {
-            let sim = Sim::new(crate::weather::Weather::draw(seed));
+            let sim = Sim::new(crate::weather::Weather::draw(seed), seed);
             let here = sim.sim.state.pos;
             let Some((offing, bound_for)) = find_her_a_job(&sim, here) else {
                 continue;
@@ -1204,7 +1204,7 @@ mod how_far_off_she_starts {
     #[ignore]
     fn probe_start_range() {
         for seed in 28..44u64 {
-            let sim = Sim::new(crate::weather::Weather::draw(seed));
+            let sim = Sim::new(crate::weather::Weather::draw(seed), seed);
             let here = sim.sim.state.pos;
             let Some((offing, bound_for)) = find_her_a_job(&sim, here) else {
                 println!("seed {seed}: no job at all");

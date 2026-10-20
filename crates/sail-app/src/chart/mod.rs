@@ -813,6 +813,7 @@ pub fn draw(
     fleet: Res<crate::fleet::Fleet>,
     job: Res<crate::mission::Pilotage>,
     race: Res<crate::race::Race>,
+    home: Res<crate::anchorage::Home>,
 ) -> Result {
     if !chart.open {
         return Ok(());
@@ -903,7 +904,15 @@ pub fn draw(
 
         the_water(&table, land, &track, chart.range as f64, st.pos);
 
-        marks_on_the_paper(&table, &coast, &nav, chart.range as f64, spread, &course);
+        marks_on_the_paper(
+            &table,
+            &coast,
+            &nav,
+            chart.range as f64,
+            spread,
+            &course,
+            &home,
+        );
 
         her_own_place(&table, &sim, &fleet, &course, &nav, spread);
 

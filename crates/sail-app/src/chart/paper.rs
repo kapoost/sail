@@ -222,6 +222,7 @@ pub(crate) fn weather_on_the_chart(
 ///
 /// Nothing is named while she is lost and has not recognised it — a symbol on a chart
 /// with no name is what an unidentified mark is, and the naming is the exercise.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn marks_on_the_paper(
     t: &Table,
     coast: &crate::marks::Coast,
@@ -229,6 +230,7 @@ pub(crate) fn marks_on_the_paper(
     range: f64,
     spread: bool,
     course: &Course,
+    home: &crate::anchorage::Home,
 ) {
     // --- The marks ---------------------------------------------------
     //
@@ -366,6 +368,39 @@ pub(crate) fn marks_on_the_paper(
                 &h.name,
                 egui::FontId::monospace(10.0),
                 ink::COAST,
+            );
+        }
+    }
+
+    // **And the platform**, which is the one thing on this paper that is yours.
+    //
+    // Drawn whether or not she is lost, because it is not a fix: a mooring is printed on
+    // the chart the day it is laid, and knowing where your own berth is tells you nothing
+    // about where *you* are. A diamond rather than a circle, so that at a glance it is
+    // not another anchorage — and the word, because a symbol nobody has seen before needs
+    // one the first time.
+    if let Some(berth) = home.moored {
+        let at = t.to_screen(berth);
+        if t.rect.contains(at) {
+            let r = 5.0;
+            let diamond = [
+                at + egui::vec2(0.0, -r),
+                at + egui::vec2(r, 0.0),
+                at + egui::vec2(0.0, r),
+                at + egui::vec2(-r, 0.0),
+            ];
+            t.p.add(egui::Shape::convex_polygon(
+                diamond.to_vec(),
+                ink::PAPER,
+                egui::Stroke::new(1.2, ink::MARK),
+            ));
+            t.p.circle_filled(at, 1.6, ink::MARK);
+            t.p.text(
+                at + egui::vec2(8.0, -6.0),
+                egui::Align2::LEFT_TOP,
+                "home",
+                egui::FontId::monospace(10.0),
+                ink::MARK,
             );
         }
     }

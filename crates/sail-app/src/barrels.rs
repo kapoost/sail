@@ -94,66 +94,16 @@ impl Flotsam {
     }
 }
 
-/// How near an anchorage a cask can be handed over the rail, metres.
-///
-/// Seventy, which is inside the bay rather than off the headland: the mark is a buoy you
-/// sail up to and the barrel goes into somebody's tender. Far enough off that it does not
-/// ask for a berth, near enough that arriving is a thing you did.
-const ALONGSIDE: f64 = 70.0;
-
-/// And how slowly. A two-man lift over the rail at five knots is how you lose a barrel
-/// and a finger.
-const HANDING_SPEED_KN: f64 = 2.0;
-
-/// Seconds a cask takes to go over the side. They come off the painter one at a time
-/// because that is what hands do, and because a string that empties in a frame reads as
-/// a counter rather than as cargo.
-const A_CASK_TAKES: f64 = 3.0;
-
-/// Whether this is a place and a moment to be handing barrels over the rail.
-///
-/// Pulled out so the rule is one statement a test can read, which is the lesson this
-/// repository keeps relearning: the thing on screen and the thing the test used must be
-/// the same measurement.
-pub fn alongside(here: DVec2, stw_kn: f64, harbours: &[sail_core::land::Harbour]) -> bool {
-    stw_kn.abs() < HANDING_SPEED_KN && harbours.iter().any(|h| (h.at - here).length() < ALONGSIDE)
-}
-
-/// Handing them ashore, one at a time, at any anchorage.
-pub fn land_them(
-    sim: Res<Sim>,
-    course: Res<crate::course::Course>,
-    mut flotsam: ResMut<Flotsam>,
-    time: Res<Time>,
-    sound: Res<crate::sound::SoundHandle>,
-    mut passing: Local<f64>,
-) {
-    if flotsam.astern.is_empty()
-        || !alongside(
-            sim.sim.state.pos,
-            sail_core::units::ms_to_kn(sim.sim.telemetry.stw),
-            &course.harbours,
-        )
-    {
-        *passing = 0.0;
-        return;
-    }
-    *passing += time.delta_secs_f64();
-    if *passing < A_CASK_TAKES {
-        return;
-    }
-    *passing = 0.0;
-    // The one nearest her goes first and the string closes up behind it, which is what
-    // happens to a line of barrels when you take the front one off it.
-    flotsam.astern.remove(0);
-    flotsam.landed += 1;
-    sound.0.strike_damped(190.0, 0.3, 0.75);
-    info!(
-        "cask ashore — {} landed, {} still on the painter",
-        flotsam.landed,
-        flotsam.astern.len()
-    );
-}
+// **Where they are handed over moved.** Casks used to go ashore at any anchorage in the
+// archipelago, and the comment on `Flotsam::landed` argued for it: the sea is full of
+// them and so is the chart, and a cargo that has to go to a named place is a consignment,
+// which this game already has.
+//
+// What changed is that there is now a place of your own to take them to — the platform at
+// `anchorage.rs`, moored in one anchorage, with the pile *drawn* on it. A store you can
+// see from the water beats a counter at any distance, and it gives the collecting a
+// second half that the old rule only pretended to have. The rule itself — alongside and
+// slow, one cask at a time — went with it unchanged.
 
 /// One cask, in the water or on the string — and *which* one.
 ///
@@ -279,40 +229,6 @@ pub fn float(flotsam: Res<Flotsam>, mut casks: Query<(&Cask, &mut crate::course:
         if let Some(at) = all.get(cask.0) {
             float.at = *at;
         }
-    }
-}
-
-#[cfg(test)]
-mod ashore {
-    use super::*;
-
-    fn anchorage(at: DVec2) -> sail_core::land::Harbour {
-        sail_core::land::Harbour {
-            at,
-            name: "Testvik".into(),
-            exposed_to: 0.0,
-        }
-    }
-
-    /// **Alongside and stopped, or it does not happen.**
-    ///
-    /// A barrel is a two-man lift over a rail; at five knots it is how you lose the
-    /// barrel and a finger. And seventy metres is inside the bay rather than off the
-    /// headland, so arriving is a thing you did rather than a line you crossed.
-    #[test]
-    fn casks_go_ashore_alongside_and_slowly_or_not_at_all() {
-        let bay = DVec2::new(1_000.0, 500.0);
-        let harbours = [anchorage(bay)];
-        assert!(alongside(bay + DVec2::new(40.0, 0.0), 1.2, &harbours));
-        assert!(
-            !alongside(bay + DVec2::new(40.0, 0.0), 4.0, &harbours),
-            "a barrel went over the rail at four knots"
-        );
-        assert!(
-            !alongside(bay + DVec2::new(400.0, 0.0), 1.0, &harbours),
-            "a cask was handed ashore from four cables off"
-        );
-        assert!(!alongside(bay, 1.0, &[]), "there was no anchorage there");
     }
 }
 

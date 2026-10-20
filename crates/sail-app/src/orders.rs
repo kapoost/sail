@@ -131,7 +131,7 @@ mod a_change_is_a_sequence {
     use super::*;
 
     fn boat() -> Sim {
-        Sim::new(crate::weather::Weather::draw(7))
+        Sim::new(crate::weather::Weather::draw(7), 7)
     }
 
     /// **The order is the end state; the sequence is still the sequence.**

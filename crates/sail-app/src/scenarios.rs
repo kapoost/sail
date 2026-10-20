@@ -30,7 +30,7 @@ use crate::sim::Sim;
 fn at_sea() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
-    app.insert_resource(Sim::new(crate::weather::Weather::draw(42)));
+    app.insert_resource(Sim::new(crate::weather::Weather::draw(42), 42));
     app.insert_resource(crate::sound::SoundHandle(Arc::new(
         crate::sound::SeaParams::default(),
     )));
@@ -367,7 +367,7 @@ mod the_watch_on_deck {
             "the weather this test is about changed: {kn:.1} kn"
         );
         let mut app = at_sea();
-        app.insert_resource(Sim::new(crate::weather::Weather::draw(seed)));
+        app.insert_resource(Sim::new(crate::weather::Weather::draw(seed), seed));
         app.init_resource::<crate::clutch::Bank>();
         // Close-hauled, where the heel is.
         app.insert_resource(HeldOn(w.wind_from + rad(45.0)));
@@ -940,5 +940,125 @@ mod the_chart_table {
             "and they cross where she is, {:.0} m out",
             (got.at - here).length()
         );
+    }
+}
+
+/// **Coming home**: what she has collected goes onto the platform and stays there.
+///
+/// The whole of the loop that persistence exists for, in one test. There is no save at
+/// sea in this game and there is not going to be — a passage is an evening — so the only
+/// thing that crosses from one evening to the next is what was landed, and this is the
+/// act that lands it.
+#[cfg(test)]
+mod coming_home {
+    use super::*;
+    use crate::anchorage::{land, Home};
+    use crate::barrels::Flotsam;
+    use crate::fishing::{Fishing, Landed, Quarry};
+
+    /// Her berth, and a boat sitting in it with a string of casks and a full creel.
+    ///
+    /// Built without `MinimalPlugins`, which is the one difference from every other
+    /// scenario here and the reason is time: a cask takes three seconds to go over the
+    /// rail, and with the engine's own clock running that is nine real seconds of test for
+    /// three casks. Nothing `land` touches needs a plugin, so the clock is ours and a
+    /// quarter of a second is whatever we say it is.
+    fn alongside_her_platform() -> App {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(Sim::new(crate::weather::Weather::draw(42), 42));
+        app.insert_resource(crate::sound::SoundHandle(Arc::new(
+            crate::sound::SeaParams::default(),
+        )));
+        let berth = app.world().resource::<Sim>().sim.state.pos;
+        app.insert_resource(Home {
+            sea: 42,
+            moored: Some(berth),
+            harbour: "Testvik".into(),
+            ..Default::default()
+        });
+        app.insert_resource(Flotsam {
+            adrift: Vec::new(),
+            astern: vec![berth, berth, berth],
+            landed: 0,
+        });
+        let mut fishing = Fishing::new(42);
+        fishing.caught = vec![
+            Landed {
+                what: Quarry::Mackerel,
+                mass: 0.6,
+            },
+            Landed {
+                what: Quarry::Pollack,
+                mass: 2.4,
+            },
+        ];
+        app.insert_resource(fishing);
+        app.add_systems(Update, land);
+        app
+    }
+
+    /// The creel goes up in one trip and the casks come off one at a time, which is what
+    /// hands do — and the store has them afterwards.
+    #[test]
+    fn the_creel_and_the_casks_go_onto_the_platform() {
+        let mut app = alongside_her_platform();
+        // She has to be stopped, and she starts sailing: with way on, nothing goes over
+        // the rail at all, which is the first half of the rule.
+        app.update();
+        assert_eq!(
+            app.world().resource::<Home>().stores.fish,
+            0,
+            "the creel went up while she still had way on"
+        );
+        // Stop her, and run long enough for three casks at three seconds each.
+        {
+            let mut sim = app.world_mut().resource_mut::<Sim>();
+            sim.sim.state.surge = 0.0;
+            sim.sim.state.sway = 0.0;
+            sim.sim.telemetry.stw = 0.0;
+        }
+        for _ in 0..60 {
+            let mut time = app.world_mut().resource_mut::<Time<()>>();
+            time.advance_by(std::time::Duration::from_millis(250));
+            app.update();
+        }
+        let home = app.world().resource::<Home>();
+        assert_eq!(home.stores.fish, 2, "the creel did not go up");
+        assert!(
+            (home.stores.catch_kg - 3.0).abs() < 0.01,
+            "three kilos went aboard as {:.2}",
+            home.stores.catch_kg
+        );
+        assert_eq!(
+            home.stores.casks, 3,
+            "the casks did not come off the painter"
+        );
+        assert!(
+            app.world().resource::<Flotsam>().astern.is_empty(),
+            "she is still towing them"
+        );
+        assert!(home.unsaved, "nothing asked for the file to be written");
+    }
+
+    /// And nothing goes over the rail from a mile off, however long you wait.
+    #[test]
+    fn nothing_is_landed_from_out_in_the_fairway() {
+        let mut app = alongside_her_platform();
+        {
+            let mut sim = app.world_mut().resource_mut::<Sim>();
+            sim.sim.state.surge = 0.0;
+            sim.sim.state.sway = 0.0;
+            sim.sim.telemetry.stw = 0.0;
+            sim.sim.state.pos += glam::DVec2::new(1_852.0, 0.0);
+        }
+        for _ in 0..40 {
+            let mut time = app.world_mut().resource_mut::<Time<()>>();
+            time.advance_by(std::time::Duration::from_millis(250));
+            app.update();
+        }
+        let home = app.world().resource::<Home>();
+        assert_eq!(home.stores.casks, 0);
+        assert_eq!(home.stores.fish, 0);
     }
 }
