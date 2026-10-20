@@ -35,10 +35,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Bevy wants ALSA and udev headers on Linux even for a test binary that never
       # opens a window: the audio and gamepad backends are linked, not loaded.
-      - name: The system libraries Bevy links against
+      #
+      # And Mesa, which is not decoration either. Five of the tests in `sea_card.rs`
+      # compile the shipped WESL and *run* it against the Rust spectrum it has to agree
+      # with — the whole reason the sea could be moved onto the card at all — and a runner
+      # with no graphics adapter has nothing to check it against. `mesa-vulkan-drivers`
+      # is llvmpipe: a Vulkan adapter in software, slow and entirely sufficient for five
+      # compute dispatches over a few hundred samples.
+      - name: The system libraries Bevy links against, and an adapter to run shaders on
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev
+          sudo apt-get install -y libasound2-dev libudev-dev mesa-vulkan-drivers libvulkan1
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --release
