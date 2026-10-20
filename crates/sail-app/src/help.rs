@@ -154,8 +154,9 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
                  to stop her",
             ),
             (
-                "Shift L",
-                "somewhere at sea with the sails set and no idea where",
+                "Shift Backspace",
+                "somewhere at sea with the sails set and no idea where — it throws the \
+                 passage away, which is why it is nowhere near the keys you sail with",
             ),
             (
                 "F12",
@@ -231,7 +232,7 @@ const SECOND_COLUMN: usize = 3;
 /// help does not mention is a feature nobody will find; a key the help promises and
 /// nothing reads is a lie, and both have happened here.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const DOCUMENTED: [KeyCode; 44] = [
+pub const DOCUMENTED: [KeyCode; 45] = [
     // At the helm.
     KeyCode::ArrowLeft,
     KeyCode::ArrowRight,
@@ -284,6 +285,7 @@ pub const DOCUMENTED: [KeyCode; 44] = [
     // And the help itself, which the list cannot very well leave out.
     KeyCode::F1,
     KeyCode::F12,
+    KeyCode::Backspace,
     KeyCode::Slash,
 ];
 

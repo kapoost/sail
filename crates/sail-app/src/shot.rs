@@ -167,6 +167,7 @@ fn key_named(name: &str) -> Option<KeyCode> {
         "space" => KeyCode::Space,
         "shift" => KeyCode::ShiftLeft,
         "esc" => KeyCode::Escape,
+        "backspace" => KeyCode::Backspace,
         "enter" => KeyCode::Enter,
         "f1" => KeyCode::F1,
         "f12" => KeyCode::F12,

@@ -406,6 +406,133 @@ mod the_watch_on_deck {
         );
     }
 
+    /// **Every key the pilot answers to, in one press each.**
+    ///
+    /// Asked for from the deck — *check the pilot keys* — and it is exactly the kind of
+    /// question a scenario answers better than a screenshot: four keys, four states, and
+    /// the fault they would have is silent. `O` only means anything with the pilot
+    /// engaged, and `,` and `.` move a target that does not exist until it is; a key
+    /// that quietly does nothing in one state and something in another is the shape of
+    /// thing nobody notices is broken.
+    #[test]
+    fn the_pilot_answers_to_its_four_keys() {
+        use crate::input::Pilot;
+        use sail_core::autopilot::PilotMode;
+
+        let mut app = at_sea();
+        app.add_systems(Update, crate::input::gather);
+        {
+            // Sails set and drawing: the pilot is the thing under test, not a boat
+            // that will not sail.
+            let mut sim = app.world_mut().resource_mut::<Sim>();
+            sim.controls.main_sheet = 0.3;
+            sim.controls.jib_sheet = 0.3;
+            sim.controls.furl = 0.0;
+        }
+        // Way on first: a tiller pilot engaged on a stopped boat has nothing going over
+        // the blade and lets go within seconds, which would be the test failing for a
+        // reason that has nothing to do with the keys.
+        for _ in 0..600 {
+            app.update();
+        }
+        assert!(
+            !app.world().resource::<Pilot>().engaged(),
+            "she started with the pilot already on"
+        );
+
+        // O before P does nothing, and does nothing *quietly*: there is no course to
+        // hold and no mode to swap.
+        press(&mut app, KeyCode::KeyO);
+        assert!(
+            !app.world().resource::<Pilot>().engaged(),
+            "O engaged the pilot, which is P's job"
+        );
+
+        press(&mut app, KeyCode::KeyP);
+        let heading = app.world().resource::<Sim>().sim.state.heading;
+        {
+            let pilot = app.world().resource::<Pilot>();
+            assert!(pilot.engaged(), "P did not engage it");
+            match pilot.mode {
+                PilotMode::Heading(held) => assert!(
+                    sail_core::units::deg(sail_core::units::wrap_pi(held - heading)).abs() < 1.0,
+                    "it engaged on a course she was not on"
+                ),
+                other => panic!("P engaged in {other:?} rather than on a compass course"),
+            }
+        }
+
+        press(&mut app, KeyCode::KeyO);
+        assert!(
+            matches!(
+                app.world().resource::<Pilot>().mode,
+                PilotMode::ApparentWind { .. }
+            ),
+            "O did not put it on the wind"
+        );
+        press(&mut app, KeyCode::KeyO);
+        let held = match app.world().resource::<Pilot>().mode {
+            PilotMode::Heading(h) => h,
+            other => panic!("O did not put it back on a course: {other:?}"),
+        };
+
+        // Ten degrees a press, and the fine step under shift — the same way round as the
+        // helm, where shift is the small bite.
+        press(&mut app, KeyCode::Period);
+        let after = match app.world().resource::<Pilot>().mode {
+            PilotMode::Heading(h) => h,
+            other => panic!("a nudge changed the mode: {other:?}"),
+        };
+        let step = sail_core::units::deg(sail_core::units::wrap_pi(after - held));
+        assert!(
+            (step - 10.0).abs() < 0.01,
+            "a press of . moved the target {step:.2} deg rather than ten"
+        );
+        press(&mut app, KeyCode::Comma);
+        let back = match app.world().resource::<Pilot>().mode {
+            PilotMode::Heading(h) => h,
+            other => panic!("a nudge changed the mode: {other:?}"),
+        };
+        assert!(
+            sail_core::units::deg(sail_core::units::wrap_pi(back - held)).abs() < 0.01,
+            "a press of , did not take the ten degrees back"
+        );
+
+        // And shift makes it one, which is what lining something up wants.
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.press(KeyCode::ShiftLeft);
+        }
+        press(&mut app, KeyCode::Period);
+        let fine = match app.world().resource::<Pilot>().mode {
+            PilotMode::Heading(h) => h,
+            other => panic!("a fine nudge changed the mode: {other:?}"),
+        };
+        let small = sail_core::units::deg(sail_core::units::wrap_pi(fine - held));
+        assert!(
+            (small - 1.0).abs() < 0.01,
+            "shift and . moved the target {small:.2} deg rather than one"
+        );
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release(KeyCode::ShiftLeft);
+            keys.clear();
+        }
+
+        press(&mut app, KeyCode::KeyP);
+        assert!(
+            !app.world().resource::<Pilot>().engaged(),
+            "P did not switch it off again"
+        );
+        // Switched off is not dropped out: the console says why the *gear* let go, and
+        // a person pressing the button is not a failure.
+        assert!(
+            app.world().resource::<Pilot>().last_reason.is_none(),
+            "switching it off wrote a reason: {:?}",
+            app.world().resource::<Pilot>().last_reason
+        );
+    }
+
     /// **The pilot steers and the watch sails: the two run together.**
     ///
     /// The combination nobody had tried, and the one a tired skipper actually wants —

@@ -675,7 +675,7 @@ impl Navigation {
 ///
 /// The state half of being lost, with no teleporting in it: what the exercise does to
 /// the *chart* rather than to the boat. Its own function because two things do it now —
-/// `Shift L`, and arriving in somebody else's archipelago when the game is reset under
+/// `Shift Backspace`, and arriving in somebody else's archipelago when the game is reset under
 /// you, which is the same condition arrived at from the other end. A boat whose world
 /// has just been replaced is a boat that has never seen this coast before, and a chart
 /// that went on drawing her position through that would be the one piece of the
@@ -823,7 +823,18 @@ pub fn lost_at_sea(
     mut track: ResMut<crate::chart::Track>,
     mut pilot: ResMut<crate::input::Pilot>,
 ) {
-    let asked = keys.just_pressed(KeyCode::KeyL)
+    // **Shift and backspace, not shift and L.**
+    //
+    // This throws the passage away: she is picked up and put down somewhere else in the
+    // archipelago, the fix is gone and the deck log is cleared. That is a fine thing to
+    // ask for and a terrible thing to *land on*, and it used to sit one shifted finger
+    // away from `L`, which streams the log — a key you press while sailing, with the
+    // other hand already holding shift for a fine bite on the helm. Reported from the
+    // deck after it happened by accident.
+    //
+    // Backspace is the right neighbourhood for it: the key that undoes, nowhere near
+    // anything that trims or steers, and nothing else in the game reads it.
+    let asked = keys.just_pressed(KeyCode::Backspace)
         && (keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight));
     if !asked {
         return;

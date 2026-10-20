@@ -490,7 +490,7 @@ is and why it is there — position line, transferred, ruled by hand, log leg, r
 track made good. A plot is six kinds of line in two colours with no legend, and telling
 them apart is most of the subject.
 
-**`Shift L` puts you somewhere at sea with no idea where.** The sails are set for the
+**`Shift Backspace` puts you somewhere at sea with no idea where.** The sails are set for the
 wind she is in and nothing else is made difficult; the chart stops following her, the
 names come off the marks, and getting them back is the exercise. Three bearings, crossed,
 entered in the log — and the scoring is the honest one: a fix is good if it is near where
