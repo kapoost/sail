@@ -631,10 +631,12 @@ does, <code>Invoke-WebRequest</code> does not. <code>Sail.exe</code> from the re
 page works too, if you would rather click <b>More info</b> and <b>Run anyway</b>."""
 
 IN_A_TAB = """No install at all, if you would rather look first: the same game, built
-for the browser, in a tab. It needs WebGPU — Chrome, Edge, or Safari 18 and up — and
-about fifteen megabytes down the wire, and it runs at a little under fifty frames a
-second against sixty on a desk. Single-handed only: a page cannot find the game your
-friend is running in the next room."""
+for the browser, in a tab. She starts with the watch aboard and the pilot steering, in
+open water, so the first minute can be spent looking — and <b>Esc &rarr; MISSIONS &rarr;
+SAILING 101</b> walks you round her one control at a time. It needs WebGPU — Chrome,
+Edge, or Safari 18 and up — and about fifteen megabytes down the wire, and it runs at a
+little under fifty frames a second against sixty on a desk. Single-handed only: a page
+cannot find the game your friend is running in the next room."""
 
 SOURCE_GAME = "the game"
 SOURCE_TESTS = "the validation suite"

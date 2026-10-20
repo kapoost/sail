@@ -627,10 +627,12 @@ pobierający — przeglądarka dokłada, <code>Invoke-WebRequest</code> nie.
 i <b>Run anyway</b>."""
 
 IN_A_TAB = """Bez instalowania, jeśli wolisz najpierw zobaczyć: ta sama gra zbudowana
-dla przeglądarki, w karcie. Potrzebuje WebGPU — Chrome, Edge albo Safari od 18 — i
-jakichś piętnastu megabajtów po drucie, a chodzi w niecałych pięćdziesięciu klatkach na
-sekundę wobec sześćdziesięciu na biurku. Tylko samotnie: strona nie znajdzie gry, którą
-kolega uruchomił w sąsiednim pokoju."""
+dla przeglądarki, w karcie. Zaczyna z wachtą na pokładzie i pilotem u steru, na otwartej
+wodzie, żeby pierwszą minutę dało się spędzić na patrzeniu — a <b>Esc &rarr; MISSIONS
+&rarr; SAILING 101</b> oprowadza po łódce, jedno urządzenie naraz. Potrzebuje WebGPU —
+Chrome, Edge albo Safari od 18 — i jakichś piętnastu megabajtów po drucie, a chodzi w
+niecałych pięćdziesięciu klatkach na sekundę wobec sześćdziesięciu na biurku. Tylko
+samotnie: strona nie znajdzie gry, którą kolega uruchomił w sąsiednim pokoju."""
 
 SOURCE_GAME = "gra"
 SOURCE_TESTS = "zestaw testów"

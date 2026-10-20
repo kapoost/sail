@@ -15,7 +15,10 @@ git push origin main --tags
 ```
 
 The tag starts `.github/workflows/release.yml`, which builds a universal macOS bundle, a
-Windows executable and `sail-server` for both, and publishes them. **An hour from cold,
+Windows executable and `sail-server` for both, and publishes them. **The browser build is
+not in that workflow**: it is built and published by `pages.yml` on every push to `main`
+that touches the crate, so the playable demo tracks the branch rather than the tag. See
+`dist/web.sh` and `docs/browser.md`. **An hour from cold,
 and about twenty-five minutes when the runner cache is still warm from a recent
 release** — nearly all of the cold hour is the Windows job compiling Bevy. Watch it with
 `gh run list` or `gh run view --log`.
@@ -37,7 +40,7 @@ afterwards.
 ## Before the tag
 
 ```sh
-cargo test --release          # 248 of them, about twenty seconds
+cargo test --release          # 360 of them, about twenty seconds
 cargo clippy --release --all-targets    # has to be silent
 cargo fmt --all
 ```

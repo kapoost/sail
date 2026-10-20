@@ -17,15 +17,20 @@ APIs — threads, files, environment — and compiles calls to them happily. Wha
 fail at run time. So the work is not a fight with the build; it is replacing four things
 that do not work in a tab.
 
-## What breaks when it runs
+## What broke when it ran, and what was done about it
 
-| | what happens | what it would take |
+Kept as a list rather than deleted: it is the shape of the work, and four of the five
+turned out to be worth doing on a desk as well.
+
+| | what happened | what was done |
 |---|---|---|
-| `sea_texture.rs` bakes 36 ripple frames in `thread::scope` | `spawn` is unsupported and **panics** — the one hard blocker | spread the bake across frames, which is worth doing natively too: it is 0.47 s on all cores, so 4–6 s on one, and 6–15 s of frozen tab in wasm |
-| the hull is unpacked with `fs::write` into a temp directory | returns an error, and the fallback path `"assets"` is taken | **nothing** — on the web `AssetServer` fetches over HTTP, so serving `assets/` is all it needs. This is *easier* in a browser, not harder |
-| twenty `env::var` calls (`SAIL_SEED`, `SAIL_JOIN`, `SAIL_FLEET`…) | all return `Err`, so every diagnostic knob disappears | read them from the query string instead; mechanical |
-| the sky bakes a cubemap on `AsyncComputeTaskPool` | runs on the main thread | 0.11 s of stall per bake, worse in wasm; batch it or accept it |
-| audio | needs a user gesture before anything sounds | a click-to-start screen, which every web game has |
+| `sea_texture.rs` baked 36 ripple frames in `thread::scope` | `spawn` is unimplemented and **panics** | **done** — baked a few rows a frame with a four millisecond budget, on the task pool where there is one. The window opens a fifth of a second sooner natively too |
+| `SystemTime::now()` seeding the day, `Instant::now()` timing two bakes | **panics** on this target, in `main`, before a window exists | **done** — `knob::seed` and the engine's own `Instant`, which knows where it is |
+| fifty `env::var` calls (`SAIL_SEED`, `SAIL_WIND`, `SAIL_FRAMES`…) | all return `Err`, so every dial disappears exactly where there is no terminal to set one | **done** — one seam, `knob::var`: the environment on a desk, the query string in a tab |
+| eight multisamples | WebGPU has one and four; every pass after the first was invalid | **done** — four in a tab, which at this drawn width is a boundary pixel either way |
+| the hull unpacked with `fs::write` into a temp directory | returns an error, and the fallback path `"assets"` is taken | **nothing to do** — on the web `AssetServer` fetches over HTTP, so serving `assets/` is all it needs. Easier in a browser, not harder |
+| the sky bakes a cubemap on `AsyncComputeTaskPool` | runs on the main thread | 0.086 s a bake here, and part of the twelve seconds of startup below |
+| audio | needs a user gesture before anything sounds | **done** — the page starts her on a button |
 
 ## What settles it: sailing together
 
@@ -161,18 +166,63 @@ it builds anything, because the failure when they disagree is a stack trace in a
 console an hour later. `wasm-opt` is used if it happens to be installed and nothing is
 made of it if not.
 
-The page itself is `dist/web/index.html`: a title, the keys, a progress bar against the
-download, and a button. **The button is deliberate** — a browser will not open an audio
-context without a gesture, so a game started without one is a game that sounds broken,
-and "press to sail" buys the wind and the water with it. The canvas carries its own
-aspect and the page scales it to fit, which is the same decision the desk build makes
-with a window that cannot be resized: the console, the chart and the gauges are drawn at
-known pixel sizes, so the picture is scaled rather than re-laid-out.
+### The page, and the three slow things behind it
+
+`dist/web/index.html` is a title, the keys, a mainsail going up as the loading bar, and a
+button. All four exist because of something that went wrong.
+
+**The sail is the bar** because the thing being waited for is fifteen megabytes and a
+compile, and a bar that fills in one jump says nothing: the head of the sail runs up the
+mast with the download, creeps through the compile, and reaches the masthead when she is
+drawing.
+
+**The button is deliberate.** A browser will not open an audio context without a gesture,
+so a game started without one is a game that sounds broken; "press to sail" buys the wind
+and the water with it.
+
+**The card does not come down until the canvas has a real size.** The first version added
+its `sailing` class — which hides the page and shows the canvas — and *then* awaited the
+engine, so from the moment anybody clicked, the only thing on screen was a black
+rectangle. Reported from the other side of the room as *long, long, nothing*, with a
+photograph of a black tab. A black rectangle is indistinguishable from a page that has
+died.
+
+**And the compile happens off the main thread.** Handing the bytes straight to `init`
+compiles them synchronously: nothing moves, including the thing saying please wait.
+`WebAssembly.compile` hands the module to a background thread and yields, so the sail
+goes on rising while it works.
+
+What that leaves, measured in Chromium over WebGPU with a warm cache:
+
+| | |
+|---|---|
+| fetch, 14.6 MB over the wire | a few seconds, with the sail rising |
+| compile, 60 MB of module | about four seconds, animated |
+| **the engine's own start** | **about twelve seconds, frozen** |
+
+The last row is the one left to attack, and it is the same fix the ripple film already
+had: the textures, the sky and a ten megabyte hull are all baked or parsed *before* the
+first frame, where on this machine they cost two and a half seconds and on one thread in
+a tab they cost twelve. Baking across frames is what the film does now and what the rest
+of them should do.
+
+**The keyboard goes to whatever has focus, and that was the button.** The engine listens
+for keys on the canvas, which is why winit gives it a `tabindex` — but a game started by
+pressing a button leaves the focus on the button, and then on the body when the button
+goes away, and the tiller does nothing. The page hands the canvas the focus as soon as
+there is one to hand it to, and takes it back on any press in it.
+
+The canvas carries its own aspect and the page scales it to fit, which is the same
+decision the desk build makes with a window that cannot be resized: the console, the
+chart and the gauges are drawn at known pixel sizes, so the picture is scaled rather than
+re-laid-out.
 
 ### What is left to settle
 
 * **The engine's frame, not ours.** Nineteen of twenty-one milliseconds. Whether that is
   reducible without threads is the next measurement, not the next assumption.
+* **Twelve seconds of startup**, all of it work done before the first frame that could be
+  done across the first hundred.
 * **Somewhere to put it.** 60 MB is over GitHub Pages' 100 MB per-file limit only if it
   grows, but the repository would have to carry the module or the pages workflow would
   have to build it — six minutes of wasm compile added to a job that takes one.
@@ -185,9 +235,16 @@ known pixel sizes, so the picture is scaled rather than re-laid-out.
 ## The shape that would make sense
 
 A **single-player demo in a tab**, as a shop window: click a link, sail for five minutes,
-install the real thing if you liked it. It needs the ripple bake spread across frames,
-the knobs moved to the query string, and a click-to-start. The game stays native, keeps
-its LAN play, and nothing has to be maintained twice except a build target.
+install the real thing if you liked it. That is what is now at
+[kapoost.github.io/sail/play](https://kapoost.github.io/sail/play/), published beside the
+page it is described on by the same workflow — the game stays native, keeps its LAN play,
+and nothing is maintained twice except a build target.
+
+She starts there with the watch aboard and the pilot steering, on a day chosen for sea
+room rather than drawn at random, because a first minute should be spent looking rather
+than rounding up; `Esc → MISSIONS → SAILING 101` walks a reader round her one control at
+a time. None of that is web-only — `SAIL_CREW=1 SAIL_PILOT=1` and `SAIL_LESSON=1` are the
+same start on a desk — but a tab is the one place somebody arrives having read nothing.
 
 What would *not* make sense is porting the game and keeping sailing together, because the
 second half of that sentence costs a certificate, a public host, a second transport and

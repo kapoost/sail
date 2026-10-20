@@ -12,6 +12,12 @@ get it, and [the manual](https://kapoost.github.io/sail/manual.html)
 ([PDF](https://kapoost.github.io/sail/manual.pdf)). The page is generated from this
 repository, key list included, so it cannot drift from the program; see `site/`.
 
+**[And she sails in a tab](https://kapoost.github.io/sail/play/)**: the same game built
+for the browser, published beside the page. It needs WebGPU — Chrome, Edge, or Safari 18
+and up — and about fifteen megabytes down the wire. Single-handed only; a page cannot
+find the game your friend is running in the next room. `dist/web.sh` builds it and
+`docs/browser.md` has the measurements.
+
 ## Where things stand
 
 `crates/sail-core` — the dynamics, and nothing else. No renderer, no input handling,
@@ -31,7 +37,7 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
    still on the table; the presentation layer is a few days of work on top of this
    crate, not a rewrite.
 2. **The physics is testable without opening a window.** 141 tests in the core assert
-   against figures a sailor knows from the water — 350 across the workspace. When one
+   against figures a sailor knows from the water — 360 across the workspace. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
 
@@ -65,6 +71,13 @@ steered, and can therefore judge. One boat modelled properly beats five modelled
 vaguely.
 
 ## Try it
+
+In a browser, installing nothing:
+[**kapoost.github.io/sail/play**](https://kapoost.github.io/sail/play/). She starts with
+the watch aboard and the pilot steering, in open water, so the first minute can be spent
+looking rather than rounding up — and `Esc → MISSIONS → SAILING 101` walks you round her
+one control at a time. The dials this README gives as environment variables are the
+query string there: `?wind=32&sea=built&hour=14`.
 
 On a Mac, without building anything:
 
@@ -528,6 +541,13 @@ and thinking about what is set. Under the water you are fishing, and there is no
 this boat you could adjust from down there. A bar that showed everything everywhere
 showed the wrong thing three times out of four.
 
+**And three buttons for the things you pick up.** Everything else on the console is a
+reading or a rope; the glasses, the hand bearing compass and the rod are neither — they
+are in your hands, and a hand is the one thing a keyboard hides. `GLASSES`, `BEARING`
+and `ROD` sit under the weather and light when the thing is in use. They do the half
+that was undiscoverable — picking it up and putting it down — and leave naming a mark,
+shooting a bearing and taking a fish on the keys, because those three are timing.
+
 **Nothing is printed beside the drawing of itself.** Her head is the card, the apparent
 wind is the needle, her heel is the line across the bottom half of the bowl — so those
 three figures are not also set in type next to them, which is the oldest way to make an
@@ -546,6 +566,28 @@ not read at all — so the next best thing is to make looking cheap. That loop i
 panel above got rebuilt, and it paid for itself in the first hour by finding a clinometer
 drawing a green line across the whole console.
 
+## Sailing 101
+
+`Esc`, then **MISSIONS**, then **SAILING 101**: thirteen steps round the deck, one
+instruction at a time, each about *one control and the instrument that answers it*.
+Tiller, view, mainsheet, headsail, rope bank, pilot, watch, chart, glasses, hand bearing
+compass, log, rod, lifebuoy — and nothing moves on until the thing has been done.
+
+**The key list is not a lesson.** `H` puts forty-four keys on the screen in six groups,
+which is the right reference and the wrong introduction: somebody who has never sailed
+does not know which of the forty-four they need in the first minute, and somebody who has
+sailed does not know this boat carries binoculars until they read the whole list looking
+for something else.
+
+It sets the stage before the first instruction — the watch stood down, the pilot taken
+off — because a lesson about the mainsheet is nonsense while somebody else is trimming
+it, and both come back as steps of their own. That is also the honest order: you learn to
+do a thing before you learn to hand it over. The two sighting steps watch the
+*instrument* rather than the keystroke, so finding the console buttons first counts as
+having done it.
+
+`SAIL_LESSON=1` starts it from the first frame, `?lesson=1` in a tab.
+
 ## Man overboard
 
 There is a horseshoe lashed to the starboard quarter on a short strop, twenty metres of
@@ -556,7 +598,7 @@ the ring walks away downwind at fifteen metres a minute — thrown early it is s
 can swim to, thrown after a minute of getting organised it is upwind of nothing. Those are
 search-and-rescue numbers rather than invented ones, and the whole drill turns on them.
 
-`Esc`, then the **DRILL** page, practises the lot on a dan buoy: get her sailing, lose
+`Esc`, then **MISSIONS**, practises the lot on a dan buoy: get her sailing, lose
 Oscar over the side, and get him back. It talks you through a recognised recovery rather
 than leaving you to invent one — and it is the one piece of boat handling where being bad
 at it costs a life and nobody practises.
@@ -921,7 +963,8 @@ because a view that corrects itself while you are still looking at the thing you
 see is a view that argues with you.
 
 **They live in the program.** Press `?` or `F1`, or click the mark in the bottom-right
-corner. `F12` takes a picture of the screen into your Pictures folder, which is the
+corner — and `Esc → MISSIONS → SAILING 101` walks through the ones that matter first,
+one control at a time, which is the half a list cannot do. `F12` takes a picture of the screen into your Pictures folder, which is the
 answer to *it did something odd and I cannot describe it*. This list used to be here as well, and three of the keys in it were wrong — a
 key list in a README is a list that rots the first time somebody rearranges the console,
 and nobody notices because the person who changed the key does not read the README.
