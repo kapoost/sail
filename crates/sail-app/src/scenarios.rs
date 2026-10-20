@@ -952,7 +952,7 @@ mod the_chart_table {
 #[cfg(test)]
 mod coming_home {
     use super::*;
-    use crate::anchorage::{land, Home};
+    use crate::anchorage::{land, Berth, Home};
     use crate::barrels::Flotsam;
     use crate::fishing::{Fishing, Landed, Quarry};
 
@@ -976,6 +976,14 @@ mod coming_home {
             moored: Some(berth),
             harbour: "Testvik".into(),
             ..Default::default()
+        });
+        // Where the raft is lying in the water she is actually in — which in her own sea
+        // is the berth out of the file. See `anchorage::Berth`.
+        app.insert_resource(Berth {
+            sea: 42,
+            at: Some(berth),
+            harbour: "Testvik".into(),
+            own: true,
         });
         app.insert_resource(Flotsam {
             adrift: Vec::new(),

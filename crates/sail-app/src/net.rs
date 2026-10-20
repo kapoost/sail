@@ -134,6 +134,7 @@ pub fn rebuild(
     mut chart: ResMut<crate::chart::Chart>,
     mut log: ResMut<crate::chart::DeckLog>,
     old: Query<Entity, OfTheOldWorld>,
+    mut sea: ResMut<crate::islands::Sea>,
 ) {
     let Some(world) = net.rebuild.take() else {
         return;
@@ -154,10 +155,13 @@ pub fn rebuild(
 
     // Their sea, not ours: joining somebody means sailing in the archipelago their copy
     // generated, and the islands have to be the same islands or nothing either of us says
-    // about the water is true. Your own platform is moored in your own sea and is not
-    // here — which is honest, and is the thing a shared world will have to answer when
-    // there is more than one of them in it.
+    // about the water is true.
+    //
+    // **The platform comes with you**, which is the one thing that does. It is re-moored
+    // in whatever water this is and the store on it is untouched — see `anchorage.rs`,
+    // where that is also how you get home again.
     *sim = Sim::new(weather, world.seed);
+    *sea = crate::islands::Sea(world.seed);
     sky.hour = weather.start_hour as f32;
     track.clear();
     // Out with the old archipelago. The marks go with it: a consignment to a harbour that

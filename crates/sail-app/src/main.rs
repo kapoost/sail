@@ -300,6 +300,7 @@ fn main() {
     // plugin is what builds its pipeline and loads the two shaders beside it.
     .add_plugins(MaterialPlugin::<sea_card::SeaMaterial>::default())
     .insert_resource(sim::Sim::new(weather, sea))
+    .insert_resource(islands::Sea(sea))
     .insert_resource(weather)
     .insert_resource(sky::Sky::at(
         weather.start_hour as f32,

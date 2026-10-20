@@ -22,6 +22,17 @@ use crate::sim::Sim;
 ///
 /// What this module does in a frame, in one place — see `stages.rs` for why the
 /// schedule is named sets rather than one long chain.
+/// The seed the archipelago in front of her came from.
+///
+/// **Not always the one in the save.** The islands are a pure function of a seed and the
+/// seed can change under you: joining somebody puts you in theirs, and casting off from
+/// the platform brings you back to your own. Anything that is moored, marked or buried in
+/// *this* water has to know which water it is, and until this existed the only answer
+/// available was "the one the game started in", which stopped being true the first time
+/// anybody joined a game.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct Sea(pub u64);
+
 pub fn plugin(app: &mut App) {
     use crate::stages::{Build, Deck};
     app.add_systems(Startup, setup.in_set(Build::Scene));

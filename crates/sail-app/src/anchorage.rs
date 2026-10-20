@@ -5,7 +5,14 @@
 //! next week is a boat nothing can go wrong to. What persists is not where she is — it is
 //! what you have brought home.
 //!
-//! Home is a platform: a raft of a thing moored in one anchorage of this archipelago,
+//! **The platform is wherever you are sailing.** Not because it sails — it is a raft
+//! with a hut on it and it goes nowhere — but because it is the one thing in this game
+//! that is *yours* rather than the sea's. Whatever water she opens in, the platform is
+//! moored at the nearest town to where she starts, and the store on it is the store you
+//! left there. In somebody else's islands it is also the way out: cast off from it and
+//! you are back in your own, with everything that was aboard.
+//!
+//! Home is a platform: a raft of a thing moored in an anchorage of the archipelago,
 //! with a hut on it and the casks you have fished out of the sea stacked where you can
 //! see them from the water. It is the second half of every mechanic this game already
 //! has. Casks adrift were collected and handed over at any anchorage, which made them a
@@ -37,12 +44,18 @@ use crate::sim::Sim;
 /// schedule is named sets rather than one long chain.
 pub fn plugin(app: &mut App) {
     use crate::stages::{Deck, Paint};
+    app.init_resource::<Berth>();
     app.add_systems(
         Update,
         (moor, build, land, the_lamp_at_dusk, keep)
             .chain()
             .in_set(Deck::Weather),
     );
+    // **In `Last`, not in `Update`.** The engine checks for a request to quit after the
+    // main schedule has run, so a system that wants to catch one has to come after
+    // everything that can send it — in `Update` it is a coin toss whether the reader runs
+    // before the writer, and losing that toss is losing the last few casks.
+    app.add_systems(Last, keep_on_the_way_out);
     app.add_systems(
         bevy_egui::EguiPrimaryContextPass,
         chandler.in_set(Paint::Instruments),
@@ -216,15 +229,18 @@ impl Home {
     /// No crate for this. Three platforms, three environment variables, and the whole of
     /// what a crate would do for us is the part we would still have to check.
     pub fn path() -> Option<std::path::PathBuf> {
-        let home = std::env::var("HOME").ok();
+        // Bound inside each branch that wants it rather than once above them: on Windows
+        // nothing reads `HOME`, and a binding nobody reads is a warning in the build that
+        // most players run.
         #[cfg(target_os = "macos")]
-        let dir = std::path::PathBuf::from(home?).join("Library/Application Support/sail");
+        let dir = std::path::PathBuf::from(std::env::var("HOME").ok()?)
+            .join("Library/Application Support/sail");
         #[cfg(target_os = "windows")]
         let dir = std::path::PathBuf::from(std::env::var("APPDATA").ok()?).join("sail");
         #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
         let dir = match std::env::var("XDG_DATA_HOME") {
             Ok(data) if !data.is_empty() => std::path::PathBuf::from(data).join("sail"),
-            _ => std::path::PathBuf::from(home?).join(".local/share/sail"),
+            _ => std::path::PathBuf::from(std::env::var("HOME").ok()?).join(".local/share/sail"),
         };
         Some(dir.join("home"))
     }
@@ -288,51 +304,139 @@ impl Home {
     }
 }
 
-/// Pick the berth, once, and never again.
+/// Where the platform lies **in the water we are in now**, and whether that water is
+/// ours.
+///
+/// **There is one platform and it is in whatever water she is.** The first version
+/// moored it in one archipelago and left it there, which lasted exactly until somebody
+/// joined a friend's game: the raft floats, a joined world despawns everything that
+/// floats, and a season's casks went with the old islands and did not come back.
+///
+/// The answer is not to pin it down harder. A platform that only exists in one sea is a
+/// reason not to visit anybody. So it is moored again wherever she opens — at the
+/// anchorage she is lying in, or the nearest town if she is at sea — the store on it is
+/// untouched, and when the water is not yours the raft is also the way out: cast off from
+/// it and you are back in your own islands with everything that was aboard.
+///
+/// Kept apart from [`Home`] because they answer different questions: `Home` is the berth
+/// in *your* sea and goes in the file, this is where the raft is at this moment and is
+/// forgotten when the program closes.
+#[derive(Resource, Clone, Debug, Default)]
+pub struct Berth {
+    /// Which archipelago this berth is a position in.
+    pub sea: u64,
+    pub at: Option<DVec2>,
+    pub harbour: String,
+    /// Whether this is your own water. False while you are somebody's guest, and what
+    /// the way home hangs off.
+    pub own: bool,
+}
+
+/// Pick the berth, once per sea.
 ///
 /// The nearest anchorage to where she first came to — which on a new sea is the clear
 /// water the day was chosen for, so the platform ends up a mile or two from the start and
 /// in sight of it. Any anchorage would do; *the same* anchorage every time is the whole
 /// requirement.
-pub fn moor(mut home: ResMut<Home>, sim: Res<Sim>, course: Res<crate::course::Course>) {
-    let from = sim.sim.state.pos;
-    if crate::knob::var("SAIL_PLATFORM").is_ok() && home.harbour != "alongside" {
-        // The drawing knob wins over a berth that is already written down, because the
-        // whole of what it is for is looking at a platform you would otherwise have to
-        // sail to.
-    } else if home.moored.is_some() || course.harbours.is_empty() {
+pub fn moor(
+    mut home: ResMut<Home>,
+    mut berth: ResMut<Berth>,
+    sea: Res<crate::islands::Sea>,
+    sim: Res<Sim>,
+    course: Res<crate::course::Course>,
+) {
+    if berth.at.is_some() && berth.sea == sea.0 {
         return;
     }
+    let from = sim.sim.state.pos;
+    let own = sea.0 == home.sea;
     // `SAIL_PLATFORM=here` moors it where she is, which is the only way to look at a
     // thing that is otherwise two miles away through a day's sailing. A drawing knob and
-    // nothing else — the same argument as `SAIL_BRIG_SHOW`, and it is not written to the
-    // file, so a berth looked at is not a berth moved.
+    // nothing else: it never reaches the file — see `keep`.
     if crate::knob::var("SAIL_PLATFORM").as_deref() == Ok("here") {
-        info!("the platform is moored alongside, for looking at");
-        home.harbour = "alongside".into();
         // Fine on the port bow, sixty metres off: dead ahead is behind her own mainsail
-        // from the chase camera, and abeam is outside its field. This is the one place
-        // she can be looked at from without steering first.
+        // from the chase camera, and abeam is outside its field.
         let heading = sim.sim.state.heading - 0.6;
-        home.moored = Some(from + DVec2::new(heading.sin(), heading.cos()) * 60.0);
+        *berth = Berth {
+            sea: sea.0,
+            at: Some(from + DVec2::new(heading.sin(), heading.cos()) * 60.0),
+            harbour: "alongside".into(),
+            own,
+        };
+        info!("the platform is moored alongside, for looking at");
         return;
     }
-    let Some(berth) = course
-        .harbours
-        .iter()
-        .min_by(|a, b| (a.at - from).length().total_cmp(&(b.at - from).length()))
-        .cloned()
-    else {
+    let Some(picked) = berth_for(
+        own,
+        home.moored.map(|at| (at, home.harbour.clone())),
+        from,
+        &course.harbours,
+    ) else {
         return;
     };
-    info!(
-        "the platform lies at {} — {:.1} nm off",
-        berth.name,
-        (berth.at - from).length() / 1_852.0
-    );
-    home.harbour = berth.name.clone();
-    home.moored = Some(berth.at);
-    home.unsaved = true;
+    if picked.fresh {
+        info!(
+            "the platform lies at {} — {:.1} nm off{}",
+            picked.harbour,
+            (picked.at - from).length() / 1_852.0,
+            if own { "" } else { ", in borrowed water" }
+        );
+    }
+    *berth = Berth {
+        sea: sea.0,
+        at: Some(picked.at),
+        harbour: picked.harbour.clone(),
+        own,
+    };
+    // Only your own berth is written down. A berth in somebody else's islands is a
+    // position in a world you are visiting, and writing it to the file would move your
+    // platform to a point in your own sea that has nothing at it.
+    if own && picked.fresh {
+        home.harbour = picked.harbour;
+        home.moored = Some(picked.at);
+        home.unsaved = true;
+    }
+}
+
+/// The berth the platform takes in this water, and whether it is a new one.
+pub struct Picked {
+    pub at: DVec2,
+    pub harbour: String,
+    /// True when it was chosen now rather than read out of the file — which is also the
+    /// only case worth writing down or announcing.
+    pub fresh: bool,
+}
+
+/// Where the platform goes, given whose water this is.
+///
+/// **In your own sea it goes back where it was**; anywhere else it is moored at the
+/// nearest town to where she opened, which is the anchorage she is lying in if she opened
+/// in one. Its own function because the rule is the whole of the mechanic and a test
+/// should be able to read it without a world — and because the one thing that must never
+/// happen is a guest berth being written into the file as home.
+pub fn berth_for(
+    own: bool,
+    remembered: Option<(DVec2, String)>,
+    from: DVec2,
+    harbours: &[sail_core::land::Harbour],
+) -> Option<Picked> {
+    if own {
+        if let Some((at, harbour)) = remembered {
+            return Some(Picked {
+                at,
+                harbour,
+                fresh: false,
+            });
+        }
+    }
+    let found = harbours
+        .iter()
+        .min_by(|a, b| (a.at - from).length().total_cmp(&(b.at - from).length()))?;
+    Some(Picked {
+        at: found.at,
+        harbour: found.name.clone(),
+        fresh: true,
+    })
 }
 
 /// Whether this is a place and a moment to be handing things over the rail.
@@ -384,14 +488,29 @@ pub fn build(
     platform: Query<Entity, With<Platform>>,
     stack: Query<(Entity, &Stacked)>,
     fitted: Query<Entity, With<Fitted>>,
-    mut built: Local<bool>,
+    berth: Res<Berth>,
+    mut standing: Local<Option<(Entity, DVec2)>>,
     mut fittings: Local<usize>,
 ) {
-    let Some(at) = home.moored else {
+    let Some(at) = berth.at else {
         return;
     };
-    if !*built {
-        *built = true;
+    // **Built when there is no raft, rather than once.**
+    //
+    // It used to be a `bool`, and the bool was wrong the moment anything else despawned
+    // the platform — which the joined world does, because it takes out everything that
+    // floats. The raft went and the latch said it was still there, so a player who
+    // visited a friend had no platform for the rest of the session. Keeping the entity
+    // answers the real question, which is *is she still in the water*, and the berth
+    // beside it answers the other one: has she moved to another sea.
+    let afloat = standing
+        .map(|(entity, was)| platform.get(entity).is_ok() && (was - at).length() < 1.0)
+        .unwrap_or(false);
+    if !afloat {
+        for entity in &platform {
+            commands.entity(entity).despawn();
+        }
+        *fittings = usize::MAX;
         // The raft: a deck of planks on two logs, a hut at one end, and a ladder over the
         // side where a boat comes alongside. Generated like everything else here — it is
         // six boxes, and six boxes that are the right size read better than a model that
@@ -410,7 +529,7 @@ pub fn build(
         let float = meshes.add(Cylinder::new(0.8, 8.4));
         let hut = meshes.add(Cuboid::new(2.8, 2.1, 2.4));
         let roof = meshes.add(Cuboid::new(3.2, 0.18, 2.8));
-        commands
+        let raft = commands
             .spawn((
                 Platform,
                 crate::course::Floating { at, lift: 0.0 },
@@ -437,8 +556,14 @@ pub fn build(
                     MeshMaterial3d(tarred.clone()),
                     Transform::from_xyz(-2.6, 2.45, 0.0),
                 ));
-            });
-        info!("platform moored at {}", home.harbour);
+            })
+            .id();
+        *standing = Some((raft, at));
+        info!(
+            "platform moored at {}{}",
+            berth.harbour,
+            if berth.own { "" } else { " — borrowed water" }
+        );
     }
 
     // What has been built out there. Same rule as the pile: rebuilt when the list it is
@@ -619,6 +744,7 @@ pub fn build(
 #[allow(clippy::too_many_arguments)]
 pub fn land(
     mut home: ResMut<Home>,
+    berth: Res<Berth>,
     sim: Res<Sim>,
     mut flotsam: ResMut<crate::barrels::Flotsam>,
     mut fishing: ResMut<crate::fishing::Fishing>,
@@ -626,12 +752,12 @@ pub fn land(
     sound: Res<crate::sound::SoundHandle>,
     mut passing: Local<f64>,
 ) {
-    let Some(berth) = home.moored else {
+    let Some(at) = berth.at else {
         return;
     };
     let here = sim.sim.state.pos;
     let knots = sail_core::units::ms_to_kn(sim.sim.telemetry.stw);
-    if !alongside(here, knots, berth) {
+    if !alongside(here, knots, at) {
         *passing = 0.0;
         return;
     }
@@ -723,13 +849,16 @@ fn lit_at(elevation_deg: f32) -> f32 {
 pub fn chandler(
     mut contexts: bevy_egui::EguiContexts,
     mut home: ResMut<Home>,
+    berth: Res<Berth>,
+    mut net: ResMut<crate::net::Net>,
+    weather: Res<crate::weather::Weather>,
     sim: Res<Sim>,
 ) -> Result {
-    let Some(berth) = home.moored else {
+    let Some(at) = berth.at else {
         return Ok(());
     };
     let knots = sail_core::units::ms_to_kn(sim.sim.telemetry.stw);
-    if !alongside(sim.sim.state.pos, knots, berth) {
+    if !alongside(sim.sim.state.pos, knots, at) {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
@@ -740,13 +869,14 @@ pub fn chandler(
         .stroke(egui::Stroke::new(1.0, ink))
         .inner_margin(egui::Margin::symmetric(16, 12));
     let mut buying: Option<Fitting> = None;
+    let mut casting_off = false;
     egui::Area::new("platform".into())
         .anchor(egui::Align2::LEFT_CENTER, egui::vec2(12.0, 0.0))
         .show(ctx, |ui| {
             frame.show(ui, |ui| {
                 ui.set_width(300.0);
                 ui.label(
-                    egui::RichText::new(format!("THE PLATFORM — {}", home.harbour.to_uppercase()))
+                    egui::RichText::new(format!("THE PLATFORM — {}", berth.harbour.to_uppercase()))
                         .monospace()
                         .size(12.0)
                         .color(ink),
@@ -793,6 +923,28 @@ pub fn chandler(
                         buying = Some(fitting);
                     }
                 }
+                // **And the way home.**
+                //
+                // The platform is in this water because she is; in somebody else's
+                // islands it is also the only way back to your own, and the store comes
+                // with you because the store is yours and not the sea's. A line rather
+                // than a key: it is a thing you do at one place, standing still, and the
+                // key list on this boat is for things you do *to the boat*.
+                if !berth.own {
+                    ui.add_space(6.0);
+                    if ui
+                        .button(
+                            egui::RichText::new("cast off for your own water")
+                                .monospace()
+                                .size(11.0)
+                                .color(ink),
+                        )
+                        .on_hover_text("back to your own islands, with everything aboard")
+                        .clicked()
+                    {
+                        casting_off = true;
+                    }
+                }
             });
         });
     if let Some(fitting) = buying {
@@ -800,12 +952,27 @@ pub fn chandler(
             info!("built on the platform: {}", fitting.name());
         }
     }
+    if casting_off {
+        // The same handover a join uses, pointed the other way: your seed, and the day
+        // you are actually sailing rather than the one it opened on. `net::rebuild` does
+        // the rest — the islands, the harbours, the chart that no longer knows where
+        // anybody is.
+        net.rebuild = Some(sail_net::World {
+            seed: home.sea,
+            tws: weather.tws as f32,
+            wind_from: weather.wind_from as f32,
+            fetch: weather.fetch as f32,
+            start_hour: weather.start_hour as f32,
+            cover: weather.cover as f32,
+        });
+        info!("casting off for her own water: seed {}", home.sea);
+    }
     Ok(())
 }
 
 /// Write it down, when there is something to write and not more often than that.
 pub fn keep(mut home: ResMut<Home>, time: Res<Time>, mut since: Local<f32>) {
-    if !home.unsaved {
+    if !home.unsaved || looking_only() {
         return;
     }
     *since += time.delta_secs();
@@ -815,6 +982,34 @@ pub fn keep(mut home: ResMut<Home>, time: Res<Time>, mut since: Local<f32>) {
     *since = 0.0;
     if home.write().is_some() {
         home.unsaved = false;
+    }
+}
+
+/// Whether the platform is where it is only to be looked at.
+///
+/// `SAIL_PLATFORM=here` moves the raft to the port bow so it can be photographed without
+/// a two-mile sail, and a berth looked at must not become a berth moved: with the knob on
+/// nothing is written, because the first fitting bought or cask landed would otherwise
+/// put a position sixty metres off her bow into the file as your home — in a sea where
+/// there is nothing there.
+fn looking_only() -> bool {
+    crate::knob::var("SAIL_PLATFORM").is_ok()
+}
+
+/// And write it on the way out.
+///
+/// The timer above writes every few seconds, which loses up to that much when somebody
+/// quits — three casks swung aboard and then the window closed is three casks gone, and
+/// "it did not save" is the one bug a player never forgives. This catches both ways out
+/// that the program knows about, the key and the window's own button; a kill still loses
+/// the last few seconds, which is what the timer is for.
+pub fn keep_on_the_way_out(mut quitting: MessageReader<AppExit>, home: Res<Home>) {
+    if quitting.is_empty() {
+        return;
+    }
+    quitting.clear();
+    if home.unsaved && !looking_only() {
+        home.write();
     }
 }
 
@@ -1030,5 +1225,74 @@ mod when_the_lamp_burns {
             "halfway through the dusk it was at {half:.2}"
         );
         assert!(lit_at(6.0) < lit_at(2.0), "it got dimmer as the sun set");
+    }
+}
+
+#[cfg(test)]
+mod where_she_lies {
+    use super::*;
+
+    fn town(at: DVec2, name: &str) -> sail_core::land::Harbour {
+        sail_core::land::Harbour {
+            at,
+            name: name.into(),
+            exposed_to: 0.0,
+        }
+    }
+
+    fn coast() -> Vec<sail_core::land::Harbour> {
+        vec![
+            town(DVec2::new(0.0, 2_000.0), "Nordvik"),
+            town(DVec2::new(600.0, 200.0), "Testvik"),
+            town(DVec2::new(-4_000.0, 0.0), "Melnes"),
+        ]
+    }
+
+    /// **In your own water she goes back where she was.** The whole of what a home is.
+    #[test]
+    fn her_own_berth_is_the_one_in_the_file() {
+        let was = DVec2::new(-1_234.0, 99.0);
+        let picked = berth_for(true, Some((was, "Fuglhavn".into())), DVec2::ZERO, &coast())
+            .expect("a berth");
+        assert_eq!(picked.at, was);
+        assert_eq!(picked.harbour, "Fuglhavn");
+        assert!(!picked.fresh, "a remembered berth was treated as a new one");
+    }
+
+    /// **And in anybody else's, the nearest town to where she opened** — which is the
+    /// anchorage she is lying in when she opens in one.
+    #[test]
+    fn a_guest_moors_at_the_nearest_town() {
+        let picked = berth_for(false, None, DVec2::new(500.0, 150.0), &coast()).expect("a berth");
+        assert_eq!(picked.harbour, "Testvik");
+        assert!(picked.fresh);
+    }
+
+    /// **A berth in borrowed water is never written down**, which is the one way this
+    /// could lose somebody their platform: a position in a visited archipelago, saved as
+    /// home, is open water or the inside of a hill in their own.
+    ///
+    /// The rule is in `moor`, and this is the half of it a function can hold: a guest
+    /// berth is always `fresh`, and the file is only touched when the sea is ours.
+    #[test]
+    fn a_guest_berth_is_not_mistaken_for_home() {
+        let remembered = Some((DVec2::new(-1_234.0, 99.0), "Fuglhavn".into()));
+        let guest = berth_for(false, remembered, DVec2::ZERO, &coast()).expect("a berth");
+        assert_eq!(
+            guest.harbour, "Testvik",
+            "it did not moor at the nearest town in the water she is actually in"
+        );
+        assert!(
+            guest.fresh,
+            "a berth in borrowed water was reported as the remembered one, which is how \
+             it would end up in the file"
+        );
+    }
+
+    /// A world with no towns in it leaves the platform where it was rather than dropping
+    /// it in the middle of the sea.
+    #[test]
+    fn nowhere_to_moor_is_not_an_answer() {
+        assert!(berth_for(false, None, DVec2::ZERO, &[]).is_none());
     }
 }
