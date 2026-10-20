@@ -316,6 +316,20 @@ def index(v: str, lang: str = "en") -> str:
     # The playable build sits at the root of the site in both languages, because there
     # is only one of it: the game inside the tab speaks whatever the game speaks.
     play_href = "play/" if lang == "en" else "../play/"
+    # **The first button on the page, when there is a build to put behind it.**
+    # Somebody who has just arrived will try the thing that costs them nothing before
+    # they will download a binary from a stranger, and a link to the demo three screens
+    # down the page is a link nobody follows. The download keeps its place, quietly.
+    top_play = (
+        f'''<a class="button" href="{play_href}">{u["in_a_tab"]}</a>
+      '''
+        if PLAY
+        else ""
+    )
+    get_it_quiet = " quiet" if PLAY else ""
+    # And the paragraph under the pictures stops saying there is no demo, because there
+    # is one: the same words would be a lie on a page with a button to it at the top.
+    pictures_lede = t.PICTURES_AND_A_TAB if PLAY else t.WHY_NOT_BROWSER
     in_a_tab = (
         f"""    <h3>{u["in_a_tab"]}</h3>
     <p>{t.IN_A_TAB}</p>
@@ -333,7 +347,7 @@ def index(v: str, lang: str = "en") -> str:
     <h1 class="title">sail<span>.</span></h1>
     <p class="standfirst">{t.STANDFIRST}</p>
     <div class="buttons">
-      <a class="button" href="#get-it">{u["get_it"]}</a>
+      {top_play}<a class="button{get_it_quiet}" href="#get-it">{u["get_it"]}</a>
       <a class="button quiet" href="{manual_href}">{u["read_manual"]}</a>
       <a class="button quiet" href="{REPO}">{u["source"]}</a>
     </div>
@@ -366,7 +380,7 @@ def index(v: str, lang: str = "en") -> str:
 <section id="pictures">
   <div class="wrap">
     <div class="heading"><h2>{u["pictures"]}</h2></div>
-    <p class="lede narrow">{t.WHY_NOT_BROWSER}</p>
+    <p class="lede narrow">{pictures_lede}</p>
     {reel_html(lang)}
     <div class="gallery">{gallery}</div>
   </div>

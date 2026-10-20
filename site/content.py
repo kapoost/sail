@@ -123,6 +123,14 @@ the one thing on the paper the boat does not obey. Worth knowing before trusting
 dead-reckoning position. Time runs 1:1 with no compression, which is a deliberate decision
 and one that will have to be revisited: forty miles at five knots is eight hours."""
 
+PICTURES_AND_A_TAB = """<b>These are the desk build, and there is a tab you can sail
+instead.</b> The whole thing compiles for <code>wasm32-unknown-unknown</code> and the
+button at the top of this page opens it: the same sea, the same boat, the same model,
+about fifteen megabytes down the wire and a little under fifty frames a second. What the
+tab cannot do is sailing together — a browser has no UDP and cannot broadcast, so the
+relay, the list of games on the network and joining by address are the desk build's
+alone — and it wants a real keyboard, so a phone will have to wait."""
+
 WHY_NOT_BROWSER = """<b>There is no demo you can play in this tab.</b> The whole thing
 compiles for <code>wasm32-unknown-unknown</code>, so that is not what stops it — what stops
 it is sailing together. A browser has no UDP and cannot broadcast, so the relay, the list of

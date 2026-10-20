@@ -125,6 +125,14 @@ papierze, której łódź nie słucha. Warto o tym wiedzieć, zanim się zaufa p
 zliczonej. Czas płynie jeden do jednego, bez kompresji, co jest decyzją świadomą i taką,
 do której trzeba będzie wrócić: czterdzieści mil przy pięciu węzłach to osiem godzin."""
 
+PICTURES_AND_A_TAB = """<b>To jest wersja z biurka, a w karcie można pożeglować od
+razu.</b> Całość kompiluje się na <code>wasm32-unknown-unknown</code> i przycisk na górze
+strony to otwiera: to samo morze, ta sama łódka, ten sam model, jakichś piętnaście
+megabajtów po drucie i niecałe pięćdziesiąt klatek na sekundę. Czego karta nie potrafi,
+to wspólnego żeglowania — przeglądarka nie ma UDP i nie umie rozgłaszać, więc przekaźnik,
+lista gier w sieci i dołączanie po adresie zostają przy wersji z biurka — i potrzebuje
+prawdziwej klawiatury, więc telefon musi poczekać."""
+
 WHY_NOT_BROWSER = """<b>Nie ma tu dema do zagrania w karcie przeglądarki.</b> Całość
 <em>kompiluje się</em> na <code>wasm32-unknown-unknown</code>, więc nie to jest przeszkodą
 — przeszkodą jest wspólne żeglowanie. Przeglądarka nie ma UDP i nie umie rozgłaszać, więc
