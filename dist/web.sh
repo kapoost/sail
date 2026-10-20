@@ -18,9 +18,16 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$here"
 out="dist/out/web"
 serve=""
+named=""
 for arg in "$@"; do
   case "$arg" in
     --serve) serve=1 ;;
+    # Keep the function names in the module, for `dist/tab.py --profile`. The sampler
+    # in a browser reports what it finds in the name section, and a stripped module
+    # answers "wasm-function[18521]" to every question about where the time went —
+    # which is a profile of nothing. Costs a few megabytes, so it is not what gets
+    # published.
+    --named) named=1 ;;
     *) out="$arg" ;;
   esac
 done
@@ -42,17 +49,24 @@ if ! rustup target list --installed | grep -q wasm32-unknown-unknown; then
 fi
 
 echo "sail: building for the browser (web profile, webgpu)"
+if [ -n "$named" ]; then
+  export CARGO_PROFILE_WEB_STRIP=none
+fi
 cargo build --profile web --target wasm32-unknown-unknown -p sail-app --features webgpu
 
 rm -rf "$out"
 mkdir -p "$out"
+keep=(--remove-name-section --remove-producers-section)
+if [ -n "$named" ]; then
+  keep=(--remove-producers-section --keep-debug)
+fi
 wasm-bindgen --out-dir "$out" --target web --no-typescript \
-  --remove-name-section --remove-producers-section \
+  "${keep[@]}" \
   target/wasm32-unknown-unknown/web/sail-app.wasm
 
 # Binaryen if it happens to be here, and no fuss if it is not: `-Oz` takes a few more
 # megabytes off, and the stripped module is already inside what a page should ask for.
-if command -v wasm-opt >/dev/null; then
+if [ -z "$named" ] && command -v wasm-opt >/dev/null; then
   echo "sail: wasm-opt -Oz"
   wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
     "$out/sail-app_bg.wasm" -o "$out/sail-app_bg.wasm"
