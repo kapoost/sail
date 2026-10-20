@@ -4,6 +4,14 @@ name: pages
 # list comes out of `crates/sail-app/src/help.rs`, the polar and the model table out of
 # `README.md`, the version out of `Cargo.toml` — so a page that disagrees with the
 # program is a build failure here rather than something a reader finds first.
+#
+# **And the game itself is published with it**, at `/play/`: a wasm build served beside
+# the pages. That is why this workflow now compiles Rust and why it watches the whole
+# crate rather than one file of it. The cost is honest and worth naming: a cold run
+# builds the engine for a target the cache has never seen, which is twenty minutes or
+# so; a warm one rebuilds `sail-app` alone and is a few. The site therefore waits for
+# the game — deliberately, because a page advertising a demo that failed to build is
+# worse than a page published a quarter of an hour later.
 
 on:
   push:
@@ -11,8 +19,12 @@ on:
     paths:
       - "site/**"
       - "README.md"
-      - "crates/sail-app/src/help.rs"
-      - "crates/*/Cargo.toml"
+      - "crates/**"
+      - "assets/**"
+      - "dist/web/**"
+      - "dist/web.sh"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -28,10 +40,73 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The playable build. Its own job so that the cache it needs — a Rust target
+  # directory for `wasm32-unknown-unknown` — is not mixed up with a job whose other
+  # half is Python and a PDF.
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm
+      # Belt and braces: `rust-toolchain.toml` says `stable`, which is the toolchain the
+      # action set up — but the target has to be present for whichever toolchain rustup
+      # actually selects when cargo runs in this directory, and that is cheap to make
+      # certain of.
+      - run: rustup target add wasm32-unknown-unknown
+
+      # `wasm-bindgen-cli` must match the `wasm-bindgen` in the lockfile exactly or the
+      # module it produces will not load, so the version is read from the lockfile
+      # rather than written down twice. Cached by that version: installing it is three
+      # minutes and it changes about twice a year.
+      - name: the binder, at the version the lockfile says
+        run: |
+          want=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[^0-9.]/, "", $0); print; exit}' Cargo.lock)
+          echo "WASM_BINDGEN_VERSION=$want" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: wasm-bindgen-${{ env.WASM_BINDGEN_VERSION }}
+      - run: |
+          if ! command -v wasm-bindgen >/dev/null; then
+            cargo install -f wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
+          fi
+
+      - name: build the game for a browser
+        run: dist/web.sh
+
+      # The one check that matters here: a module that is a few kilobytes is a build
+      # that produced a stub, and nothing downstream would notice.
+      - name: it is a game and not a stub
+        run: |
+          test -s dist/out/web/sail-app_bg.wasm
+          test -s dist/out/web/index.html
+          test -s dist/out/web/assets/sea_wave.wesl
+          size=$(du -m dist/out/web/sail-app_bg.wasm | cut -f1)
+          echo "wasm: ${size} MB"
+          [ "$size" -gt 10 ] || { echo "that is not the whole game"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: dist/out/web
+          retention-days: 1
+
   build:
+    needs: web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web
+          path: dist/out/web
 
       - uses: actions/setup-python@v5
         with:
@@ -53,7 +128,7 @@ jobs:
         run: python3 site/keys.py
 
       - name: build
-        run: python3 site/build.py --pdf
+        run: python3 site/build.py --pdf --play dist/out/web
 
       # A page that built but came out empty is the failure this catches. The build
       # itself now refuses to finish if any local reference is missing — added after a
@@ -80,6 +155,14 @@ jobs:
             test -s "_site/$f" || { echo "missing: $f"; exit 1; }
           done
           echo "pictures: $(ls _site/shots | tr '\n' ' ')"
+          # And the game that is published with the page: the module, the page that
+          # starts it, the shaders it fetches, and the link that gets anybody there.
+          test -s _site/play/sail-app_bg.wasm
+          test -s _site/play/index.html
+          test -s _site/play/assets/sea_wave.wesl
+          grep -q 'href="play/"' _site/index.html
+          grep -q 'href="../play/"' _site/pl/index.html
+          echo "play: $(du -m _site/play/sail-app_bg.wasm | cut -f1) MB of wasm"
 
       - uses: actions/upload-pages-artifact@v3
         with:

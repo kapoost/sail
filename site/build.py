@@ -29,6 +29,10 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 OUT = ROOT / "_site"
+# Where the browser build is, if one was handed to us. `--play dist/out/web` copies it
+# in beside the pages and turns on the link to it; without it the link is not written at
+# all, so a local preview does not advertise something it has not got.
+PLAY = None
 
 sys.path.insert(0, str(HERE))
 import content  # noqa: E402
@@ -309,6 +313,18 @@ def index(v: str, lang: str = "en") -> str:
     )
     manual_href = "manual.html"
     pdf_href = "manual.pdf"
+    # The playable build sits at the root of the site in both languages, because there
+    # is only one of it: the game inside the tab speaks whatever the game speaks.
+    play_href = "play/" if lang == "en" else "../play/"
+    in_a_tab = (
+        f"""    <h3>{u["in_a_tab"]}</h3>
+    <p>{t.IN_A_TAB}</p>
+    <div class="buttons">
+      <a class="button" href="{play_href}">{u["in_a_tab"]}</a>
+    </div>"""
+        if PLAY
+        else ""
+    )
 
     return f"""{head(u["page_title"], u["page_desc"], lang, "index.html")}
 <header class="mast">
@@ -406,6 +422,7 @@ def index(v: str, lang: str = "en") -> str:
         <p>{t.INSTALL_WINDOWS}</p>
       </div>
     </div>
+{in_a_tab}
     <h3>{u["from_source"]}</h3>
     <pre>cargo run -p sail-app --release      # {t.SOURCE_GAME}
 cargo test -p sail-core              # {t.SOURCE_TESTS}
@@ -640,6 +657,11 @@ def every_reference_resolves(expect_pdf: bool = True) -> None:
 
 
 def main() -> None:
+    global PLAY
+    if "--play" in sys.argv:
+        PLAY = pathlib.Path(sys.argv[sys.argv.index("--play") + 1])
+        if not (PLAY / "sail-app_bg.wasm").is_file():
+            raise SystemExit(f"--play {PLAY}: no sail-app_bg.wasm in there")
     v = version()
     if OUT.exists():
         shutil.rmtree(OUT)
@@ -664,6 +686,11 @@ def main() -> None:
     for extra in ("sailing.webp", "keys.webp", "widths.webp"):
         if (HERE / "shots" / extra).exists():
             shutil.copy(HERE / "shots" / extra, OUT / "shots" / extra)
+    if PLAY:
+        shutil.copytree(PLAY, OUT / "play")
+        wasm = (OUT / "play/sail-app_bg.wasm").stat().st_size
+        print(f"  play/ — {wasm / 1e6:.0f} MB of wasm and the assets beside it")
+
     # GitHub Pages would otherwise hand the whole thing to Jekyll.
     (OUT / ".nojekyll").write_text("", encoding="utf-8")
 

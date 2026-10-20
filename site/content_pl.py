@@ -626,6 +626,12 @@ pobierający — przeglądarka dokłada, <code>Invoke-WebRequest</code> nie.
 <code>Sail.exe</code> ze strony wydań też działa, jeśli wolisz kliknąć <b>More info</b>
 i <b>Run anyway</b>."""
 
+IN_A_TAB = """Bez instalowania, jeśli wolisz najpierw zobaczyć: ta sama gra zbudowana
+dla przeglądarki, w karcie. Potrzebuje WebGPU — Chrome, Edge albo Safari od 18 — i
+jakichś piętnastu megabajtów po drucie, a chodzi w niecałych pięćdziesięciu klatkach na
+sekundę wobec sześćdziesięciu na biurku. Tylko samotnie: strona nie znajdzie gry, którą
+kolega uruchomił w sąsiednim pokoju."""
+
 SOURCE_GAME = "gra"
 SOURCE_TESTS = "zestaw testów"
 SOURCE_POLAR = "polara prędkości"
