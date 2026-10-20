@@ -167,6 +167,7 @@ pub fn draw(
     fleet: Res<crate::fleet::Fleet>,
     mut missions: Missions,
     mut course: ResMut<crate::course::Course>,
+    mut screen: ResMut<crate::screen::Screen>,
 ) -> Result {
     if !settings.open {
         net.scan = None;
@@ -269,6 +270,28 @@ pub fn draw(
                         ink.0 = !ink.0;
                     }
                     pixels(ui, &mut retro);
+                    // Where the picture is drawn. `F11` is the same switch without
+                    // opening this, and both of them end up in the same resource —
+                    // see `screen.rs`, which also explains why the window can be
+                    // dragged about at all now.
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("window")
+                                .color(egui::Color32::from_rgb(150, 150, 130))
+                                .monospace()
+                                .size(11.0),
+                        );
+                        for which in [crate::screen::Screen::Windowed, crate::screen::Screen::Full]
+                        {
+                            if ui
+                                .selectable_label(*screen == which, which.name())
+                                .on_hover_text("F11, or Alt Enter")
+                                .clicked()
+                            {
+                                *screen = which;
+                            }
+                        }
+                    });
                     if ui.selectable_label(hud.0, "the diagnostic panel").clicked() {
                         hud.0 = !hud.0;
                     }

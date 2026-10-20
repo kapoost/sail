@@ -49,6 +49,7 @@ mod rig;
 mod rod;
 mod sail_texture;
 mod scenarios;
+mod screen;
 mod sea_card;
 mod sea_texture;
 mod settings;
@@ -68,7 +69,7 @@ mod windstreaks;
 mod world;
 
 use bevy::prelude::*;
-use bevy::window::EnabledButtons;
+use bevy::window::WindowResizeConstraints;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 /// No time compression — the clock runs at one to one.
@@ -239,18 +240,20 @@ fn main() {
                     // anyway, and that case has to be looked at rather than reasoned
                     // about.
                     resolution: window_size().into(),
-                    // The window is fixed at this size on purpose. The instruments are
-                    // not a responsive layout: the console, the chart and the gauges are
-                    // drawn at known pixel sizes into a 480-line image that is then
-                    // scaled, and at any other aspect the needles sit off their dials and
-                    // the chart corner crawls out of the frame. A resizable window offers
-                    // a promise the picture cannot keep, so it is withdrawn.
-                    resizable: false,
-                    // Resizing is also reachable past `resizable` on macOS: the green
-                    // button zooms the window to the display. Turning the button off is
-                    // part of the same decision, not a separate nicety.
-                    enabled_buttons: EnabledButtons {
-                        maximize: false,
+                    // **It resizes now, and it goes full screen.** It did not, and the
+                    // reasoning was sound as far as it went: the instruments are not a
+                    // responsive layout, so a window at some other size was a promise the
+                    // drawing could not keep. What changed is that the drawing can keep
+                    // it — the world is rendered at a fixed drawn width and scaled to
+                    // whatever the window is, and the console shrinks until the strip
+                    // fits. See `screen.rs` for the rest of that argument, and `F11`.
+                    resizable: true,
+                    mode: screen::Screen::asked().mode(),
+                    // The floor, because a window that can be dragged into uselessness is
+                    // a bug report nobody can diagnose.
+                    resize_constraints: WindowResizeConstraints {
+                        min_width: screen::NARROWEST,
+                        min_height: screen::SHORTEST,
                         ..default()
                     },
                     // The page owns the canvas, and for the same reason the window is
@@ -296,6 +299,7 @@ fn main() {
     // The sky as the water reads it, rebuilt whenever the sky itself is repainted.
     .init_resource::<sky::Dome>()
     .init_resource::<world::Spent>()
+    .insert_resource(screen::Screen::asked())
     .init_resource::<settings::Settings>()
     .init_resource::<help::Help>()
     .init_resource::<logbook::Logbook>()
@@ -512,6 +516,12 @@ fn main() {
         )
             .chain(),
     )
+    // How big the picture is: the key and the panel are the same switch, and the
+    // window can also be changed from outside by a window manager. Its own
+    // `add_systems` rather than another limb of the chain above — that tuple is at
+    // the twenty the scheduler allows, and this pair has nothing to say to the
+    // order the rest of them run in.
+    .add_systems(Update, (screen::the_key, screen::follow).chain())
     .add_systems(
         EguiPrimaryContextPass,
         (

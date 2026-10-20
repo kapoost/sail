@@ -5,8 +5,15 @@ written the same way `docs/online.md` was: the shape first, the detail that is m
 from it second, and an honest list of what only the owner can decide.
 
 **The one-line version:** the model is finished enough to sell and the *game around it*
-is not — three things stand between here and a shop window, none of them content, and
-they should be built before a single new feature is.
+is not — a short list of things stands between here and a shop window, none of them
+content, and they should be built before a single new feature is.
+
+**Decided, 20 October:** no Early Access — one 1.0 release. Price later. Windows, macOS
+and Linux, the Mac unsigned at first and signed before it is sold. No time compression:
+the game is aimed at sailing together in small worlds, where a passage is an evening and
+not a crossing, and a clock that runs faster for one boat than another is not a thing a
+shared sea can have. Demo as recommended — Sailing 101 and one delivery. **Done since:**
+the window resizes and goes full screen.
 
 ---
 
@@ -31,27 +38,30 @@ debt.
 
 ---
 
-## The three things that block a shop window
+## What blocks a shop window
 
-None of these is content. All three are the difference between "a thing you can run" and
-"a thing somebody pays for".
+None of it is content. It is the difference between "a thing you can run" and "a thing
+somebody pays for".
 
-### 1. The window is nailed to 1440 × 880
+### 1. ~~The window is nailed to 1440 × 880~~ — done
 
-`main.rs` sets `resizable: false` and a fixed size, on purpose and for a good reason: the
+`main.rs` set `resizable: false` and a fixed size, on purpose and for a good reason: the
 instruments are drawn at known pixel sizes and a resizable window promises a layout the
-picture cannot keep. On Steam that reasoning does not survive contact with the customer.
-People expect full screen, their own resolution, and a game that fits a 1280 × 800 Steam
-Deck.
+picture cannot keep. On Steam that reasoning does not survive contact with the customer —
+people expect full screen, their own resolution, and a game that fits a 1280 × 800 Deck.
 
-Half the work is already done — `retro::console_scale` adapts the console to the physical
-width, and the 3D picture is rendered at a fixed drawn width and scaled up anyway. What
-is missing: a real video settings page (full screen / windowed / borderless, resolution,
-drawn width, UI scale), the chart and the panels behaving at both extremes, and a pass
-over every hard-coded panel size.
+It does keep the promise now, because two pieces of it were already there: the world is
+rendered at a fixed drawn width and scaled to whatever the window is, and
+`retro::console_scale` shrinks the console until the strip fits. So the window opens,
+resizes and goes full screen on `F11` or from the settings panel, with a floor under it
+(`screen::NARROWEST` by `screen::SHORTEST`) because a window that can be dragged into
+uselessness is a bug report nobody can diagnose. The chart in the corner now takes its
+width from the instrument case beneath it rather than a constant, so the right-hand side
+reads as one column at every size.
 
-**Lands in:** `main.rs` (window), `retro.rs` (scale), `settings.rs` (the page),
-`panel.rs`, `chart/`, `hud.rs` (layout at the extremes).
+**Landed in:** new `screen.rs`, plus `main.rs`, `chart/mod.rs`, `settings.rs`, `help.rs`.
+What is left of this item: a resolution picker for the windowed case, which is the window
+manager's job on every platform we ship to, and only worth adding if somebody asks.
 
 ### 2. Nothing is ever saved
 
@@ -66,20 +76,22 @@ slot is enough to start; Steam Cloud wants the same file.
 **Lands in:** a new `crates/sail-app/src/anchorage.rs` (or `passage.rs`) plus `serde` on
 the few state structs that cross the line, `settings.rs` for the UI.
 
-### 3. No pause, no time compression
+### 3. ~~No pause, no time compression~~ — not for this game
 
-`main.rs` says it plainly: the clock runs at one to one. `course.rs` lays legs on that
-assumption. Forty miles at five knots is eight hours, and the README already admits this
-has to come back.
+Struck out rather than deleted, because the reasoning is worth keeping: with the clock at
+one to one, forty miles at five knots is eight hours, and that is what the README has
+always said would have to come back.
 
-The honest version for a sailing game is not a speed slider but a **watch below**: ×1, ×4,
-×16, available only when nothing needs a hand — no squall, no land inside a mile, no
-mission step waiting on you — and dropped to ×1 the moment something does. That is both
-more defensible and more interesting than a slider, and it uses the hazard tests the model
-already has.
+It does not come back here. **The game this is becoming is two to eight boats on the same
+water**, and a clock that runs at four for one of them and at one for the others is not a
+thing a shared sea can have — the alternative, a compression everybody agrees to, is a
+lobby vote in the middle of a passage, which is worse. The answer instead is the size of
+the world: five and a half kilometres across, harbours a mile and a half apart, a leg
+that is an evening rather than a crossing. A passage you can finish is better than a
+passage you can skip.
 
-**Lands in:** `sim.rs` (the step), `mission.rs` and `navigation.rs` (what counts as
-"needs a hand"), `hud.rs` (showing it), plus a test per interrupting condition.
+**A pause for one person on a desk** is still worth having, and is small. It is not on
+this list because it blocks nothing.
 
 ---
 
@@ -88,9 +100,9 @@ already has.
 | Platform | Today | For Steam |
 |---|---|---|
 | Windows x86-64 | Built in CI | Ship it |
-| macOS universal | Built in CI | Ship it — **but it must be signed and notarised**, see risks |
-| Linux x86-64 | Server only | Add the game to `release.yml`; needed for a native Deck build |
-| Steam Deck | Untested | Controller is already in; needs item 1, then a verification pass |
+| macOS universal | Built in CI | **Decided:** ships. Unsigned while it is only being sailed here; signed and notarised before it is sold — see risks |
+| Linux x86-64 | Server only | **Decided:** ships. The shared server already runs there, and the same job can build the game beside it |
+| Steam Deck | Untested | Controller is already in, the window now fits it; needs a verification pass |
 
 The cheap path to the Deck is Proton running the Windows build — worth testing on day one,
 because if it works the native Linux depot becomes a nice-to-have rather than a blocker.
@@ -137,14 +149,16 @@ tempting and would turn a cruising game into a racing game by accident.
 
 ## Price and shape
 
-**Recommendation: Early Access, $14.99 (about 59 zł), moving to $19.99 at 1.0.**
+**Decided: no Early Access — one 1.0 release, price set nearer the date.**
 
-The reasoning: the thing that is usually unfinished in Early Access — the simulation — is
-the thing that is finished here, and the thing that is usually finished — content and
-comfort — is what is missing. That is an honest Early Access and it reads well on the
-page: *the boat is done, the world around her is growing, here is the list and the order.*
+The case for Early Access was that the simulation is the finished half and the content is
+the growing one, which reads well on a store page. The case against it won: a game sold as
+unfinished is reviewed as unfinished, the launch visibility is spent once either way, and
+a one-person project does not need the second round of store-page work that leaving Early
+Access costs. It ships when the list below says it is a game.
 
-A regional price for PL below the automatic conversion is worth setting by hand.
+What that changes downstream: the content list is no longer "wave one before launch, wave
+two after" — it is the scope of the release, and the date is whatever that scope takes.
 
 ---
 
@@ -191,10 +205,30 @@ branch stays closed; push to a `beta` branch first and promote by hand.
 
 * **Steam Direct:** $100 per app, recoupable after $1,000 of sales. 30% of revenue to
   Valve.
-* **Tax interview:** required before payouts. A Polish company files W-8BEN-E, a sole
-  trader W-8BEN; the Poland–US treaty takes withholding on game sales to zero when it is
-  filled in correctly. **Decide the payout entity before opening the account** — moving it
-  afterwards is paperwork.
+* **Payout entity — decided: a Polish JDG.** The right call for a one-person project:
+  it exists already or opens in a day, it costs nothing to keep, and Valve is the merchant
+  of record — the customer buys from Valve, not from us, which is where most of the
+  consumer-facing liability that would argue for a company actually sits.
+* **Tax interview:** required before payouts, and a JDG files **W-8BEN** as an individual
+  rather than W-8BEN-E: a sole trader has no separate legal personality, so the form
+  carries a person's name and claims the Poland–US treaty. Withholding applies only to the
+  US-sourced share of sales, and what it comes to with the treaty claimed is a question
+  for an accountant rather than for this document — get the number in writing before the
+  first payout rather than after it.
+* **Three things worth asking that accountant, in this order:**
+  1. **IP Box.** Income from a copyright to a computer program can be taxed at 5% for a
+     JDG that keeps the required records *from the start of the year in which it arises*.
+     A game sold on Steam is exactly that kind of income. Started late, the records cannot
+     be reconstructed — which makes this the one question with a deadline on it.
+  2. **Which form of taxation**, given the above: ryczałt, liniowy, or the scale.
+  3. **VAT on a service sold to a US company**, and whether anything has to be registered
+     before the first invoice.
+* **The PKD code** for publishing games, 58.21.Z, has to be on the business before it
+  sells one.
+* **One thing that is not tax:** this is being written by somebody employed elsewhere as a
+  CTO. Check what the employment contract says about work created outside it before the
+  shop opens, not after. The git history is the record of when and where it was written,
+  and it is a good one — but it is worth being able to say the contract allows it.
 * **Rating:** Steam does not require one. PEGI/USK matter only for a boxed release.
 * **Licences:** already clean. The hull is CC0, VT323 is OFL and its text ships beside the
   binary, the crates are MIT/Apache. `ATTRIBUTION.md` goes into the depot as it goes into
@@ -223,9 +257,10 @@ Each ends with a sentence that is either true or false — no "mostly done".
 **M0 — Decisions.** The list at the bottom of this document is answered. *Ends when the
 Steam partner account exists and the app is created.*
 
-**M1 — A game you can leave and come back to.** Window and video settings, save and
-resume, pause and the watch below. *Ends when somebody can sail for twenty minutes, quit
-mid-passage, and pick it up the next evening at the right resolution.*
+**M1 — A game you can leave and come back to.** ~~Window and video settings~~ (done —
+the window resizes, goes full screen on `F11`, and the chart in the corner now takes its
+width from the instrument case under it), save and resume. *Ends when somebody can sail
+for twenty minutes, quit mid-passage, and pick it up the next evening.*
 
 **M2 — The shop skeleton.** Depots, CI upload, cloud saves, ten achievements, store page
 live, wishlists open, demo app built from the same binary. *Ends when a stranger can
@@ -246,16 +281,15 @@ the campaign. *Ends when the Early Access promise on the store page has been kep
 
 Each with the recommendation, so the question is yes or no rather than open:
 
-1. **Payout entity** — company or sole trader. *Recommendation: the one whose accountant
-   already handles foreign revenue; decide before the account is opened.*
-2. **Early Access or a single 1.0** — *Recommendation: Early Access, for the reason given
-   above.*
-3. **Price** — *Recommendation: $14.99 in Early Access, $19.99 at 1.0, PL set by hand.*
-4. **Platforms at launch** — *Recommendation: Windows and macOS native, Deck through
-   Proton, native Linux when the Deck numbers say it is worth it.*
-5. **Multiplayer in Early Access?** — *Recommendation: yes, as it is, through the existing
-   relay and documented as LAN-first. Steam Networking after launch.*
-6. **Demo scope** — *Recommendation: Sailing 101 plus one delivery, no campaign, no save.*
-7. **The quarter you are aiming at** — everything above is weeks of work by one person; the
-   date decides how much of the content list is inside Early Access and how much is after
-   it.
+1. ~~Payout entity~~ — **decided: a Polish JDG**, W-8BEN at the tax interview. The one
+   question left under it has a deadline rather than a decision: IP Box has to be set up
+   from the start of the tax year, so ask the accountant before January rather than before
+   launch.
+2. ~~Early Access or a single 1.0~~ — **decided: one 1.0.**
+3. **Price** — open, and deliberately late: it depends on how much of the content list is
+   in the release.
+4. ~~Platforms at launch~~ — **decided: Windows, macOS and Linux.**
+5. **Multiplayer at launch** — yes, through the existing relay. Steam Networking after,
+   when there is somebody to be matched with.
+6. ~~Demo scope~~ — **decided: Sailing 101 plus one delivery, no campaign, no save.**
+7. **The date** — open until the scope is frozen.

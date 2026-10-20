@@ -757,6 +757,48 @@ pub(crate) fn in_hand(
     asked
 }
 
+/// How big the folded chart is: **as wide as the instrument case under it**.
+///
+/// The chart in the corner and the binnacle below it are one column down the right of
+/// the screen, and a column whose two halves are different widths reads as two things
+/// that happen to be near each other rather than as one instrument panel. It was a flat
+/// three hundred and thirty points against a case that comes out around four hundred,
+/// and that step was the first thing the eye found on that side of the picture.
+///
+/// Measured rather than matched by hand: the case's own area reports its size from the
+/// frame before, so a change to what the instruments show moves the chart with it and
+/// there is no second number to keep in step. A frame of lag is invisible — the case only
+/// changes size when the readings in it do.
+///
+/// **And it is allowed to be shorter than it is wide**, which the chart on the table is
+/// not. The table wants a square because dividers walked across a paper with a different
+/// scale up and across measure the wrong distance; the corner is a *glance* — you are
+/// checking the water ahead, not stepping off a run — and its scale comes from its width
+/// either way. So when the case is tall and the room above it is not square, what gives
+/// is the height. The alternative was a chart narrower than the case it sits on, which is
+/// the thing this is for.
+fn folded(ctx: &egui::Context, screen: egui::Rect) -> egui::Vec2 {
+    let case = egui::AreaState::load(ctx, egui::Id::new("corner")).and_then(|area| area.size);
+    folded_to(case, screen.height())
+}
+
+/// The arithmetic of the above, without a window in it.
+///
+/// Split out for the usual reason: the shape of the corner is a thing a test can hold —
+/// the widths must match, the chart must not reach down into the case, and neither of
+/// them may be squeezed into a smear — and none of that needs egui to be running.
+fn folded_to(case: Option<egui::Vec2>, screen_height: f32) -> egui::Vec2 {
+    /// The size it was before any of this, and the fallback on the first frame.
+    const AS_DRAWN: f32 = 330.0;
+    /// Below this a chart in a corner is a decoration rather than a glance.
+    const LEAST: f32 = 180.0;
+    /// What the two of them keep between themselves and the edges.
+    const MARGINS: f32 = 36.0;
+    let width = case.map(|size| size.x).unwrap_or(AS_DRAWN).max(LEAST);
+    let room = screen_height - case.map(|size| size.y).unwrap_or(0.0) - MARGINS;
+    egui::vec2(width, width.min(room).max(LEAST))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
@@ -832,7 +874,7 @@ pub fn draw(
             let side = (screen.height() - 70.0).min(screen.width() - 70.0);
             egui::vec2(side, side)
         } else {
-            egui::vec2(330.0, 330.0)
+            folded(ctx, screen)
         };
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         let p = ui.painter_at(rect);
@@ -1289,5 +1331,62 @@ impl Table {
     pub fn to_water(&self, at: egui::Pos2) -> glam::DVec2 {
         let off = at - self.rect.center();
         self.middle + glam::DVec2::new((off.x / self.scale) as f64, (-off.y / self.scale) as f64)
+    }
+}
+
+#[cfg(test)]
+mod the_corner_is_one_column {
+    use super::*;
+
+    /// **The chart and the case under it are the same width**, which is the whole point:
+    /// two panels in a corner at different widths read as two things that happen to be
+    /// near each other.
+    #[test]
+    fn the_chart_matches_the_case_it_sits_on() {
+        let case = egui::vec2(404.0, 480.0);
+        let chart = folded_to(Some(case), 1000.0);
+        assert_eq!(chart.x, case.x, "the chart came out {} wide", chart.x);
+    }
+
+    /// And it stops before it reaches the case — a square that does not fit the gap
+    /// overlaps the thing it was supposed to line up with.
+    ///
+    /// Over the screens this game is actually played on. The console shrinks itself until
+    /// the strip fits, so the screen is about nine hundred and fifty points tall whether
+    /// it is a laptop, a large monitor or a Steam Deck; the case is between a third and
+    /// two thirds of that depending on what the instruments are showing.
+    #[test]
+    fn it_never_reaches_down_into_the_instruments() {
+        for screen in [900.0_f32, 950.0, 1100.0] {
+            for case_height in [360.0_f32, 480.0, 640.0] {
+                let case = egui::vec2(404.0, case_height);
+                let chart = folded_to(Some(case), screen);
+                assert!(
+                    chart.y + case.y <= screen,
+                    "a {screen:.0}-point screen with a {case_height:.0}-point case: \
+                     {:.0} of chart is {:.0} too much",
+                    chart.y,
+                    chart.y + case.y - screen
+                );
+            }
+        }
+    }
+
+    /// **The floor wins over the gap**, which is the one case where the two rules above
+    /// disagree: on a screen too short to hold both, a chart squeezed to forty points is
+    /// no use to anybody, so it keeps its floor and overlaps instead. The window cannot be
+    /// dragged that small — see `screen::SHORTEST` — so this is the behaviour at a size
+    /// only a stranger display can produce, and overlapping is the better failure.
+    #[test]
+    fn it_is_never_squeezed_into_a_smear() {
+        let chart = folded_to(Some(egui::vec2(404.0, 700.0)), 740.0);
+        assert!(chart.y >= 180.0, "the chart came out {:.0} tall", chart.y);
+    }
+
+    /// And before the case has ever been drawn there is still a chart.
+    #[test]
+    fn the_first_frame_has_a_size_too() {
+        let chart = folded_to(None, 880.0);
+        assert!(chart.x > 200.0 && chart.y > 200.0, "{chart:?}");
     }
 }

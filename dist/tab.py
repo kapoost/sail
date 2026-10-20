@@ -38,6 +38,8 @@ except ImportError:  # pragma: no cover - a message rather than a traceback
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 PUBLISHED = "https://kapoost.github.io/sail/play/"
 PORT = 9333
+# Retina, when a run wants to reproduce what a laptop screen does.
+DPR2 = False
 
 
 class Tab:
@@ -54,6 +56,7 @@ class Tab:
                 "--use-angle=metal",
                 f"--remote-debugging-port={port}",
                 f"--window-size={size[0]},{size[1]}",
+                *(["--force-device-scale-factor=2"] if DPR2 else []),
                 "--remote-allow-origins=*",
                 "--no-first-run",
                 "--user-data-dir=/tmp/sail-tab-profile",
@@ -301,8 +304,12 @@ def main():
         help="the .wasm being served, to turn wasm-function[N] into function names",
     )
     ap.add_argument("--quiet", action="store_true", help="only the summary")
+    ap.add_argument("--say", action="store_true", help="print every line the page said")
+    ap.add_argument("--retina", action="store_true", help="pretend the display doubles")
     args = ap.parse_args()
 
+    global DPR2
+    DPR2 = args.retina
     width, height = (int(n) for n in args.size.lower().split("x"))
     url = args.url
     if args.frames:
@@ -323,7 +330,13 @@ def main():
             tab.shot(args.shot)
             print(f"picture: {args.shot}")
         said = summarise(tab.console)
-        if not args.quiet:
+        if args.say:
+            # Everything except the one warning Bevy repeats for every sail it rebuilds,
+            # which is thousands of lines and buries what is worth reading.
+            for line in tab.console:
+                if "different vertex count" not in line:
+                    print(" ", line.strip()[:260])
+        elif not args.quiet:
             for line in tab.console:
                 if "frame:" in line or "slow frames" in line:
                     print(" ", line.strip())
