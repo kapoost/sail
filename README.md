@@ -160,10 +160,11 @@ slope, drift and band limit against `sail-core`. They also check the drawn sea's
 properties on the card: that a creeping tone cannot jump a band, and that a crest glows
 up-sun and not down.
 
-A tab is now a measurement rather than a theory: the same scene runs in Chromium over
-WebGPU at 48 frames a second, with the sea at 0.17 ms — the shader is WGSL and goes over
-unchanged. What is slow there is the engine's own frame on one thread, not the water.
-`docs/browser.md` has the table and the four things that were in the way.
+A tab is now a measurement rather than a theory: `dist/web.sh` builds it, and the same
+scene runs in Chromium over WebGPU at 48 frames a second with the sea at 0.17 ms — the
+shader is WGSL and goes over unchanged. What is slow there is the engine's own frame on
+one thread, not the water. `docs/browser.md` has the table and the four things that were
+in the way.
 
 The graphics card was not the limit before and still is not: the frame rate is the same
 at a drawn width of 480 and at 1920, because the world is rendered into a small image and

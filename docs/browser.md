@@ -140,33 +140,47 @@ it is about everything the renderer does around it. That is also the argument th
 hosting decides, and the same hosting constraint applies — a page served from GitHub
 Pages gets one thread.
 
-### Seeing it for yourself
+### Building it
 
 ```sh
-cargo build --release --target wasm32-unknown-unknown -p sail-app --features webgpu
-wasm-bindgen --out-dir /tmp/sailweb --target web --no-typescript \
-  target/wasm32-unknown-unknown/release/sail-app.wasm
-cp -R assets /tmp/sailweb/           # the hull and the sea's shaders, fetched over HTTP
-# plus an index.html that imports ./sail-app.js and calls init()
-cd /tmp/sailweb && python3 -m http.server 8777
+dist/web.sh            # into dist/out/web
+dist/web.sh --serve    # and then http://localhost:8777
 ```
 
-Then `http://localhost:8777/?seed=7&wind=18&sea=built&frames=1`. The wasm is 144 MB
-unoptimised and nobody has put `wasm-opt` near it yet; over a local socket that does not
-matter and over a wire it would be the first thing to fix.
+Three things that script does which `cargo build` does not. It picks the **`web`
+profile**, which is `dist` plus `strip` and `panic = "abort"` — the debug information is
+most of a wasm module, and taking it out is 144 MB down to **60 MB, 14.6 MB over the
+wire**, since every server worth the name gzips it. It asks for **WebGPU**, because the
+sea reads its spectrum out of a storage buffer and WebGL2 has no such thing. And it puts
+**`assets/` beside the page**, because on the web the asset server fetches them over
+HTTP instead of unpacking them out of the binary — which is the one platform where this
+game's fallback path was always the right answer.
 
-Two things this does **not** yet do: it has no click-to-start, so the audio context never
-opens, and it has no loading screen, so the first seconds are a blank page while 144 MB
-of wasm compiles.
+It also checks that `wasm-bindgen-cli` matches the `wasm-bindgen` in `Cargo.lock` before
+it builds anything, because the failure when they disagree is a stack trace in a browser
+console an hour later. `wasm-opt` is used if it happens to be installed and nothing is
+made of it if not.
+
+The page itself is `dist/web/index.html`: a title, the keys, a progress bar against the
+download, and a button. **The button is deliberate** — a browser will not open an audio
+context without a gesture, so a game started without one is a game that sounds broken,
+and "press to sail" buys the wind and the water with it. The canvas carries its own
+aspect and the page scales it to fit, which is the same decision the desk build makes
+with a window that cannot be resized: the console, the chart and the gauges are drawn at
+known pixel sizes, so the picture is scaled rather than re-laid-out.
 
 ### What is left to settle
 
 * **The engine's frame, not ours.** Nineteen of twenty-one milliseconds. Whether that is
   reducible without threads is the next measurement, not the next assumption.
-* **Size.** 144 MB of wasm before `wasm-opt`, 370 MB resident, 50 MB of it the ripple
-  film. A tab will take it and would rather not.
-* **A loading screen and a click to start.** Both are a page's manners rather than a
-  port.
+* **Somewhere to put it.** 60 MB is over GitHub Pages' 100 MB per-file limit only if it
+  grows, but the repository would have to carry the module or the pages workflow would
+  have to build it — six minutes of wasm compile added to a job that takes one.
+* **The aspect.** The canvas follows the viewport, so a tall window gets a picture with
+  the instruments nearer the edges than the desk build ever shows. Nothing is cut off;
+  it is simply not a layout, by design.
+* **Sailing together, never.** No UDP, no broadcast, no finding the game your friend is
+  running in the next room. A tab is for one person.
 
 ## The shape that would make sense
 

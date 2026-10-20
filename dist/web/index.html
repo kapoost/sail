@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>sail</title>
+    <meta name="description" content="A sailing simulator: real rig, real sea, no arcade." />
+    <style>
+      :root { color-scheme: dark; }
+      html, body {
+        margin: 0; height: 100%; background: #070b10; color: #c7d4e0;
+        font: 15px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+        overscroll-behavior: none;
+      }
+      /* The picture is a fixed size and is *scaled* by the page, never re-laid out:
+         the console, the chart and the gauges are drawn at known pixel sizes. The
+         canvas carries its own aspect in its width and height attributes, so the two
+         maxima below are all it takes — and nothing here has to know what the game
+         chose, which `SAIL_WINDOW` can change. */
+      #sail {
+        display: none;
+        max-width: 100vw; max-height: 100vh; width: auto; height: auto;
+        touch-action: none;
+      }
+      body.sailing { display: grid; place-items: center; }
+      body.sailing #sail { display: block; }
+      body.sailing #hall { display: none; }
+      #hall {
+        max-width: 42rem; margin: 0 auto; padding: 12vh 1.5rem 2rem;
+        display: flex; flex-direction: column; gap: 1.1rem;
+      }
+      h1 { margin: 0; font-size: 2.6rem; letter-spacing: 0.5rem; font-weight: 500; color: #eaf1f7; }
+      p { margin: 0; color: #8fa4b8; }
+      strong { color: #c7d4e0; font-weight: 500; }
+      #bar { height: 3px; background: #16202b; overflow: hidden; }
+      #bar > i { display: block; height: 100%; width: 0; background: #5d87ad; transition: width .2s; }
+      button {
+        align-self: flex-start; font: inherit; color: #07131d; background: #86b2d6;
+        border: 0; padding: .55rem 1.4rem; cursor: pointer; letter-spacing: .1rem;
+      }
+      button[disabled] { background: #26323d; color: #6c7d8d; cursor: default; }
+      code { color: #9ab7d0; }
+      ul { margin: 0; padding-left: 1.1rem; color: #8fa4b8; }
+      li { margin: .1rem 0; }
+      a { color: #86b2d6; }
+    </style>
+  </head>
+  <body>
+    <canvas id="sail"></canvas>
+    <main id="hall">
+      <h1>sail</h1>
+      <p>
+        A thirty-four foot sloop, a sea built out of twenty-one Gerstner components, and
+        a rig that answers the way a rig answers. <strong>W, S</strong> trim the main,
+        <strong>arrow keys</strong> steer, <strong>P</strong> hands it to the pilot,
+        <strong>H</strong> is the key list.
+      </p>
+      <div id="bar"><i></i></div>
+      <p id="state">fetching the game…</p>
+      <button id="go" disabled>press to sail</button>
+      <p>
+        Needs a browser with WebGPU — Chrome, Edge, or Safari 18 and up. The dials the
+        desk build reads from the environment are on the query string here:
+      </p>
+      <ul>
+        <li><code>?wind=32&amp;sea=built</code> — a gale that has already blown up</li>
+        <li><code>?hour=19&amp;cover=0.8</code> — the evening, overcast</li>
+        <li><code>?ink=1</code> — the sea drawn rather than photographed</li>
+        <li><code>?seed=7</code> — the same day back again</li>
+      </ul>
+      <p>
+        The real thing is a single file for Mac and Windows and it does not need a tab:
+        <a href="https://github.com/kapoost/sail/releases/latest">the latest release</a>.
+      </p>
+    </main>
+    <script type="module">
+      import init from './sail-app.js';
+
+      const bar = document.querySelector('#bar > i');
+      const state = document.getElementById('state');
+      const go = document.getElementById('go');
+
+      // Fetched by hand rather than handed to `init` as a URL, for one reason: a
+      // fourteen megabyte download with no sign of progress is a page that looks broken.
+      async function fetched() {
+        const response = await fetch('sail-app_bg.wasm');
+        if (!response.ok) throw new Error(`${response.status} fetching the game`);
+        // `Content-Length` is the *compressed* length when the server is doing its job,
+        // so the bar is drawn against it and the numbers printed beside it are what the
+        // wire actually carried.
+        const total = Number(response.headers.get('content-length')) || 0;
+        const reader = response.body.getReader();
+        const parts = [];
+        let had = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parts.push(value);
+          had += value.length;
+          if (total) bar.style.width = `${Math.min(100, (had / total) * 100)}%`;
+          state.textContent = `fetching the game… ${(had / 1e6).toFixed(1)} MB`;
+        }
+        bar.style.width = '100%';
+        const bytes = new Uint8Array(had);
+        let at = 0;
+        for (const part of parts) { bytes.set(part, at); at += part.length; }
+        return bytes;
+      }
+
+      let bytes;
+      try {
+        bytes = await fetched();
+        state.textContent = 'ready. the sound needs a click, and so does the sea.';
+        go.disabled = false;
+      } catch (e) {
+        state.textContent = `it would not load: ${e}`;
+      }
+
+      // **Started on a click, deliberately.** A browser will not open an audio context
+      // without a gesture, and a game that is silent until somebody happens to press a
+      // key is a game that sounds broken. The gesture buys the wind and the water with
+      // it.
+      go.addEventListener('click', async () => {
+        go.disabled = true;
+        state.textContent = 'compiling…';
+        try {
+          document.body.classList.add('sailing');
+          await init({ module_or_path: bytes });
+        } catch (e) {
+          document.body.classList.remove('sailing');
+          state.textContent = `it would not start: ${e}`;
+        }
+      });
+    </script>
+  </body>
+</html>

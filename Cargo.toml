@@ -15,6 +15,17 @@ glam = "0.34"
 [profile.test]
 opt-level = 2
 
+# And a profile for the thing a browser downloads, where the bill is in bytes rather
+# than in seconds. Same optimisation as `dist` — fat link-time optimisation, one codegen
+# unit — plus the one that matters most on this target: `strip`, because the debug
+# information in a wasm module is most of the module. Measured on this game: 144 MB
+# without it.
+[profile.web]
+inherits = "dist"
+# Aborting rather than unwinding. A panic in a tab is a page that has stopped either way;
+# the unwinding tables are bytes down the wire for a recovery nobody performs.
+panic = "abort"
+
 # A profile for the thing you hand to somebody else.
 #
 # Separate from `release` on purpose. Fat link-time optimisation across a single codegen

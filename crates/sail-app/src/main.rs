@@ -251,6 +251,14 @@ fn main() {
                         maximize: false,
                         ..default()
                     },
+                    // The page owns the canvas, and for the same reason the window is
+                    // a fixed size: the instruments are drawn at known pixel sizes, so
+                    // the picture is scaled by the page rather than re-laid-out by it.
+                    // `fit_canvas_to_parent` would do the opposite — change the
+                    // resolution with the viewport — and put the needles off their
+                    // dials on every phone it met.
+                    #[cfg(target_arch = "wasm32")]
+                    canvas: Some(String::from("#sail")),
                     ..default()
                 }),
                 ..default()
