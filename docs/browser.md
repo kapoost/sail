@@ -93,24 +93,80 @@ rewriting the loop as a pure function of a grid offset with no shared mutable st
 turned out to be the same shape a vertex shader wants, which is why the move to the card
 was a translation rather than a redesign. Threads in wasm need `SharedArrayBuffer`, which
 needs the `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers, and
-**GitHub Pages cannot send headers**; that still decides whether the *foam* and the
-*ripple bake* get more than one core in a tab.
+**GitHub Pages cannot send headers**.
+
+## It runs in a tab
+
+Measured rather than argued, on 20 October, in Chromium over WebGPU on the same M5,
+with the same seed and the same weather as the native figures above:
+
+| | native | in a tab |
+|---|---|---|
+| sea | 0.06 ms | **0.17 ms** |
+| foam | 0.95 ms | 1.67 ms |
+| cloud | 0.14 ms | 0.20 ms |
+| frames a second | 60, capped | **48** |
+| worst frame | 17.4 ms | 25 ms |
+| the ripple film is complete | half a second of sailing | about six seconds |
+
+Four things were in the way and none of them was the water.
+
+1. **The clock panics.** `SystemTime::now()` on `wasm32-unknown-unknown` is not missing,
+   it is a panic — and it was in `main`, seeding the day, before a window exists. Same
+   for `Instant::now()` in the two places that time a bake. The engine ships a shim for
+   exactly this (`bevy::platform::time::Instant`, `web-time` underneath); the seed comes
+   off the browser's own clock now.
+2. **The ripple bake panics.** Thirty-six frames of normal map were baked in
+   `std::thread::scope`, and `spawn` is unimplemented in a tab. It is baked a few rows at
+   a time now, with a four millisecond budget a frame, on the task pool where there is
+   one — which is also why the game opens a fifth of a second sooner on a desk.
+3. **Eight samples do not exist.** WebGPU has multisampling at one and four; the camera
+   asked for eight and every pass after that was invalid. Four in a tab.
+4. **The dials had nowhere to come from.** Fifty `SAIL_*` variables that a browser
+   answers `Err` to, for ever. They go through `knob::var` now, which reads the query
+   string in a tab: `?wind=32&seed=7&frames=1` is `SAIL_WIND=32 SAIL_SEED=7
+   SAIL_FRAMES=1`. Without that there is no way to ask a tab for a gale, and no way to
+   get the measurement in this table out of one.
+
+**What is slow is no longer ours.** Of a 21 ms frame, the three systems this project
+measures account for 2.1 ms. Halving the drawn width — 960 to 720 — does not move the
+frame rate at all, so it is not the card and not fill rate; turning the ripple film off
+buys two frames a second. The rest is the engine's own per-frame work, single-threaded,
+because that is what wasm without `SharedArrayBuffer` gets: extract, queue, prepare and
+the user interface all on the one thread that is also running the game.
+
+So the thread argument has come back, and it has moved: it is no longer about our sea,
+it is about everything the renderer does around it. That is also the argument that
+hosting decides, and the same hosting constraint applies — a page served from GitHub
+Pages gets one thread.
+
+### Seeing it for yourself
+
+```sh
+cargo build --release --target wasm32-unknown-unknown -p sail-app --features webgpu
+wasm-bindgen --out-dir /tmp/sailweb --target web --no-typescript \
+  target/wasm32-unknown-unknown/release/sail-app.wasm
+cp -R assets /tmp/sailweb/           # the hull and the sea's shaders, fetched over HTTP
+# plus an index.html that imports ./sail-app.js and calls init()
+cd /tmp/sailweb && python3 -m http.server 8777
+```
+
+Then `http://localhost:8777/?seed=7&wind=18&sea=built&frames=1`. The wasm is 144 MB
+unoptimised and nobody has put `wasm-opt` near it yet; over a local socket that does not
+matter and over a wire it would be the first thing to fix.
+
+Two things this does **not** yet do: it has no click-to-start, so the audio context never
+opens, and it has no loading screen, so the first seconds are a blank page while 144 MB
+of wasm compiles.
 
 ### What is left to settle
 
-* **The ripple bake across frames.** Six to fifteen seconds of frozen page, and the one
-  blocker that is genuinely in the way now.
-* **Fewer vertices, if a weak card needs it.** 201 to 129 is two and a half times less
-  work. It was a processor economy before and it is a card economy now, which is a much
-  cheaper thing to need.
-* **Trim the memory.** 370 MB resident, 50 MB of it thirty-six key frames of ripple map.
-  A tab will take it and would rather not.
-* **The knobs.** Twenty `env::var` calls would have to come off the query string.
-
-What this does *not* change is the half of the question that was never about speed:
-sailing together. A tab still has no UDP, still cannot find the game your friend is
-running in the next room, and still needs a certificate and a public host to talk to
-anybody at all.
+* **The engine's frame, not ours.** Nineteen of twenty-one milliseconds. Whether that is
+  reducible without threads is the next measurement, not the next assumption.
+* **Size.** 144 MB of wasm before `wasm-opt`, 370 MB resident, 50 MB of it the ripple
+  film. A tab will take it and would rather not.
+* **A loading screen and a click to start.** Both are a page's manners rather than a
+  port.
 
 ## The shape that would make sense
 

@@ -453,7 +453,16 @@ pub fn setup(
         // the water without touching the grain. Going further would mean rendering at
         // twice the width and filtering down before the nearest-neighbour blow-up —
         // genuinely antialiased pixel art — which is a bigger change than a trial.
+        // **Four in a tab, because WebGPU has only one and four.** Eight samples is a
+        // native luxury; asking for it in a browser is not a slower picture but no
+        // picture at all — the first thing the renderer says is "the sample count (8) of
+        // the texture is not supported" and every pass after it is invalid. At this
+        // drawn width the difference between four and eight is a boundary pixel that is
+        // six screen pixels across either way.
+        #[cfg(not(target_arch = "wasm32"))]
         bevy::render::view::Msaa::Sample8,
+        #[cfg(target_arch = "wasm32")]
+        bevy::render::view::Msaa::Sample4,
         // Daylight exposure. Bevy defaults to roughly EV100 9.7 — an indoor setting,
         // at which white falls around a thousand candela per square metre. A sky of
         // several thousand then saturates to a flat white sheet with no gradient and

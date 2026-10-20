@@ -18,6 +18,18 @@ glam.workspace = true
 # system when that is allowed. Already in the tree — the renderer is built on it.
 bytemuck = "1"
 
+# A tab has no environment to read dials from and no clock in `std`: the query string
+# answers both, and these are the two crates that ask the page about itself. Only on
+# wasm — a desk build has `std::env` and a working `SystemTime`.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Location"] }
+js-sys = "0.3"
+
+# The browser build picks its graphics backend explicitly, and it has to be WebGPU: the
+# sea reads its spectrum out of a storage buffer, and WebGL2 has no such thing.
+[features]
+webgpu = ["bevy/webgpu"]
+
 [dev-dependencies]
 # The sea's shader is compiled and *run* by a test, against the Rust spectrum it has to
 # agree with. Pinned to the version the renderer itself uses, so the test exercises the

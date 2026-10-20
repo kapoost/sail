@@ -93,6 +93,7 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 /// the pure answer and it is a lot of API archaeology for a single file; unpacking it
 /// beside the user's temporary directory on first run is four lines, cannot be wrong in
 /// an interesting way, and leaves the distributed artefact a single file either way.
+#[cfg(not(target_arch = "wasm32"))]
 const HULL: &[u8] = include_bytes!("../../../assets/venus.glb");
 
 /// And the sea's shaders, for the same reason.
@@ -101,6 +102,7 @@ const HULL: &[u8] = include_bytes!("../../../assets/venus.glb");
 /// recompiles them if they change, which is what makes a shader something you can work
 /// on by looking — so a binary handed to a friend has to carry them too. Three small
 /// text files against ten megabytes of hull; the mechanism is already here.
+#[cfg(not(target_arch = "wasm32"))]
 const SHADERS: [(&str, &str); 3] = [
     ("sea.wesl", include_str!("../../../assets/sea.wesl")),
     (
@@ -121,26 +123,37 @@ const SHADERS: [(&str, &str); 3] = [
 /// the binary, unpacked. `SAIL_ASSETS=embedded` skips straight to the last one, which is
 /// how the path a friend will take gets tested on a machine that has the other two.
 fn asset_root() -> String {
-    let forced = crate::knob::var("SAIL_ASSETS").is_ok_and(|v| v == "embedded");
-    if !forced {
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(beside) = exe.parent().map(|d| d.join("assets")) {
-                if beside.is_dir() {
-                    return beside.to_string_lossy().into_owned();
+    // A tab has no executable, no source tree and nowhere to unpack to — and it does not
+    // need any of them: the asset server fetches over HTTP, so the directory served
+    // beside the page *is* the asset root. This is the one platform where the fallback
+    // path was always the right answer.
+    #[cfg(target_arch = "wasm32")]
+    {
+        return String::from("assets");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let forced = crate::knob::var("SAIL_ASSETS").is_ok_and(|v| v == "embedded");
+        if !forced {
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(beside) = exe.parent().map(|d| d.join("assets")) {
+                    if beside.is_dir() {
+                        return beside.to_string_lossy().into_owned();
+                    }
                 }
             }
+            let source = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets");
+            if std::path::Path::new(source).is_dir() {
+                return source.to_string();
+            }
         }
-        let source = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets");
-        if std::path::Path::new(source).is_dir() {
-            return source.to_string();
-        }
+        unpacked().unwrap_or_else(|| {
+            // Nothing to be done about it here — the window has not opened and there is no
+            // logger yet — so say so on the terminal and let the asset server fail loudly.
+            println!("sail: could not unpack the hull; the boat will have no hull in it");
+            String::from("assets")
+        })
     }
-    unpacked().unwrap_or_else(|| {
-        // Nothing to be done about it here — the window has not opened and there is no
-        // logger yet — so say so on the terminal and let the asset server fail loudly.
-        println!("sail: could not unpack the hull; the boat will have no hull in it");
-        String::from("assets")
-    })
 }
 
 /// Put the embedded hull somewhere the asset server can read it, and return that
@@ -148,6 +161,7 @@ fn asset_root() -> String {
 ///
 /// Skipped when the file is already there with the right length, so the
 /// second run costs a stat.
+#[cfg(not(target_arch = "wasm32"))]
 fn unpacked() -> Option<String> {
     let dir = std::env::temp_dir().join(concat!("sail-assets-", env!("CARGO_PKG_VERSION")));
     std::fs::create_dir_all(&dir).ok()?;
