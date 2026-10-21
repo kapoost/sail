@@ -395,15 +395,26 @@ impl Squall {
     /// How developed it is: nothing at birth, full in the middle of its life, gone at
     /// the end. A squall that arrived at full strength would be a wall, and one that
     /// vanished at full strength would leave a hole in the wind.
+    /// **A life of zero is a division that returns NaN, and `clamp` does not catch it.**
+    /// `0.0 / 0.0` is NaN, and Rust's `f64::clamp` propagates a NaN input rather than
+    /// clamping it — so one squall with no life in it put NaN through the maturity curve,
+    /// the depth, the outflow and finally the wind at *every* boat including the reader's
+    /// own, with nothing anywhere to stop it or to say what had happened.
+    ///
+    /// The wire refuses such a squall before it gets here (`Sane` in `sail-net`), and the
+    /// model has never made one. This is the floor under both: a quantity about to go
+    /// underneath a division is held above zero where the division is, not where the
+    /// value came from.
     pub fn maturity(&self) -> f64 {
-        let u = (self.age / self.life).clamp(0.0, 1.0);
+        let u = (self.age / self.life.max(f64::EPSILON)).clamp(0.0, 1.0);
         (std::f64::consts::PI * u).sin().powf(0.6)
     }
 
     /// How deep inside it a point is: 1 at the centre of the core, 0 at the edge and
     /// beyond. This is what the rain and the visibility are drawn from.
     pub fn depth(&self, pos: DVec2) -> f64 {
-        let r = (pos - self.at).length() / self.radius;
+        // Held above zero for the same reason as `maturity`, and in the same place.
+        let r = (pos - self.at).length() / self.radius.max(f64::EPSILON);
         (1.0 - crate::units::smoothstep(0.55, 1.05, r)) * self.maturity()
     }
 

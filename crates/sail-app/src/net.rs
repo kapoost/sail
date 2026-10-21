@@ -241,7 +241,11 @@ pub fn exchange(
                 // Safe to snap: the simulation clock drives the wave field, the gusts and
                 // the squalls, and nothing else. The passage deadline counts frame time
                 // and the time of day has its own hour.
-                sim.sim.state.time = sky.t as f64;
+                // Guarded here too: this arm is the handshake and the one above is the
+                // hourly weather, and they are two different packets.
+                if sky.t.is_finite() && sky.t > 0.0 {
+                    sim.sim.state.time = sky.t as f64;
+                }
                 if world.seed != sim.weather.seed {
                     // Sail where they are sailing. Handled by its own system rather than
                     // here, because moving to another archipelago means replacing the
@@ -268,7 +272,19 @@ pub fn exchange(
                 }
             }
             Event::Weather { sky, squalls } => {
-                if sky.t <= 0.0 {
+                // **Written so that NaN fails it**, and spelled out rather than
+                // negated: `sky.t <= 0.0` is `false` for NaN,
+                // so the old spelling let one through — and a NaN here is not a glitch
+                // that passes, it is permanent: the next lines nudge the simulation clock
+                // by five percent of the error, the error is NaN, and the clock that
+                // drives the wave field, the gusts and the squalls is NaN from then on
+                // with no path back to a number.
+                //
+                // The wire refuses it now (`Sane` in `sail-net`) and this is the second
+                // lock on the one value in the program that cannot recover from a bad
+                // one. Two locks on this and none on anything else is the right shape:
+                // every other number here is a drawing.
+                if !sky.t.is_finite() || sky.t <= 0.0 {
                     continue;
                 }
                 // Through the same seam the weather sliders use. The first version of

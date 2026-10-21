@@ -384,8 +384,163 @@ pub fn encode<T: Serialize>(msg: &T) -> Vec<u8> {
     postcard::to_allocvec(msg).expect("a message with no unbounded field in it")
 }
 
-pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Option<T> {
-    postcard::from_bytes(bytes).ok()
+/// Decode a datagram, **and refuse it if it is not a thing that could have happened**.
+///
+/// The `Sane` bound is the point and it is deliberately not optional: there is no way to
+/// turn bytes off the wire into a message without the check, because a check somebody has
+/// to remember to call is a check that will one day not be called. See [`Sane`].
+pub fn decode<'a, T: Deserialize<'a> + Sane>(bytes: &'a [u8]) -> Option<T> {
+    postcard::from_bytes::<T>(bytes).ok().filter(Sane::sane)
+}
+
+/// What a decoded message has to be before anything is allowed to act on it.
+///
+/// **This exists because of NaN, not because of cheating.** A hostile peer cannot move
+/// your boat — the server binds a boat to its source address — and it cannot make you
+/// collide with anything, because boats pass through each other. What it could do, until
+/// this trait existed, was send one float.
+///
+/// Two examples, both found by reading and both confirmed at a prompt:
+///
+/// * A weather packet with `t = NaN`. The receiving end guarded it with `if t <= 0.0`,
+///   and `NaN <= 0.0` is **false**, so it passed; the next line nudged the simulation
+///   clock by `0.05 * NaN` and the clock was NaN from then on, for ever, with no path
+///   back. That clock drives the wave field, the gusts and the squalls.
+/// * A squall with `life = 0`. `age / life` is `0/0`, which is NaN, and Rust's
+///   `f64::clamp` returns NaN for a NaN input rather than clamping it — so the maturity
+///   curve, the depth and finally the wind at *your own* boat all went NaN.
+///
+/// Neither is a crash. That is what makes them worth a trait: a crash is reported, and a
+/// sea that quietly stops being a sea is reported as "it broke".
+///
+/// The rule is deliberately narrow. Every float that crosses this wire must be finite,
+/// every quantity that ends up under a division must be above zero, every list and
+/// string has a length somebody chose, and positions have to be somewhere a boat could be.
+/// Beyond that, nothing: a badly trimmed boat at a strange angle is a drawing, and a
+/// drawing cannot hurt anybody. Validation that tries to decide what is *plausible*
+/// becomes anti-cheat, and this game does not have anti-cheat — it has friends.
+pub trait Sane {
+    fn sane(&self) -> bool;
+}
+
+/// How long a name or a word may be.
+///
+/// Forty-eight bytes is a generous name and a generous word. The real bound was already
+/// there and nobody chose it — a datagram is read into two kilobytes and `postcard` fails
+/// on anything longer — which is a bound that holds by accident and changes if the buffer
+/// does.
+pub const NAME_LIMIT: usize = 48;
+
+/// How many squalls one weather packet may carry.
+///
+/// The simulation makes at most two at a time (`SQUALLS_AT_ONCE` in `sail-core`), but the
+/// list on the wire replaces the local one wholesale and so goes **round** that limit
+/// rather than through it. Eight leaves room for the model to change its mind without
+/// leaving room for a list long enough to be felt: every squall is evaluated on every
+/// wind sample, which is two hundred times a second for the player and once a frame for
+/// each boat in sight.
+pub const SQUALLS_LIMIT: usize = 8;
+
+/// How far from the origin a boat is allowed to claim to be, metres.
+///
+/// A thousand kilometres, against an archipelago five and a half across. This is not a
+/// plausibility check — somebody sailing out of the world is their own business and their
+/// boat simply will not be in sight — it is a guard on the one thing a huge coordinate
+/// actually reaches, which is a `Transform` and the float maths behind it.
+pub const FAR: f32 = 1_000_000.0;
+
+fn finite(xs: &[f32]) -> bool {
+    xs.iter().all(|x| x.is_finite())
+}
+
+impl Sane for Drawn {
+    fn sane(&self) -> bool {
+        finite(&[
+            self.pos[0],
+            self.pos[1],
+            self.heading,
+            self.heel,
+            self.pitch,
+            self.heave,
+            self.surge,
+            self.sway,
+            self.yaw_rate,
+            self.boom_angle,
+            self.main_sheet,
+            self.jib_sheet,
+            self.reef,
+            self.furl,
+            self.staysail,
+            self.staysail_sheet,
+            self.genoa_car,
+        ]) && self.pos[0].abs() < FAR
+            && self.pos[1].abs() < FAR
+        // `headsail` needs no check: the match that reads it has a default arm, so an
+        // unknown number is a genoa rather than an index off the end of anything.
+    }
+}
+
+impl Sane for Sky {
+    fn sane(&self) -> bool {
+        finite(&[self.tws, self.wind_from, self.cover, self.t]) && self.t > 0.0 && self.tws >= 0.0
+    }
+}
+
+impl Sane for Squall {
+    fn sane(&self) -> bool {
+        finite(&[
+            self.pos[0],
+            self.pos[1],
+            self.radius,
+            self.strength,
+            self.age,
+            self.life,
+        ]) && self.life > 0.0
+            && self.radius > 0.0
+    }
+}
+
+impl Sane for World {
+    fn sane(&self) -> bool {
+        finite(&[
+            self.tws,
+            self.wind_from,
+            self.fetch,
+            self.start_hour,
+            self.cover,
+        ]) && self.fetch > 0.0
+            && self.tws >= 0.0
+            && (0.0..24.0).contains(&self.start_hour)
+    }
+}
+
+impl Sane for ToServer {
+    fn sane(&self) -> bool {
+        match self {
+            ToServer::Hello { name, word, .. } => {
+                name.len() <= NAME_LIMIT && word.len() <= NAME_LIMIT
+            }
+            ToServer::WhoIsThere { word } => word.len() <= NAME_LIMIT,
+            ToServer::Here { drawn, .. } => drawn.sane(),
+            ToServer::Leaving { .. } => true,
+        }
+    }
+}
+
+impl Sane for ToClient {
+    fn sane(&self) -> bool {
+        match self {
+            ToClient::Welcome { world, sky, .. } => world.sane() && sky.sane(),
+            ToClient::Boat { name, drawn, .. } => name.len() <= NAME_LIMIT && drawn.sane(),
+            ToClient::Gone { .. } => true,
+            ToClient::Weather { sky, squalls } => {
+                sky.sane() && squalls.len() <= SQUALLS_LIMIT && squalls.iter().all(Squall::sane)
+            }
+            ToClient::Beacon { game, .. } => game.len() <= NAME_LIMIT,
+            // A refusal is read by a person and nothing acts on it but a label.
+            ToClient::No { because } => because.len() <= 200,
+        }
+    }
 }
 
 #[cfg(test)]

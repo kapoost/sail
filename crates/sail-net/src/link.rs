@@ -59,6 +59,22 @@ pub struct Link {
     pub id: Option<BoatId>,
 }
 
+/// A name cut to what `Sane` will carry, on a character boundary.
+///
+/// `String::truncate` panics in the middle of a character and `&s[..n]` does the same,
+/// which would turn a long name in somebody's language into a crash rather than a short
+/// name. Counted in bytes because that is what the limit is in.
+fn shortened(name: &str) -> String {
+    if name.len() <= crate::NAME_LIMIT {
+        return name.to_string();
+    }
+    let mut cut = crate::NAME_LIMIT;
+    while cut > 0 && !name.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    name[..cut].to_string()
+}
+
 impl Link {
     /// Knock on a server and keep knocking until it answers.
     ///
@@ -76,7 +92,11 @@ impl Link {
         socket.set_read_timeout(Some(Duration::from_millis(20)))?;
         let (out_tx, out_rx) = channel::<Drawn>();
         let (in_tx, in_rx) = channel::<Event>();
-        let name = name.to_string();
+        // Cut to what the wire will carry, here rather than at the far end. A name too
+        // long to be sane is refused by the receiver, and a player whose game silently
+        // will not join because they typed a long name would never find that out —
+        // whereas a name that arrives shortened is a thing you can see.
+        let name = shortened(name);
         let word = word.trim().to_string();
         std::thread::Builder::new()
             .name("sail-net".into())
@@ -200,8 +220,30 @@ fn run(
         // And whatever has arrived. The read timeout paces the whole loop; twenty
         // milliseconds is three times round between snapshots, which is enough to keep
         // the sending on time without spinning a core.
+        //
+        // **With a budget on it**, because the timeout only ends this loop when the
+        // socket goes *quiet*. Under a stream of packets — a flood, or simply a busy
+        // game — it never would, and everything below it is what keeps this client
+        // alive: the snapshot that goes out, the knock that goes out when the server
+        // has restarted, the six seconds of silence that mean she is gone. A receiver
+        // that cannot stop receiving stops sending, and looks from the deck exactly
+        // like a network that is working.
+        //
+        // Sixty-four is four passes' worth of a full game at fifteen snapshots a second
+        // with eight boats on the water, so the real case never reaches it.
+        const LETTERS_A_PASS: usize = 64;
+        let mut read = 0;
         while let Ok((n, from)) = socket.recv_from(&mut buf) {
-            if from.ip() != server.ip() {
+            read += 1;
+            if read > LETTERS_A_PASS {
+                break;
+            }
+            // **The port as well as the address.** This compared the address alone, and
+            // a `No` is a single datagram that ends the session: anything on the server's
+            // machine, on any port, could put any player ashore with one packet. The
+            // server answers from the port it was asked on, so there is nothing to lose
+            // by requiring it.
+            if from != server {
                 continue;
             }
             heard = Instant::now();

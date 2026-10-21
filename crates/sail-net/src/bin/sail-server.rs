@@ -132,6 +132,21 @@ fn main() -> std::io::Result<()> {
     let mut refused = 0u32;
     let mut refusals_since = Instant::now();
 
+    // **How many boats this relay will have on it.**
+    //
+    // "Two to eight" was a bandwidth sum and nothing enforced it: every `Hello` from an
+    // address not already aboard inserted a map entry holding a name the sender chose,
+    // and nothing ever said no. A source address on UDP is whatever the sender writes in
+    // it, so that is an attacker-sized table with an attacker holding the tap, against a
+    // unit with `MemoryMax=32M` and `Restart=always` on it — which makes the failure a
+    // loop rather than an outage.
+    //
+    // Twelve rather than eight: the number is a *limit*, and a limit set exactly at the
+    // comfortable figure turns a ninth friend into a bug report. Relaying is
+    // (N-1)-squared in the worst case and twelve boats at fifteen snapshots is still
+    // under a megabit.
+    const ABOARD: usize = 12;
+
     let mut fleet: HashMap<SocketAddr, Aboard> = HashMap::new();
     let mut next_id: BoatId = 1;
     let mut buf = [0u8; 2048];
@@ -147,7 +162,22 @@ fn main() -> std::io::Result<()> {
         wind.step(dt.min(0.25));
         let t = began.elapsed().as_secs_f32();
 
+        // **With a budget**, because the read timeout only ends this loop when the socket
+        // goes quiet, and under a stream of packets it never does. Everything after it is
+        // the housekeeping this relay exists to do: forgetting the boats that went
+        // silent, and sending the weather that keeps everybody in the same wind. A server
+        // that cannot stop reading stops relaying the weather, and the sea diverges on
+        // every screen while the log says it is busy.
+        //
+        // Two hundred and fifty-six is a pass and a half of a full game — twelve boats at
+        // fifteen snapshots a second — so the real case never reaches it.
+        const LETTERS_A_PASS: usize = 256;
+        let mut read = 0;
         while let Ok((n, from)) = socket.recv_from(&mut buf) {
+            read += 1;
+            if read > LETTERS_A_PASS {
+                break;
+            }
             let Some(msg) = decode::<ToServer>(&buf[..n]) else {
                 continue;
             };
@@ -163,28 +193,37 @@ fn main() -> std::io::Result<()> {
                     // Already aboard and the word stops mattering: a boat that is in the
                     // fleet got in through the door, and re-knocking is what a client
                     // does when it has heard nothing for six seconds.
-                    if !word.is_empty() && said != word && !fleet.contains_key(&from) {
+                    //
+                    // Every refusal below goes through the one budget. It used to be the
+                    // wrong word alone, which left the protocol refusal — a long sentence
+                    // sent in answer to a six-byte hello, so a twenty-times amplifier —
+                    // with nothing on it at all.
+                    let mut refuse = |because: String| {
                         if refusals_since.elapsed() >= Duration::from_secs(1) {
                             refusals_since = Instant::now();
                             refused = 0;
                         }
                         if refused < REFUSALS_A_SECOND {
                             refused += 1;
-                            let no = encode(&ToClient::No {
-                                because: "wrong word".into(),
-                            });
-                            let _ = socket.send_to(&no, from);
+                            let _ = socket.send_to(&encode(&ToClient::No { because }), from);
                         }
+                    };
+                    if !word.is_empty() && said != word && !fleet.contains_key(&from) {
+                        refuse("wrong word".into());
                         continue;
                     }
                     if protocol != PROTOCOL {
-                        let no = encode(&ToClient::No {
-                            because: format!(
-                                "this game is on protocol {PROTOCOL} and you are on \
-                                 {protocol} — somebody is on an older build"
-                            ),
-                        });
-                        let _ = socket.send_to(&no, from);
+                        refuse(format!(
+                            "this game is on protocol {PROTOCOL} and you are on \
+                             {protocol} — somebody is on an older build"
+                        ));
+                        continue;
+                    }
+                    // And the door has a width. Said out loud rather than dropped,
+                    // because "the game is full" is a thing a person can act on and
+                    // silence is a thing they can only stare at.
+                    if fleet.len() >= ABOARD && !fleet.contains_key(&from) {
+                        refuse(format!("this game is full — {ABOARD} boats are on it"));
                         continue;
                     }
                     // Knocking twice is normal: the hello repeats once a second until a
