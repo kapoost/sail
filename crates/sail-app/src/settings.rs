@@ -790,6 +790,78 @@ fn pilotage(
 /// A page rather than a key, because starting a man-overboard drill by accident in the
 /// middle of a delivery would be a poor joke, and because this is where somebody who has
 /// just opened the game looks for the thing that teaches them to sail it.
+/// What there is to have done, and what has been.
+///
+/// **The list is on the page whether or not a shop is running.** It is kept in our own
+/// file — see `earned.rs` — and Steam is told as well when Steam is there, which is the
+/// right way round: the list is a map of the first hour, and a map that only exists
+/// inside somebody else's client is not ours to show.
+///
+/// Said as a line each rather than as badges with pictures. What a person wants from this
+/// page is *what is there left to do*, and a grid of grey squares answers a different
+/// question.
+fn what_you_have_done(
+    ui: &mut egui::Ui,
+    earned: &crate::earned::Earned,
+    steam: &crate::steam::Steam,
+) {
+    use crate::earned::DEEDS;
+    heading(ui, "WHAT YOU HAVE DONE");
+    ui.label(
+        egui::RichText::new(format!(
+            "{} of {}{}",
+            earned.count(),
+            DEEDS.len(),
+            // Said plainly, because the question somebody will have is "why has Steam
+            // not got these", and the answer is usually that the game was not started
+            // through Steam.
+            if steam.aboard() {
+                " · Steam has these too"
+            } else {
+                " · kept here; Steam is not running"
+            }
+        ))
+        .monospace()
+        .size(11.0)
+        .color(egui::Color32::from_rgb(150, 150, 130)),
+    );
+    ui.add_space(6.0);
+    for deed in DEEDS {
+        let done = earned.has(deed.api);
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(if done { "✓" } else { "·" })
+                    .monospace()
+                    .size(12.0)
+                    .color(if done {
+                        egui::Color32::from_rgb(196, 112, 24)
+                    } else {
+                        egui::Color32::from_rgb(90, 96, 104)
+                    }),
+            );
+            ui.label(
+                egui::RichText::new(deed.name)
+                    .monospace()
+                    .size(12.0)
+                    .color(if done {
+                        egui::Color32::from_rgb(214, 214, 206)
+                    } else {
+                        egui::Color32::from_rgb(130, 136, 144)
+                    }),
+            );
+        });
+        // The how is always shown, done or not. A list that hides what the remaining
+        // ones are is a list that tells you only how far behind you are.
+        ui.label(
+            egui::RichText::new(deed.how)
+                .monospace()
+                .size(10.0)
+                .color(egui::Color32::from_rgb(120, 124, 130)),
+        );
+        ui.add_space(4.0);
+    }
+}
+
 fn drill(ui: &mut egui::Ui, missions: &mut Missions) {
     sailing_101(ui, missions);
     ui.add_space(14.0);
@@ -800,6 +872,10 @@ fn drill(ui: &mut egui::Ui, missions: &mut Missions) {
     ui.separator();
     ui.add_space(10.0);
     pilotage(ui, &mut missions.wants, &missions.job);
+    ui.add_space(14.0);
+    ui.separator();
+    ui.add_space(10.0);
+    what_you_have_done(ui, &missions.earned, &missions.steam);
     ui.add_space(14.0);
     ui.separator();
     ui.add_space(10.0);
@@ -898,6 +974,8 @@ pub struct Missions<'w> {
     pub drill: ResMut<'w, crate::tutorial::Tutorial>,
     pub wants: ResMut<'w, crate::mission::WantsPilotage>,
     pub job: Res<'w, crate::mission::Pilotage>,
+    pub earned: Res<'w, crate::earned::Earned>,
+    pub steam: Res<'w, crate::steam::Steam>,
     pub race: ResMut<'w, crate::race::Race>,
 }
 

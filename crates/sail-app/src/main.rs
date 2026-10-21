@@ -22,6 +22,7 @@ mod crew;
 mod curve;
 mod deck;
 mod deck_texture;
+mod earned;
 mod fishing;
 mod fittings;
 mod fleet;
@@ -66,6 +67,7 @@ mod sky;
 mod sound;
 mod spray;
 mod stages;
+mod steam;
 mod stowage;
 mod swing;
 mod tutorial;
@@ -409,6 +411,8 @@ fn main() {
         aboard::plugin,
         screen::plugin,
         reel::plugin,
+        steam::plugin,
+        earned::plugin,
         retro::plugin,
         ink::plugin,
     ))

@@ -1,0 +1,25 @@
+// What SteamPipe uploads, and where it puts it.
+//
+// APPID is substituted by `dist/steam.sh`; the depot numbers are App ID + 1, 2 and 3,
+// which is what Steamworks hands out for the first three depots of a new application.
+// They are written out rather than computed so that the day they are not consecutive,
+// this file is wrong in a way somebody can see.
+//
+// `setlive` is empty on purpose. A build that goes straight to the default branch is a
+// build nobody looked at; set the branch by hand in the partner site, or pass it here
+// when there is a release being made deliberately.
+"appbuild"
+{
+	"appid"	"APPID"
+	"desc"	"sail — built from CI"
+	"buildoutput" "../../dist/steam/output"
+	"contentroot" "../../dist/steam/content"
+	"setlive"	""
+
+	"depots"
+	{
+		"APPID1"	"depot_windows.vdf"
+		"APPID2"	"depot_macos.vdf"
+		"APPID3"	"depot_linux.vdf"
+	}
+}

@@ -55,3 +55,9 @@ jobs:
       # compiles here can fail there. A `check` rather than a build: the question is
       # whether it compiles, and `dist/web.sh` answers the rest when the site is built.
       - run: cargo check --target wasm32-unknown-unknown -p sail-app --features webgpu
+      # And the other build that is not the default one. The Steam depot is compiled with
+      # `--features steam`, which nobody develops in — so without this it rots quietly and
+      # is found on the day somebody tries to cut a release. A `check` is enough: the
+      # question is whether the feature still compiles against the tree, and whether it
+      # *runs* is answered by `dist/steam.sh`, which builds the depot and starts it.
+      - run: cargo check -p sail-app --features steam

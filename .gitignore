@@ -15,6 +15,12 @@
 /dist/out/
 # The shop's screenshots: build output, taken by `dist/store.sh`, uploaded once.
 /dist/store/
+# The depot payloads and whatever SteamPipe leaves behind. A hundred and sixty megabytes
+# of binary per platform, rebuilt from the tree by `dist/steam.sh` — the manifests beside
+# them are source and are kept.
+/dist/steam/content/
+/dist/steam/output/
+/dist/steam/*.generated.vdf
 
 # Session scratch
 /.claude/

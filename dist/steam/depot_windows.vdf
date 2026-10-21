@@ -1,0 +1,17 @@
+// The windows depot: everything under content/windows, flattened into the install directory.
+//
+// "LocalPath" is relative to the contentroot in app_build.vdf. The library beside the
+// binary is not optional — see the note at the top of dist/steam.sh.
+"DepotBuild"
+{
+	"DepotID"	"APPID1"
+	"contentroot"	"../../dist/steam/content/windows"
+	"FileMapping"
+	{
+		"LocalPath"	"*"
+		"DepotPath"	"."
+		"recursive"	"1"
+	}
+	"FileExclusion"	"*.pdb"
+	"FileExclusion"	"*.dSYM"
+}

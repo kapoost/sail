@@ -26,8 +26,16 @@ web-sys = { version = "0.3", features = ["Window", "Location"] }
 
 # The browser build picks its graphics backend explicitly, and it has to be WebGPU: the
 # sea reads its spectrum out of a storage buffer, and WebGL2 has no such thing.
+# Steamworks, for the depot build only. Optional because linking it is not free: the
+# library is dynamic and the linker writes `@loader_path/libsteam_api` into the binary, so
+# a build with this on will not *start* without that file beside it. The releases page
+# gets the plain build; the Steam depot gets this one. See `steam.rs`.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+steamworks = { version = "0.13", optional = true }
+
 [features]
 webgpu = ["bevy/webgpu"]
+steam = ["dep:steamworks"]
 
 [dev-dependencies]
 # The sea's shader is compiled and *run* by a test, against the Rust spectrum it has to

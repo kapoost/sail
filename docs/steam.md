@@ -138,14 +138,42 @@ give us the numbers to decide whether the Deck needs a lower drawn width by defa
 
 ## Steamworks: what to take and what to leave
 
+**The one fact that shapes all of it:** linking Steamworks rewrites the binary's own
+loader path. A build with it on will not *start* — not fail, not warn, killed by the
+dynamic loader before `main` — unless `libsteam_api` is sitting beside the executable:
+
+```text
+dyld: Library not loaded: @loader_path/libsteam_api.dylib
+```
+
+So Steam is a **cargo feature, off by default**. Two binaries out of one tree: the plain
+one on the releases page, which has never heard of Steam and runs from wherever somebody
+unzipped it, and `--features steam` in the depot with the library next to it. Nothing in
+the game behaves differently; anything that did would be a second game to test.
+
 **Take, in this order:**
 
-1. **Depots and SteamPipe.** Three depots (Windows, macOS, Linux), one app, uploaded from
-   CI on a tag — the same trigger that already cuts a GitHub release.
-2. **Cloud saves.** Free once item 2 above exists; it is a file path in a config.
-3. **Achievements.** Cheap and they shape a first hour: finish Sailing 101, make a first
-   delivery, come through a gale with the rig standing, anchor overnight, name your
-   position with three bearings, land a fish. Ten to fifteen, no grind.
+1. ~~**Depots and SteamPipe.**~~ Written and dry-run: `dist/steam.sh` builds this
+   machine's depot payload — binary plus library, the library *found* rather than named,
+   because cargo leaves it under a build hash that moves — and checks that the two landed
+   together, since a depot whose binary cannot find its library installs perfectly and
+   never opens a window. The manifests are in `dist/steam/`. The upload is written and
+   **cannot be tested**: it wants an App ID, three depot IDs and an account with build
+   permission, and it fails loudly rather than half-running without them.
+2. **Cloud saves.** Still nothing to write: Steam Auto-Cloud watches a directory and
+   `kept::dir()` already is one. It is a path typed into the partner site.
+3. ~~**Achievements.**~~ Twelve, in `earned.rs`, and they are **watched for rather than
+   announced**: this file reads state that already exists and decides for itself, instead
+   of twelve modules each carrying a line that says "and tell the achievements" — which is
+   exactly the line that gets lost in a refactor and is never missed, because nothing
+   fails when an achievement quietly stops being given. They are kept in our own file
+   whether Steam is there or not, and shown on the missions page, because a list that only
+   exists inside somebody else's client is not ours to show.
+
+**The App ID is 480 until there is a real one.** That is Spacewar, Valve's public test
+application: against it the library initialises, the overlay works and an unlock is
+accepted and then dropped, so the whole path can be exercised and the only untestable part
+is the number itself.
 
 **Leave for later:** Steam Networking in place of our relay. The relay works and is
 tested; what Steam would buy is NAT traversal and no port forwarding, which matters for
