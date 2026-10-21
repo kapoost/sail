@@ -13,6 +13,8 @@
 
 # Packaged builds
 /dist/out/
+# The shop's screenshots: build output, taken by `dist/store.sh`, uploaded once.
+/dist/store/
 
 # Session scratch
 /.claude/
