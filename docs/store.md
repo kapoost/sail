@@ -185,6 +185,40 @@ quit. It checks each one for the two failures that look like success — a black
 a frame that is the wrong shape for the shop — and it stages them against a save of its
 own, so a screenshot run cannot touch the player's platform.
 
+### The trailer
+
+**The game cannot film itself at speed.** The screenshot dials can take one frame at a
+time, but past about twelve frames a second the capture is handed a picture that has not
+been drawn into it yet and every frame comes back black — and it comes back black
+*looking like success*: the right count of files, the right names, eleven kilobytes of
+nothing each. `dist/trailer.sh` therefore records at twelve, checks brightness as well as
+count, retries a dead scene once, and lets ffmpeg interpolate up to twenty-four. That
+produces a cut. It does not produce footage.
+
+So the trailer is shot the other way round: **something else films the screen** — a
+screen recorder, sixty real frames a second, with the sound — and the game puts on the
+show on its own. `SAIL_REEL=1` runs a timetable (`crates/sail-app/src/reel.rs`), seventeen
+beats over a hundred and two seconds, with nothing to press:
+
+| From | To | The shot |
+|---|---|---|
+| 0 s | 9 s | Astern of her, force 4, morning — the shot that says what the game is |
+| 9 s | 20 s | All the way round her: rig, heel, wake, hull |
+| 21 s | 31 s | The helmsman's seat — the deck as a place |
+| 31 s | 43 s | The chart spread on the table, the console lit |
+| 44 s | 57 s | Force 8 on a built sea, from the seat she was just sailing quietly in |
+| 57 s | 68 s | The drawn sea: the same water, told differently |
+| 69 s | 78 s | Evening, the platform fine on the bow, its lamp lighting itself |
+| 78 s | 88 s | K at the masthead, and the brig's pendant answering |
+| 88 s | 102 s | Night: a moon, a path under it, the chart in the corner under its lamp |
+
+Each scene is long enough to take six seconds out of the middle of, away from the moment
+the weather jumps — which is a test (`the_running_order`) rather than a hope. Record it,
+then cut the nine shots down to the sixty seconds Steam wants.
+
+**It is not a cutscene.** Every beat writes the same resource the settings panel writes;
+anything the reel can show, a player can do.
+
 ---
 
 ## System requirements
