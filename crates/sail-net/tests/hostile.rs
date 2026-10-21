@@ -327,9 +327,19 @@ fn a_server_shrugs_off_rubbish_and_carries_on() {
         let _ = socket.send_to(packet, &at);
     }
 
-    // A snapshot full of NaN, from an address that is aboard — so the only thing left
-    // between it and the fleet is the decoding.
-    let id = match knock(&socket, &at, "nobody") {
+    // **A second socket to join on, and the first is never read from again.**
+    //
+    // The rubbish above is not silent: one of those two hundred and fifty-six single
+    // bytes decodes as a `Hello` claiming protocol zero, and the server answers it — so
+    // the next datagram arriving at the sender is a refusal about *that*, not a welcome
+    // about this. The first version of this test knocked on the same socket, read the
+    // next thing it was sent and asserted it was a welcome. It passed here and failed on
+    // CI, which is the signature of a test that was reading a race rather than a result.
+    //
+    // Two sockets is also the truer picture: the thing throwing rubbish at a server and
+    // the thing joining it are not the same party.
+    let joiner = stranger();
+    let id = match knock(&joiner, &at, "nobody") {
         Some(ToClient::Welcome { your_id, .. }) => your_id,
         other => panic!("expected a welcome, got {other:?}"),
     };
@@ -356,7 +366,7 @@ fn a_server_shrugs_off_rubbish_and_carries_on() {
         ..Default::default()
     };
     for _ in 0..20 {
-        let _ = socket.send_to(&encode(&ToServer::Here { id, drawn: poison }), &at);
+        let _ = joiner.send_to(&encode(&ToServer::Here { id, drawn: poison }), &at);
         std::thread::sleep(Duration::from_millis(15));
     }
     // Refused at the decoding, so there was never anything to relay and alice is told
