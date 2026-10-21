@@ -396,7 +396,10 @@ pub fn draw(
                     // whatever is driving the wind.
                     let mut hour = sky.hour;
                     if ui
-                        .add(egui::Slider::new(&mut hour, 4.0..=20.0).text("hour"))
+                        // The whole clock, not the daylight half of it: night is a
+                        // thing you can sail now, and a slider that stops at eight in
+                        // the evening is a slider that says it is not.
+                        .add(egui::Slider::new(&mut hour, 0.0..=23.9).text("hour"))
                         .changed()
                     {
                         *sky = crate::sky::Sky::at(hour, sky.cover);

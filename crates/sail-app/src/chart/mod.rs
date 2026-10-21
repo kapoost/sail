@@ -435,6 +435,66 @@ mod ink {
     pub const PENCIL: Color32 = Color32::from_rgb(64, 64, 70);
 }
 
+/// The chart as it is actually read after dark: dim, and red.
+///
+/// **A white chart at night is a flashbang.** Twenty minutes of dark adaptation goes in
+/// the second it comes up, and then there is no coast out there any more — which is
+/// exactly the half of night pilotage a game can get wrong without anybody noticing,
+/// because the player's room is lit. Every chart table at sea is lit red for this reason,
+/// and every chart is printed so that it can be read under one: that is why lights and
+/// everything else put there by people are magenta, which red light turns to black lines
+/// on a pale ground while blue water goes dark and even.
+///
+/// Drawn as a torch rather than as a second palette: one veil over the finished chart,
+/// darkening it and taking the colour out, instead of a night-coloured twin of every ink
+/// on the paper. It is the same thing physically — the paper has not changed, the light
+/// on it has — and it cannot drift out of step with the day version, because there is
+/// only one.
+///
+/// It follows the sun, on the same curve as her own lamps and the lights on the coast.
+fn under_a_red_torch(t: &Table, sky: &crate::sky::Sky) {
+    let dark = after_dark(sky);
+    if dark < 0.02 {
+        return;
+    }
+    // Down first, then red. Two passes because one colour cannot both take light away
+    // and put a colour back.
+    torch(&t.p, t.rect, dark);
+}
+
+/// The torch itself.
+///
+/// Only the paper goes under it, and that is the right line to draw: a chart is paper and
+/// takes the colour of whatever is shining on it, while the console is an instrument with
+/// its own backlight and keeps its own dim amber — which is what a lit binnacle does at
+/// sea. Putting everything under the torch would be prettier and wrong.
+pub(crate) fn torch(p: &egui::Painter, rect: egui::Rect, dark: f32) {
+    // **One veil, and it is dark with the red already in it.** Two passes were tried —
+    // black to take the light away, then red to put the colour back — and they fight:
+    // the red pass lifts what the black pass took down and the chart comes out pink,
+    // washed and lower in contrast than it started. A single dark red does both at once.
+    //
+    // It is a dimmer rather than a filter, and that is an honest limit of painting with
+    // alpha: a real red torch *removes* the blue and the green, which is a multiply, and
+    // nothing here can multiply. The proper version of this is a second palette — every
+    // ink on the paper given a night value — and it is a wider change than one rectangle
+    // because a hundred and fifty-odd colours are named across five files.
+    p.rect_filled(
+        rect,
+        4.0,
+        egui::Color32::from_rgba_unmultiplied(30, 5, 3, (188.0 * dark) as u8),
+    );
+}
+
+/// How dark it is, as the lamps and the lights on the coast measure it.
+pub(crate) fn after_dark(sky: &crate::sky::Sky) -> f32 {
+    1.0 - crate::curve::smoothstep(
+        (-3.0_f32).to_radians(),
+        (4.0_f32).to_radians(),
+        sky.elevation(),
+    )
+}
+
 pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut chart: ResMut<Chart>) {
     // Shift and M spreads it on the table; M alone folds the corner one away. Two states
     // of one chart rather than two charts, because a boat has one.
@@ -1071,6 +1131,7 @@ pub fn draw(
 
             what_she_knows(&table, &nav, st.time);
             the_scale(&table);
+            under_a_red_torch(&table, &sky);
 
             let (picked, explained) = the_instruments(
                 &table,
@@ -1138,6 +1199,11 @@ pub fn draw(
             egui::FontId::monospace(10.0),
             ink::COAST,
         );
+        // **Last, so that nothing is painted over the torch.** The first attempt put it
+        // after the coastline and before the instruments, and everything the plotting
+        // layer lays down afterwards went on top: a chart that was red where nothing had
+        // been drawn and daylight everywhere that mattered.
+        under_a_red_torch(&table, &sky);
     });
     // **The book lies on the table beside the chart**, in its own area with a hand's
     // breadth of gap: it is a separate object, it is read while the chart is being
@@ -1151,6 +1217,13 @@ pub fn draw(
                     Some(Turned::Line(line)) => laid = Some(line),
                     Some(Turned::To(which)) => turn_to = Some(which),
                     None => {}
+                }
+                // The book is paper too, and it is lying on the same table under the
+                // same lamp. A log that stayed cream while the chart went dark would be
+                // the brightest thing in the cockpit.
+                let dark = after_dark(&sky);
+                if dark > 0.02 {
+                    torch(ui.painter(), ui.min_rect().expand(6.0), dark);
                 }
             });
     }

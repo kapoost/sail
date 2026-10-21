@@ -101,10 +101,22 @@ pub struct Weather {
     pub tp: f64,
     /// Local time at the start, hours since midnight.
     ///
-    /// Morning, always, and that is a design decision rather than a limitation: a
-    /// delivery leg starts at a civilised hour, and it means the sun climbs through the
-    /// session instead of setting in it. Night sailing is a different game — instrument
-    /// lights, navigation lights, a sea you cannot read — and it is not written yet.
+    /// **Morning, mostly — and one day in five, the dark.** It used to be morning always,
+    /// and the reasoning was that a delivery leg starts at a civilised hour and the sun
+    /// should climb through the session rather than set in it; night sailing was called a
+    /// different game, needing instrument lights, navigation lights and a sea you cannot
+    /// read, and it was not written.
+    ///
+    /// It is written now. She carries her side lights and a stern light, the coast
+    /// flashes its own characteristics, the chart goes under a dim lamp, and there is a
+    /// moon at the antisolar point with a path under it on the water. So the draw opens
+    /// the other end of the day: four runs in five still start between half past six and
+    /// half past eight, and the fifth starts in the dark somewhere between ten at night
+    /// and three in the morning.
+    ///
+    /// One in five rather than half, because a passage you cannot see is the *special*
+    /// one. A game that handed out night every other session would be a game about
+    /// night, and this one is about sailing.
     pub start_hour: f64,
     /// Cloud cover the day settles about, 0 clear to 1 solid.
     pub cover: f64,
@@ -183,7 +195,16 @@ impl Weather {
         // eight and twenty-three degrees up. Deliberately the low end: a low sun is what
         // gives the long cloud shadows, the shafts under the squalls and the warm light
         // the whole look was built on, and it climbs through the session anyway.
-        let start_hour = 6.5 + rng.next_f64() * 2.0;
+        // Four days in five a morning; the fifth, a night watch. `SAIL_HOUR` overrides
+        // either, which is how both are looked at.
+        let start_hour = if rng.next_f64() < 0.2 {
+            // Ten at night to three in the morning, wrapped round midnight: the hours
+            // when there is nothing but the lights, and the ones a pilot earns his fee
+            // in.
+            (22.0 + rng.next_f64() * 5.0) % 24.0
+        } else {
+            6.5 + rng.next_f64() * 2.0
+        };
         // `SAIL_HOUR=20.5` starts her at half past eight in the evening.
         //
         // The same kind of knob as `SAIL_SQUALL`: the sky's best hours are the two at

@@ -464,6 +464,38 @@ rank and is there once the day has reached it, and what is there grows and flatt
 the cover rises, because fair-weather cumulus are separate lumps and an overcast is the
 same cloud joined up.
 
+## Night
+
+**One passage in five starts in the dark**, somewhere between ten at night and three in
+the morning, and the rest of them can sail into it. It used to be morning always, on the
+reasoning that a delivery leg starts at a civilised hour — and that night was a different
+game needing instrument lights, navigation lights and a sea you cannot read. All three of
+those exist now.
+
+**A moon at the antisolar point**, which is where a full moon always is: that is not a
+simplification dressed up as physics, it is the same fact twice, and what falls out of it
+is a moon that rises as the sun sets, stands highest at midnight and sets at dawn. It
+throws a path of broken light across the water that moves as she moves, and it is the one
+directional light in the scene once the sun is down — cold, because an eye adapted to a
+quarter of a lux reports blue. The phase is the thing given up, and deliberately: a phase
+needs a calendar, and this game has no calendar.
+
+**Stars**, as a function of direction rather than a catalogue, so the baked dome gives the
+same answer every time and nothing crawls. Bright ones only: the sky is painted into a
+cubemap at 256 pixels a face, a third of a degree to the texel, and a star is a hundredth
+of that — so the smallest point this sky can draw is already twenty times too big, and a
+thousand of them is not a starry night, it is snow. A few hundred, each worth looking at.
+
+**Her own lamps and the coast's.** She carries side lights in boxes with a lens in one
+face, because the box is what makes a sector and nobody should see green from your port
+bow; the marks flash their real characteristics, which is what identifies a light in the
+dark and the only thing that does.
+
+**And the chart goes under a dim lamp**, because a white chart at night is a flashbang:
+twenty minutes of dark adaptation gone in a second, and no coast out there any more. The
+paper dims and warms; the console keeps its own backlight, which is what a lit binnacle
+does.
+
 ## Navigation
 
 The archipelago has names on it, and finding out which bit of it you are looking at is a

@@ -103,6 +103,37 @@ impl Sky {
         }
     }
 
+    /// Where the moon is.
+    ///
+    /// **At the antisolar point, which is where a full moon always is.** That is not a
+    /// simplification dressed up as physics: a moon is full *because* it is opposite the
+    /// sun, so the two facts are the same fact — and what falls out of it is right for
+    /// free. The moon rises as the sun sets, is highest at midnight, and sets at dawn.
+    ///
+    /// The phase is the thing being given up, and it is given up for a reason: a phase
+    /// needs a calendar, and this game has no calendar. Days do not accumulate — every
+    /// passage is its own day — so a crescent would be a number pulled out of nothing and
+    /// a different number next time you sailed the same water. A full moon every night is
+    /// a lie a sailor would notice; a moon in the wrong place is a lie the *sky* would
+    /// notice, and the sky is what this model is for.
+    pub fn moon(&self) -> Vec3 {
+        -self.sun
+    }
+
+    /// How much light the moon is actually giving: it has to be up, and the sun has to
+    /// be down.
+    ///
+    /// A full moon is about four hundred thousand times fainter than the sun, which is a
+    /// quarter of a lux — enough to read a coastline by and nothing like enough to read
+    /// a chart by, which is the whole character of night sailing. The number below is
+    /// higher than that, because an eye adapted to a quarter-lux night sees a great deal
+    /// more than a camera exposed for one does, and this picture is the eye's answer.
+    pub fn moonlight(&self) -> f32 {
+        let up = (self.moon().y / 0.35).clamp(0.0, 1.0);
+        let dark = 1.0 - self.daylight();
+        up * dark * (1.0 - 0.75 * self.cover) * 900.0
+    }
+
     /// How high the sun is, radians. Negative is below the horizon.
     pub fn elevation(&self) -> f32 {
         self.sun.y.clamp(-1.0, 1.0).asin()
@@ -753,6 +784,25 @@ fn sky_colour(dir: Vec3, state: &Sky) -> Vec3 {
     } else {
         0.0
     };
+    // **The other half of the sky, which this model has never painted.** Below the
+    // horizon the sun takes the colour with it and leaves a grey dome — which reads as
+    // an overcast afternoon with the lights off rather than as night. What makes a night
+    // sky a night sky is that it has *things in it*: stars, and a moon with a path under
+    // it on the water.
+    let night = (1.0 - day).clamp(0.0, 1.0);
+    let stars = starlight(dir) * night * (1.0 - cover).powf(1.5) * (1.0 - veiled * 0.0);
+    // Cloud covers them: the deck in front of a star is the thing you are looking at.
+    let hidden =
+        (1.0 - low_d).max(0.0) * (1.0 - mid_d * 0.9).max(0.0) * (1.0 - high_d * 0.8).max(0.0);
+    let stars = stars * hidden;
+    // And the moon: a disc about half a degree across, a corona round it, and the glow
+    // it puts into the air near it. Same shape as the sun's own, two hundred thousand
+    // times fainter.
+    let moon_dir = state.moon();
+    let on_moon = dir.dot(moon_dir).max(0.0);
+    let moon_disc = if on_moon > 0.99985 { 2.6 } else { 0.0 };
+    let moon_glow = on_moon.powf(1400.0) * 0.5 + on_moon.powf(9.0) * 0.06;
+    let moonshine = (moon_disc + moon_glow) * night * (1.0 - cover * 0.85) * hidden;
     let corona = alignment.powf(1800.0) * 180.0 * veiled;
     let haze = alignment.powf(5.0) * 0.45;
 
@@ -774,7 +824,66 @@ fn sky_colour(dir: Vec3, state: &Sky) -> Vec3 {
     // looking like a lens effect.
     let ray_tint = warm.lerp(RAY_LOW, low * 0.8);
     let rays = shafts(dir, sun, cover) * 0.5;
-    sky + warm * (disc + corona) + warm * haze + ray_tint * rays
+    // Starlight is white with the faintest blue in it; moonlight is sunlight that has
+    // bounced off rock, so it is a little grey and very slightly warm — and the eye,
+    // adapted to a quarter of a lux, calls all of it blue anyway. That last part is the
+    // Purkinje shift and it is why every painting of a moonlit sea is blue; the tint
+    // below is the eye's answer rather than the photometer's.
+    let starlight = Vec3::new(0.80, 0.86, 1.0) * stars;
+    let moonlight = Vec3::new(0.74, 0.80, 0.95) * moonshine;
+    sky + warm * (disc + corona) + warm * haze + ray_tint * rays + starlight + moonlight
+}
+
+/// How bright a star is in this direction, if there is one at all.
+///
+/// **A hash on the direction rather than a list of stars**, for the reason everything
+/// else in this sky is a function: the dome is baked into a cubemap a few times a minute
+/// and a baked field has to give the same answer for the same direction every time, or
+/// the stars crawl. A table of real ones would be better and is a different project —
+/// and at this latitude, under this much cloud, nobody is taking a sight off them yet.
+///
+/// What it does reproduce is the part the eye reads: **most stars are faint and a few are
+/// bright**, which is a steep magnitude distribution rather than a uniform sprinkle, and
+/// **they thin out towards the horizon**, because that is where the air is thickest.
+fn starlight(dir: Vec3) -> f32 {
+    if dir.y < 0.02 {
+        return 0.0;
+    }
+    // A grid fine enough that two stars rarely share a cell, and fine enough that a star
+    // is a *point*: the first attempt used a third of this and the sky came out with
+    // snow in it — blobs a degree across, which at sea reads as spray on the lens.
+    const GRID: f32 = 520.0;
+    let cell = (dir * GRID).floor();
+    let seed = cell.x * 127.1 + cell.y * 311.7 + cell.z * 74.7;
+    let hash = |n: f32| (n.sin() * 43_758.545).fract().abs();
+    let there = hash(seed);
+    // **One cell in three hundred, and this number is set by the cubemap rather than by
+    // the sky.** The dome is baked at 256 a face, which is a third of a degree a texel;
+    // a star is a point a hundredth that wide, so the smallest thing this sky can draw
+    // is already twenty times too big. Thousands of them at that size is not a starry
+    // night, it is snow — it was, and it read as spray on the lens.
+    //
+    // So: the bright ones only, which is also what an eye gets on a hazy northern night
+    // with cloud about. A few hundred points, each a texel, each worth looking at. The
+    // real answer is a separate pass that draws stars as points rather than baking them
+    // into an image, and it is a bigger job than this one.
+    if there > 0.0034 {
+        return 0.0;
+    }
+    // Where in the cell, so the field is not a lattice.
+    let jitter = Vec3::new(hash(seed + 1.0), hash(seed + 2.0), hash(seed + 3.0)) - 0.5;
+    let at = ((cell + Vec3::splat(0.5) + jitter) / GRID).normalize();
+    // A tight gaussian in the angle between here and the star, so each one is a point
+    // with a little bloom rather than a square.
+    let apart = (1.0 - dir.dot(at)).max(0.0) * GRID * GRID;
+    let shape = (-apart * 1.6).exp();
+    // Magnitude: the fifth power makes most of them faint and a handful bright, which
+    // is the distribution the eye actually reads a sky by — a uniform sprinkle looks
+    // printed.
+    let magnitude = hash(seed + 4.0).powf(2.2) * 1.0 + 0.25;
+    // Extinction: the last ten degrees above the water take most of a star away.
+    let height = (dir.y / 0.17).clamp(0.0, 1.0).powf(0.6);
+    shape * magnitude * height * 3.4
 }
 
 /// The colour the haze has to be: the sky's own average along the horizon.
@@ -1036,10 +1145,25 @@ pub fn light(
     let Ok((mut t, mut light)) = lamp.single_mut() else {
         return;
     };
-    t.look_to(-sky.sun, Vec3::Y);
-    let tint = sky.sunlight();
+    // **The light in the sky is the moon's once the sun has gone.** One directional
+    // light, pointed at whichever of the two is lighting the scene: it swings round to
+    // the antisolar point as the sun sets, which is also when the moon rises, so the
+    // swing happens exactly when there is nothing to see it happen by. What it buys is
+    // the thing that makes a moonlit sea a moonlit sea — a path of broken light on the
+    // water, in the right place, moving as she moves.
+    let moonlight = sky.moonlight();
+    let sunlight = sky.illuminance();
+    let moonlit = moonlight > sunlight;
+    t.look_to(if moonlit { -sky.moon() } else { -sky.sun }, Vec3::Y);
+    let tint = if moonlit {
+        // Cold, because that is what an eye at a quarter of a lux reports — see
+        // `Sky::moonlight`.
+        Vec3::new(0.62, 0.72, 1.0)
+    } else {
+        sky.sunlight()
+    };
     light.color = Color::linear_rgb(tint.x, tint.y, tint.z);
-    light.illuminance = sky.illuminance();
+    light.illuminance = sunlight.max(moonlight);
     ambient.brightness = sky.ambient();
     // And the colour of it: a clear sky's diffuse light is blue because it is the sky,
     // and an overcast's is grey because the cloud has taken the colour out of it.
@@ -1310,5 +1434,78 @@ mod lighting {
                 pair[1]
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod the_other_half_of_the_day {
+    use super::*;
+
+    /// **A full moon is opposite the sun, and that is why it is full.** Which means the
+    /// one fact a sailor checks — *the moon rises as the sun sets* — comes out of the
+    /// model rather than being put into it.
+    #[test]
+    fn the_moon_rises_as_the_sun_sets() {
+        // Sunset: the sun on the horizon, the moon on the opposite one.
+        let dusk = (0..240)
+            .map(|n| Sky::at(12.0 + n as f32 / 20.0, 0.0))
+            .find(|sky| sky.elevation() <= 0.0)
+            .expect("the sun sets at this latitude");
+        assert!(
+            dusk.moon().y.abs() < 0.05,
+            "the moon was {:.2} up at sunset",
+            dusk.moon().y
+        );
+        // And at midnight, with the sun at its lowest, the moon is at its highest.
+        let midnight = Sky::at(0.0, 0.0);
+        assert!(midnight.elevation() < 0.0, "the sun was up at midnight");
+        assert!(
+            midnight.moon().y > 0.3,
+            "the moon was only {:.2} up at midnight",
+            midnight.moon().y
+        );
+    }
+
+    /// And she is lit by whichever of them is up — but never by both, and never by the
+    /// moon in daylight.
+    #[test]
+    fn the_moon_lights_nothing_in_the_afternoon() {
+        let noon = Sky::at(13.0, 0.2);
+        assert_eq!(noon.moonlight(), 0.0, "the moon lit a sunny afternoon");
+        let night = Sky::at(1.0, 0.1);
+        assert!(
+            night.moonlight() > 100.0,
+            "a clear midnight got {:.0} lux of moon",
+            night.moonlight()
+        );
+        // Cloud takes most of it away, which is the difference between a night you can
+        // pilot in and one you cannot.
+        let thick = Sky::at(1.0, 1.0);
+        assert!(
+            thick.moonlight() < night.moonlight() * 0.4,
+            "an overcast midnight was nearly as bright as a clear one"
+        );
+    }
+
+    /// Stars are above the horizon, thin out towards it, and are not everywhere.
+    #[test]
+    fn the_stars_are_points_and_not_a_wash() {
+        assert_eq!(starlight(Vec3::new(0.0, -0.3, -1.0).normalize()), 0.0);
+        let mut lit = 0;
+        let mut sampled = 0;
+        for x in -40..40 {
+            for z in -40..40 {
+                let dir = Vec3::new(x as f32 / 40.0, 0.7, z as f32 / 40.0).normalize();
+                sampled += 1;
+                if starlight(dir) > 0.05 {
+                    lit += 1;
+                }
+            }
+        }
+        assert!(lit > 0, "a sky with no stars in it at all");
+        assert!(
+            lit * 12 < sampled,
+            "{lit} of {sampled} samples were star — that is a wash, not a star field"
+        );
     }
 }
