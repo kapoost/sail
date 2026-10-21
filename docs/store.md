@@ -273,6 +273,13 @@ and lands wherever it lands. Two attempts at finding it failed in ways worth kee
   terminal with scrolling log lines sitting hard against its right-hand edge, taking
   seventy-one columns of it every time.
 
+Two things it cannot fix and you should set before pressing record: **turn the mouse
+pointer off** (⌘⇧5 → Options → Show Mouse Pointer), because otherwise the arrow sits in
+the middle of every frame of the take, and **record the window rather than the screen**,
+which saves cropping away a desktop. A pointer already in the footage can be painted out
+afterwards if it did not move — `delogo=x=656:y=94:w=32:h=42` on the chain, which against
+a sky is invisible.
+
 What works is motion **density**: a column inside the picture moves nearly all the way
 down, a column of scrolling text moves on the few rows that have glyphs on them, and the
 edge is where that falls off a cliff. On the first take of the passage reel it returns

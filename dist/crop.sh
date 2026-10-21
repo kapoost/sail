@@ -18,6 +18,16 @@
 # is a 16:9 shape of a plausible size, because a crop that has quietly locked onto a
 # terminal window is a thing you want to be told about rather than to discover in an edit.
 #
+# **Turn the mouse pointer off before recording.** In the ⌘⇧5 panel it is one checkbox
+# under Options, and with it on the arrow sits in the middle of every frame of the take.
+# If it is already in the footage and it did not move, it can be painted out afterwards —
+# find it with a zoom and add `delogo` to the chain below:
+#
+#     ffmpeg -i in.mov -vf "crop=...,scale=1920:1080,delogo=x=656:y=94:w=32:h=42" out.mp4
+#
+# Against a sky that is the end of it; over a sail edge it smears a little, which is still
+# a great deal better than a cursor.
+#
 # Writes <name>-crop.mp4 beside the recording, 1920 x 1080, with the sound kept.
 
 set -uo pipefail
@@ -116,6 +126,15 @@ y, ch = longest(rows > DENSE)
 ch = round(cw * 9 / 16)
 if y + ch > h:
     ch = h - y
+
+# **A macOS window has rounded corners**, and a crop taken to the edge keeps a few black
+# pixels in each bottom one — eighty-five of them in the recording this was written
+# against, which is nothing until the shot they sit in is a dark sea and they read as a
+# chip out of the frame. Four pixels off each side and six off the bottom costs a tenth of
+# a percent of picture and takes the corners with it. The top is square: the title bar is
+# above it and the window's own rounding is above that.
+x, cw = x + 4, cw - 8
+ch -= 6
 print(f"{cw}:{ch}:{x}:{y}")
 FIND
 )

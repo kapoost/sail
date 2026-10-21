@@ -411,7 +411,16 @@ pub fn run(mut reel: ResMut<Reel>, mut sim: ResMut<Sim>, mut stage: Stage) {
         let (at, act) = beats[reel.done];
         reel.done += 1;
         play(act, &mut sim, &mut stage);
-        info!("reel: {at:>5.1} s — {act:?}");
+        // The cloth that is actually up, said at every beat. Whoever is cutting the film
+        // needs to know what was on the bow in each shot, and a reel that *orders* a
+        // gennaker is not the same statement as a boat that *has* one — the order takes
+        // twenty-four seconds and the log is the only place the difference shows.
+        info!(
+            "reel: {at:>5.1} s — {act:?}  [{} {:.0}% out, reef {:.0}%]",
+            sim.controls.headsail.name(),
+            (1.0 - sim.controls.furl) * 100.0,
+            sim.controls.reef * 100.0,
+        );
     }
     let runs_for = reel.which.runs_for();
     if !reel.said && now > runs_for {
