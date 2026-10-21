@@ -219,6 +219,45 @@ then cut the nine shots down to the sixty seconds Steam wants.
 **It is not a cutscene.** Every beat writes the same resource the settings panel writes;
 anything the reel can show, a player can do.
 
+### And the short one — `SAIL_REEL=short`
+
+The passage reel is for somebody deciding whether to buy it: it has the instruments in it,
+because they are half the game. **This one is for somebody deciding whether to look at
+it**, and what decides that is water, light and cloth. No panels, no mission, no text —
+ninety-three seconds of a boat sailing, to be cut down to about fifty-five.
+
+| From | To | The shot |
+|---|---|---|
+| 0 s | 10 s | **Sunrise.** 04:45 to 06:09 with the sky's clock at five hundred and twenty. The sun breaks the horizon about five seconds in |
+| 10 s | 18 s | **First light, close-hauled.** The cockpit: the deck, the heel, low sun through the genoa |
+| 18 s | 30 s | **Bearing away.** Fifty degrees to a hundred and thirty-five, the camera walking round her the other way, the genoa rolling away as she goes |
+| 30 s | 42 s | **The kite.** The bow clear, the gennaker up off the sprit, full and drawing by the end |
+| 42 s | 54 s | **And in again** — twelve seconds before the breeze arrives, which is when a kite actually comes down |
+| 54 s | 66 s | **It comes on to blow.** Force 7, two slabs in the main, the genoa unrolling into it, seen from aft where the wake tilts |
+| 66 s | 76 s | **Sunset**, the clock back up to five hundred and twenty; the sun on the horizon at about seventy-one |
+| 76 s | 85 s | **Moonrise**, the camera coming round to the opposite bearing — which is where a full moon always is |
+| 85 s | 93 s | **Night under the moon**, its path on the water |
+
+Three numbers shape it and all three were measured rather than chosen:
+
+* **A sail change is twenty-four seconds.** The furling drum runs at 0.085 a second and a
+  change is two full turns of it — roll the old one away, swap at the bow, set the new
+  one. The first cut of this reel ordered the gennaker ten seconds before it wanted it and
+  filmed a boat with a bare forestay. Every order is now given a shot early, and the
+  rolling away is part of the shot before.
+* **The kite comes in before the wind comes up.** A gennaker in force 7 is over its cloth,
+  and cloth over its number has about five seconds left; the twelve it takes to roll away
+  would have blown it out. Which is also how it works at sea.
+* **Sunrise here is 05:29 and sunset 18:31** — fifty-seven north, five degrees of
+  declination, off the same two sines the sky itself uses. The moonrise is free: a full
+  moon is at the antisolar point, so it comes up as the sun goes down and the camera only
+  has to turn round.
+
+`SAIL_REEL_AFTER=30` holds everything back half a minute, so there is time to find the
+window and get the mouse out of the frame before the first beat fires.
+
+There is **no brig in this one** and nothing to signal to — it is the boat and the sea.
+
 ---
 
 ## System requirements

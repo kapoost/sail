@@ -317,7 +317,22 @@ pub const DOCUMENTED: [KeyCode; 54] = [
     KeyCode::Digit7,
 ];
 
-pub fn draw(mut contexts: bevy_egui::EguiContexts, mut help: ResMut<Help>) -> Result {
+/// The mark in the corner, and the page behind it.
+///
+/// **Off while a reel is playing.** It is the one piece of furniture that is not on the
+/// console and so does not come off with it, and a question mark sitting in the corner of
+/// a trailer is the single thing in the frame that says this is a program rather than a
+/// sea. Nothing else about it changes: a player who hides the console keeps it, because a
+/// player who has just hidden the console is exactly who needs to be able to ask how to
+/// get it back.
+pub fn draw(
+    mut contexts: bevy_egui::EguiContexts,
+    mut help: ResMut<Help>,
+    reel: Res<crate::reel::Reel>,
+) -> Result {
+    if reel.on {
+        return Ok(());
+    }
     let ctx = contexts.ctx_mut()?;
 
     // **The mark, on the instrument case rather than in the corner of the screen.**

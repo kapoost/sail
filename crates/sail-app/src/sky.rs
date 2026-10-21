@@ -27,6 +27,7 @@ pub fn plugin(app: &mut App) {
     use crate::stages::Deck;
     app.init_resource::<Baking>();
     app.init_resource::<Dome>();
+    app.init_resource::<Clock>();
     app.add_systems(Update, (drift, light).in_set(Deck::Weather));
 }
 
@@ -1072,22 +1073,47 @@ pub struct Baking {
 /// delivery is hours, and the sun should move like it.
 const HOURS_PER_SECOND: f32 = 1.0 / 3_600.0;
 
+/// How fast the sun goes, as a multiple of the above.
+///
+/// **One, and the filming reel is the only thing that changes it.** A sunrise is ninety
+/// minutes of sky and nobody is going to watch ninety minutes of it, so the reel runs the
+/// clock at five hundred and gets the whole thing in ten seconds — the light climbing
+/// through the colours in the order it really climbs through them, because the geometry
+/// underneath is the same geometry.
+///
+/// This is the one dial in the reel that is a camera trick rather than something a player
+/// could do, and it is worth being plain about that: everywhere else the reel moves the
+/// same resources a hand moves. It stays here in the sky rather than in `reel.rs` because
+/// the sky is the only thing it touches — the wind, the sea, the boat and the crew all go
+/// on at their own speed underneath, which is why a timelapse of the light is honest and
+/// a timelapse of the weather would not be.
+#[derive(Resource, Clone, Copy)]
+pub struct Clock(pub f32);
+
+impl Default for Clock {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
 /// How far the sun has to move, or the cover change, before it is worth sixty
 /// milliseconds of someone's core to repaint the sky.
 const SUN_STEP: f32 = 0.6_f32.to_radians();
 const COVER_STEP: f32 = 0.04;
 
 /// Advance the clock and the weather, and repaint the sky when either has moved.
+#[allow(clippy::too_many_arguments)]
 pub fn drift(
     sim: bevy::prelude::Res<crate::sim::Sim>,
     time: bevy::prelude::Res<Time>,
+    clock: bevy::prelude::Res<Clock>,
     mut sky: bevy::prelude::ResMut<Sky>,
     mut dome: bevy::prelude::ResMut<Dome>,
     mut baking: bevy::prelude::ResMut<Baking>,
     mut images: bevy::prelude::ResMut<Assets<Image>>,
     held: bevy::prelude::Query<&SkyImage>,
 ) {
-    let hour = sky.hour + time.delta_secs() * HOURS_PER_SECOND;
+    let hour = sky.hour + time.delta_secs() * HOURS_PER_SECOND * clock.0;
     // Cover comes from the same slow weather that moves the mean wind, plus whatever
     // squall is overhead — which is how a squall manages to darken the whole sky rather
     // than only the patch its own cloud is drawn on.

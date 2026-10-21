@@ -479,6 +479,12 @@ screen at sixty frames with the sound, and the game's job is to put on the show 
 hand on the keyboard. Every beat writes the same resource the settings panel writes;
 anything the reel can show, a player can do.
 
+`SAIL_REEL=short` is the other one: ninety-three seconds of nothing but a boat sailing —
+sunrise, the wardrobe changing as she bears away, the breeze making, a reef, sunset,
+moonrise, night. No panels and no story. The shape of it is set by three measurements and
+not by taste: a sail change takes twenty-four seconds at the drum's pace, a kite has to
+come in before the wind arrives rather than after, and the sun here rises at 05:29.
+
 `dist/store.sh` takes the shop's stills and `dist/capsules.py` composes its capsules from
 one of them. `dist/trailer.sh` cuts a trailer out of the game filming itself, at the
 twelve frames a second that works, for when there is nobody to press record.
