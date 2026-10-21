@@ -258,6 +258,26 @@ window and get the mouse out of the frame before the first beat fires.
 
 There is **no brig in this one** and nothing to signal to — it is the boat and the sea.
 
+### Getting the window back out of the recording
+
+`dist/crop.sh <recording.mov> [from] [to]` finds the game's window in a screen recording,
+crops to it, scales to 1920 x 1080 and keeps the sound.
+
+**The window is found rather than typed in**, because a hand-measured crop is right once
+and wrong the next time — a 1280 x 720 window on a 2x display is 2560 x 1440 of recording
+and lands wherever it lands. Two attempts at finding it failed in ways worth keeping:
+
+* Looking for sky and sea — blue ahead of red — worked until the frame it sampled was a
+  night scene, where it locked onto a nine-hundred-pixel patch of something else.
+* Looking for the longest run of *motion* walked straight out of the window and into a
+  terminal with scrolling log lines sitting hard against its right-hand edge, taking
+  seventy-one columns of it every time.
+
+What works is motion **density**: a column inside the picture moves nearly all the way
+down, a column of scrolling text moves on the few rows that have glyphs on them, and the
+edge is where that falls off a cliff. On the first take of the passage reel it returns
+`2560:1440:190:211` against a true `190, 212`.
+
 ---
 
 ## System requirements
