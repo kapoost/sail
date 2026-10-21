@@ -76,10 +76,17 @@ pub(crate) fn half(i: usize) -> f32 {
         let n = i as f32;
         let last = (NEAR_RINGS - 1) as f32;
         SPACING_NEAR * n + (SPACING_FAR - SPACING_NEAR) * n * (n - 1.0) / (2.0 * last)
+    } else if i <= NEAR_RINGS + MID_RINGS {
+        // And a second ramp, carrying on from where the first ended rather than starting
+        // somewhere else. See `MID_RINGS` for what it is for.
+        let n = (i - NEAR_RINGS) as f32;
+        let last = (MID_RINGS - 1) as f32;
+        NEAR_FIELD + SPACING_FAR * n + (SPACING_MID - SPACING_FAR) * n * (n - 1.0) / (2.0 * last)
     } else {
-        let rest = (GRID / 2 - NEAR_RINGS) as f32;
-        let step = (i - NEAR_RINGS) as f32;
-        NEAR_FIELD * (EXTENT / NEAR_FIELD).powf(step / rest)
+        let waving = NEAR_RINGS + MID_RINGS;
+        let rest = (GRID / 2 - waving) as f32;
+        let step = (i - waving) as f32;
+        MID_FIELD * (EXTENT / MID_FIELD).powf(step / rest)
     }
 }
 
@@ -133,14 +140,53 @@ pub(crate) const GRID: usize = 201;
 /// and it costs almost nothing because the outer rings carry no waves at all — see
 /// `resolutions`.
 const EXTENT: f32 = 3000.0;
-/// Where the wave-carrying part of the grid ends and the flat run to the horizon
-/// begins, metres.
+/// Where the first ramp ends, metres. Not where the waves end any more — see
+/// `MID_RINGS`.
 const NEAR_FIELD: f32 = 209.0;
 /// Vertex spacing at the boat, and at the edge of the near field.
 const SPACING_NEAR: f32 = 1.30;
 const SPACING_FAR: f32 = 4.20;
-/// How many rings make up the near field; the rest sprint to the horizon.
+/// How many rings make up the near field.
 const NEAR_RINGS: usize = 76;
+
+/// A second, gentler ramp before the sprint to the horizon — and the whole of why it is
+/// here is a line you could see.
+///
+/// **The grid used to fall off a cliff at two hundred and nine metres.** The spacing went
+/// from 4.06 m to 14.37 m in one ring, because the geometric run to the horizon began at
+/// whatever step its own ratio asked for and nothing matched it to the ramp it was
+/// starting from. Four times the spacing is the shortest wave the mesh can carry, so
+/// everything past that ring was flat water in any sea but a gale — and flat water is
+/// shaded differently as well as shaped differently, so what it actually looked like was
+/// a pale band lying across the picture just under the horizon.
+///
+/// From the cockpit this never showed: the eye is two metres up and two hundred metres
+/// out is already the horizon. From the chase camera, nine metres up and looking down, it
+/// is a line across the middle of the sea. Reported from there.
+///
+/// **A second ramp rather than a steeper first one**, and that is the whole design. The
+/// obvious fix was to push `SPACING_FAR` out and let the one ramp run further, and it
+/// buys reach by selling the near water: spacing grows faster everywhere, so a light air
+/// — whose waves are short enough that a coarse mesh loses them early — went flat at a
+/// hundred metres instead of a hundred and forty. Measured over four seas before a line
+/// was changed. Carrying on from 4.2 m instead of restarting steeper gives back nothing:
+///
+/// | sea | before | after |
+/// |---|---|---|
+/// | light air, Tp 3.0 s | 139 m | 139 m |
+/// | fresh breeze, Tp 4.2 s | 209 m | 271 m |
+/// | a good sea, Tp 6.0 s | 209 m | 328 m |
+/// | a gale, Tp 8.8 s | 292 m | 328 m |
+///
+/// It costs the vertices it costs: the wave-carrying square goes from 153 to 189 a side,
+/// twenty-three thousand vertices to thirty-six. The grid itself is the same size — the
+/// rings come out of the sprint, which carries no waves and is only there to reach the
+/// horizon with something to hang a colour on.
+const MID_RINGS: usize = 18;
+/// Vertex spacing where the second ramp ends.
+const SPACING_MID: f32 = 9.0;
+/// And where that is: the first ramp's end plus the second ramp's own sum.
+const MID_FIELD: f32 = NEAR_FIELD + MID_RINGS as f32 * (SPACING_FAR + SPACING_MID) / 2.0;
 
 /// The sea's one entity.
 ///
@@ -1148,6 +1194,112 @@ pub fn report_frame_times(time: Res<Time>, mut frames: ResMut<Frames>) {
 // `sea_card`'s tests compile the shader, run those two functions on the card and check
 // the same two things. A property tested against a copy of the code is a property that
 // can pass while the picture is wrong.
+
+#[cfg(test)]
+mod where_the_sea_stops_being_a_sea {
+    use super::*;
+
+    /// How far out the mesh can still carry a wave of this length, metres.
+    ///
+    /// The mesh cannot animate anything finer than four samples across it, which is the
+    /// rule `drawn_resolution` is built on and the one the shader's early-out uses: past
+    /// the ring where four times the spacing exceeds the longest wave in the sea, the
+    /// water is flat. This walks out until that happens.
+    fn carries(longest: f32) -> f32 {
+        (1..=GRID / 2)
+            .find(|k| 4.0 * spacing(GRID / 2 + k) >= longest)
+            .map(half)
+            .unwrap_or(EXTENT)
+    }
+
+    /// **The step cannot be removed, only placed**, and that is worth writing down
+    /// because the obvious reading of this change is that a discontinuity was fixed.
+    ///
+    /// A hundred half-rings have to reach three kilometres. Joining the sprint smoothly
+    /// onto nine-metre spacing would need a ratio of about 1.055 a ring, and from three
+    /// hundred metres that is **forty-two rings** to the horizon — there are six. So the
+    /// mesh runs out of rings and jumps, and it always did; what was wrong was where.
+    /// At two hundred and nine metres it jumped in water the eye is still reading, and
+    /// from the chase camera that is a pale band lying across the sea under the horizon.
+    ///
+    /// What this guards is the part that *is* a choice: that inside the wave-carrying
+    /// field there is no jump at all. Two arithmetic ramps, each continuing from where
+    /// the last ended, and a tenth is the most any ring may be wider than the one inside
+    /// it. Put a geometric segment in the middle of that and this fails.
+    #[test]
+    fn nothing_jumps_while_there_are_still_waves_to_carry() {
+        // Up to the last wave-carrying ring but not including it: `spacing` is a central
+        // difference, so the outermost one necessarily straddles the boundary and reads
+        // the sprint's first step. Including it tests the sprint while claiming to test
+        // the ramps, which is how a test ends up asserting something nobody meant.
+        let waving = NEAR_RINGS + MID_RINGS;
+        for k in 2..waving {
+            let (inner, outer) = (spacing(GRID / 2 + k - 1), spacing(GRID / 2 + k));
+            assert!(
+                outer >= inner - 0.01,
+                "ring {k} is finer than the one inside it: {outer} after {inner}"
+            );
+            assert!(
+                outer < inner * 1.1,
+                "ring {k} is {:.1} times the spacing of the one inside it, \
+                 and it is still carrying waves",
+                outer / inner
+            );
+        }
+        // And the two ramps meet without a step between them, which is the join the
+        // second one exists to make.
+        let across_the_join = spacing(GRID / 2 + NEAR_RINGS + 1) / spacing(GRID / 2 + NEAR_RINGS);
+        assert!(
+            across_the_join < 1.1,
+            "the ramps meet with a {across_the_join:.2} step"
+        );
+    }
+
+    /// And what that buys, in metres, for the seas this game actually draws.
+    ///
+    /// **The light air is the one to watch.** The obvious fix — one steeper ramp — buys
+    /// reach everywhere else by selling it here, because a short sea is lost by a coarse
+    /// mesh first: measured at a hundred metres instead of a hundred and forty. The
+    /// second ramp carries on from where the first ended rather than restarting steeper,
+    /// so this number is the one number that does not move.
+    #[test]
+    fn a_light_air_keeps_everything_it_had() {
+        let light = carries(14.0);
+        assert!(
+            (135.0..145.0).contains(&light),
+            "a short sea used to be drawn to 139 m and is now drawn to {light}"
+        );
+        // And everything above it reaches a good deal further than the two hundred and
+        // nine metres the old cliff allowed.
+        for (longest, was) in [(28.0, 209.0), (56.0, 209.0), (120.0, 292.0)] {
+            let now = carries(longest);
+            assert!(
+                now > was * 1.1,
+                "a {longest} m sea was drawn to {was} m and is now {now:.0} m"
+            );
+        }
+    }
+
+    /// The rings run outwards and the grid reaches what it says it reaches.
+    #[test]
+    fn the_grid_is_the_shape_it_claims() {
+        let mut last = -1.0;
+        for k in 0..=GRID / 2 {
+            let d = half(k);
+            assert!(d > last, "ring {k} at {d} is not past {last}");
+            last = d;
+        }
+        assert!((half(GRID / 2) - EXTENT).abs() < 1.0);
+        assert!(
+            (half(NEAR_RINGS) - NEAR_FIELD).abs() < 1.0,
+            "the first ramp should end where NEAR_FIELD says"
+        );
+        assert!(
+            (half(NEAR_RINGS + MID_RINGS) - MID_FIELD).abs() < 1.0,
+            "and the second where MID_FIELD says"
+        );
+    }
+}
 
 #[cfg(test)]
 mod how_the_frames_are_going {
