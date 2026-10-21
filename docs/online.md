@@ -147,7 +147,20 @@ game, and it needs no new physics.
   are cannot be made to collide without one of them being wrong on somebody's screen.
   Ghosts pass through each other, and an anchorage full of friends is a drawing problem
   rather than a physics one. Revisit only if somebody actually wants to race starts.
-- **No anti-cheat, no validation.** Friends.
+- **No anti-cheat. Validation, though** — the two are not the same thing and this line
+  used to say they were. Anti-cheat decides what is *plausible*: whether that boat could
+  really be doing fourteen knots. That is a bottomless, losing job for a game nobody
+  competes in, and the answer is still no. Validation decides what is *a number*: whether
+  a float is finite, whether a quantity about to go underneath a division is above zero.
+  That one is not optional, because its failures are silent. A weather packet with
+  `t = NaN` walked past a guard spelled `if t <= 0.0` — `NaN <= 0.0` is **false** — and
+  poisoned the simulation clock for ever, and that clock drives the wave field, the gusts
+  and the squalls. A squall with `life = 0` divides zero by zero, which `f64::clamp`
+  propagates rather than clamps, so the wind went NaN at *every* boat including your own.
+  Neither crashes. A crash is reported; a sea that quietly stops being a sea is reported
+  as "it broke". So: one `Sane` trait, and `decode` will not compile without it. Nothing
+  beyond finite-and-above-zero — a boat trimmed like nothing on earth is a drawing, and a
+  drawing cannot hurt anybody.
 - **The host is a player's machine on LAN and a VPS on the internet.** Same binary.
 - **Crates**: `serde` + `postcard` for the wire, the standard library for the socket. No
   QUIC until there is a reason — TLS for a friends-only game over an overlay network is a
