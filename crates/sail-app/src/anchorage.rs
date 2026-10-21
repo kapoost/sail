@@ -209,40 +209,12 @@ const FORMAT: u32 = 1;
 impl Home {
     /// The file, if there is one and it makes sense.
     pub fn read() -> Option<Self> {
-        let text = std::fs::read_to_string(Self::path()?).ok()?;
-        Self::parse(&text)
+        Self::parse(&crate::kept::read("home")?)
     }
 
-    /// Write it where it will be found again. Through a temporary file and a rename, so
-    /// that a crash halfway through a write leaves the old one rather than half a new one.
+    /// Write it where it will be found again — see `kept.rs` for how and where.
     pub fn write(&self) -> Option<()> {
-        let path = Self::path()?;
-        std::fs::create_dir_all(path.parent()?).ok()?;
-        let beside = path.with_extension("writing");
-        std::fs::write(&beside, self.text()).ok()?;
-        std::fs::rename(&beside, &path).ok()?;
-        Some(())
-    }
-
-    /// Where the file lives, by the conventions of the machine it is on.
-    ///
-    /// No crate for this. Three platforms, three environment variables, and the whole of
-    /// what a crate would do for us is the part we would still have to check.
-    pub fn path() -> Option<std::path::PathBuf> {
-        // Bound inside each branch that wants it rather than once above them: on Windows
-        // nothing reads `HOME`, and a binding nobody reads is a warning in the build that
-        // most players run.
-        #[cfg(target_os = "macos")]
-        let dir = std::path::PathBuf::from(std::env::var("HOME").ok()?)
-            .join("Library/Application Support/sail");
-        #[cfg(target_os = "windows")]
-        let dir = std::path::PathBuf::from(std::env::var("APPDATA").ok()?).join("sail");
-        #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-        let dir = match std::env::var("XDG_DATA_HOME") {
-            Ok(data) if !data.is_empty() => std::path::PathBuf::from(data).join("sail"),
-            _ => std::path::PathBuf::from(std::env::var("HOME").ok()?).join(".local/share/sail"),
-        };
-        Some(dir.join("home"))
+        crate::kept::write("home", &self.text())
     }
 
     /// The file's contents. One fact a line, in the order somebody would want to read
@@ -266,15 +238,11 @@ impl Home {
 
     /// And back again. A line it does not know is skipped rather than fatal.
     pub fn parse(text: &str) -> Option<Self> {
-        let mut lines = text.lines();
-        let stamp = lines.next()?;
-        let version: u32 = stamp.strip_prefix("sail home ")?.trim().parse().ok()?;
-        if version > FORMAT {
+        if !crate::kept::stamped(text, "home", FORMAT) {
             return None;
         }
         let mut home = Self::default();
-        for line in lines {
-            let (key, value) = line.trim().split_once(' ').unwrap_or((line.trim(), ""));
+        for (key, value) in crate::kept::lines(text) {
             match key {
                 "sea" => home.sea = value.trim().parse().unwrap_or(0),
                 "moored" => {

@@ -218,6 +218,11 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
             ("C", "view: behind her, ahead, down the wake, under it"),
             ("H", "hide the console"),
             ("K", "mute"),
+            (
+                "3 - 7",
+                "the signal halyard, while there is a ship to talk to: K ask, L stop, \
+                 X wait, P carry on, U danger — and 0 hauls it down",
+            ),
             ("F11", "full screen, and back — Alt Enter does it too"),
             (
                 "Esc",
@@ -244,7 +249,7 @@ const SECOND_COLUMN: usize = 3;
 /// help does not mention is a feature nobody will find; a key the help promises and
 /// nothing reads is a lie, and both have happened here.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const DOCUMENTED: [KeyCode; 48] = [
+pub const DOCUMENTED: [KeyCode; 54] = [
     // At the helm.
     KeyCode::ArrowLeft,
     KeyCode::ArrowRight,
@@ -303,6 +308,13 @@ pub const DOCUMENTED: [KeyCode; 48] = [
     KeyCode::F11,
     KeyCode::AltLeft,
     KeyCode::AltRight,
+    // The signal halyard.
+    KeyCode::Digit0,
+    KeyCode::Digit3,
+    KeyCode::Digit4,
+    KeyCode::Digit5,
+    KeyCode::Digit6,
+    KeyCode::Digit7,
 ];
 
 pub fn draw(mut contexts: bevy_egui::EguiContexts, mut help: ResMut<Help>) -> Result {

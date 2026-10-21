@@ -33,6 +33,7 @@ mod hud;
 mod ink;
 mod input;
 mod islands;
+mod kept;
 mod knob;
 mod logbook;
 mod marks;
@@ -43,6 +44,7 @@ mod navigation;
 mod net;
 mod orders;
 mod panel;
+mod preferences;
 mod race;
 mod rain;
 mod retro;
@@ -199,6 +201,32 @@ fn window_size() -> (u32, u32) {
     asked.unwrap_or((1440, 880))
 }
 
+/// The file the log is copied into, opened fresh each launch.
+///
+/// `None` when there is nowhere to keep it — a browser, or a machine whose home
+/// directory cannot be found — and then the program behaves exactly as it did before,
+/// which is to say it talks to standard output and nowhere else.
+#[cfg(not(target_arch = "wasm32"))]
+fn log_to_a_file() -> Option<bevy::log::BoxedLayer> {
+    use bevy::log::tracing_subscriber::Layer;
+    let path = kept::at("log")?;
+    std::fs::create_dir_all(path.parent()?).ok()?;
+    let file = std::fs::File::create(&path).ok()?;
+    Some(Box::new(
+        bevy::log::tracing_subscriber::fmt::layer()
+            .with_writer(file)
+            // No colour: this is a file somebody will open in a text editor or paste
+            // into a bug report, and escape codes in either are noise.
+            .with_ansi(false)
+            .boxed(),
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn log_to_a_file() -> Option<bevy::log::BoxedLayer> {
+    None
+}
+
 fn main() {
     // **The sea she is moored in, and a day that has not been sailed before.**
     //
@@ -247,6 +275,18 @@ fn main() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
+            // **A copy of the log, in a file beside the save.**
+            //
+            // Everything this program says goes to standard output, which is perfect for
+            // the person who started it from a terminal and useless to everybody else: a
+            // game opened by double-clicking has no console, so the one thing a player
+            // could send after a crash was a description. The file is written fresh each
+            // launch and holds the last run — the forecast, the seed, what was built,
+            // what went wrong — which is exactly what a bug report needs attached to it.
+            .set(bevy::log::LogPlugin {
+                custom_layer: |_| log_to_a_file(),
+                ..default()
+            })
             .set(AssetPlugin {
                 file_path: asset_root(),
                 ..default()
@@ -413,6 +453,7 @@ fn main() {
         ship::plugin,
         fleet::plugin,
         panel::plugin,
+        preferences::plugin,
         settings::plugin,
         help::plugin,
         logbook::plugin,

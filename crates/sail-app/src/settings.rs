@@ -35,7 +35,10 @@ use crate::sound::SoundHandle;
 pub fn plugin(app: &mut App) {
     use crate::stages::{Deck, Paint};
     app.init_resource::<Settings>();
-    app.add_systems(Update, (toggle, apply).in_set(Deck::Weather));
+    app.add_systems(
+        Update,
+        (toggle, apply, hold_everything).in_set(Deck::Weather),
+    );
     app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Cards));
 }
 
@@ -164,23 +167,76 @@ pub fn toggle(
 // panel reaches four more resources than it did now that the picture is settable from
 // somewhere other than a keypress.
 #[allow(clippy::too_many_arguments)]
+/// **The sea stops while the panel is open.**
+///
+/// There was no pause at all: the one place a player could step away was this panel, and
+/// the boat sailed on behind it — which on this coast means she sails on into something.
+/// A menu that stops the game is the oldest convention there is and it costs no key,
+/// which matters because the key list is for things you do *to the boat* and pausing is
+/// not one of them.
+///
+/// Bevy's virtual clock does it, so everything that reads a delta stops together: the
+/// simulation, the sky, the sound, the sea's own animation. Stopping only the simulation
+/// would leave a boat frozen under a sky that was still moving, which is worse than not
+/// stopping at all.
+///
+/// **Except in company.** Two to eight boats are each computed by the person sailing
+/// them, so a local pause cannot stop anybody else's sea — it would stop only yours while
+/// the fleet sailed on. With a link up the water keeps moving and the panel says so.
+pub fn hold_everything(
+    settings: Res<Settings>,
+    net: Res<crate::net::Net>,
+    mut clock: ResMut<Time<Virtual>>,
+) {
+    let hold = settings.open && net.link.is_none();
+    if hold && !clock.is_paused() {
+        clock.pause();
+        info!("the sea is stopped");
+    } else if !hold && clock.is_paused() {
+        clock.unpause();
+        info!("and on again");
+    }
+}
+
+/// Everything the PICTURE page can touch, behind one name.
+///
+/// Six resources that are all answers to the same question — *what does the game look
+/// like* — and a system may have sixteen parameters. The same move as `Missions` and
+/// `InHand` below, and for the same two reasons: the limit, and the fact that these
+/// genuinely belong together.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct Picture<'w> {
+    pub view: ResMut<'w, crate::camera::View>,
+    pub ink: ResMut<'w, crate::world::Ink>,
+    pub retro: ResMut<'w, crate::retro::Retro>,
+    pub hud: ResMut<'w, crate::hud::HudVisible>,
+    pub counter: ResMut<'w, crate::world::Counter>,
+    pub screen: ResMut<'w, crate::screen::Screen>,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: bevy_egui::EguiContexts,
     mut settings: ResMut<Settings>,
     mut sim: ResMut<Sim>,
     mut sky: ResMut<crate::sky::Sky>,
     sound: Res<SoundHandle>,
-    mut view: ResMut<crate::camera::View>,
-    mut ink: ResMut<crate::world::Ink>,
-    mut retro: ResMut<crate::retro::Retro>,
-    mut hud: ResMut<crate::hud::HudVisible>,
+    mut picture: Picture,
     mut net: ResMut<crate::net::Net>,
     fleet: Res<crate::fleet::Fleet>,
     mut missions: Missions,
     mut course: ResMut<crate::course::Course>,
-    mut screen: ResMut<crate::screen::Screen>,
-    mut counter: ResMut<crate::world::Counter>,
+    mut home: ResMut<crate::anchorage::Home>,
+    weather: Res<crate::weather::Weather>,
 ) -> Result {
+    let (view, ink, retro, hud, counter, screen) = (
+        &mut picture.view,
+        &mut picture.ink,
+        &mut picture.retro,
+        &mut picture.hud,
+        &mut picture.counter,
+        &mut picture.screen,
+    );
     if !settings.open {
         net.scan = None;
         return Ok(());
@@ -192,6 +248,7 @@ pub fn draw(
         .inner_margin(egui::Margin::symmetric(14, 12));
 
     let mut close = false;
+    let mut another_sea = false;
     egui::Area::new("settings".into())
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -20.0))
         .show(ctx, |ui| {
@@ -271,8 +328,8 @@ pub fn draw(
                             ("at the helm", crate::camera::View::Cockpit),
                             ("from astern", crate::camera::View::Chase),
                         ] {
-                            if ui.selectable_label(*view == which, name).clicked() {
-                                *view = which;
+                            if ui.selectable_label(**view == which, name).clicked() {
+                                **view = which;
                             }
                         }
                     });
@@ -281,7 +338,7 @@ pub fn draw(
                     if ui.selectable_label(ink.0, "the ink drawing").clicked() {
                         ink.0 = !ink.0;
                     }
-                    pixels(ui, &mut retro);
+                    pixels(ui, retro);
                     // Where the picture is drawn. `F11` is the same switch without
                     // opening this, and both of them end up in the same resource —
                     // see `screen.rs`, which also explains why the window can be
@@ -296,11 +353,11 @@ pub fn draw(
                         for which in [crate::screen::Screen::Windowed, crate::screen::Screen::Full]
                         {
                             if ui
-                                .selectable_label(*screen == which, which.name())
+                                .selectable_label(**screen == which, which.name())
                                 .on_hover_text("F11, or Alt Enter")
                                 .clicked()
                             {
-                                *screen = which;
+                                **screen = which;
                             }
                         }
                     });
@@ -468,6 +525,7 @@ pub fn draw(
 
                 if settings.tab == Tab::Passage {
                     passage(ui, &mut course);
+                    a_new_sea(ui, &mut another_sea, &home.stores);
                 }
                 if settings.tab == Tab::Drill {
                     drill(ui, &mut missions);
@@ -487,11 +545,44 @@ pub fn draw(
                     // stepping to DRILL left the scan running. Found in review.
                     net.scan = None;
                 }
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(if net.link.is_some() {
+                        "the fleet is sailing — this does not stop the sea"
+                    } else {
+                        "the sea is stopped while this is open"
+                    })
+                    .monospace()
+                    .size(10.0)
+                    .color(egui::Color32::from_rgb(130, 136, 146)),
+                );
                 footer(ui, &mut close);
             });
         });
     if close {
         settings.open = false;
+    }
+    if another_sea {
+        // The same handover joining a game uses, pointed at a seed nobody has sailed:
+        // `net::rebuild` throws the archipelago away and builds the new one through the
+        // systems that built the first, so the solo world and the joined one cannot
+        // drift apart. The platform's berth goes with the old islands and is picked
+        // again when she opens in the new ones; the store is untouched.
+        let drawn = crate::knob::seed() ^ 0x9E37_79B9;
+        home.sea = drawn;
+        home.moored = None;
+        home.harbour.clear();
+        home.unsaved = true;
+        net.rebuild = Some(sail_net::World {
+            seed: drawn,
+            tws: weather.tws as f32,
+            wind_from: weather.wind_from as f32,
+            fetch: weather.fetch as f32,
+            start_hour: weather.start_hour as f32,
+            cover: weather.cover as f32,
+        });
+        settings.open = false;
+        info!("a new sea: seed {drawn}");
     }
     Ok(())
 }
@@ -532,6 +623,45 @@ fn passage(ui: &mut egui::Ui, course: &mut crate::course::Course) {
         .clicked()
     {
         course.wants_new = true;
+    }
+}
+
+/// **A new sea**, which until now could only be asked for with an environment variable.
+///
+/// The world is a pure function of its seed and the seed is in the save, so a player who
+/// does not like the archipelago they were dealt had no way to be dealt another — short
+/// of finding the file and deleting it. This is that, with the two things it has to say
+/// out loud: the islands and the names go, and **the platform and everything on it come
+/// with you**, because the store is yours and not the sea's.
+fn a_new_sea(ui: &mut egui::Ui, wants: &mut bool, stores: &crate::anchorage::Stores) {
+    ui.add_space(10.0);
+    ui.label(
+        egui::RichText::new("A NEW SEA")
+            .monospace()
+            .size(11.0)
+            .color(egui::Color32::from_rgb(150, 150, 130)),
+    );
+    ui.label(
+        egui::RichText::new(format!(
+            "another archipelago, drawn fresh. {} casks and {} fish come with you — the \
+             platform is moored again at the nearest town to wherever she opens.",
+            stores.casks, stores.fish
+        ))
+        .color(egui::Color32::from_rgb(176, 182, 190))
+        .monospace()
+        .size(10.0),
+    );
+    ui.add_space(4.0);
+    if ui
+        .button(
+            egui::RichText::new("DRAW ANOTHER ARCHIPELAGO")
+                .monospace()
+                .size(12.0),
+        )
+        .on_hover_text("this water, these islands and these names are gone for good")
+        .clicked()
+    {
+        *wants = true;
     }
 }
 

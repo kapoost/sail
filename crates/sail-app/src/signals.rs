@@ -71,6 +71,34 @@ impl Flag {
         Flag::Uniform,
     ];
 
+    /// The key it is bent on to.
+    ///
+    /// **Three to seven, and not one to five.** One and two pick a line out of the clutch
+    /// bank and have done since before this existed; a key that means two things
+    /// depending on what is on the screen is a key list nobody can trust, which is a
+    /// lesson this repository has already learnt once. The number is printed beside the
+    /// signal on the panel, because a key nobody can see is a key nobody presses.
+    pub fn key(self) -> KeyCode {
+        match self {
+            Flag::Kilo => KeyCode::Digit3,
+            Flag::Lima => KeyCode::Digit4,
+            Flag::Xray => KeyCode::Digit5,
+            Flag::Papa => KeyCode::Digit6,
+            Flag::Uniform => KeyCode::Digit7,
+        }
+    }
+
+    /// What that key is called on the panel and in the key list.
+    pub fn key_name(self) -> &'static str {
+        match self {
+            Flag::Kilo => "3",
+            Flag::Lima => "4",
+            Flag::Xray => "5",
+            Flag::Papa => "6",
+            Flag::Uniform => "7",
+        }
+    }
+
     /// The letter, which is what anybody on a bridge would call it.
     pub fn letter(self) -> &'static str {
         match self {
@@ -285,6 +313,49 @@ pub fn signalling(
     answer.reading = reading;
 }
 
+/// The halyard, on the keys.
+///
+/// One number a flag, and the same number again hauls it down — which is what a halyard
+/// does and saves a hand going to the panel to undo something. `0` clears whatever is up,
+/// for the moment when the thing you want is *nothing flying* and you cannot remember
+/// which number you pulled.
+///
+/// Only while there is a ship to talk to. A digit pressed with nothing in sight does
+/// nothing at all rather than quietly bending a flag on for later: a signal is made to
+/// somebody, and the pendant is how you know it arrived.
+pub fn the_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut hoist: ResMut<Hoist>,
+    job: Res<Pilotage>,
+    brig: Res<Brig>,
+    sim: Res<Sim>,
+) {
+    if !job.running || job.over.is_some() || !brig.afloat {
+        return;
+    }
+    if (brig.at - sim.sim.state.pos).length() > crate::mission::IN_SIGHT * 1.5 {
+        return;
+    }
+    let mut asked: Option<Option<Flag>> = None;
+    if keys.just_pressed(KeyCode::Digit0) && hoist.flying.is_some() {
+        asked = Some(None);
+    }
+    for flag in Flag::ALL {
+        if keys.just_pressed(flag.key()) {
+            asked = Some((hoist.flying != Some(flag)).then_some(flag));
+        }
+    }
+    let Some(flying) = asked else {
+        return;
+    };
+    hoist.flying = flying;
+    hoist.since = sim.sim.state.time;
+    match flying {
+        Some(flag) => info!("hoisted {} — {}", flag.letter(), flag.means()),
+        None => info!("the halyard is clear"),
+    }
+}
+
 /// The hoist, as a panel — the halyard you actually pull.
 ///
 /// Only while there is a ship to talk to, like every other panel in this game that is
@@ -355,9 +426,14 @@ pub fn draw(
                     if ui
                         .selectable_label(
                             up,
-                            egui::RichText::new(format!("{} — {}", flag.letter(), flag.asks()))
-                                .monospace()
-                                .size(11.0),
+                            egui::RichText::new(format!(
+                                "{}  {} — {}",
+                                flag.key_name(),
+                                flag.letter(),
+                                flag.asks()
+                            ))
+                            .monospace()
+                            .size(11.0),
                         )
                         .on_hover_text(flag.means())
                         .clicked()
@@ -369,7 +445,7 @@ pub fn draw(
                     ui.add_space(4.0);
                     if ui
                         .button(
-                            egui::RichText::new("haul down")
+                            egui::RichText::new("0  haul down")
                                 .monospace()
                                 .size(11.0)
                                 .color(quiet),
@@ -490,7 +566,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<Answer>();
     app.add_systems(
         Update,
-        (signalling, dress, fly_the_pendant)
+        (the_keys, signalling, dress, fly_the_pendant)
             .chain()
             .in_set(Deck::Weather),
     );

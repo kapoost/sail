@@ -156,6 +156,14 @@ impl Retro {
         &WIDTHS
     }
 
+    /// The drawn width a fresh install opens on, as a step.
+    ///
+    /// Its own function because two things want it now — the dial below and the file of
+    /// preferences — and a default written twice is a default that drifts.
+    pub fn default_step() -> Option<usize> {
+        Some(nearest(960))
+    }
+
     /// Start in the pixelated picture, from `SAIL_PIXELS` in the environment.
     ///
     /// Takes the width you want and picks the nearest step, so `SAIL_PIXELS=480` means

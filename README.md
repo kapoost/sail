@@ -36,8 +36,9 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
 1. **The engine stays a reversible decision.** Bevy, Fyrox and Godot-via-gdext are all
    still on the table; the presentation layer is a few days of work on top of this
    crate, not a rewrite.
-2. **The physics is testable without opening a window.** 141 tests in the core assert
-   against figures a sailor knows from the water — 360 across the workspace. When one
+2. **The physics is testable without opening a window.** The core's tests assert
+   against figures a sailor knows from the water — four hundred and ten across the
+   workspace, run by CI on every push. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
 
@@ -49,6 +50,29 @@ compass. None of those is findable by reading, and all of them are one assertion
 `scenarios.rs` runs the game headless — a Bevy `App` with `MinimalPlugins`, the resources
 a system needs, and `update()` for a frame — and asks the questions those faults should
 have been asked. No renderer, no window, no new dependency, four hundredths of a second.
+
+## What it keeps
+
+Three files, in `~/Library/Application Support/sail` and the equivalents, all of them
+lines of text: a save you can read, diff and delete is one you can also recover from.
+
+**`home`** — the sea you are sailing, where your platform is moored in it, and what is on
+it. Not a passage: this game does not save at sea and is not going to, because an evening
+is the length of a passage and a boat that can be put down mid-gale is a boat nothing can
+go wrong to. What persists is what you brought home. The seed is in there too, so the
+second launch opens on *your* islands — with a new day's weather over them, because a day
+you have already sailed is a replay.
+
+**`settings`** — volume, the view, the drawn width, the frame counter, full screen. An
+environment dial still wins while it is set, and is deliberately not written back: `SAIL_FPS=1`
+is somebody answering a question about one run.
+
+**`log`** — everything the program said, written fresh each launch. A game opened by
+double-clicking has no console, so this is the thing to attach to a bug report.
+
+`Esc` stops the sea while the panel is open — unless you are sailing with other people,
+who cannot be stopped by your menu. **PASSAGE → DRAW ANOTHER ARCHIPELAGO** deals a new
+sea and brings the platform and the store with you.
 
 ## The core loop
 

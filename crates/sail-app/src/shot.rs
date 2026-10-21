@@ -189,8 +189,16 @@ fn key_named(name: &str) -> Option<KeyCode> {
         "=" => KeyCode::Equal,
         "[" => KeyCode::BracketLeft,
         "]" => KeyCode::BracketRight,
+        "0" => KeyCode::Digit0,
         "1" => KeyCode::Digit1,
         "2" => KeyCode::Digit2,
+        // Three to seven are the signal halyard, and a scripted passage wants to be able
+        // to hoist one the same way a hand does.
+        "3" => KeyCode::Digit3,
+        "4" => KeyCode::Digit4,
+        "5" => KeyCode::Digit5,
+        "6" => KeyCode::Digit6,
+        "7" => KeyCode::Digit7,
         "a" => KeyCode::KeyA,
         "b" => KeyCode::KeyB,
         "c" => KeyCode::KeyC,
