@@ -47,6 +47,7 @@ mod panel;
 mod preferences;
 mod race;
 mod rain;
+mod reel;
 mod retro;
 mod rig;
 mod rod;
@@ -407,6 +408,7 @@ fn main() {
         frame::plugin,
         aboard::plugin,
         screen::plugin,
+        reel::plugin,
         retro::plugin,
         ink::plugin,
     ))

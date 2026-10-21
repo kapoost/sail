@@ -464,6 +464,25 @@ rank and is there once the day has reached it, and what is there grows and flatt
 the cover rises, because fair-weather cumulus are separate lumps and an overcast is the
 same cloud joined up.
 
+## Filming it
+
+`SAIL_REEL=1` and the game plays itself: a timetable of scenes — a breeze astern of her,
+a sweep all the way round, the helmsman's seat, the chart on the table, a gale, the drawn
+sea, evening over the platform, a flag at the masthead, and a night with a moon on the
+water. About a minute and three quarters, each scene long enough to take six seconds out
+of the middle of.
+
+It exists because the game's own screenshot dials cannot film at speed: past about twelve
+frames a second the capture is served a picture that has not been drawn yet and every
+frame comes back **black**. So the reel is the other way round — something else films the
+screen at sixty frames with the sound, and the game's job is to put on the show without a
+hand on the keyboard. Every beat writes the same resource the settings panel writes;
+anything the reel can show, a player can do.
+
+`dist/store.sh` takes the shop's stills and `dist/capsules.py` composes its capsules from
+one of them. `dist/trailer.sh` cuts a trailer out of the game filming itself, at the
+twelve frames a second that works, for when there is nobody to press record.
+
 ## Night
 
 **One passage in five starts in the dark**, somewhere between ten at night and three in

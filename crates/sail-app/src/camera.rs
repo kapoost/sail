@@ -19,6 +19,7 @@ use crate::sim::Sim;
 pub fn plugin(app: &mut App) {
     use crate::stages::{Build, Deck};
     app.init_resource::<ChaseState>();
+    app.insert_resource(Sweep::asked());
     app.init_resource::<ViewAim>();
     app.add_systems(Startup, setup.in_set(Build::Scene));
     app.add_systems(Update, follow.in_set(Deck::Dress));
@@ -29,7 +30,7 @@ pub fn plugin(app: &mut App) {
 #[derive(Component)]
 pub struct MainCamera;
 
-#[derive(Resource, Default, PartialEq, Eq, Clone, Copy)]
+#[derive(Resource, Default, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum View {
     Cockpit,
     /// The default, which is not where the helmsman is.
@@ -264,13 +265,25 @@ const AIM_RECENTRE: f32 = 0.42;
 /// entirely, which is what it did.
 const ROLL_HOLDS_THE_EYE: f32 = 2.6;
 
-/// Degrees a second the view sweeps round her on its own, if asked.
-fn orbit() -> Option<f32> {
-    crate::knob::var("SAIL_ORBIT")
-        .ok()
-        .and_then(|v| v.parse::<f32>().ok())
-        .filter(|v| *v > 0.0)
-        .map(|deg| deg.to_radians())
+/// How fast the view sweeps round her on its own, radians a second, if at all.
+///
+/// A resource rather than a read of the environment, because two things ask for it now:
+/// `SAIL_ORBIT=9` from outside, which is what it was built for, and the reel in
+/// `reel.rs`, which turns it on for one scene and off again — and a dial that can only be
+/// set before the program starts cannot do that.
+#[derive(Resource, Clone, Copy, Default)]
+pub struct Sweep(pub Option<f32>);
+
+impl Sweep {
+    pub fn asked() -> Self {
+        Self(
+            crate::knob::var("SAIL_ORBIT")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+                .filter(|v| *v > 0.0)
+                .map(|deg| deg.to_radians()),
+        )
+    }
 }
 
 /// Swing the view with the right mouse button held.
@@ -285,6 +298,7 @@ pub fn aim(
     time: Res<Time>,
     mut aim: ResMut<ViewAim>,
     mut attention: ResMut<Attention>,
+    sweep: Res<Sweep>,
 ) {
     aim.since_hand += time.delta_secs();
     // `SAIL_ORBIT=9` swings the view round her at nine degrees a second and leaves it
@@ -292,7 +306,7 @@ pub fn aim(
     // without a hand on the mouse. Within the same reach a hand has — two and a half
     // radians either way — so it sweeps rather than spins, and nothing drags it home
     // behind it.
-    if let Some(rate) = orbit() {
+    if let Some(rate) = sweep.0 {
         let reach = AIM_YAW * 0.92;
         aim.yaw = reach * (time.elapsed_secs() * rate).sin();
         aim.pitch = 0.08;
