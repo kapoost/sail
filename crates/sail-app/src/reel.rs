@@ -454,7 +454,15 @@ fn play(act: Act, sim: &mut Sim, stage: &mut Stage) {
                 // hour for a gale to raise its own sea.
                 sea.settle(sim.sim.telemetry.tws, 0.0);
             }
-            *stage.sky = crate::sky::Sky::at(hour.unwrap_or(stage.sky.hour), oktas as f32 / 8.0);
+            // The hour moves the clock's own offset rather than the sky, because the sky
+            // is derived from the passage now and would be back where it was next frame.
+            // Asking for no hour leaves it where the passage has it, which is what lets a
+            // beat change the wind in the middle of a sunrise without dragging the sun
+            // back to where the last beat put it.
+            if let Some(want) = hour {
+                stage.clock.put_at(want, stage.sky.hour);
+            }
+            *stage.sky = crate::sky::Sky::at(stage.sky.hour, oktas as f32 / 8.0);
         }
         Act::Seat(seat) => {
             *stage.view = seat;
@@ -480,7 +488,7 @@ fn play(act: Act, sim: &mut Sim, stage: &mut Stage) {
             stage.berth.at = Some(st.pos + glam::DVec2::new(heading.sin(), heading.cos()) * 70.0);
             stage.berth.harbour = "alongside".into();
         }
-        Act::Clock(rate) => stage.clock.0 = rate,
+        Act::Clock(rate) => stage.clock.rate = rate,
         Act::Headsail(which) => stage.orders.set(sim, which),
         Act::Reef(slab) => {
             use crate::clutch::{Line, BANK};

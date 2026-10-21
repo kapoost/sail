@@ -219,7 +219,8 @@ pub fn draw(
     mut contexts: bevy_egui::EguiContexts,
     mut settings: ResMut<Settings>,
     mut sim: ResMut<Sim>,
-    mut sky: ResMut<crate::sky::Sky>,
+    sky: Res<crate::sky::Sky>,
+    mut clock: ResMut<crate::sky::Clock>,
     sound: Res<SoundHandle>,
     mut picture: Picture,
     mut net: ResMut<crate::net::Net>,
@@ -402,7 +403,10 @@ pub fn draw(
                         .add(egui::Slider::new(&mut hour, 0.0..=23.9).text("hour"))
                         .changed()
                     {
-                        *sky = crate::sky::Sky::at(hour, sky.cover);
+                        // Through the clock's offset: the hour itself is read off the
+                        // passage, which is shared with everybody else in the game and
+                        // is not this machine's to move.
+                        clock.put_at(hour, sky.hour);
                         settings.weather_touched = true;
                     }
 

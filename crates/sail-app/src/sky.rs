@@ -1088,11 +1088,44 @@ const HOURS_PER_SECOND: f32 = 1.0 / 3_600.0;
 /// on at their own speed underneath, which is why a timelapse of the light is honest and
 /// a timelapse of the weather would not be.
 #[derive(Resource, Clone, Copy)]
-pub struct Clock(pub f32);
+pub struct Clock {
+    /// How fast the sun goes, as a multiple. One is a sailing day.
+    pub rate: f32,
+    /// Hours put on top of what the passage says, and the only part of the time of day
+    /// that is this machine's own opinion.
+    ///
+    /// Private on purpose: everything that moves the sky moves it through [`put_at`] or
+    /// [`follow_the_passage`], because an offset somebody can assign is an offset that
+    /// will be assigned to an hour instead of to a difference.
+    ///
+    /// [`put_at`]: Clock::put_at
+    /// [`follow_the_passage`]: Clock::follow_the_passage
+    ahead: f32,
+}
 
 impl Default for Clock {
     fn default() -> Self {
-        Self(1.0)
+        Self {
+            rate: 1.0,
+            ahead: 0.0,
+        }
+    }
+}
+
+impl Clock {
+    /// Put the sky at this hour, given the hour it is showing now.
+    ///
+    /// Moves the offset rather than the clock, which is the whole trick: the passage time
+    /// underneath is shared with everybody else in the game and is not this machine's to
+    /// change, so a hand on the hour slider — or a reel jumping to a sunset — becomes a
+    /// difference held here instead of a disagreement about what time it is.
+    pub fn put_at(&mut self, want: f32, showing: f32) {
+        self.ahead += want - showing;
+    }
+
+    /// Back to the hour the passage says it is, with no opinion of our own on top.
+    pub fn follow_the_passage(&mut self) {
+        self.ahead = 0.0;
     }
 }
 
@@ -1106,14 +1139,37 @@ const COVER_STEP: f32 = 0.04;
 pub fn drift(
     sim: bevy::prelude::Res<crate::sim::Sim>,
     time: bevy::prelude::Res<Time>,
-    clock: bevy::prelude::Res<Clock>,
+    mut clock: bevy::prelude::ResMut<Clock>,
     mut sky: bevy::prelude::ResMut<Sky>,
     mut dome: bevy::prelude::ResMut<Dome>,
     mut baking: bevy::prelude::ResMut<Baking>,
     mut images: bevy::prelude::ResMut<Assets<Image>>,
     held: bevy::prelude::Query<&SkyImage>,
 ) {
-    let hour = sky.hour + time.delta_secs() * HOURS_PER_SECOND * clock.0;
+    // **The hour is derived, not accumulated**, and that is what makes it the same hour
+    // on everybody's screen.
+    //
+    // It used to be a number that advanced itself: `hour += dt`, seeded once at the start
+    // and never spoken about again. On one machine that is fine. In a game it meant the
+    // time of day was the one part of the world *not* shared — the seed is shared, the
+    // weather is relayed, the simulation clock is nudged into step every second, and the
+    // sun was left wandering off each copy's own frame time. Somebody joining an hour
+    // into a passage was handed the start hour and sailed into their own morning while
+    // everybody else watched the afternoon.
+    //
+    // So it is read off the two things that *are* shared: the hour the passage began,
+    // which crosses the wire in `World`, and the simulation clock, which both ends
+    // already agree about to within a nudge. The same argument as the gust field — a
+    // thing that can be worked out from what we both have does not need a packet — and
+    // the same trap, which is that it is only true if the clock really is shared.
+    //
+    // `ahead` is this machine's own addition and nobody else's business: a hand on the
+    // hour slider, or a reel running a sunrise at five hundred times.
+    clock.ahead += time.delta_secs() * HOURS_PER_SECOND * (clock.rate - 1.0);
+    let passage = sim.sim.state.time as f32 * HOURS_PER_SECOND;
+    // Wrapped, which the accumulating version never was: an eight-hour passage starting
+    // at eighteen hundred used to print "26:14" in the log book.
+    let hour = (sim.weather.start_hour as f32 + passage + clock.ahead).rem_euclid(24.0);
     // Cover comes from the same slow weather that moves the mean wind, plus whatever
     // squall is overhead — which is how a squall manages to darken the whole sky rather
     // than only the patch its own cloud is drawn on.
@@ -1466,6 +1522,108 @@ mod lighting {
 #[cfg(test)]
 mod the_other_half_of_the_day {
     use super::*;
+
+    /// The hour, as `drift` works it out. Written once here so the test and the system
+    /// cannot drift apart, which is the failure this file has had before.
+    fn hour_of(start: f32, passage_seconds: f32, ahead: f32) -> f32 {
+        (start + passage_seconds * HOURS_PER_SECOND + ahead).rem_euclid(24.0)
+    }
+
+    /// **Two people who joined an hour apart are in the same part of the day.**
+    ///
+    /// This is the whole reason the hour stopped being a number that advanced itself. The
+    /// old one was seeded at the start and then grew by its own frame time, so the time of
+    /// day was the one piece of the world that was never shared: a latecomer was handed
+    /// the hour the passage *began* and sailed into their own morning while everybody
+    /// else watched the afternoon.
+    ///
+    /// Derived, there is nothing to share. Both machines have the start hour — it crosses
+    /// the wire in `World` — and both have the simulation clock, which is nudged into
+    /// step every second. Same two numbers, same sun.
+    #[test]
+    fn two_boats_that_joined_an_hour_apart_see_the_same_sun() {
+        // The hour as it used to be found: seeded from the start hour at the moment this
+        // machine joined, and then grown by this machine's own frame time. Kept here
+        // because a test that only exercises the new way cannot show what was wrong with
+        // the old one, and "they agree" is not interesting unless something made them
+        // disagree.
+        fn accumulated(start: f32, seconds_since_i_joined: f32) -> f32 {
+            start + seconds_since_i_joined * HOURS_PER_SECOND
+        }
+
+        let start = 8.0;
+        // Four thousand seconds — an hour and six minutes — into somebody's passage.
+        let passage = 4_000.0;
+
+        // One of them has been sailing it since the beginning; the other walked in just
+        // now and has nothing but the handshake. The old way puts them an hour and six
+        // minutes apart, which is the difference between a morning and a forenoon.
+        let veteran = accumulated(start, passage);
+        let latecomer = accumulated(start, 0.0);
+        assert!(
+            (veteran - latecomer).abs() > 1.0,
+            "this is the bug, and without it the rest of this test proves nothing"
+        );
+
+        // Derived, there is nothing to get wrong: both have the start hour, because it
+        // crosses the wire in `World`, and both have the simulation clock, because it is
+        // nudged into step every second. Same two numbers, same sun.
+        let veteran = hour_of(start, passage, 0.0);
+        let latecomer = hour_of(start, passage, 0.0);
+        assert_eq!(veteran, latecomer);
+        assert!(
+            (veteran - 9.111).abs() < 0.01,
+            "eight o'clock plus an hour and six minutes, and it is {veteran}"
+        );
+
+        // And the sun itself, which is the thing anybody actually looks at.
+        assert!(
+            (Sky::at(veteran, 0.3).elevation() - Sky::at(latecomer, 0.3).elevation()).abs() < 1e-6
+        );
+    }
+
+    /// An offset is this machine's own and does not move the passage underneath it: a
+    /// hand on the hour slider, or a reel jumping to a sunset, changes what *you* see and
+    /// leaves what time it is alone.
+    #[test]
+    fn a_hand_on_the_slider_is_not_a_disagreement_about_the_time() {
+        let (start, passage) = (8.0, 4_000.0);
+        let showing = hour_of(start, passage, 0.0);
+
+        let mut clock = Clock::default();
+        clock.put_at(19.5, showing);
+        assert!(
+            (hour_of(start, passage, clock.ahead) - 19.5).abs() < 1e-4,
+            "asked for half past seven and got {}",
+            hour_of(start, passage, clock.ahead)
+        );
+        // The passage has not moved, which is the point: the shared number is untouched
+        // and only this machine's opinion of it has changed.
+        assert!((hour_of(start, passage, 0.0) - showing).abs() < 1e-6);
+
+        // And letting go of it comes back to the hour everybody else has.
+        clock.follow_the_passage();
+        assert!((hour_of(start, passage, clock.ahead) - showing).abs() < 1e-6);
+    }
+
+    /// **It wraps**, which the accumulating version never did. An eight-hour passage that
+    /// began at six in the evening used to put "26:14" in the deck log, because the hour
+    /// was a running total and nothing ever brought it back round the clock.
+    #[test]
+    fn a_long_night_does_not_run_off_the_end_of_the_day() {
+        let hour = hour_of(18.0, 8.0 * 3_600.0, 0.0);
+        assert!(
+            (hour - 2.0).abs() < 1e-3,
+            "six in the evening plus eight hours is two in the morning, not {hour}"
+        );
+        for passage in [0.0, 3_600.0, 50_000.0, 500_000.0] {
+            let hour = hour_of(18.0, passage, 0.0);
+            assert!(
+                (0.0..24.0).contains(&hour),
+                "{passage} s into it the clock says {hour}"
+            );
+        }
+    }
 
     /// **A full moon is opposite the sun, and that is why it is full.** Which means the
     /// one fact a sailor checks — *the moon rises as the sun sets* — comes out of the

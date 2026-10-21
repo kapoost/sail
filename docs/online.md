@@ -55,6 +55,15 @@ eight and a half kilobytes a second in each direction, which is nothing on any l
 of us has. There is no compression, no delta encoding and no prioritisation in this plan
 on purpose — at this scale they would be work spent on a problem we do not have.
 
+**The time of day is not sent either**, for the same reason and after being got wrong in
+the same way. It is the start hour — which crosses the wire once, in `World` — plus the
+simulation clock, so both ends work it out from two numbers they already share. It used
+to be a number that advanced itself off local frame time, which made the sun the one part
+of the world that was never shared at all: somebody joining an hour into a passage was
+handed the hour it *began* and sailed into their own morning while everybody else watched
+the afternoon. An hour slider, or a reel running a sunrise at five hundred times, is held
+as an offset on top — this machine's own opinion, and nobody else's business.
+
 **The gust field is not sent.** It is already a stateless function of position and time,
 so every client computes the same gusts from the same `(seed, t)` without a packet. Only
 the synoptic state and the squalls — which have their own position and radius — travel,

@@ -128,7 +128,7 @@ pub fn rebuild(
     mut commands: Commands,
     mut net: ResMut<Net>,
     mut sim: ResMut<Sim>,
-    mut sky: ResMut<crate::sky::Sky>,
+    mut clock: ResMut<crate::sky::Clock>,
     mut track: ResMut<crate::chart::Track>,
     mut nav_state: ResMut<crate::navigation::Navigation>,
     mut chart: ResMut<crate::chart::Chart>,
@@ -162,7 +162,7 @@ pub fn rebuild(
     // where that is also how you get home again.
     *sim = Sim::new(weather, world.seed);
     *sea = crate::islands::Sea(world.seed);
-    sky.hour = weather.start_hour as f32;
+    clock.follow_the_passage();
     track.clear();
     // Out with the old archipelago. The marks go with it: a consignment to a harbour that
     // is no longer there is a buoy floating in open water.
@@ -201,6 +201,7 @@ pub fn exchange(
     mut net: ResMut<Net>,
     mut fleet: ResMut<Fleet>,
     mut sim: ResMut<Sim>,
+    mut clock: ResMut<crate::sky::Clock>,
     sound: Res<crate::sound::SoundHandle>,
 ) {
     let Some(link) = net.link.as_mut() else {
@@ -238,9 +239,20 @@ pub fn exchange(
                 // supposed to prevent, hiding inside the sentence that claimed to prevent
                 // it.
                 //
-                // Safe to snap: the simulation clock drives the wave field, the gusts and
-                // the squalls, and nothing else. The passage deadline counts frame time
-                // and the time of day has its own hour.
+                // Safe to snap: the simulation clock drives the wave field, the gusts,
+                // the squalls — and now the time of day as well, which is new and is the
+                // point. The sun used to have a number of its own that advanced itself,
+                // so joining an hour into somebody's passage put you in your own morning
+                // while they watched the afternoon. It is read off this clock and the
+                // hour the passage began, both of which are shared, so it comes right
+                // here with no packet of its own.
+                //
+                // The start hour is taken whether or not the sea is changing: joining a
+                // game on the seed you are already sailing skips the rebuild below, and
+                // the hour would otherwise stay this machine's while the clock became
+                // theirs — which is a worse answer than either end alone.
+                sim.weather.start_hour = world.start_hour as f64;
+                clock.follow_the_passage();
                 // Guarded here too: this arm is the handshake and the one above is the
                 // hourly weather, and they are two different packets.
                 if sky.t.is_finite() && sky.t > 0.0 {
