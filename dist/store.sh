@@ -68,6 +68,12 @@ scene_env () {
     # and it is a mile astern inside a minute. The lamp wants the half hour before
     # sunset, which is what the hour is for.
     platform) echo "SAIL_SEED=31 SAIL_PLATFORM=here SAIL_HOUR=19.4 SAIL_SHOT_AFTER=6" ;;
+    # **The capsule's own picture, with the furniture off.** `h` hides the console and
+    # `m` folds the chart away, which leaves the thing the capsule is of: a boat, a sea
+    # and a sky. Evening, because a capsule is looked at for a third of a second and low
+    # light is what makes a hull read as a shape rather than as a texture. Feed it to
+    # `dist/capsules.py`.
+    capsule)  echo "SAIL_SEED=31 SAIL_WIND=26 SAIL_SEA=built SAIL_HOUR=18.4 SAIL_SHOT_KEYS=58:h;59:m SAIL_SHOT_AFTER=62" ;;
     *) return 1 ;;
   esac
 }
@@ -93,7 +99,7 @@ print(f"{w}x{h}")
 PY
 }
 
-scenes=${*:-"gale chart brig ink helm platform"}
+scenes=${*:-"gale chart brig ink helm platform capsule"}
 failed=0
 for scene in $scenes; do
   env=$(scene_env "$scene") || { echo "no scene called $scene"; failed=1; continue; }

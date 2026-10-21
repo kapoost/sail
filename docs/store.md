@@ -151,7 +151,21 @@ Sizes are Valve's and they are not suggestions; a capsule at the wrong size is r
 | Screenshots | ≥ 1920 × 1080, 16:9 | At least five |
 | Trailer | 1920 × 1080, H.264 | One, sixty seconds |
 
-**The capsules are the commission.** Everything else on this list comes out of the game.
+**There is a first set of capsules**, made by `dist/capsules.py` out of a picture the game
+took of itself with its own furniture turned off, set in the game's own face with the
+game's own accent. It is deliberately a poster rather than a screenshot: cropped hard
+around the rig, a stop down, the contrast up, and the name in VT323 with the amber full
+stop the console and the website both use.
+
+**Whether that is good enough is a judgement, not a measurement.** Put it beside the
+capsules on any Steam search page and it will be obvious within a second. If it reads
+weakly, the answer is an illustrator and a few hundred dollars, and the script's job is
+then to be deleted rather than defended — but a shop page that looks like the game is
+worth more than a shop page that looks expensive, and this one at least looks like the
+game.
+
+The **library logo**, which sits over the hero as transparent artwork, is the one piece
+with no honest generated answer. That one is a pen.
 
 ### Screenshots, in the order they should sit on the page
 
