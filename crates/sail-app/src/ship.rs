@@ -1031,6 +1031,39 @@ pub fn setup(
                     });
                 }
             }
+            // **The answering pendant**, at her mainmast head, where a ship's answer
+            // goes. Red and white vertical stripes, which is what the pendant is, and
+            // three strips of cloth is as much of it as reads at this distance. It is
+            // hidden until she has something to answer — see `signals.rs`, which also
+            // explains why *where* it is flying matters as much as whether it is.
+            {
+                for (n, colour) in [
+                    Color::srgb(0.82, 0.14, 0.14),
+                    Color::srgb(0.92, 0.91, 0.88),
+                    Color::srgb(0.82, 0.14, 0.14),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    ship.spawn((
+                        crate::signals::Answering,
+                        Mesh3d(meshes.add(Cuboid::new(0.02, 0.9, 0.14))),
+                        MeshMaterial3d(materials.add(StandardMaterial {
+                            base_color: colour,
+                            perceptual_roughness: 0.92,
+                            double_sided: true,
+                            cull_mode: None,
+                            ..default()
+                        })),
+                        Transform::from_translation(
+                            mast_foot(1)
+                                + Vec3::new(0.0, LOWER_MAST + TOPMAST * 0.55, 0.0)
+                                + Vec3::Z * (n as f32 * 0.15 - 0.15),
+                        ),
+                        Visibility::Hidden,
+                    ));
+                }
+            }
             // The spanker: a gaff sail abaft the mainmast, and the sail she steers with.
             ship.spawn((
                 Driver(0),

@@ -269,6 +269,19 @@ pub fn remark(
 
 impl Pilotage {
     /// Put a hail on the deck, if she has not just said something else.
+    /// The same, but it is an answer and answers are never suppressed.
+    ///
+    /// **A ship that has read your signal replies to it.** The limiter above exists so
+    /// that she is not a parrot — she has opinions about the water and she offers them
+    /// every so often — but a hoist is a question asked on purpose, and "she said nothing
+    /// because somebody mentioned the tide nine seconds ago" is the behaviour that makes
+    /// a player stop trusting the channel.
+    fn answer_across(&mut self, words: &str, now: f64) {
+        self.hailed_at = now;
+        self.hail = Some((words.to_string(), now + HAIL_STANDS));
+        info!("brig: {words}");
+    }
+
     fn call_across(&mut self, words: &str, now: f64) {
         if now - self.hailed_at < BETWEEN_HAILS {
             return;
@@ -280,12 +293,115 @@ impl Pilotage {
 }
 
 /// The job, frame by frame: her casks, her following, and the two ways it ends.
+/// Carry out what has been hoisted, if she has read it.
+///
+/// Five flags, and each one does the thing the code says it means rather than a
+/// convenience invented for the game: stopped is stopped, held is held, and *you are
+/// standing into danger* turns her away from the shoal rather than stopping her, because
+/// a ship that stops in the wrong place is still in the wrong place.
+fn told_her(brig: &mut Brig, job: &mut Pilotage, answer: &mut crate::signals::Answer, sim: &Sim) {
+    use crate::signals::Flag;
+    let Some(flag) = answer.reading else {
+        return;
+    };
+    let now = sim.sim.state.time;
+    match flag {
+        // Words, not helm: she says what she is doing, which is the one question this
+        // mission could not answer before.
+        Flag::Kilo => {
+            if answer.said.is_none() {
+                let words = if job.leading {
+                    "we have you ahead of us and we are following"
+                } else if job.led_once {
+                    "we have lost sight of you — we are lying here waiting"
+                } else {
+                    "we are standing in under our own navigation — get ahead of us"
+                };
+                answer.said = Some(words.to_string());
+                job.answer_across(words, now);
+            }
+        }
+        // Everything off her and the way comes off: it takes a ship a while, which is
+        // the point of the signal being *instantly*.
+        Flag::Lima => {
+            brig.set = [0.0, 0.0, 0.0];
+            brig.bound_for = brig.at;
+            if answer.said.is_none() {
+                answer.said = Some("taking the way off her".into());
+                job.answer_across("all aback — we are taking the way off her", now);
+            }
+        }
+        // Hold: topsail to the mast and she stays where she is, and this is *not* losing
+        // the pilot — she was told to wait, so she does not complain about it.
+        Flag::Xray => {
+            brig.set = [0.0, 0.35, 0.0];
+            brig.bound_for = brig.at + DVec2::new(brig.heading.sin(), brig.heading.cos()) * 150.0;
+            if answer.said.is_none() {
+                answer.said = Some("holding on, watching you".into());
+                job.answer_across("holding on — we are watching your signals", now);
+            }
+        }
+        // And on again.
+        Flag::Papa => {
+            brig.set = [1.0, 1.0, 1.0];
+            if answer.said.is_none() {
+                answer.said = Some("making sail".into());
+                job.answer_across("making sail — we are coming on", now);
+            }
+        }
+        // Danger: she sheers away from the nearest shoal rather than from your boat, and
+        // keeps her way on while she does it. A ship that stops on a lee shore is a ship
+        // that goes onto it.
+        Flag::Uniform => {
+            let away = sheer_off(sim, brig.at, brig.heading);
+            brig.set = [0.6, 1.0, 0.0];
+            brig.bound_for = brig.at + away * 600.0;
+            if answer.said.is_none() {
+                answer.said = Some("sheering off".into());
+                job.answer_across("sheering off — where is the water?", now);
+            }
+        }
+    }
+}
+
+/// Which way is out of it: the heading that gets her off the shoalest bearing within
+/// reach, biased to the smaller turn.
+///
+/// Soundings rather than cleverness. Half a dozen bearings either side of her head, a
+/// cast of the lead a cable and a half along each, and she goes where the water is — the
+/// same thing a leadsman and a worried master would do, and it is right for the same
+/// reason: nobody on that deck knows this coast, which is why they wanted a pilot.
+fn sheer_off(sim: &Sim, at: DVec2, heading: f64) -> DVec2 {
+    let Some(land) = sim.sim.land.as_ref() else {
+        return DVec2::new(heading.sin(), heading.cos());
+    };
+    let mut best = (f64::MIN, DVec2::new(heading.sin(), heading.cos()));
+    for step in -6..=6 {
+        let off = rad(15.0) * step as f64;
+        let course = heading + off;
+        let along = DVec2::new(course.sin(), course.cos());
+        // The least water along that bearing, which is what decides it.
+        let mut least = f64::MAX;
+        for cast in 1..=6 {
+            least = least.min(land.depth(at + along * (cast as f64 * 50.0)));
+        }
+        // A tie goes to the smaller turn: a ship sheering off does not wear round if a
+        // point and a half will do.
+        let score = least - off.abs() * 2.0;
+        if score > best.0 {
+            best = (score, along);
+        }
+    }
+    best.1
+}
+
 pub fn run(
     time: Res<Time>,
     sim: Res<Sim>,
     mut brig: ResMut<Brig>,
     mut job: ResMut<Pilotage>,
     mut flotsam: ResMut<crate::barrels::Flotsam>,
+    mut answer: ResMut<crate::signals::Answer>,
 ) {
     if !job.running || job.over.is_some() {
         return;
@@ -355,7 +471,15 @@ pub fn run(
         brig.set = [1.0, 1.0, 1.0];
     }
 
-    if job.leading {
+    // --- And what she has been told, which outranks all of it ----------------------
+    //
+    // **An order she has read is an order she obeys.** The hoist itself is not enough:
+    // `signals::Answer::reading` is what her officer has actually got out of the signal
+    // book, and until the answering pendant is close up there is nothing here to act on.
+    // That is the whole of why the pendant is worth watching.
+    told_her(&mut brig, &mut job, &mut answer, &sim);
+
+    if job.leading && answer.reading.is_none() {
         // **A track, not a tow-rope.** She steers at where the pilot boat *was*, not at
         // where it is: a ship two cables astern aiming at the boat herself cuts every
         // corner you just went round, which on this coast is the corner you went round

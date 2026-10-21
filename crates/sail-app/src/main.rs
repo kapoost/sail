@@ -57,6 +57,7 @@ mod settings;
 mod ship;
 mod shot;
 mod sight;
+mod signals;
 mod sim;
 mod sky;
 mod sound;
@@ -402,6 +403,7 @@ fn main() {
         chart::plugin,
         navigation::plugin,
         sight::plugin,
+        signals::plugin,
         anchorage::plugin,
     ))
     .add_plugins((

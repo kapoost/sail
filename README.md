@@ -662,6 +662,20 @@ pilot does not carry on into a bay she does not know. Her master says what his v
 will and will not do, in the order a seaman says it: the bottom first, then a course she
 cannot sail, then a turn too fine for three hundred tons.
 
+**And you can talk to her.** A pilot boat and the ship she is leading cannot shout across
+half a cable of water with two sets of canvas between them, so they do what every ship
+has done since long before anybody had a radio: they hoist flags. Five single-letter
+signals from the International Code are bent on in this boat, and each one means on this
+water what it means on any other — **K** *I wish to communicate with you*, **L** *you
+should stop your vessel instantly*, **X** *stop what you are doing and watch for my
+signals*, **P** the Blue Peter, **U** *you are running into danger*. She reads them with
+a lookout and a signal book, which takes a few seconds, and answers the way a ship
+answers: the **answering pendant** to the dip when the hoist has been seen, close up when
+it has been read and will be acted on. Out of signalling distance, or in thick weather, a
+flag is cloth nobody can read and nothing happens — which is why the pendant is the thing
+to watch. K is the one that was missing: ask her what she is doing and she says whether
+she has you ahead of her, is waiting for you, or is standing in under her own navigation.
+
 The chart carries the way in — a search over the soundings for deep water away from the
 edges that a square-rigged ship can actually sail, so the line moves when the wind does.
 The pilot flag is in our own rigging, hoisted when the job is taken; `Enter` in clear

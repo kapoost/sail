@@ -617,6 +617,10 @@ mod the_pilotage {
         app.init_resource::<Pilotage>();
         app.init_resource::<crate::barrels::Flotsam>();
         app.init_resource::<crate::boathook::Boathook>();
+        // Her half of the conversation. Nothing in these scenarios hoists anything, so
+        // it stays empty — but `mission::run` reads it now, because what she has been
+        // told outranks what she can see.
+        app.init_resource::<crate::signals::Answer>();
         app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(250),
         ));
@@ -1068,5 +1072,126 @@ mod coming_home {
         let home = app.world().resource::<Home>();
         assert_eq!(home.stores.casks, 0);
         assert_eq!(home.stores.fish, 0);
+    }
+}
+
+/// **Talking to her with flags**, which is the only way a pilot boat can say anything to
+/// a ship she is leading.
+#[cfg(test)]
+mod what_the_hoist_does {
+    use super::*;
+    use crate::mission::Pilotage;
+    use crate::ship::Brig;
+    use crate::signals::{signalling, Answer, Flag, Hoist, Pendant};
+
+    /// A ship a cable ahead, a job running, and a clock we own.
+    fn within_signal(flag: Flag) -> App {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(Sim::new(crate::weather::Weather::draw(42), 42));
+        app.insert_resource(crate::sound::SoundHandle(Arc::new(
+            crate::sound::SeaParams::default(),
+        )));
+        let here = app.world().resource::<Sim>().sim.state.pos;
+        app.insert_resource(Brig {
+            at: here + glam::DVec2::new(0.0, -300.0),
+            afloat: true,
+            set: [1.0, 1.0, 1.0],
+            ..Default::default()
+        });
+        let mut job = Pilotage::default();
+        job.running = true;
+        // Somewhere to be taking her, five miles off: the default is the origin, which
+        // is where she already is, and a brig that is delivered on the first frame
+        // strikes all her canvas and answers nothing.
+        job.bound_for = here + glam::DVec2::new(0.0, 9_000.0);
+        job.let_go_at = job.bound_for;
+        app.insert_resource(job);
+        app.insert_resource(Answer::default());
+        app.insert_resource(Hoist {
+            flying: Some(flag),
+            since: 0.0,
+        });
+        app.insert_resource(crate::sky::Sky::at(12.0, 0.2));
+        app.init_resource::<crate::barrels::Flotsam>();
+        app.add_systems(Update, (signalling, crate::mission::run).chain());
+        app
+    }
+
+    /// Set the simulation's clock, which is what a lookout and a signal book take their
+    /// time from.
+    fn at(app: &mut App, seconds: f64) {
+        app.world_mut().resource_mut::<Sim>().sim.state.time = seconds;
+        app.update();
+    }
+
+    /// **Seen, then understood, then done** — and nothing happens before the first of
+    /// those, because a signal she has not read is not an order.
+    #[test]
+    fn the_pendant_goes_to_the_dip_before_it_goes_close_up() {
+        let mut app = within_signal(Flag::Lima);
+        at(&mut app, 1.0);
+        assert_eq!(app.world().resource::<Answer>().pendant, Pendant::Down);
+        assert_eq!(
+            app.world().resource::<Brig>().set,
+            [1.0, 1.0, 1.0],
+            "she took in sail before anybody aboard had seen the hoist"
+        );
+        at(&mut app, 3.0);
+        assert_eq!(app.world().resource::<Answer>().pendant, Pendant::Dip);
+        at(&mut app, 6.0);
+        assert_eq!(app.world().resource::<Answer>().pendant, Pendant::CloseUp);
+        assert_eq!(
+            app.world().resource::<Brig>().set,
+            [0.0, 0.0, 0.0],
+            "she was told to stop instantly and kept her canvas on"
+        );
+    }
+
+    /// X holds her where she is with a topsail aback, which is a ship waiting rather
+    /// than a ship stopped.
+    #[test]
+    fn x_holds_her_with_a_topsail_to_the_mast() {
+        let mut app = within_signal(Flag::Xray);
+        at(&mut app, 8.0);
+        let brig = app.world().resource::<Brig>();
+        assert_eq!(brig.set[0], 0.0, "her courses were left set");
+        assert!(brig.set[1] > 0.0, "she had nothing on the mainmast at all");
+    }
+
+    /// And K is the one that answers the question this mission could not: she says what
+    /// she is doing.
+    #[test]
+    fn k_gets_an_answer_in_words() {
+        let mut app = within_signal(Flag::Kilo);
+        at(&mut app, 8.0);
+        let answer = app.world().resource::<Answer>();
+        let said = answer.said.clone().expect("she said nothing to K");
+        assert!(
+            said.contains("ahead") || said.contains("waiting") || said.contains("standing"),
+            "she answered {said:?}, which says nothing about what she is doing"
+        );
+        assert!(
+            app.world().resource::<Pilotage>().hail.is_some(),
+            "nothing was called across the water"
+        );
+    }
+
+    /// A signal from out of sight is cloth nobody can read.
+    #[test]
+    fn she_cannot_obey_what_she_cannot_read() {
+        let mut app = within_signal(Flag::Lima);
+        {
+            let here = app.world().resource::<Sim>().sim.state.pos;
+            let mut brig = app.world_mut().resource_mut::<Brig>();
+            brig.at = here + glam::DVec2::new(0.0, -4_000.0);
+        }
+        at(&mut app, 20.0);
+        assert_eq!(app.world().resource::<Answer>().pendant, Pendant::Down);
+        assert_eq!(
+            app.world().resource::<Brig>().set,
+            [1.0, 1.0, 1.0],
+            "she obeyed a flag from two miles off"
+        );
     }
 }
