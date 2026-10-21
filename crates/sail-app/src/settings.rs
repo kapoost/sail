@@ -487,9 +487,19 @@ pub fn draw(
                         // trends wander about, and setting it alone leaves the wind where
                         // it was for the next half hour. A slider moved to force 8 has to
                         // give force 8.
+                        //
+                        // **And the sky stays where it was put.** Cloud is correlated
+                        // with the wind's trend in this model — `cover()` carries 0.45 of
+                        // it — so zeroing the trend moves the cover by up to a third,
+                        // which is nearly three oktas of sky changing because somebody
+                        // touched a slider labelled "wind". True to the model and a
+                        // surprise on the screen; the cloud has its own slider two lines
+                        // down and that is the one that should move it.
+                        let sky_was = wind.synoptic.cover();
                         wind.synoptic.blows(sail_core::units::kn_to_ms(
                             crate::weather::force_wind(force),
                         ));
+                        wind.synoptic.start_cover(sky_was);
                         settings.weather_touched = true;
                     }
                     // And the line under it reads the wind rather than the day, so that

@@ -51,9 +51,9 @@ pub const DEEDS: &[Deed] = &[
         how: "Take a square-rigger in and hand her over in the anchorage.",
     },
     Deed {
-        api: "NOT_A_CASK",
-        name: "Not a cask",
-        how: "Bring one in without her shedding a single cask over the side.",
+        api: "DEEP_WATER",
+        name: "Never under two",
+        how: "Take her in without ever having less than two metres under her keel.",
     },
     Deed {
         api: "THREE_BEARINGS",
@@ -184,6 +184,7 @@ pub struct Deeds<'w> {
     pub nav: Res<'w, crate::navigation::Navigation>,
     pub sky: Res<'w, crate::sky::Sky>,
     pub fleet: Res<'w, crate::fleet::Fleet>,
+    pub linked: Res<'w, crate::net::Net>,
     pub answer: Res<'w, crate::signals::Answer>,
     pub hoist: Res<'w, crate::signals::Hoist>,
 }
@@ -205,12 +206,21 @@ pub fn watch(
     if deeds.drill.stage == crate::tutorial::Stage::Done {
         earned.did("MAN_OVERBOARD", &steam);
     }
-    if let Some(crate::mission::Outcome::Delivered { casks, .. }) = deeds.job.over {
+    if let Some(crate::mission::Outcome::Delivered { least, .. }) = deeds.job.over {
         earned.did("FIRST_DELIVERY", &steam);
-        // She starts with a deck cargo and sheds it when she is driven too hard; bringing
-        // her in with all of it is the difference between a pilot and a passenger.
-        if casks == 0 {
-            earned.did("NOT_A_CASK", &steam);
+        // **The least water she crossed**, which the mission itself calls the number
+        // another pilot would ask about. Two metres under a deep-draught ship is a
+        // margin rather than a miss; aground is nought.
+        //
+        // This was `casks == 0` and it was backwards. `Outcome::Delivered.casks` is
+        // `flotsam.landed + flotsam.astern` — the casks you *recovered* — so a run where
+        // you saved none was being handed an achievement for losing none. Worse, the
+        // thing it claimed to measure is not measured anywhere: the brig pushes what she
+        // sheds into `flotsam.adrift` with no counter, and the archipelago seeds that
+        // same list with salvage nobody shed. There was no condition to fix, only one to
+        // replace.
+        if least >= 2.0 {
+            earned.did("DEEP_WATER", &steam);
         }
     }
     // Three is a fix — a cocked hat with a boat inside it — and the navigation file says
@@ -227,7 +237,12 @@ pub fn watch(
     if deeds.home.built.len() >= 3 {
         earned.did("THE_LAMP", &steam);
     }
-    if !deeds.fleet.boats.is_empty() {
+    // **A person, not a ghost.** `Fleet` is also where the rehearsal boats go —
+    // `SAIL_FLEET=3` puts three hand-moved drawings on the water for getting the
+    // rendering right — and where the regatta puts its AI rivals. Both are boats as far
+    // as this list is concerned and neither is somebody else. Linked *and* in sight is
+    // the condition the name already claims.
+    if deeds.linked.link.is_some() && !deeds.fleet.boats.is_empty() {
         earned.did("IN_COMPANY", &steam);
     }
     // Answered, not merely flown: the pendant close up is her saying she has understood,
@@ -267,7 +282,12 @@ pub fn watch(
 /// nothing to write, but the thing being avoided is a file rewritten sixty times a second
 /// for the whole of a passage.
 pub fn keep(mut earned: ResMut<Earned>, time: Res<Time>, mut since: Local<f32>) {
-    if !earned.unsaved {
+    // A screenshot run or a trailer take is not somebody playing: the reel flies a signal
+    // and gets it answered, moors the platform on the bow and jumps the weather to a
+    // gale, and every one of those is a thing this file would otherwise write down. See
+    // `kept::staging`, which the platform has obeyed since an earlier review and this did
+    // not because it was written afterwards.
+    if !earned.unsaved || crate::kept::staging() {
         return;
     }
     *since += time.delta_secs();
@@ -285,7 +305,7 @@ pub fn keep_on_the_way_out(quitting: MessageReader<AppExit>, earned: Res<Earned>
     if quitting.is_empty() {
         return;
     }
-    if earned.unsaved {
+    if earned.unsaved && !crate::kept::staging() {
         earned.write();
     }
 }

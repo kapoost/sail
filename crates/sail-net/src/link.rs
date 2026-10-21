@@ -97,7 +97,13 @@ impl Link {
         // will not join because they typed a long name would never find that out —
         // whereas a name that arrives shortened is a thing you can see.
         let name = shortened(name);
-        let word = word.trim().to_string();
+        // The word gets the same treatment as the name, and for a sharper reason: an
+        // over-long word fails `Sane` at the far end, and a message that fails `Sane` is
+        // dropped **silently** — so a player with a long word would knock, be answered by
+        // nothing at all, and have no way of telling that from a server which is not
+        // running. The name was cut and this was not, which is the kind of asymmetry that
+        // only shows up when somebody types a sentence into the box.
+        let word = shortened(word.trim());
         std::thread::Builder::new()
             .name("sail-net".into())
             .spawn(move || run(socket, server, name, word, out_rx, in_tx))?;
@@ -303,6 +309,45 @@ fn run(
                     return;
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod what_goes_on_the_wire {
+    use super::*;
+
+    /// **A long name is cut, not refused**, and cut where a character ends.
+    ///
+    /// Two failures are being avoided and they are different. Refusing it would be
+    /// silent: an over-long name or word fails `Sane` at the far end, and a message that
+    /// fails `Sane` is dropped without an answer — so the player knocks, hears nothing,
+    /// and cannot tell that from a server which is not running. And cutting it carelessly
+    /// would be worse than either: `String::truncate` and `&s[..n]` both *panic* in the
+    /// middle of a character, which turns a name in somebody's own language into a crash.
+    #[test]
+    fn a_name_too_long_is_shortened_rather_than_sent() {
+        let short = "alice";
+        assert_eq!(shortened(short), short);
+
+        let long = "n".repeat(crate::NAME_LIMIT * 3);
+        assert_eq!(shortened(&long).len(), crate::NAME_LIMIT);
+
+        // Four bytes a character, so the limit never lands on a boundary by luck.
+        let emoji = "⛵".repeat(60);
+        let cut = shortened(&emoji);
+        assert!(cut.len() <= crate::NAME_LIMIT);
+        assert!(cut.chars().all(|c| c == '⛵'), "cut in the middle of one");
+
+        // And whatever comes out is a thing the far end will accept, which is the whole
+        // point of cutting it here.
+        for name in [shortened(&long), shortened(&emoji)] {
+            let hello = crate::ToServer::Hello {
+                protocol: crate::PROTOCOL,
+                name: name.clone(),
+                word: String::new(),
+            };
+            assert!(crate::Sane::sane(&hello), "{name:?} would be dropped");
         }
     }
 }

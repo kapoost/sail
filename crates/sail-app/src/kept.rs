@@ -40,6 +40,26 @@ pub fn dir() -> Option<std::path::PathBuf> {
     }
 }
 
+/// Whether this run is staging something rather than being played.
+///
+/// **A screenshot run and a trailer take must not write to somebody's save.** Both move
+/// the world about to get a picture — the platform is put on the bow where it can be
+/// photographed, the weather is jumped to a gale, a flag goes up and is answered — and
+/// every one of those is a thing the game would otherwise be entitled to remember.
+///
+/// This lives here, with the writing, because it is a property of the *run* and not of
+/// any one file. It was a private function in `anchorage.rs` guarding the platform, which
+/// was right as far as it went and went exactly one file: the achievements were added
+/// later, wrote through the same directory, and a reel that flies a signal and gets it
+/// answered handed the player an achievement for a conversation they were not in.
+pub fn staging() -> bool {
+    var_set("SAIL_PLATFORM") || var_set("SAIL_REEL")
+}
+
+fn var_set(name: &str) -> bool {
+    crate::knob::var(name).is_ok_and(|v| v != "0")
+}
+
 /// One of our files, by the short name it is known by.
 pub fn at(name: &str) -> Option<std::path::PathBuf> {
     Some(dir()?.join(name))
