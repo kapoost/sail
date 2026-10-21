@@ -105,14 +105,18 @@ impl Flag {
         }
     }
 
-    /// The flag's own colours, hoist first, as the rectangles it is made of.
+    /// The flag itself, as the rectangles it is sewn from.
     ///
-    /// The patterns are the real ones and they are simple on purpose — a code flag has to
-    /// be told apart at two thousand yards by somebody with a cold, so there are no
-    /// diagonals in this set and no more than four pieces.
-    pub fn cloth(self) -> Vec<(f32, f32, Color)> {
-        // (where it starts across the fly, how wide, what colour) — the fly being nought
-        // at the halyard and one at the outer leech.
+    /// `(across, down, wide, tall, colour)` in fractions of the flag, with *across*
+    /// measured from the halyard and *down* from the head. Pieces later in the list are
+    /// sewn on top of the ones before them, which is how a cross and a centre panel are
+    /// made — and how they are made in cloth, too.
+    ///
+    /// These are the standard depictions. Getting them right is not decoration in a game
+    /// whose whole claim is that the detail is real: somebody who learns K and L here is
+    /// learning the flags that are on every bridge in the world, and a blue bar where the
+    /// code has a blue cross would be teaching them wrong.
+    pub fn cloth(self) -> Vec<(f32, f32, f32, f32, Color)> {
         let yellow = Color::srgb(0.93, 0.78, 0.12);
         let blue = Color::srgb(0.07, 0.29, 0.62);
         let black = Color::srgb(0.08, 0.08, 0.09);
@@ -120,23 +124,45 @@ impl Flag {
         let red = Color::srgb(0.78, 0.13, 0.13);
         match self {
             // Yellow at the hoist, blue flying.
-            Flag::Kilo => vec![(0.0, 0.5, yellow), (0.5, 0.5, blue)],
-            // Quartered yellow and black. Drawn as two halves across the fly with the
-            // quartering carried by the two rows — see `dress`.
-            Flag::Lima => vec![(0.0, 0.5, yellow), (0.5, 0.5, black)],
-            // White with a blue cross: a white ground and a blue bar up the middle.
-            Flag::Xray => vec![(0.0, 0.38, white), (0.38, 0.24, blue), (0.62, 0.38, white)],
-            // Blue with a white rectangle in the middle.
-            Flag::Papa => vec![(0.0, 0.3, blue), (0.3, 0.4, white), (0.7, 0.3, blue)],
-            // Quartered red and white.
-            Flag::Uniform => vec![(0.0, 0.5, red), (0.5, 0.5, white)],
+            Flag::Kilo => vec![(0.0, 0.0, 0.5, 1.0, yellow), (0.5, 0.0, 0.5, 1.0, blue)],
+            // Quartered yellow and black, yellow in the upper hoist.
+            Flag::Lima => vec![
+                (0.0, 0.0, 0.5, 0.5, yellow),
+                (0.5, 0.0, 0.5, 0.5, black),
+                (0.0, 0.5, 0.5, 0.5, black),
+                (0.5, 0.5, 0.5, 0.5, yellow),
+            ],
+            // White with a blue **cross** — both arms, which is the whole of telling X
+            // apart from a flag with a stripe down it.
+            Flag::Xray => vec![
+                (0.0, 0.0, 1.0, 1.0, white),
+                (0.38, 0.0, 0.24, 1.0, blue),
+                (0.0, 0.38, 1.0, 0.24, blue),
+            ],
+            // The Blue Peter: blue with a white rectangle in the middle of it, not a
+            // band across it.
+            Flag::Papa => vec![(0.0, 0.0, 1.0, 1.0, blue), (0.3, 0.3, 0.4, 0.4, white)],
+            // Quartered white and red, white in the upper hoist.
+            Flag::Uniform => vec![
+                (0.0, 0.0, 0.5, 0.5, white),
+                (0.5, 0.0, 0.5, 0.5, red),
+                (0.0, 0.5, 0.5, 0.5, red),
+                (0.5, 0.5, 0.5, 0.5, white),
+            ],
         }
     }
 
-    /// Whether this flag's pattern is quartered, which the drawing needs and the eye
-    /// reads as "two colours, four boxes" rather than "two colours, two stripes".
-    pub fn quartered(self) -> bool {
-        matches!(self, Flag::Lima | Flag::Uniform)
+    /// Whether what she is told takes the helm out of the signal book and puts it on the
+    /// wheel.
+    ///
+    /// **A question is not an order.** K asks what she is doing and P tells her to carry
+    /// on; neither of them is a reason to stop following the boat ahead, and gating her
+    /// steering on *any* signal meant that asking her whether she was following made her
+    /// stop — the exact opposite of what the flag was added for. L, X and U are the three
+    /// that take the helm, and they take it because each of them is an order about where
+    /// she is to be.
+    pub fn takes_the_helm(self) -> bool {
+        matches!(self, Flag::Lima | Flag::Xray | Flag::Uniform)
     }
 }
 
@@ -289,7 +315,10 @@ pub fn draw(
         .inner_margin(egui::Margin::symmetric(14, 10));
     let mut hoisting: Option<Option<Flag>> = None;
     egui::Area::new("signals".into())
-        .anchor(egui::Align2::LEFT_CENTER, egui::vec2(12.0, 140.0))
+        // Bottom left, above the frame counter: the chandler's list is anchored in the
+        // middle of the same side, and standing alongside the platform with a ship in
+        // sight put one panel over the other.
+        .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(12.0, -34.0))
         .show(ctx, |ui| {
             frame.show(ui, |ui| {
                 ui.set_width(292.0);
@@ -368,10 +397,14 @@ pub struct Answering;
 
 /// Fly it, dip it, or haul it down.
 ///
-/// **At the dip means seen; close up means understood.** A metre of halyard between the
-/// two, which is nothing on a screen — so the pendant also goes from half-shown to fully
-/// shown, and the panel says it in words. The signal book is the thing being taught here;
-/// the drawing is the reminder that it is a thing on a rope.
+/// **At the dip means seen; close up means understood**, and the difference has to be
+/// visible from another boat or it is not telling anybody anything. *At the dip* is
+/// halfway up the halyard — not a hand's breadth below the block, which is what it was
+/// and which at three cables is no difference at all. Five metres of mast between the two
+/// states, which reads as a flag that has gone *up* when she understands.
+///
+/// The panel says it in words as well, because the signal book is the thing being taught
+/// here and the cloth is the reminder that it is a thing on a rope.
 pub fn fly_the_pendant(
     answer: Res<Answer>,
     mut cloth: Query<(&mut Visibility, &mut Transform), With<Answering>>,
@@ -381,10 +414,10 @@ pub fn fly_the_pendant(
             Pendant::Down => Visibility::Hidden,
             _ => Visibility::Inherited,
         };
-        // Close up to the block, or a fathom below it.
+        // Close up to the topmast cap, or halfway down the halyard.
         at.translation.y = match answer.pendant {
-            Pendant::CloseUp => 26.0,
-            _ => 24.2,
+            Pendant::CloseUp => 26.5,
+            _ => 21.0,
         };
     }
 }
@@ -422,47 +455,31 @@ pub fn dress(
     };
     // Half a metre of bunting on the port shroud — the starboard one has H on it while
     // the job is on, which is where a pilot boat's own flag belongs.
-    let rows: &[(f32, f32)] = if flag.quartered() {
-        &[(0.0, 0.5), (0.5, 0.5)]
-    } else {
-        &[(0.0, 1.0)]
-    };
-    for (row, (down, tall)) in rows.iter().enumerate() {
-        for (across, wide, colour) in flag.cloth() {
-            // A quartered flag swaps its two colours on the second row, which is what
-            // makes it quartered rather than striped.
-            let colour = if flag.quartered() && row == 1 {
-                flag.cloth()
-                    .iter()
-                    .find(|(start, ..)| (*start - across).abs() > 0.01)
-                    .map(|(.., c)| *c)
-                    .unwrap_or(colour)
-            } else {
-                colour
-            };
-            let mesh = meshes.add(Cuboid::new(0.02, 0.46 * tall, 0.40 * wide));
-            commands.entity(root).with_children(|b| {
-                b.spawn((
-                    Flying,
-                    Mesh3d(mesh.clone()),
-                    MeshMaterial3d(materials.add(StandardMaterial {
-                        base_color: colour,
-                        perceptual_roughness: 0.92,
-                        double_sided: true,
-                        cull_mode: None,
-                        ..default()
-                    })),
-                    // On the port lower shroud, where H is on the starboard one: a
-                    // pilot boat's own flag and the thing she is saying to the ship are
-                    // two different statements and they are not flown on the same rope.
-                    Transform::from_xyz(
-                        -1.35,
-                        3.5 - 0.46 * down,
-                        -0.2 + 0.40 * (across + wide * 0.5) - 0.2,
-                    ),
-                ));
-            });
-        }
+    const WIDE: f32 = 0.46;
+    const TALL: f32 = 0.38;
+    for (n, (across, down, wide, tall, colour)) in flag.cloth().into_iter().enumerate() {
+        let mesh = meshes.add(Cuboid::new(0.02, TALL * tall, WIDE * wide));
+        commands.entity(root).with_children(|b| {
+            b.spawn((
+                Flying,
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: colour,
+                    perceptual_roughness: 0.92,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                })),
+                Transform::from_xyz(
+                    // A piece sewn on top of another stands a millimetre proud of it,
+                    // which is both true of cloth and the only way two quads in the same
+                    // plane do not fight over which is in front.
+                    -1.35 - n as f32 * 0.002,
+                    3.6 - TALL * (down + tall * 0.5),
+                    -0.2 + WIDE * (across + wide * 0.5) - WIDE * 0.5,
+                ),
+            ));
+        });
     }
 }
 
@@ -477,7 +494,12 @@ pub fn plugin(app: &mut App) {
             .chain()
             .in_set(Deck::Weather),
     );
-    app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Cards));
+    // Furniture rather than a card: it is a thing on the edge of the screen that is
+    // there while a ship is, the same as the console and the chandler's list.
+    app.add_systems(
+        bevy_egui::EguiPrimaryContextPass,
+        draw.in_set(Paint::Instruments),
+    );
 }
 
 #[cfg(test)]
@@ -503,6 +525,44 @@ mod what_a_ship_can_read {
         );
     }
 
+    /// **X is a cross and P is a panel**, which is the whole of telling either of them
+    /// from a flag with a stripe down it — and the reason this is a test rather than a
+    /// glance at a screenshot is that a wrong flag teaches somebody a wrong flag.
+    #[test]
+    fn the_cross_has_two_arms_and_the_blue_peter_has_a_middle() {
+        let x = Flag::Xray.cloth();
+        let upright = x.iter().any(|(across, down, wide, tall, _)| {
+            *down == 0.0 && *tall == 1.0 && *wide < 0.5 && *across > 0.0
+        });
+        let arm = x
+            .iter()
+            .any(|(across, _, wide, tall, _)| *across == 0.0 && *wide == 1.0 && *tall < 0.5);
+        assert!(upright && arm, "X came out as a stripe rather than a cross");
+
+        let p = Flag::Papa.cloth();
+        let panel = p.iter().any(|(across, down, wide, tall, _)| {
+            *across > 0.0 && *down > 0.0 && across + wide < 1.0 && down + tall < 1.0
+        });
+        assert!(
+            panel,
+            "the Blue Peter came out as a band rather than a panel"
+        );
+    }
+
+    /// **A question is not an order.** K and P leave the helm where it was; the three
+    /// that say where she is to be take it.
+    #[test]
+    fn only_three_of_them_take_the_helm() {
+        assert!(!Flag::Kilo.takes_the_helm(), "asking her stopped her");
+        assert!(
+            !Flag::Papa.takes_the_helm(),
+            "telling her to carry on stopped her"
+        );
+        for flag in [Flag::Lima, Flag::Xray, Flag::Uniform] {
+            assert!(flag.takes_the_helm(), "{} did nothing", flag.letter());
+        }
+    }
+
     /// And in thick weather the visibility wins over the distance.
     #[test]
     fn she_cannot_read_what_she_cannot_see() {
@@ -525,13 +585,31 @@ mod what_a_ship_can_read {
         assert_eq!(letters.len(), Flag::ALL.len(), "two flags share a letter");
         for flag in Flag::ALL {
             assert!(!flag.means().is_empty() && !flag.asks().is_empty());
+            // Every piece is inside the flag, and between them they cover it: the first
+            // rectangle of each is the ground, and a ground with a hole in it is a flag
+            // you can see the shroud through.
             let cloth = flag.cloth();
-            let covered: f32 = cloth.iter().map(|(_, wide, _)| wide).sum();
+            assert!(!cloth.is_empty(), "{} is bare rope", flag.letter());
+            for (across, down, wide, tall, _) in &cloth {
+                assert!(
+                    *across >= 0.0
+                        && *down >= 0.0
+                        && across + wide <= 1.001
+                        && down + tall <= 1.001,
+                    "{} has cloth hanging off the edge of it",
+                    flag.letter()
+                );
+            }
+            let ground: f32 = cloth
+                .iter()
+                .take_while(|(_, down, _, tall, _)| *down == 0.0 && *tall == 1.0 || cloth.len() > 2)
+                .map(|(_, _, wide, tall, _)| wide * tall)
+                .sum();
             assert!(
-                (covered - 1.0).abs() < 0.01,
-                "{} is {:.2} of a flag",
+                ground >= 0.999,
+                "{} covers {:.2} of its own area",
                 flag.letter(),
-                covered
+                ground
             );
         }
     }

@@ -479,7 +479,13 @@ pub fn run(
     // That is the whole of why the pendant is worth watching.
     told_her(&mut brig, &mut job, &mut answer, &sim);
 
-    if job.leading && answer.reading.is_none() {
+    // **A question is not an order.** Only the three signals that say where she is to be
+    // take the helm; K asks what she is doing and P tells her to carry on, and gating her
+    // steering on *any* flag meant that asking whether she was following stopped her.
+    let told = answer
+        .reading
+        .is_some_and(crate::signals::Flag::takes_the_helm);
+    if job.leading && !told {
         // **A track, not a tow-rope.** She steers at where the pilot boat *was*, not at
         // where it is: a ship two cables astern aiming at the boat herself cuts every
         // corner you just went round, which on this coast is the corner you went round

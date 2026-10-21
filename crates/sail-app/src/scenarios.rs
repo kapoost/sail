@@ -1195,3 +1195,31 @@ mod what_the_hoist_does {
         );
     }
 }
+
+/// The half of the signalling that is about her helm rather than her signal book.
+#[cfg(test)]
+mod a_question_is_not_an_order {
+    use crate::signals::Flag;
+
+    /// **Asking her what she is doing must not stop her doing it.** Reported in review:
+    /// the steering was gated on *any* flag she had read, so hoisting K — the one signal
+    /// added to answer "is she following me" — made her stop following. P, which means
+    /// carry on, did the same.
+    #[test]
+    fn k_and_p_leave_the_helm_alone() {
+        for flag in [Flag::Kilo, Flag::Papa] {
+            assert!(
+                !flag.takes_the_helm(),
+                "{} took the helm out of her hands",
+                flag.letter()
+            );
+        }
+        for flag in [Flag::Lima, Flag::Xray, Flag::Uniform] {
+            assert!(
+                flag.takes_the_helm(),
+                "{} was an order she could ignore",
+                flag.letter()
+            );
+        }
+    }
+}
