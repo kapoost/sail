@@ -267,6 +267,24 @@ impl Synoptic {
         self.start_cover(cover);
     }
 
+    /// Set the day's wind and mean it **now**.
+    ///
+    /// `base_speed` on its own is the day the trends wander about, not the wind on the
+    /// water: the trend that is in it when the base changes stays there and relaxes over
+    /// forty minutes, and it is allowed to be three quarters high or nearly half low. So
+    /// a base moved from a gale to a fresh breeze leaves a wind that is still most of a
+    /// gale for the next half hour — which is what the trailer's reel found the hard way,
+    /// with the watch setting a Code 0 into the easing it could read on the glass and the
+    /// cloth going out of her in a gust that had not eased at all.
+    ///
+    /// That lag is right when the weather is making its own mind up and wrong when
+    /// somebody has reached in and said what it is. This is the second case: a slider, a
+    /// reel, a scenario. The swings stay, so it is still weather and not a number.
+    pub fn blows(&mut self, speed: f64) {
+        self.base_speed = speed;
+        self.speed_trend = 0.0;
+    }
+
     /// The two the rest of the world is allowed to read, because a game with more than
     /// one boat in it has to be able to say what the weather is without sampling it
     /// somewhere in particular.
@@ -910,6 +928,45 @@ fn ou_step(x: &mut f64, sigma: f64, tau: f64, dt: f64, rng: &mut Pcg32) {
 mod tests {
     use super::*;
     use crate::units::{deg, kn_to_ms, ms_to_kn, rad};
+
+    /// **A wind asked for is a wind blowing.** The base speed on its own is the day the
+    /// trends wander about, so changing it leaves whatever trend was in it — up to three
+    /// quarters high, nearly half low, relaxing over forty minutes. A gale wound down to
+    /// a fresh breeze would stay most of a gale for the next half hour while the glass
+    /// and the forecast both said it had eased, which is how the trailer's reel lost a
+    /// Code 0: the watch set light cloth on the easing it could read and the wind that
+    /// had not eased took it out of her.
+    #[test]
+    fn a_wind_set_by_hand_is_the_wind_on_the_water() {
+        let mut rng = Pcg32::new(0xDECADE);
+        let mut day = Synoptic::new(deg(240.0), kn_to_ms(34.0), &mut rng);
+        // Wind it up to the ceiling, the way a gale's own trend would.
+        day.follow(kn_to_ms(34.0) * SYNOPTIC_CEILING, deg(240.0), 0.75);
+        let before = ms_to_kn(day.speed_now());
+        assert!(
+            before > 50.0,
+            "the trend should be high, and it is {before:.0} kn"
+        );
+
+        day.blows(kn_to_ms(13.5));
+        let after = ms_to_kn(day.speed_now());
+        assert!(
+            (after - 13.5).abs() < 0.1,
+            "asked for 13.5 kn and got {after:.1} kn"
+        );
+
+        // And setting the base alone is the lag this exists to avoid — kept as a
+        // measurement rather than a memory, so the day it stops being true somebody is
+        // told.
+        let mut lagging = Synoptic::new(deg(240.0), kn_to_ms(34.0), &mut rng);
+        lagging.follow(kn_to_ms(34.0) * SYNOPTIC_CEILING, deg(240.0), 0.75);
+        lagging.base_speed = kn_to_ms(13.5);
+        let still = ms_to_kn(lagging.speed_now());
+        assert!(
+            still > 20.0,
+            "the base alone should leave it blowing hard, and it is {still:.0} kn"
+        );
+    }
 
     /// `intensity` has to mean what it says, or every wind speed in the simulator is
     /// quietly a few percent wrong and nothing else says so. The shape function's own

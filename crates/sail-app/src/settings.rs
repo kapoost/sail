@@ -473,16 +473,24 @@ pub fn draw(
                     // to be connectable, and the slider lands on the *middle* of a force
                     // rather than its edge — a dial that gives you 21.9 knots when you asked
                     // for a six is a dial you will say is broken.
-                    let knots = sail_core::units::ms_to_kn(wind.synoptic.base_speed);
-                    let mut force = crate::weather::force(knots);
+                    let mut force =
+                        crate::weather::force(sail_core::units::ms_to_kn(wind.synoptic.base_speed));
                     if ui
                         .add(egui::Slider::new(&mut force, 1..=9).text("wind, force"))
                         .changed()
                     {
-                        wind.synoptic.base_speed =
-                            sail_core::units::kn_to_ms(crate::weather::force_wind(force));
+                        // `blows` rather than the base on its own: the base is the day the
+                        // trends wander about, and setting it alone leaves the wind where
+                        // it was for the next half hour. A slider moved to force 8 has to
+                        // give force 8.
+                        wind.synoptic.blows(sail_core::units::kn_to_ms(
+                            crate::weather::force_wind(force),
+                        ));
                         settings.weather_touched = true;
                     }
+                    // And the line under it reads the wind rather than the day, so that
+                    // when the two have drifted apart again it says which one you are in.
+                    let knots = sail_core::units::ms_to_kn(wind.synoptic.speed_now());
                     ui.label(
                         egui::RichText::new(format!(
                             "{} — {:.0} kn",

@@ -219,8 +219,10 @@ fn play(act: Act, sim: &mut Sim, stage: &mut Stage) {
             // The same two resources the weather page writes, and in the same way: this
             // is a hand on the sliders, not a back door into the model.
             if let Some(wind) = sim.sim.wind.adjustable() {
-                wind.synoptic.base_speed =
-                    sail_core::units::kn_to_ms(crate::weather::force_wind(force));
+                wind.synoptic
+                    .blows(sail_core::units::kn_to_ms(crate::weather::force_wind(
+                        force,
+                    )));
                 wind.synoptic.start_cover(oktas as f64 / 8.0);
             }
             if let Some(sea) = sim.sim.water.adjustable() {
