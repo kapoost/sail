@@ -25,6 +25,7 @@ use bevy::light::CascadeShadowConfigBuilder;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::storage::ShaderBuffer;
+use bevy_egui::egui;
 
 use crate::camera;
 use crate::curve::smoothstep;
@@ -39,8 +40,10 @@ use crate::sky;
 /// What this module does in a frame, in one place — see `stages.rs` for why the
 /// schedule is named sets rather than one long chain.
 pub fn plugin(app: &mut App) {
-    use crate::stages::{Build, Deck};
+    use crate::stages::{Build, Deck, Paint};
     app.init_resource::<Spent>();
+    app.init_resource::<Frames>();
+    app.init_resource::<Counter>();
     app.insert_resource(Ink::from_env());
     app.init_resource::<SeaFilm>();
     app.init_resource::<SurfaceDrift>();
@@ -50,6 +53,10 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Update, report_time_spent.in_set(Deck::Report));
     app.add_systems(Update, update_sea.in_set(Deck::Dress));
     app.add_systems(Update, apply_ink.in_set(Deck::Weather));
+    app.add_systems(
+        bevy_egui::EguiPrimaryContextPass,
+        draw_counter.in_set(Paint::Instruments),
+    );
     app.add_systems(
         Update,
         (bake_sea_film, roll_sea_film, polish)
@@ -1007,24 +1014,128 @@ pub fn report_time_spent(time: Res<Time>, mut spent: ResMut<Spent>) {
     *spent = Spent::default();
 }
 
-pub fn report_frame_times(time: Res<Time>, mut window: Local<(f32, u32, f32)>) {
-    let dt = time.delta_secs();
-    window.0 += dt;
-    window.1 += 1;
-    window.2 = window.2.max(dt);
-    if window.0 >= 2.0 {
-        // Only when something is actually wrong. Left chattering it buries the one
-        // line that matters, and the whole value of this is that it answered "is the
-        // sea badly sampled or is the application not making its frames" with a
-        // number instead of an afternoon.
-        if window.2 > 0.025 || crate::knob::var("SAIL_FRAMES").is_ok() {
-            warn!(
-                "slow frames: {:.0} per second mean, worst {:.1} ms",
-                window.1 as f32 / window.0,
-                window.2 * 1000.0
-            );
+/// How the frames are going, as two numbers.
+///
+/// **A mean on its own is a reassuring lie.** Sixty a second with one frame of a hundred
+/// and twenty milliseconds in it reads as sixty and feels like a stutter, and the stutter
+/// is the thing worth finding — so the worst frame of the window is carried beside the
+/// mean, which is also what the log has always printed.
+///
+/// One measurement, read by two things: the line in the log and the counter on the screen
+/// come out of this, and the lesson behind that is written in half the comments in this
+/// repository. Two copies of a measurement is two chances to disagree in front of
+/// somebody trying to work out why their picture is slow.
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct Frames {
+    /// Frames a second, meaned over the window that has just closed.
+    pub rate: f32,
+    /// And the longest single frame in it, seconds.
+    pub worst: f32,
+    /// What is accumulating towards the next window.
+    window: (f32, u32, f32),
+}
+
+impl Frames {
+    /// How long a window is. Two seconds: long enough that the number is steady enough
+    /// to read, short enough that trimming a sail and watching the counter answer is
+    /// still one action.
+    const WINDOW: f32 = 2.0;
+
+    /// A frame happened. Returns the window if this closed one.
+    pub fn frame(&mut self, dt: f32) -> Option<(f32, f32)> {
+        self.window.0 += dt;
+        self.window.1 += 1;
+        self.window.2 = self.window.2.max(dt);
+        if self.window.0 < Self::WINDOW {
+            return None;
         }
-        *window = (0.0, 0, 0.0);
+        self.rate = self.window.1 as f32 / self.window.0;
+        self.worst = self.window.2;
+        self.window = (0.0, 0, 0.0);
+        Some((self.rate, self.worst))
+    }
+
+    /// Whether the window that just closed had a frame in it that somebody would feel.
+    ///
+    /// Twenty-five milliseconds is forty a second: below that the helm starts to lag the
+    /// hand, which on a boat you steer by feel is the first thing to go.
+    pub fn stuttered(&self) -> bool {
+        self.worst > 0.025
+    }
+}
+
+/// Whether the counter is on the screen.
+///
+/// **Off unless asked for.** A number burning in the corner of a sailing picture is a
+/// number you stop seeing in a minute and a thing in the way of the horizon for the rest
+/// of the evening — and the one question it answers, *is this machine making its frames*,
+/// is asked twice in the life of an installation. `SAIL_FPS=1` opens with it, the
+/// PICTURE page turns it on and off, and the log says the same thing either way.
+#[derive(Resource, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Counter(pub bool);
+
+impl Default for Counter {
+    fn default() -> Self {
+        Self(crate::knob::var("SAIL_FPS").is_ok_and(|v| v != "0"))
+    }
+}
+
+/// The counter, bottom left, where there is nothing else.
+///
+/// Two numbers because one of them lies: the mean, and the worst frame of the last two
+/// seconds, which is the one that is felt. Amber when that worst frame is past what a
+/// hand at the helm can ignore, grey when it is not — a colour rather than a second
+/// number, because the question at a glance is *is it all right*.
+pub fn draw_counter(
+    mut contexts: bevy_egui::EguiContexts,
+    counter: Res<Counter>,
+    frames: Res<Frames>,
+) -> Result {
+    if !counter.0 {
+        return Ok(());
+    }
+    let ctx = contexts.ctx_mut()?;
+    let ink = if frames.stuttered() {
+        egui::Color32::from_rgb(230, 198, 120)
+    } else {
+        egui::Color32::from_rgb(150, 150, 130)
+    };
+    egui::Area::new("frames".into())
+        .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(12.0, -10.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            // One line, however narrow egui decides the area is: a counter that wraps
+            // onto two lines in the corner of the picture is worse than no counter.
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!(
+                        "{:.0} fps · worst {:.0} ms",
+                        frames.rate,
+                        frames.worst * 1000.0
+                    ))
+                    .monospace()
+                    .size(11.0)
+                    .color(ink),
+                )
+                .wrap_mode(egui::TextWrapMode::Extend),
+            );
+        });
+    Ok(())
+}
+
+pub fn report_frame_times(time: Res<Time>, mut frames: ResMut<Frames>) {
+    let Some((rate, worst)) = frames.frame(time.delta_secs()) else {
+        return;
+    };
+    // Only when something is actually wrong. Left chattering it buries the one
+    // line that matters, and the whole value of this is that it answered "is the
+    // sea badly sampled or is the application not making its frames" with a
+    // number instead of an afternoon.
+    if frames.stuttered() || crate::knob::var("SAIL_FRAMES").is_ok() {
+        warn!(
+            "slow frames: {rate:.0} per second mean, worst {:.1} ms",
+            worst * 1000.0
+        );
     }
 }
 
@@ -1037,3 +1148,74 @@ pub fn report_frame_times(time: Res<Time>, mut window: Local<(f32, u32, f32)>) {
 // `sea_card`'s tests compile the shader, run those two functions on the card and check
 // the same two things. A property tested against a copy of the code is a property that
 // can pass while the picture is wrong.
+
+#[cfg(test)]
+mod how_the_frames_are_going {
+    use super::*;
+
+    /// **The mean is over the window, not over a frame.** Sixty frames in a second and
+    /// sixty in the next is sixty a second, however the deltas were distributed.
+    #[test]
+    fn a_steady_sixty_reads_as_sixty() {
+        let mut frames = Frames::default();
+        let mut closed = None;
+        for _ in 0..180 {
+            if let Some(window) = frames.frame(1.0 / 60.0) {
+                closed = Some(window);
+            }
+        }
+        let (rate, worst) = closed.expect("three seconds closed a two-second window");
+        assert!((rate - 60.0).abs() < 1.0, "it read {rate:.1} a second");
+        assert!((worst - 1.0 / 60.0).abs() < 1e-4, "worst was {worst:.4} s");
+        assert!(!frames.stuttered());
+    }
+
+    /// **And the worst frame is the point.** A window with one long frame in it still
+    /// means something near sixty, which is exactly the reassuring lie this second number
+    /// exists to contradict.
+    #[test]
+    fn one_long_frame_shows_up_even_though_the_mean_does_not() {
+        let mut frames = Frames::default();
+        let mut closed = None;
+        for n in 0..180 {
+            let dt = if n == 90 { 0.120 } else { 1.0 / 60.0 };
+            if let Some(window) = frames.frame(dt) {
+                closed = Some(window);
+            }
+        }
+        let (rate, worst) = closed.expect("a window");
+        assert!(
+            rate > 50.0,
+            "the mean collapsed to {rate:.1}, so it is not a mean"
+        );
+        assert!(
+            (worst - 0.120).abs() < 1e-4,
+            "the hundred-and-twenty millisecond frame was lost: {worst:.4} s"
+        );
+    }
+
+    /// The window closes at two seconds and starts again, rather than meaning the whole
+    /// session — a counter that remembers a stutter from twenty minutes ago is a counter
+    /// nobody can use to try something.
+    #[test]
+    fn the_window_starts_again() {
+        let mut frames = Frames::default();
+        for _ in 0..30 {
+            frames.frame(0.1);
+        }
+        assert!(
+            frames.stuttered(),
+            "a tenth of a second a frame is a stutter"
+        );
+        // Two windows of fast frames. One is not enough and should not be: the slow
+        // frames left over when the first window closed belong to the second one, and a
+        // counter that threw them away would be reporting a window it had not finished.
+        for _ in 0..480 {
+            frames.frame(1.0 / 120.0);
+        }
+        assert!(
+            !frames.stuttered(),
+            "the old worst frame outlived the window it happened in"
+        );
+    }
+}

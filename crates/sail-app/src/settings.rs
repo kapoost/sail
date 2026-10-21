@@ -179,6 +179,7 @@ pub fn draw(
     mut missions: Missions,
     mut course: ResMut<crate::course::Course>,
     mut screen: ResMut<crate::screen::Screen>,
+    mut counter: ResMut<crate::world::Counter>,
 ) -> Result {
     if !settings.open {
         net.scan = None;
@@ -305,6 +306,18 @@ pub fn draw(
                     });
                     if ui.selectable_label(hud.0, "the diagnostic panel").clicked() {
                         hud.0 = !hud.0;
+                    }
+                    // The counter, which is the one number here that is about the
+                    // machine rather than the boat — and is off until somebody wants it.
+                    if ui
+                        .selectable_label(counter.0, "the frame counter")
+                        .on_hover_text(
+                            "frames a second, and the worst frame of the last two — \
+                             which is the one you feel",
+                        )
+                        .clicked()
+                    {
+                        counter.0 = !counter.0;
                     }
                 }
 
