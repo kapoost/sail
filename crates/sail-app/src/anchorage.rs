@@ -960,8 +960,13 @@ pub fn keep(mut home: ResMut<Home>, time: Res<Time>, mut since: Local<f32>) {
 /// nothing is written, because the first fitting bought or cask landed would otherwise
 /// put a position sixty metres off her bow into the file as your home — in a sea where
 /// there is nothing there.
+///
+/// The reel does the same thing at its evening beat, for the same reason — the platform
+/// has to be in the picture — so it counts as looking too. A trailer being filmed must not
+/// move somebody's home.
 fn looking_only() -> bool {
     crate::knob::var("SAIL_PLATFORM").is_ok()
+        || crate::knob::var("SAIL_REEL").is_ok_and(|v| v != "0")
 }
 
 /// And write it on the way out.
