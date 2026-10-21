@@ -292,7 +292,8 @@ rather than this one.
 live, wishlists open, demo app built from the same binary. *Ends when a stranger can
 wishlist it and play the demo.*
 
-**M3 — Content wave one.** Tides, night, fog. *Ends when a night entry into a strange
+**M3 — Content wave one.** Tides and fog; ~~night~~ landed early, with the lights
+flashing their own characters. *Ends when a night entry into a strange
 harbour in poor visibility is a thing you can do and want to tell somebody about.*
 
 **M4 — Early Access launch.** Trailer, capsules, price, date announced four to six weeks
@@ -311,7 +312,10 @@ Each with the recommendation, so the question is yes or no rather than open:
    question left under it has a deadline rather than a decision: IP Box has to be set up
    from the start of the tax year, so ask the accountant before January rather than before
    launch.
-2. ~~Early Access or a single 1.0~~ — **decided: one 1.0.**
+2. ~~Early Access or a single 1.0~~ — **decided, then reversed: Early Access**, with
+   multiplayer in it from the first day. The reversal is the honest one: the thing this
+   game most needs is other people sailing it, and a 1.0 held back until the content list
+   is finished is a year of nobody sailing it.
 3. **Price** — open, and deliberately late: it depends on how much of the content list is
    in the release.
 4. ~~Platforms at launch~~ — **decided: Windows, macOS and Linux.**

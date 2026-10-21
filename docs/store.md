@@ -93,8 +93,8 @@ why the world is the same world next week and the weather never is.
 
 > The hard half of this game is finished and the comfortable half is not. The simulation —
 > the rig, the hull, the sea, the coast — is built and tested against figures a sailor
-> knows from the water, and there are four hundred and ten automated tests that say so on
-> every change. What it needs now is the work that only comes from other people sailing
+> knows from the water, and there are four hundred and seventeen automated tests that say
+> so on every change. What it needs now is the work that only comes from other people sailing
 > it: which jobs are worth doing twice, what is missing from the chart table, where a
 > passage stops being interesting. That is not a thing anybody can decide alone in a room.
 
@@ -106,8 +106,8 @@ why the world is the same world next week and the weather never is.
 
 **How is the full version planned to differ from the Early Access version?**
 
-> Tidal streams and a tidal window to plan a passage around. Night, with pilotage by the
-> lights' own characteristics. Fog, and blind pilotage by sounder and clock. Weather that
+> Tidal streams and a tidal window to plan a passage around. Fog, and blind pilotage by
+> sounder and clock. Weather that
 > veers and builds through an afternoon instead of standing still. Gear that fails — a
 > parted sheet, a jammed furler, a leak. Anchoring and mooring as the end of a passage.
 > A second boat with a different feel. And a career that ties the jobs together.
@@ -115,8 +115,8 @@ why the world is the same world next week and the weather never is.
 **What is the current state of the Early Access version?**
 
 > Playable and complete as far as it goes. You can sail, navigate, make deliveries, pilot
-> a square-rigger in, fish, collect salvage, build on your platform, and sail with other
-> people. There is a fifteen-step lesson aboard for anybody who has never sailed. What is
+> a square-rigger in, fish, collect salvage, build on your platform, sail through a night
+> and pick your way in by the lights' own characters, and sail with other people. There is a fifteen-step lesson aboard for anybody who has never sailed. What is
 > missing is listed above, not hidden.
 
 **Will the game be priced differently during and after Early Access?**
