@@ -54,6 +54,9 @@ const FACE: u32 = 256;
 /// cannot disagree about where the sun is.
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug)]
 pub struct Sky {
+    /// How thick the fog is, 0 clear to 1 blind. Carried here with the cover because
+    /// everything that asks how far it can see asks the sky.
+    pub fog: f32,
     /// Unit vector towards the sun.
     pub sun: Vec3,
     /// Cover of the low deck, 0 clear to 1 solid.
@@ -100,6 +103,9 @@ impl Sky {
         Self {
             sun: Vec3::new(ce * azimuth.sin(), se, -ce * azimuth.cos()).normalize(),
             cover: cover.clamp(0.0, 1.0),
+            // Set by the drift system from the weather each frame. This function is
+            // geometry and has no opinion about whether you can see any of it.
+            fog: 0.0,
             hour,
         }
     }
@@ -580,7 +586,7 @@ pub fn cubemap(sky: &Sky) -> Image {
                 let u = (x as f32 + 0.5) / n * 2.0 - 1.0;
                 let v = (y as f32 + 0.5) / n * 2.0 - 1.0;
                 let dir = face_direction(face, u, v).normalize();
-                let colour = sky_colour(dir, sky);
+                let colour = dome_colour(dir, sky);
                 for c in [colour.x, colour.y, colour.z, 1.0] {
                     data.extend_from_slice(&c.to_le_bytes());
                 }
@@ -832,7 +838,99 @@ fn sky_colour(dir: Vec3, state: &Sky) -> Vec3 {
     // below is the eye's answer rather than the photometer's.
     let starlight = Vec3::new(0.80, 0.86, 1.0) * stars;
     let moonlight = Vec3::new(0.74, 0.80, 0.95) * moonshine;
-    sky + warm * (disc + corona) + warm * haze + ray_tint * rays + starlight + moonlight
+    let painted =
+        sky + warm * (disc + corona) + warm * haze + ray_tint * rays + starlight + moonlight;
+
+    // **Fog is a cloud you are inside, so there is no sky above it.**
+    //
+    // Reported from the deck: the water went white and the cumulus stayed sharp
+    // overhead, which is the one thing fog never looks like. The distance fog the
+    // renderer applies reaches geometry and cannot reach the dome — it is drawn at
+    // infinity and no falloff gets there — so the dome has to put itself out.
+    //
+    // It goes faster than the horizontal visibility does, and that is not a fudge: the
+    // path straight up through a fog bank is hundreds of metres of it, so by the time
+    // you can still see a quarter of a mile along the water there is nothing at all to
+    // be seen above. Hence the power below rather than a straight blend.
+    //
+    let fog = state.fog.clamp(0.0, 1.0);
+    if fog <= 0.002 {
+        return painted;
+    }
+    painted.lerp(inside_the_fog(dir, state), fog.powf(0.55))
+}
+
+/// The same sky, written for the *skybox* rather than for the renderer at large.
+///
+/// **The dome and the water have never been in the same units, and the horizon is the
+/// one line where that shows.** What `sky_colour` returns goes two ways. The water
+/// reflects it and `DistanceFog` is handed it, and both of those take the number as it
+/// stands. The skybox does not: the cubemap is multiplied by the skybox's own
+/// brightness and by the camera's fixed exposure, which between them come to about a
+/// fifth, and what survives the tonemap after that is dimmer again than the same number
+/// painted straight onto geometry.
+///
+/// In clear weather none of it matters, because the dome was tuned *through* the skybox
+/// and the haze was tuned against the dome, so the two were fitted to each other by eye
+/// with the conversion already inside them. Fog broke it, because fog is the one
+/// weather where the same white is painted by both at once — by the bake above the
+/// horizon and by the distance fog below it. It came out as a dark lid over a white
+/// sea, which is the one thing fog never looks like, and was reported from the deck
+/// twice before anybody looked at the units rather than at the colour.
+///
+/// **Three, and it is measured rather than derived.** The brightness and the exposure
+/// argue for five; the tonemap hands most of that back, because the dome's number and
+/// the water's fall either side of its knee. So it was read off the picture instead:
+/// both painted, both sampled, at thick fog and at middling fog. Three puts the sea and
+/// the sky within a couple of levels of each other at both; five overshoots into a sky
+/// brighter than the water beneath it, which is the same seam the other way up.
+///
+/// Only the fog is converted. The clear sky is left exactly as it was — it is what the
+/// dome has always been tuned on, and nothing about it was reported wrong.
+fn dome_colour(dir: Vec3, state: &Sky) -> Vec3 {
+    let fog = state.fog.clamp(0.0, 1.0);
+    if fog <= 0.002 {
+        return sky_colour(dir, state);
+    }
+    // The clear sky underneath is already in the skybox's units, so the blend is redone
+    // here against the converted fog rather than the whole thing being scaled.
+    let clear = {
+        let mut s = *state;
+        s.fog = 0.0;
+        sky_colour(dir, &s)
+    };
+    clear.lerp(inside_the_fog(dir, state) * FOG_ON_THE_DOME, fog.powf(0.55))
+}
+
+/// What the fog has to be written as in the cubemap, to come out of the skybox at the
+/// grey the same fog puts on the water. See `dome_colour`.
+const FOG_ON_THE_DOME: f32 = 3.0;
+
+/// The skybox's brightness. A clear sky runs five to ten thousand candela per square
+/// metre, and this is the one number the whole dome is scaled by before it is a picture.
+pub const SKY_BRIGHTNESS: f32 = 8000.0;
+
+/// The colour of the inside of a fog bank, looking this way.
+///
+/// **Brightest at the horizon and never dark**, which is the thing the first attempt got
+/// backwards — reported from the deck as a dark sky above a white sea, and that is
+/// exactly what it was. Fog is lit by scattering, so what you see is the light that has
+/// come sideways out of the whole column you are looking along: horizontally that column
+/// is miles of it and glows white, straight up it is only the depth of the bank and is
+/// slightly dimmer. A clear sky does the opposite — bright overhead, pale at the horizon
+/// — and painting fog that way puts a lid on the picture.
+///
+/// Its own function because two things have to agree about it: the dome, and the
+/// distance fog the renderer puts on everything else. If they differ by even a little
+/// there is a seam along the horizon, which is the one place a fog bank must not have
+/// an edge.
+pub fn inside_the_fog(dir: Vec3, sky: &Sky) -> Vec3 {
+    let lit = sky.daylight().max(0.015);
+    // A little more towards the sun, because the beam is in there somewhere even when
+    // the disc is not; a little less overhead, because that is the short way out.
+    let towards = (dir.dot(sky.sun) * 0.5 + 0.5).powf(2.0);
+    let overhead = dir.y.max(0.0);
+    Vec3::new(0.86, 0.88, 0.90) * lit * (0.92 + 0.16 * towards) * (1.0 - 0.22 * overhead)
 }
 
 /// How bright a star is in this direction, if there is one at all.
@@ -996,7 +1094,13 @@ impl Default for Dome {
 }
 
 pub fn haze_colour(sky: &Sky) -> Color {
-    let c = horizon_average(sky);
+    // Towards the same colour the dome goes to, by the same amount — or the water and
+    // the sky meet at the horizon as two different greys and the fog has a seam in it.
+    let fog = sky.fog.clamp(0.0, 1.0);
+    let c = horizon_average(sky).lerp(
+        inside_the_fog(Vec3::new(0.0, 0.0, -1.0), sky),
+        fog.powf(0.55),
+    );
     Color::linear_rgb(c.x, c.y, c.z)
 }
 
@@ -1038,7 +1142,35 @@ pub fn visibility(sky: &Sky) -> f32 {
     let clear = 12_000.0;
     let thick = 1_400.0;
     let shut = sky.cover.powf(0.75) * 0.72 + sky.low_sun() * 0.25;
-    clear + (thick - clear) * shut.clamp(0.0, 1.0)
+    let haze = clear + (thick - clear) * shut.clamp(0.0, 1.0);
+    // **And fog, which is a different thing and wins.**
+    //
+    // Haze is the air being thick; fog is being inside a cloud, and the numbers are not
+    // on the same scale — a thick overcast leaves you a mile and a half, and fog leaves
+    // you the length of the boat. Geometric from the haze down to sixty metres, because
+    // that is how visibility actually behaves: the difference between four hundred
+    // metres and two hundred is a whole category of seamanship, and the difference
+    // between eight kilometres and seven point eight is nothing at all.
+    //
+    // Sixty metres is the floor on purpose. Nought would be a dial that can make the
+    // game unplayable, and real fog thick enough to lose your own bow is rare enough
+    // that it is not worth being able to ask for.
+    let blind = 60.0_f32;
+    haze * (blind / haze).powf(sky.fog.clamp(0.0, 1.0))
+}
+
+/// How far anything at all can be made out, taking the weather and the curve of the
+/// earth together.
+///
+/// **One answer, because there were two.** `Archipelago::visible_from` gives the
+/// geometric horizon — how far a mark of that height is over the curve — and knows
+/// nothing about the weather; `visibility` gives the weather and knows nothing about the
+/// curve. Nothing combined them, so the renderer fogged a headland out at a mile and a
+/// half while the navigation went on letting you take a bearing on it at eight, which is
+/// the exercise handed back to you by an instrument that was never asked whether it
+/// could see.
+pub fn can_make_out(sky: &Sky, over_the_curve: f64) -> f64 {
+    over_the_curve.min(visibility(sky) as f64)
 }
 
 pub fn haze_near(sky: &Sky) -> Color {
@@ -1133,6 +1265,28 @@ impl Clock {
 /// milliseconds of someone's core to repaint the sky.
 const SUN_STEP: f32 = 0.6_f32.to_radians();
 const COVER_STEP: f32 = 0.04;
+/// And how far the fog has to move. Finer than the cloud's, because the fog does more to
+/// the dome than the cloud does: it takes it from a sky to a wall.
+const FOG_STEP: f32 = 0.02;
+
+/// Whether the sky has moved far enough to be worth rebuilding what is made out of it.
+///
+/// **One test, asked by two callers**, and that is the point of it being a function. The
+/// dome is baked from the sky and the haze is computed from the sky, and for a long time
+/// only the dome had a trigger: the haze was set once when the camera was dressed and
+/// then left, so the sea stayed at the visibility of the minute the game opened while
+/// the sky overhead went on changing. A fog bank that thinned the dome to a wall left
+/// the water clear to the horizon, and the two halves of the same weather disagreed
+/// along the one line where the disagreement is unmissable.
+///
+/// The thresholds are what sixty milliseconds of a core is worth, and are shared for the
+/// same reason the test is: two triggers drifting apart is how the dome and the haze
+/// came to disagree in the first place.
+pub fn worth_repainting(was: &Sky, now: &Sky) -> bool {
+    was.sun.angle_between(now.sun) > SUN_STEP
+        || (was.cover - now.cover).abs() > COVER_STEP
+        || (was.fog - now.fog).abs() > FOG_STEP
+}
 
 /// Advance the clock and the weather, and repaint the sky when either has moved.
 #[allow(clippy::too_many_arguments)]
@@ -1176,6 +1330,7 @@ pub fn drift(
     let overcast = sim.sim.wind.cover() as f32;
     let under = sim.sim.wind.squall_at(sim.sim.state.pos) as f32;
     *sky = Sky::at(hour, (overcast + 0.45 * under).clamp(0.0, 1.0));
+    sky.fog = sim.sim.wind.fog() as f32;
 
     // Collect a finished bake first, so a slow frame cannot leave one waiting.
     if let Some(task) = &mut baking.task {
@@ -1200,9 +1355,13 @@ pub fn drift(
         return;
     }
 
-    let moved = baking.baked.is_none_or(|was| {
-        was.sun.angle_between(sky.sun) > SUN_STEP || (was.cover - sky.cover).abs() > COVER_STEP
-    });
+    // **And the fog, which this did not know about.** The dome is painted into a cubemap
+    // and repainted when the sky has moved enough to be worth sixty milliseconds — and
+    // "moved" meant the sun or the cloud. So a fog bank rolling in changed the water and
+    // left the dome exactly as it was: a dark sky over a white sea, which is the one
+    // thing fog never looks like. Reported from the deck twice before I looked at the
+    // trigger rather than at the colour.
+    let moved = baking.baked.is_none_or(|was| worth_repainting(&was, &sky));
     if moved {
         let want = *sky;
         baking.baked = Some(want);
@@ -1691,5 +1850,66 @@ mod the_other_half_of_the_day {
             lit * 12 < sampled,
             "{lit} of {sampled} samples were star — that is a wash, not a star field"
         );
+    }
+}
+
+/// What fog does to the picture, which is two separate things that have to agree.
+#[cfg(test)]
+mod inside_a_cloud {
+    use super::*;
+
+    /// **The repaint has to notice fog, or nothing downstream can.** The dome is baked
+    /// and the haze is set, both only when the sky has moved; for a long time "moved"
+    /// meant the sun or the cloud, and a fog bank that rolled in over an otherwise
+    /// steady afternoon moved neither. Everything else in this module was correct and
+    /// none of it ran.
+    #[test]
+    fn fog_counts_as_the_sky_moving() {
+        let clear = Sky::at(12.0, 0.6);
+        let mut thick = clear;
+        thick.fog = 0.8;
+        assert!(
+            worth_repainting(&clear, &thick),
+            "a fog bank rolled in and the sky said nothing had changed"
+        );
+        let mut barely = clear;
+        barely.fog = FOG_STEP * 0.4;
+        assert!(
+            !worth_repainting(&clear, &barely),
+            "a fortieth of an okta of fog is not worth sixty milliseconds of a core"
+        );
+    }
+
+    /// **The dome and the water have to arrive at the same grey.** They are painted by
+    /// two different parts of the renderer out of the same numbers, and the skybox
+    /// scales its own down on the way — so the dome is written up by the same amount,
+    /// and the one place that can go wrong is somebody deleting the conversion because
+    /// it looks like a fudge.
+    #[test]
+    fn the_dome_is_written_up_to_meet_the_water() {
+        let mut sky = Sky::at(12.0, 0.6);
+        sky.fog = 1.0;
+        let down = Vec3::new(0.0, 0.0, -1.0);
+        let dome = dome_colour(down, &sky);
+        let water = sky_colour(down, &sky);
+        let ratio = dome.x / water.x;
+        assert!(
+            (ratio - FOG_ON_THE_DOME).abs() < 0.05,
+            "the dome came out {ratio:.2} times the water, not {FOG_ON_THE_DOME:.0}"
+        );
+    }
+
+    /// And in clear air the two are the same picture they always were: the conversion
+    /// is fog's and nothing else's.
+    #[test]
+    fn clear_air_is_left_alone() {
+        let sky = Sky::at(12.0, 0.6);
+        for dir in [Vec3::Y, Vec3::new(0.0, 0.1, -1.0).normalize(), Vec3::X] {
+            assert_eq!(
+                dome_colour(dir, &sky),
+                sky_colour(dir, &sky),
+                "the dome moved on a day with no fog in it"
+            );
+        }
     }
 }

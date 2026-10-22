@@ -95,12 +95,22 @@ pub const GLASSES_REACH: f64 = 2.2;
 /// One function because two places ask it and they must agree: the instrument that
 /// decides whether the bearing may be taken, and the plot that decides whether the fix
 /// taken from it still holds.
-pub fn nameable_from(mark: &sail_core::land::Landmark, recognised: &[String]) -> f64 {
-    if recognised.contains(&mark.name) {
+pub fn nameable_from(
+    mark: &sail_core::land::Landmark,
+    recognised: &[String],
+    sky: &crate::sky::Sky,
+) -> f64 {
+    // **And the weather, which used to be left out of this entirely.** The curve of the
+    // earth said eight miles and the fog said four hundred metres, and this function
+    // only knew about the first — so a headland the renderer had fogged out completely
+    // was still a thing you could put a name to and take a bearing on. One answer now;
+    // see `sky::can_make_out`.
+    let over_the_curve = if recognised.contains(&mark.name) {
         mark.visible_from(2.0)
     } else {
         mark.kind.identified_from().min(mark.visible_from(2.0))
-    }
+    };
+    crate::sky::can_make_out(sky, over_the_curve)
 }
 
 /// Whether the compass can put a name to what is in the notch.
@@ -281,7 +291,7 @@ pub fn aim(
     for mark in &coast.marks {
         let off = mark.at - here;
         let range = off.length();
-        if range > nameable_from(mark, &nav.recognised) {
+        if range > nameable_from(mark, &nav.recognised, &sky) {
             continue;
         }
         let to_it = wrap_tau(off.x.atan2(off.y));
@@ -796,7 +806,7 @@ pub fn recognise(
         .filter_map(|m| {
             let off = m.at - here;
             let range = off.length();
-            if range > m.visible_from(2.0) {
+            if range > crate::sky::can_make_out(&sky, m.visible_from(2.0)) {
                 return None;
             }
             let bearing = wrap_tau(off.x.atan2(off.y));
@@ -826,7 +836,11 @@ pub fn recognise(
     let readable: Vec<&sail_core::land::Landmark> = in_view
         .iter()
         .filter(|(_, m, range)| {
-            *range <= (m.kind.identified_from() * GLASSES_REACH).min(m.visible_from(2.0))
+            *range
+                <= crate::sky::can_make_out(
+                    &sky,
+                    (m.kind.identified_from() * GLASSES_REACH).min(m.visible_from(2.0)),
+                )
         })
         .map(|(_, m, _)| *m)
         .collect();

@@ -614,6 +614,12 @@ impl crate::wind::WindField for ShelteredWind {
         self.inner.cover()
     }
 
+    fn fog(&self) -> f64 {
+        // Land shelters a boat from the wind and does nothing whatever about the fog —
+        // if anything a lee is where it lingers. Passed straight through.
+        self.inner.fog()
+    }
+
     fn adjustable(&mut self) -> Option<&mut crate::wind::SyntheticWind> {
         self.inner.adjustable()
     }

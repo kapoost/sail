@@ -532,8 +532,7 @@ pub fn setup(
         crate::sky::SkyImage(sky.clone()),
         Skybox {
             image: Some(sky.clone()),
-            // A clear sky runs five to ten thousand candela per square metre.
-            brightness: 8000.0,
+            brightness: crate::sky::SKY_BRIGHTNESS,
             ..default()
         },
         GeneratedEnvironmentMapLight {
@@ -560,11 +559,11 @@ pub fn setup(
         // this anyway.
         DistanceFog {
             color: crate::sky::haze_colour(&sky_state),
-            // Both of these are set again by `dress` whenever the view changes, and
-            // this is the pair that was left behind when visibility stopped being a
-            // constant: the camera starts in the chase view and `dress` returns early
-            // until something switches, so the opening scene kept the old 2600 m and
-            // every judgement about the change was made against an unchanged picture.
+            // Both of these are set again by `dress` whenever the view changes or the
+            // weather does, and this is the pair that was left behind when visibility
+            // stopped being a constant: `dress` used to return early until the view
+            // switched, so the opening scene kept the old 2600 m and every judgement
+            // about the change was made against an unchanged picture.
             directional_light_color: crate::sky::glow_colour(&sky_state),
             directional_light_exponent: 3.0,
             falloff: FogFalloff::from_visibility_colors(
@@ -625,9 +624,18 @@ const UNDER_WATER: Color = Color::srgb(0.045, 0.145, 0.135);
 /// with a hole in the ceiling. With it gone, everything past the fog is the clear colour,
 /// and the clear colour is the water.
 ///
-/// Runs on a change of view rather than every frame, because adding and removing a
-/// component is a structural change to the entity and doing it sixty times a second to
-/// say the same thing would be sixty archetype moves a second.
+/// Runs on a change of view, **and on a change of weather** — not every frame, because
+/// adding and removing a component is a structural change to the entity and doing it
+/// sixty times a second to say the same thing would be sixty archetype moves a second.
+///
+/// The weather half is the half that was missing, and it cost two reports from the deck.
+/// The haze is weather now — its colour and the distance you can see through it are both
+/// read off the sky — but this ran on a change of view alone, so both were fixed at
+/// whatever the sky was in the first frame of the game. The visibility went to sixty
+/// metres in fog and the water stayed clear to the horizon; the dome went white and the
+/// sea it stood over did not. Everything below is cheap except `haze_colour`, which
+/// walks the horizon, so it is gated on the same test the dome's repaint uses rather
+/// than run every frame.
 pub fn dress(
     mut commands: Commands,
     view: Res<View>,
@@ -635,12 +643,14 @@ pub fn dress(
     image: Query<(Entity, &crate::sky::SkyImage), With<MainCamera>>,
     mut fog: Query<&mut DistanceFog, With<MainCamera>>,
     mut camera: Query<&mut Camera, With<MainCamera>>,
-    mut was: Local<Option<View>>,
+    mut was: Local<Option<(View, crate::sky::Sky)>>,
 ) {
-    if *was == Some(*view) {
+    let turned = was.is_none_or(|(seen, _)| seen != *view);
+    let weathered = was.is_none_or(|(_, seen)| crate::sky::worth_repainting(&seen, &sky));
+    if !turned && !weathered {
         return;
     }
-    *was = Some(*view);
+    *was = Some((*view, *sky));
     let under = *view == View::Under;
     for mut fog in &mut fog {
         fog.color = if under {
@@ -677,6 +687,11 @@ pub fn dress(
             )
         };
     }
+    // The structural half, which is the part that must not happen every time the cloud
+    // thickens: adding or removing a component moves the entity between archetypes.
+    if !turned {
+        return;
+    }
     for mut camera in &mut camera {
         camera.clear_color = if under {
             bevy::camera::ClearColorConfig::Custom(UNDER_WATER)
@@ -690,7 +705,7 @@ pub fn dress(
         } else {
             commands.entity(entity).insert(Skybox {
                 image: Some(image.0.clone()),
-                brightness: 8000.0,
+                brightness: crate::sky::SKY_BRIGHTNESS,
                 ..default()
             });
         }

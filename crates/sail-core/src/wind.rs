@@ -108,6 +108,13 @@ pub trait WindField: Send + Sync {
         0.55
     }
 
+    /// How thick the fog is, 0 clear to 1 blind. Here with the cloud and for the same
+    /// reason: it is weather, it comes and goes on the weather's own clock, and a field
+    /// with no weather in it has none.
+    fn fog(&self) -> f64 {
+        0.0
+    }
+
     /// How much harder than the mean it is blowing at a point, as a fraction: 0.2 is a
     /// twenty percent gust and −0.2 a lull. Zero for a field with no structure in it.
     ///
@@ -163,6 +170,27 @@ pub struct Synoptic {
     speed_trend: f64,
     direction_trend: f64,
     cover_trend: f64,
+    /// How thick the fog is, 0 to 1, as a slow process of its own.
+    ///
+    /// **Not cloud.** Cover is what is above you and fog is what you are inside, and the
+    /// two are different weather: a clear night with a cold sea under warm air is the
+    /// classic way to get fog and there is no cloud in it at all. So it gets its own
+    /// mean and its own trend rather than being read off the sky.
+    fog_mean: f64,
+    fog_trend: f64,
+    /// **Fog's own dice.**
+    ///
+    /// Not the shared generator, and that is the whole of why this field exists. The
+    /// synoptic process, the squalls and the gust field all draw from one stream, so a
+    /// new quantity taking a number out of it shifts every number after it — and every
+    /// seed in the game then means a different day. Caught by a crew scenario that had
+    /// nothing to do with fog and failed the moment this was added.
+    ///
+    /// Kept as a seed and a counter rather than as a generator, because `Synoptic` is
+    /// `Copy` and a generator that can be copied is a generator that quietly rewinds —
+    /// which this crate decided once already by giving `Pcg32` only `Clone`.
+    fog_seed: u64,
+    fog_step: u64,
 }
 
 /// How much of the wind's trend shows up in the cloud cover.
@@ -178,11 +206,19 @@ const COVER_FROM_WIND: f64 = 0.45;
 /// Not a taste decision in either direction. The floor keeps the player out of the
 /// light-air regime the model is known to handle badly (see `weather.rs`), and the
 /// ceiling keeps a drawn gale from becoming a storm the boat has no answer to.
+/// How far the fog wanders from the day it was drawn.
+///
+/// Wider than the cloud's, because fog is more nearly a yes-or-no than cover is: a coast
+/// either has it or it has not, and the days in between are the unusual ones.
+const FOG_SWING: f64 = 0.35;
+
 const SYNOPTIC_FLOOR: f64 = 0.55;
 const SYNOPTIC_CEILING: f64 = 1.75;
 
 impl Synoptic {
-    pub fn new(direction: f64, speed: f64, rng: &mut Pcg32) -> Self {
+    pub fn new(direction: f64, speed: f64, seed: u64, rng: &mut Pcg32) -> Self {
+        let fog_seed = seed ^ 0xF0_6F_06;
+        let mut fog_rng = Pcg32::new(fog_seed);
         Self {
             base_speed: speed,
             base_direction: direction,
@@ -197,6 +233,14 @@ impl Synoptic {
             speed_trend: 0.22 * rng.next_normal(),
             direction_trend: 20.0_f64.to_radians() * rng.next_normal(),
             cover_trend: 0.22 * rng.next_normal(),
+            // Most days have none. A mean at a fifth with this swing puts thick fog on
+            // about one day in six and a bit of haze on a good many more — a coast
+            // rather than a climate, and the shape anybody who sails one would know:
+            // fog is not rare, it is just not today.
+            fog_mean: 0.20,
+            fog_trend: FOG_SWING * fog_rng.next_normal(),
+            fog_seed,
+            fog_step: 1,
         }
     }
 
@@ -222,6 +266,21 @@ impl Synoptic {
             dt,
             rng,
         );
+        // Fog comes and goes over a watch rather than over a tack, like the cloud, and
+        // a little slower: a bank rolls in over an hour and takes most of a day to lift.
+        // Its own dice here too, for the same reason: stepping the fog off the shared
+        // stream would shift the gusts by one draw every step, which is the same fault
+        // spread thinner.
+        //
+        let mut fog_rng = Pcg32::new(self.fog_seed ^ self.fog_step);
+        self.fog_step = self.fog_step.wrapping_add(1);
+        ou_step(
+            &mut self.fog_trend,
+            FOG_SWING,
+            self.cover_timescale * 1.6,
+            dt,
+            &mut fog_rng,
+        );
     }
 
     /// Set the cover to a given value *now*, leaving it free to wander afterwards.
@@ -235,6 +294,45 @@ impl Synoptic {
     /// honestly after it.
     pub fn start_cover(&mut self, cover: f64) {
         self.cover_trend = cover - self.cover_mean - COVER_FROM_WIND * self.speed_trend;
+    }
+
+    /// Put the fog the air is carrying where it is asked for, and let it wander after.
+    ///
+    /// **It sets what is there, not what you will see**, and the difference is the one
+    /// honest thing about this dial. The first version solved through the thinning so
+    /// that asking for nine tenths gave nine tenths — which meant a dial that could
+    /// produce thick fog in a gale, and stored a trend of several hundred to do it, so
+    /// that the moment the wind eased the fog went to one and stayed there.
+    ///
+    /// Asking for fog in twenty knots now gives you almost none, because that is what
+    /// twenty knots does to fog. A dial that can lie about its own model is worse than
+    /// no dial.
+    pub fn start_fog(&mut self, fog: f64) {
+        self.fog_trend = fog.clamp(0.0, 1.0) - self.fog_mean;
+    }
+
+    /// What the air is carrying, before the wind gets at it — which is what a dial
+    /// setting it should read back, or it would snap away from wherever it was put.
+    pub fn fog_aloft(&self) -> f64 {
+        (self.fog_mean + self.fog_trend).clamp(0.0, 1.0)
+    }
+
+    /// **How much of the fog the wind has not yet blown away.**
+    ///
+    /// The relation this model has to get right, because it is the one a sailor knows
+    /// without thinking: fog does not survive a breeze. Below about eight knots it sits;
+    /// by twenty it has gone. Mixing is what destroys it — the wind stirs the cold air at
+    /// the surface into the warmer air above and the droplets evaporate — so this is a
+    /// mechanism rather than a fudge, and it is why a foggy morning burns off the moment
+    /// the sea breeze fills in.
+    fn thinning(&self) -> f64 {
+        let knots = crate::units::ms_to_kn(self.speed());
+        (1.0 - (knots - 8.0) / 12.0).clamp(0.0, 1.0)
+    }
+
+    /// How thick it is here and now: 0 is clear and 1 is not seeing your own bow.
+    pub fn fog(&self) -> f64 {
+        ((self.fog_mean + self.fog_trend) * self.thinning()).clamp(0.0, 1.0)
     }
 
     /// Cover now. Correlated with the wind, because they are correlated in the weather:
@@ -706,7 +804,7 @@ impl SyntheticWind {
     /// A plausible open-water day: moderate breeze, moderate gustiness.
     pub fn new(mean_direction: f64, mean_speed: f64, seed: u64) -> Self {
         let mut rng = Pcg32::new(seed);
-        let synoptic = Synoptic::new(mean_direction, mean_speed, &mut rng);
+        let synoptic = Synoptic::new(mean_direction, mean_speed, seed, &mut rng);
         Self {
             mean_direction: synoptic.direction(),
             mean_speed: synoptic.speed(),
@@ -880,6 +978,10 @@ impl WindField for SyntheticWind {
         self.synoptic.cover()
     }
 
+    fn fog(&self) -> f64 {
+        self.synoptic.fog()
+    }
+
     fn step(&mut self, dt: f64) {
         // The slow weather first, because it moves the mean everything else is measured
         // against — including where the gusts are carried to.
@@ -950,7 +1052,7 @@ mod tests {
     #[test]
     fn a_wind_set_by_hand_is_the_wind_on_the_water() {
         let mut rng = Pcg32::new(0xDECADE);
-        let mut day = Synoptic::new(deg(240.0), kn_to_ms(34.0), &mut rng);
+        let mut day = Synoptic::new(deg(240.0), kn_to_ms(34.0), 7, &mut rng);
         // Wind it up to the ceiling, the way a gale's own trend would.
         day.follow(kn_to_ms(34.0) * SYNOPTIC_CEILING, deg(240.0), 0.75);
         let before = ms_to_kn(day.speed_now());
@@ -969,7 +1071,7 @@ mod tests {
         // And setting the base alone is the lag this exists to avoid — kept as a
         // measurement rather than a memory, so the day it stops being true somebody is
         // told.
-        let mut lagging = Synoptic::new(deg(240.0), kn_to_ms(34.0), &mut rng);
+        let mut lagging = Synoptic::new(deg(240.0), kn_to_ms(34.0), 7, &mut rng);
         lagging.follow(kn_to_ms(34.0) * SYNOPTIC_CEILING, deg(240.0), 0.75);
         lagging.base_speed = kn_to_ms(13.5);
         let still = ms_to_kn(lagging.speed_now());
@@ -977,6 +1079,64 @@ mod tests {
             still > 20.0,
             "the base alone should leave it blowing hard, and it is {still:.0} kn"
         );
+    }
+
+    /// **Fog does not survive a breeze**, which is the one relation about it a sailor
+    /// knows without being told — and the reason a foggy morning burns off the moment
+    /// the sea breeze fills in. Below about eight knots it sits; by twenty it has gone.
+    #[test]
+    fn the_wind_blows_it_away() {
+        let thick = |knots: f64| {
+            let mut rng = Pcg32::new(0xF0660);
+            let mut day = Synoptic::new(deg(180.0), kn_to_ms(knots), 11, &mut rng);
+            // `blows` rather than the base alone, or the wind in this test is the wind
+            // asked for times whatever trend the dice handed out — which is up to three
+            // quarters either way and makes a test about wind speed a test about luck.
+            day.blows(kn_to_ms(knots));
+            day.start_fog(0.9);
+            day.fog()
+        };
+        let calm = thick(5.0);
+        assert!(calm > 0.85, "a calm morning kept only {calm:.2} of its fog");
+        assert!(thick(14.0) < calm, "a working breeze thinned nothing");
+        assert!(
+            thick(22.0) < 0.01,
+            "twenty-two knots left {:.2} of it",
+            thick(22.0)
+        );
+        // And it is a slope rather than a switch: the middle is the middle.
+        let middle = thick(14.0);
+        assert!(
+            (0.1..0.75).contains(&middle),
+            "fourteen knots gave {middle:.2}"
+        );
+    }
+
+    /// **Adding fog must not change anybody's day.** The synoptic process, the squalls
+    /// and the gusts all draw from one stream, so a new quantity taking a number out of
+    /// it shifts every number after — and every seed in the game then means a different
+    /// afternoon. That is not hypothetical: it happened, and what caught it was a crew
+    /// scenario with nothing to do with weather at all.
+    #[test]
+    fn fog_draws_from_its_own_dice() {
+        let mut rng = Pcg32::new(0xDEC1DE);
+        let day = Synoptic::new(deg(200.0), kn_to_ms(16.0), 3, &mut rng);
+        // Whatever the shared stream had left after building the day is what the squalls
+        // and the gust field get. Two days built the same way must leave it in the same
+        // place — and must leave it where a day with no fog in it would have.
+        let after_fog = rng.next_f64();
+
+        let mut plain = Pcg32::new(0xDEC1DE);
+        // The three draws a synoptic makes of the shared stream: speed, direction, cover.
+        for _ in 0..3 {
+            let _ = plain.next_normal();
+        }
+        assert_eq!(
+            after_fog,
+            plain.next_f64(),
+            "fog took a number out of the shared stream and moved the weather"
+        );
+        assert!(day.fog() >= 0.0);
     }
 
     /// `intensity` has to mean what it says, or every wind speed in the simulator is

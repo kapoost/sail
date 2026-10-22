@@ -529,7 +529,7 @@ pub fn reckon(
         }
         let off = m.at - here;
         let range = off.length();
-        if range > crate::sight::nameable_from(m, &nav.recognised) {
+        if range > crate::sight::nameable_from(m, &nav.recognised, &sky) {
             return false;
         }
         sail_core::units::wrap_pi(off.x.atan2(off.y) - heading)
@@ -1124,7 +1124,12 @@ pub fn enter_in_the_log(
 /// When the second one goes — round a headland, into the rain, over the horizon — the
 /// chart stops saying. That is the moment a navigator starts keeping a dead-reckoning
 /// plot, and it arrives by itself rather than on a timer.
-pub fn the_fix_holds(sim: Res<Sim>, coast: Res<crate::marks::Coast>, mut nav: ResMut<Navigation>) {
+pub fn the_fix_holds(
+    sim: Res<Sim>,
+    coast: Res<crate::marks::Coast>,
+    sky: Res<crate::sky::Sky>,
+    mut nav: ResMut<Navigation>,
+) {
     if !nav.lost || nav.fixed_on.is_empty() {
         if !nav.lost {
             nav.still_in_sight = usize::MAX;
@@ -1148,7 +1153,7 @@ pub fn the_fix_holds(sim: Res<Sim>, coast: Res<crate::marks::Coast>, mut nav: Re
         .filter(|(at, kind)| {
             let range = (*at - here).length();
             let reach = match coast.marks.iter().find(|m| (m.at - *at).length() < 1.0) {
-                Some(mark) => crate::sight::nameable_from(mark, &nav.recognised),
+                Some(mark) => crate::sight::nameable_from(mark, &nav.recognised, &sky),
                 // A mark that is no longer on the coast at all — a world rebuilt under
                 // the fix — cannot be re-shot, and the old rule is the safe answer.
                 None => kind.identified_from(),

@@ -129,6 +129,18 @@ impl Sim {
                 sail_core::units::deg(swell.run + std::f64::consts::PI).rem_euclid(360.0)
             );
         }
+        // `SAIL_FOG=0.8` shuts the visibility down, for looking at what that is like
+        // without waiting for a day that has it.
+        if let Some(fog) = crate::knob::var("SAIL_FOG")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+        {
+            if let Some(w) = wind.adjustable() {
+                w.synoptic.start_fog(fog.clamp(0.0, 1.0));
+                info!("fog: {:.0}% — see how far that gets you", fog * 100.0);
+            }
+        }
+
         // `SAIL_SEA=built` opens with the sea the wind has already made, instead of the
         // flat water it starts on and the two and a half hours it takes to build.
         //

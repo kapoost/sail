@@ -394,6 +394,38 @@ pub fn force_wind(force: u8) -> f64 {
     }
 }
 
+/// What a visibility is called, in the words a forecast uses.
+///
+/// The international scale, because it is the one on every shipping forecast and the
+/// numbers in it already mean something to anybody who has listened to one. "Poor" is
+/// where a prudent skipper starts sounding a signal; "fog" is where the chart table
+/// stops being optional.
+pub fn how_far(metres: f32) -> &'static str {
+    match metres {
+        m if m < 200.0 => "under a cable",
+        m if m < 1_000.0 => "a few hundred metres",
+        m if m < 2_000.0 => "a mile at most",
+        m if m < 5_000.0 => "two or three miles",
+        m if m < 10_000.0 => "a good few miles",
+        _ => "all the way to the horizon",
+    }
+}
+
+/// And what the fog itself is doing, as opposed to how far you can see through it.
+///
+/// Two different sentences on purpose: a tenth of fog on a clear day still leaves ten
+/// kilometres, and the same tenth under a thick overcast leaves a mile. The dial moves
+/// the first and the line underneath reports the second.
+pub fn how_thick(fog: f64) -> &'static str {
+    match fog {
+        f if f < 0.05 => "clear",
+        f if f < 0.25 => "a haze on the water",
+        f if f < 0.55 => "coming and going",
+        f if f < 0.85 => "shut in",
+        _ => "you hear more than you see",
+    }
+}
+
 /// What a sea of this height is called.
 ///
 /// Douglas, which is the *sea* scale and is not Beaufort — a point worth keeping

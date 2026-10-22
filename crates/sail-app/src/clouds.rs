@@ -795,7 +795,15 @@ pub fn update(
                 continue;
             }
         }
-        let mut alpha = (0.80 + 0.19 * cell.storm) * (1.0 - far * far * 0.4) * cell.presence;
+        // **In fog there are no clouds**, which sounds obvious and was not happening:
+        // these are billboards seven kilometres out and the distance fog did not take
+        // them, so the water went white and the cumulus stayed sharp overhead — the one
+        // thing fog never looks like. Gone by about half a fog, because the path up
+        // through a bank is hundreds of metres of it and nothing survives that.
+        let mut alpha = (0.80 + 0.19 * cell.storm)
+            * (1.0 - far * far * 0.4)
+            * cell.presence
+            * (1.0 - sky.fog.clamp(0.0, 1.0).powf(0.5)).max(0.0);
 
         if ink.0 {
             // Drawn cloud is flat tone and hard edges: three levels, no gradient. The
