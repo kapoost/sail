@@ -35,3 +35,7 @@ assets/*-hull.glb
 /_site/
 /.playwright-mcp/
 __pycache__/
+# Voice recordings are somebody's voice, not source. They live outside this tree and are
+# pointed at with `SAIL_VOICE` — see `sound.rs` — so that a placeholder cut out of a
+# public-domain reading cannot be shipped by forgetting about it.
+/voice/

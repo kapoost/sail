@@ -70,6 +70,8 @@ impl Default for SeaParams {
             notes_played: AtomicU32::default(),
             notes_lost: AtomicU32::default(),
             bell: AtomicU32::default(),
+            shout: AtomicU32::default(),
+            voices: Vec::new(),
             water_level: AtomicU32::default(),
             sea_surge: AtomicU32::default(),
             sea_slam: AtomicU32::default(),
@@ -112,6 +114,16 @@ pub struct SeaParams {
     notes_lost: AtomicU32,
     /// Strikes of the ship's bell waiting to be rung.
     bell: AtomicU32,
+    /// A call from the deck waiting to be made: `(generation << 8) | index`.
+    ///
+    /// The generation is what makes two of the same call in a row two calls. A plain
+    /// index could not say "again" — the stream would read the same number and have no
+    /// way of telling a repeat from a value nobody had cleared.
+    shout: AtomicU32,
+    /// The recorded calls themselves, loaded once before this is shared and never
+    /// written again — so the audio thread reads them without a lock and without an
+    /// atomic, which is the only way a sample buffer belongs in a callback.
+    voices: Vec<Vec<f32>>,
     water_level: AtomicU32,
     water_cutoff: AtomicU32,
     /// A wave arriving: how hard she was hit, 0 to 1, taken rather than read.
@@ -305,6 +317,26 @@ impl SeaParams {
     /// without being loud.
     pub fn ring(&self, strikes: u8) {
         self.bell.store(strikes.min(3) as u32, Ordering::Relaxed);
+    }
+
+    /// Somebody on deck says something.
+    ///
+    /// **The words are on the console and this is not carrying them.** What a call across
+    /// a deck carries is who, from where, and how urgently — the content is already in
+    /// front of the player in writing, and a voice repeating it would be a voice reading
+    /// out a caption. So this takes an index into whatever was recorded and nothing else.
+    ///
+    /// Mixed inside the stream rather than played as a sound of its own, which is the
+    /// whole point: the question a voice has to answer here is whether it carries
+    /// *through* thirty knots of synthesised wind, and a one-shot played beside the mix
+    /// would answer a different one.
+    pub fn shout(&self, which: usize) {
+        if self.voices.is_empty() {
+            return;
+        }
+        let i = (which % self.voices.len()) as u32;
+        let gen = (self.shout.load(Ordering::Relaxed) >> 8).wrapping_add(1) & 0xff_ffff;
+        self.shout.store((gen << 8) | i, Ordering::Relaxed);
     }
 
     /// How many notes have been asked for and how many were dropped, since the
@@ -691,6 +723,10 @@ pub struct SeaStream {
     /// Strikes still to come, the wait until the next one, and the five partials of the
     /// one that is ringing.
     bell_left: u8,
+    /// Which call is being made and how far through it we are.
+    shout_at: Option<(usize, usize)>,
+    /// The last generation seen, so a repeat of the same call still counts as one.
+    shout_seen: u32,
     bell_wait: f32,
     bell_amp: [f32; 5],
     bell_phase: [f32; 5],
@@ -732,6 +768,8 @@ impl SeaStream {
             tick_env: 0.0,
             tick_phase: 0.0,
             bell_left: 0,
+            shout_at: None,
+            shout_seen: 0,
             bell_wait: 0.0,
             bell_amp: [0.0; 5],
             bell_phase: [0.0; 5],
@@ -1211,7 +1249,32 @@ impl Iterator for SeaStream {
         // game that must not be level with anything. The answer stays what it was: the
         // band gets out of the way rather than the reel getting louder.
         let duck = 1.0 / (1.0 + 7.0 * (self.smooth.gear - 1.0).max(0.0));
-        let mix = ((wind + water + thump + rain) * t_sea + (rig + flog + gear + bell) * t_boat)
+        // A call from the deck. Started on a new generation, and a call already running
+        // is cut off by the next one — because two people shouting over each other is
+        // what actually happens and is also the only sane thing to do with one play head.
+        let asked = self.params.shout.load(Ordering::Relaxed);
+        if asked >> 8 != self.shout_seen {
+            self.shout_seen = asked >> 8;
+            self.shout_at = Some(((asked & 0xff) as usize, 0));
+        }
+        let mut shout = 0.0;
+        if let Some((which, at)) = self.shout_at {
+            match self.params.voices.get(which).and_then(|v| v.get(at)) {
+                Some(sample) => {
+                    shout = *sample;
+                    self.shout_at = Some((which, at + 1));
+                }
+                None => self.shout_at = None,
+            }
+        }
+
+        let mix = ((wind + water + thump + rain) * t_sea
+            + (rig + flog + gear + bell) * t_boat
+            // **On the boat's bus, not the sea's.** A voice on deck is a thing aboard,
+            // so it rides the same fader as the rigging and the winches — turn the boat
+            // down and the watch goes quiet with it, which is the behaviour anybody
+            // would expect from a control labelled "boat".
+            + shout * SHOUT * t_boat)
             * MASTER
             * t_master
             + song * t_music * t_master * duck
@@ -1243,8 +1306,126 @@ impl Source for SeaStream {
 
 /// Register the generator and start it playing. It never ends; the parameters do all
 /// the work from here.
+/// Read whatever has been recorded, from a directory named by `SAIL_VOICE`.
+///
+/// **Outside the repository on purpose.** The calls are somebody's voice, recorded once
+/// and not part of the source, and a directory that has to be pointed at cannot be
+/// shipped by accident — which matters while the ones being listened to are placeholders
+/// cut out of a public-domain reading rather than the real thing.
+///
+/// Sixteen-bit mono PCM, which is what every recorder on earth writes and what the
+/// chopping script produces. Written out by hand rather than brought in with a crate: it
+/// is forty lines, the format has not changed since 1991, and a dependency that decodes
+/// every audio format in the world is a poor trade for a program that has no audio files
+/// in it at all.
+fn recorded() -> Vec<Vec<f32>> {
+    let Ok(dir) = crate::knob::var("SAIL_VOICE") else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        warn!("voice: cannot read {dir}");
+        return Vec::new();
+    };
+    let mut names: Vec<_> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")))
+        .collect();
+    // Sorted, so an index means the same call between runs.
+    names.sort();
+    let mut out = Vec::new();
+    for path in names {
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        match wav_mono(&bytes) {
+            Some((samples, rate)) if !samples.is_empty() => out.push(at_our_rate(samples, rate)),
+            _ => warn!("voice: {} is not 16-bit mono PCM", path.display()),
+        }
+    }
+    info!("voice: {} calls from {dir}", out.len());
+    out
+}
+
+/// The samples out of a RIFF/WAVE file, if it is the one shape this reads.
+///
+/// Chunks are walked rather than assumed to be in a fixed order, because they are not:
+/// recorders put `LIST` and `fact` chunks wherever they like, and a reader that expects
+/// `data` at byte 44 works on its own test file and nothing else.
+/// Whatever was recorded, at the rate this stream actually runs at.
+///
+/// **Not a constraint to put on the person holding the microphone.** Forty-eight is what
+/// a recorder writes by default and forty-four one is what this stream runs at, and a
+/// nine percent error is a voice a semitone and a half low and slower than it was said —
+/// close enough to sound like a choice and wrong enough to be one. Telling somebody to
+/// export at a particular rate is a trap they fall into once; converting here is six
+/// lines and they never meet it.
+///
+/// Linear, which is the part worth being honest about: it is audibly fine for speech
+/// and it is not what a resampler should be. If voices ever stop being a placeholder
+/// this wants to be done once, offline, by something with a proper filter in it.
+fn at_our_rate(samples: Vec<f32>, rate: u32) -> Vec<f32> {
+    if rate == SAMPLE_RATE || rate == 0 {
+        return samples;
+    }
+    let ratio = SAMPLE_RATE as f64 / rate as f64;
+    let n = (samples.len() as f64 * ratio) as usize;
+    (0..n)
+        .map(|i| {
+            let at = i as f64 / ratio;
+            let (a, f) = (at.floor() as usize, (at.fract()) as f32);
+            let x = samples.get(a).copied().unwrap_or(0.0);
+            let y = samples.get(a + 1).copied().unwrap_or(x);
+            x + (y - x) * f
+        })
+        .collect()
+}
+
+fn wav_mono(bytes: &[u8]) -> Option<(Vec<f32>, u32)> {
+    let word = |at: usize| -> Option<u32> {
+        Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
+    };
+    let half = |at: usize| -> Option<u16> {
+        Some(u16::from_le_bytes(bytes.get(at..at + 2)?.try_into().ok()?))
+    };
+    if bytes.get(..4)? != b"RIFF" || bytes.get(8..12)? != b"WAVE" {
+        return None;
+    }
+    let (mut at, mut channels, mut bits, mut rate) = (12usize, 0u16, 0u16, 0u32);
+    while at + 8 <= bytes.len() {
+        let id = bytes.get(at..at + 4)?;
+        let size = word(at + 4)? as usize;
+        let body = at + 8;
+        if id == b"fmt " {
+            channels = half(body + 2)?;
+            rate = word(body + 4)?;
+            bits = half(body + 14)?;
+        } else if id == b"data" {
+            if channels != 1 || bits != 16 {
+                return None;
+            }
+            let end = (body + size).min(bytes.len());
+            return Some((
+                bytes[body..end]
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|b| i16::from_le_bytes(*b) as f32 / 32768.0)
+                    .collect(),
+                rate,
+            ));
+        }
+        // Chunks are padded to an even length and the padding is not in the size.
+        at = body + size + (size & 1);
+    }
+    None
+}
+
 pub fn setup(mut commands: Commands, mut assets: ResMut<Assets<SeaVoice>>) {
-    let params = Arc::new(SeaParams::default());
+    let params = Arc::new(SeaParams {
+        voices: recorded(),
+        ..SeaParams::default()
+    });
     // Seed the filter targets before the first frame writes them. A default of zero
     // would pull every cutoff towards DC for the first few milliseconds, which is an
     // audible thud on startup.
@@ -1270,6 +1451,14 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Startup, setup.in_set(Build::Scene));
     app.add_systems(Update, update.in_set(Deck::Dress));
 }
+
+/// How loud a call from the deck is against everything else.
+///
+/// A number to be argued with by ear and nothing more: the only honest way to set it is
+/// to stand the recording up against thirty knots of synthesised wind and find out
+/// whether it carries. That is the entire reason the voice is mixed in here rather than
+/// played beside the mix.
+const SHOUT: f32 = 0.9;
 
 /// Diameter of a shroud, metres. Sets the pitch of the whine through the Strouhal
 /// relation — thinner wire sings higher, which is true and free.
@@ -2178,5 +2367,95 @@ mod the_sea_voice {
                 "a silence"
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod what_was_recorded {
+    use super::*;
+
+    /// A RIFF file written by hand, with a chunk in front of the data that a reader
+    /// expecting a fixed layout would walk straight past.
+    fn wav(rate: u32, channels: u16, bits: u16, samples: &[i16], junk_first: bool) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend(b"WAVE");
+        if junk_first {
+            // `LIST` chunks turn up in front of `data` in files from real recorders, and
+            // this one is an odd length so the padding byte matters too.
+            body.extend(b"LIST");
+            body.extend(5u32.to_le_bytes());
+            body.extend(b"INFOx");
+            body.push(0);
+        }
+        body.extend(b"fmt ");
+        body.extend(16u32.to_le_bytes());
+        body.extend(1u16.to_le_bytes());
+        body.extend(channels.to_le_bytes());
+        body.extend(rate.to_le_bytes());
+        body.extend((rate * channels as u32 * 2).to_le_bytes());
+        body.extend((channels * 2).to_le_bytes());
+        body.extend(bits.to_le_bytes());
+        body.extend(b"data");
+        body.extend((samples.len() as u32 * 2).to_le_bytes());
+        for s in samples {
+            body.extend(s.to_le_bytes());
+        }
+        let mut out = Vec::new();
+        out.extend(b"RIFF");
+        out.extend((body.len() as u32).to_le_bytes());
+        out.extend(body);
+        out
+    }
+
+    /// **Chunks are walked, not assumed.** A reader that expects `data` at byte
+    /// forty-four works on its own test file and on nothing a recorder produced.
+    #[test]
+    fn a_chunk_in_front_of_the_data_is_stepped_over() {
+        let samples = [0i16, 16384, -16384, 32767];
+        let plain = wav_mono(&wav(44_100, 1, 16, &samples, false)).expect("a plain file");
+        let padded = wav_mono(&wav(44_100, 1, 16, &samples, true)).expect("one with a LIST");
+        assert_eq!(plain.0.len(), 4);
+        assert_eq!(plain, padded);
+        assert!((plain.0[1] - 0.5).abs() < 1e-3);
+        assert!((plain.0[2] + 0.5).abs() < 1e-3);
+    }
+
+    /// And what it will not take, it refuses rather than mangles.
+    #[test]
+    fn stereo_and_eight_bit_are_refused() {
+        let samples = [0i16; 8];
+        assert!(
+            wav_mono(&wav(44_100, 2, 16, &samples, false)).is_none(),
+            "stereo"
+        );
+        assert!(
+            wav_mono(&wav(44_100, 1, 8, &samples, false)).is_none(),
+            "eight-bit"
+        );
+        assert!(wav_mono(b"not a riff file at all").is_none());
+        assert!(wav_mono(&[]).is_none());
+    }
+
+    /// **Forty-eight is what a recorder writes and forty-four one is what we play**, and
+    /// the difference is a voice a semitone and a half low — close enough to sound like
+    /// a choice. Converted on the way in, so nobody has to be told to export at a
+    /// particular rate.
+    #[test]
+    fn a_recording_comes_back_at_the_rate_we_play_at() {
+        let second: Vec<f32> = (0..48_000).map(|i| (i as f32 / 48_000.0) - 0.5).collect();
+        let played = at_our_rate(second, 48_000);
+        assert!(
+            (played.len() as i32 - SAMPLE_RATE as i32).abs() < 8,
+            "a second came back as {} samples at {SAMPLE_RATE} Hz",
+            played.len()
+        );
+        // A ramp stays a ramp: resampling must not move where the sound is, only how
+        // many samples describe it.
+        assert!((played[0] + 0.5).abs() < 0.01);
+        assert!((played[played.len() / 2]).abs() < 0.01);
+
+        // And the rate we already play at is left alone entirely.
+        let same = vec![0.25f32; 100];
+        assert_eq!(at_our_rate(same.clone(), SAMPLE_RATE), same);
     }
 }

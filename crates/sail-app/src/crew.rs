@@ -399,6 +399,7 @@ pub fn work(
     mut crew: ResMut<Crew>,
     mut orders: ResMut<Orders>,
     pilot: Res<crate::input::Pilot>,
+    sound: Res<crate::sound::SoundHandle>,
     time: Res<Time>,
 ) {
     if !crew.standing {
@@ -566,6 +567,10 @@ pub fn work(
         // "She is over too far" is a boat leaning; "the helm has run out" is a boat
         // about to go round, and a watch that said the first when it meant the second
         // would be describing a heel gauge rather than what is happening.
+        // And somebody says it out loud. The index picks a group rather than a line —
+        // the words are on the console, and what a call carries is which of the two
+        // things is happening and how urgently. See `SoundHandle::shout`.
+        sound.0.shout(if helm_losing { 0 } else { 1 });
         info!(
             "{}",
             match (stop > at, helm_losing) {
