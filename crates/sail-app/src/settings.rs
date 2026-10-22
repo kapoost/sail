@@ -455,6 +455,70 @@ pub fn draw(
                                 settings.weather_touched = true;
                             }
                         });
+
+                        // **And the swell, which is three dials because it is not a
+                        // consequence of anything here.**
+                        //
+                        // The paragraph above says wave height gets one honest dial and
+                        // that dial is the fetch, because height follows from the wind,
+                        // the fetch and the time it has blown — and that argument is
+                        // right about the *wind sea* and does not reach this. A swell is
+                        // a boundary condition: it was made by a storm that stopped two
+                        // days ago a thousand miles away, nothing here has any say over
+                        // how big it is, and there is no local quantity it could be
+                        // derived from. So it is set directly, and setting it directly is
+                        // the honest shape rather than a shortcut.
+                        //
+                        // Nought metres is no swell at all, which is how it is turned off
+                        // — rather than a checkbox beside a slider that then means
+                        // nothing.
+                        ui.add_space(6.0);
+                        let was = sea.swell();
+                        let mut hs = was.map_or(0.0_f32, |s| s.hs as f32);
+                        let mut period = was.map_or(14.0_f32, |s| s.tp as f32);
+                        let mut from = was.map_or(270.0_f32, |s| {
+                            sail_core::units::deg(s.run + std::f64::consts::PI).rem_euclid(360.0)
+                                as f32
+                        });
+                        let mut moved = ui
+                            .add(egui::Slider::new(&mut hs, 0.0..=12.0).text("swell, m"))
+                            .changed();
+                        if hs > 0.0 {
+                            // Eight seconds is a tired wind sea that has outrun its
+                            // wind; twenty-two is an ocean that has been travelling for
+                            // days. Below eight it is not a swell, it is chop.
+                            moved |= ui
+                                .add(egui::Slider::new(&mut period, 8.0..=22.0).text("swell, s"))
+                                .changed();
+                            // The bearing it comes *from*, like the wind and like every
+                            // forecast anybody reads out.
+                            moved |= ui
+                                .add(egui::Slider::new(&mut from, 0.0..=359.0).text("swell from"))
+                                .changed();
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{:.0} m long, and the sea is {:.1} m with it",
+                                    1.56 * period * period,
+                                    (hs * hs
+                                        + (sea.wind_sea_height() * sea.wind_sea_height()) as f32)
+                                        .sqrt()
+                                ))
+                                .color(egui::Color32::from_rgb(150, 150, 130))
+                                .monospace()
+                                .size(10.0),
+                            );
+                        }
+                        if moved {
+                            sea.set_swell(
+                                (hs > 0.0).then_some(sail_core::water::Swell {
+                                    hs: hs as f64,
+                                    tp: period as f64,
+                                    run: sail_core::units::rad(from as f64) + std::f64::consts::PI,
+                                }),
+                                t,
+                            );
+                            settings.weather_touched = true;
+                        }
                     }
 
                     // And the wind, if whatever is behind the field has dials on it. A real
@@ -479,8 +543,18 @@ pub fn draw(
                     // for a six is a dial you will say is broken.
                     let mut force =
                         crate::weather::force(sail_core::units::ms_to_kn(wind.synoptic.base_speed));
+                    // **To twelve, not to nine.** Nine is where the *draw* stops, and it
+                    // stops there for a reason that is about the boat: thirty-four knots
+                    // is where a thirty-four footer is out by mistake rather than by
+                    // choice, and no day this game hands somebody who did not ask should
+                    // be worse than that. A slider is not a day handed to anybody. It is
+                    // where you go to ask what something looks like, and the top of the
+                    // scale is a question the water can answer.
+                    //
+                    // Nothing is promised about the boat up there and the line underneath
+                    // says so. She is a cork in a storm and that is not a defect.
                     if ui
-                        .add(egui::Slider::new(&mut force, 1..=9).text("wind, force"))
+                        .add(egui::Slider::new(&mut force, 1..=12).text("wind, force"))
                         .changed()
                     {
                         // `blows` rather than the base on its own: the base is the day the
@@ -507,9 +581,17 @@ pub fn draw(
                     let knots = sail_core::units::ms_to_kn(wind.synoptic.speed_now());
                     ui.label(
                         egui::RichText::new(format!(
-                            "{} — {:.0} kn",
+                            "{} — {:.0} kn{}",
                             crate::weather::beaufort(knots),
-                            knots
+                            knots,
+                            // Said once, where it matters, rather than as a warning
+                            // nobody reads: past a nine this boat is not sailing, she is
+                            // surviving, and shortly after that she is not doing either.
+                            if knots > 48.0 {
+                                " · past anything she can sail in"
+                            } else {
+                                ""
+                            }
                         ))
                         .color(egui::Color32::from_rgb(150, 150, 130))
                         .monospace()
