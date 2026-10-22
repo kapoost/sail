@@ -1445,11 +1445,56 @@ pub fn setup(mut commands: Commands, mut assets: ResMut<Assets<SeaVoice>>) {
 ///
 /// What this module does in a frame, in one place: see `stages.rs` for why the schedule
 /// is named sets rather than one long chain.
+/// Shout on a timer, for listening to what was recorded.
+///
+/// **Because waiting for the watch is not a way to judge a voice.** The calls are made
+/// when something happens — a reef goes in, a sail comes down — and in a long gale that
+/// is once. One four-hundred-millisecond fragment, once, underneath a force nine, is not
+/// an audition; it is a thing you miss and then wonder whether it played at all. That is
+/// exactly what happened the first time these were listened to.
+///
+/// `SAIL_VOICE_TEST=3` makes a call every three seconds, walking through every file in
+/// turn and saying which one in the log, so a recording that is wrong can be found by
+/// name rather than by guessing.
+///
+/// **And it pulls the sea down**, because the other half of not hearing anything is
+/// thirty knots of wind sitting on top of it. Said out loud rather than done quietly —
+/// a harness that changes the mix without mentioning it is a harness that teaches you
+/// the wrong thing about the mix. The sliders put it back.
+fn rehearse(
+    sound: Res<SoundHandle>,
+    time: Res<Time>,
+    mut at: Local<usize>,
+    mut since: Local<f32>,
+    mut said: Local<bool>,
+) {
+    let Some(every) = crate::knob::var("SAIL_VOICE_TEST")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| *v > 0.0)
+    else {
+        return;
+    };
+    if !*said {
+        *said = true;
+        sound.0.set_sea(0.0);
+        info!("voice: rehearsing every {every:.1} s, and the sea is down while this runs");
+    }
+    *since += time.delta_secs();
+    if *since < every {
+        return;
+    }
+    *since = 0.0;
+    info!("voice: call {}", *at);
+    sound.0.shout(*at);
+    *at += 1;
+}
+
 pub fn plugin(app: &mut App) {
     use crate::stages::{Build, Deck};
     app.add_audio_source::<SeaVoice>();
     app.add_systems(Startup, setup.in_set(Build::Scene));
-    app.add_systems(Update, update.in_set(Deck::Dress));
+    app.add_systems(Update, (update, rehearse).in_set(Deck::Dress));
 }
 
 /// How loud a call from the deck is against everything else.
@@ -2434,6 +2479,60 @@ mod what_was_recorded {
         );
         assert!(wav_mono(b"not a riff file at all").is_none());
         assert!(wav_mono(&[]).is_none());
+    }
+
+    /// **Does a call actually come out of the mix.** Asked as a test because "I cannot
+    /// hear anything" has two causes that feel identical from the deck — nothing is
+    /// playing, or something is playing underneath a force nine — and only one of them
+    /// is a bug. This settles that half of it without anybody listening.
+    #[test]
+    fn a_call_comes_out_of_the_mix() {
+        let params = Arc::new(SeaParams {
+            // A tenth of a second of steady signal: not a sound, but unmistakable.
+            voices: vec![vec![0.5; SAMPLE_RATE as usize / 10]],
+            ..SeaParams::default()
+        });
+        params.set_master(1.0);
+        params.set_boat(1.0);
+        params.set_sea(0.0);
+        params.set_music(0.0);
+        let mut stream = SeaStream::new(params.clone());
+
+        let loudest = |s: &mut SeaStream, n: usize| {
+            (0..n).fold(0.0_f32, |m, _| m.max(s.next().unwrap_or(0.0).abs()))
+        };
+        // Let the filters settle, then measure the floor with nobody speaking.
+        loudest(&mut stream, SAMPLE_RATE as usize / 2);
+        let quiet = loudest(&mut stream, SAMPLE_RATE as usize / 10);
+
+        params.shout(0);
+        let called = loudest(&mut stream, SAMPLE_RATE as usize / 10);
+        assert!(
+            called > quiet + 0.1,
+            "a call made no difference: {quiet:.3} before, {called:.3} during"
+        );
+
+        // And it stops. A play head that runs off the end of the buffer and keeps going
+        // is a click at best and an index out of bounds at worst.
+        loudest(&mut stream, SAMPLE_RATE as usize / 5);
+        let after = loudest(&mut stream, SAMPLE_RATE as usize / 10);
+        assert!(after < quiet + 0.1, "it was still going: {after:.3}");
+    }
+
+    /// Two of the same call in a row are two calls. With a bare index they would be one:
+    /// the stream reads the same number and cannot tell a repeat from a value nobody
+    /// cleared, which is why the trigger carries a generation.
+    #[test]
+    fn the_same_call_twice_is_twice() {
+        let params = Arc::new(SeaParams {
+            voices: vec![vec![0.5; SAMPLE_RATE as usize / 20]],
+            ..SeaParams::default()
+        });
+        params.shout(0);
+        let first = params.shout.load(Ordering::Relaxed);
+        params.shout(0);
+        assert_ne!(first, params.shout.load(Ordering::Relaxed));
+        assert_eq!(first & 0xff, params.shout.load(Ordering::Relaxed) & 0xff);
     }
 
     /// **Forty-eight is what a recorder writes and forty-four one is what we play**, and
