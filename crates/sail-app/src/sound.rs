@@ -1564,7 +1564,7 @@ fn rehearse(
     // as well as what it sounds like — which is half of what there is to judge.
     let kind = Call::all()[*at % Call::KINDS];
     info!("voice: {kind:?}");
-    hail.call(kind);
+    hail.anyway(kind);
     *at += 1;
 }
 

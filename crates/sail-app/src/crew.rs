@@ -455,6 +455,9 @@ pub fn work(
             if crew.asking > BEFORE_A_CHANGE || urgent {
                 orders.headsail = Some(want_sail);
                 crew.asking = 0.0;
+                // A sail change is a decision and gets said. Trimming the sheet it is
+                // then set on is not, and stays silent — see `QUIET_FOR` in `hail.rs`.
+                hail.call(crate::sound::Call::Report);
                 info!(
                     "crew: {} coming down, {} going up",
                     sim.controls.headsail.name(),
