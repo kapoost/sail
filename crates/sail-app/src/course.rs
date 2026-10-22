@@ -123,6 +123,19 @@ impl Course {
     }
 
     /// Where the parcels are going now.
+    /// Where a fresh boat comes in, when the last one came to grief.
+    ///
+    /// The harbour the consignment starts from — or, if there is no harbour at all,
+    /// wherever she went down. **There is a sea with no harbours in it now**: `SAIL_LAND=0`
+    /// is open ocean, with no islands, no marks and nowhere to come from, and this was
+    /// the one line in this file that indexed the list instead of asking it. Every other
+    /// reader here already used `get` and a fallback; this one panicked, and the way to
+    /// reach it was to die and press the button that says ANOTHER BOAT — which in a
+    /// ten-metre sea with nothing to run into is the likeliest thing that happens.
+    pub fn starts_from(&self, adrift: DVec2) -> DVec2 {
+        self.harbours.get(self.from).map(|h| h.at).unwrap_or(adrift)
+    }
+
     pub fn target(&self) -> DVec2 {
         self.harbours
             .get(self.to)
@@ -412,7 +425,7 @@ pub fn restart(
     if sim.sim.telemetry.mishap.is_some() {
         let heading = sim.sim.state.heading;
         let mut fresh = sail_core::state::BoatState::at_rest(heading);
-        fresh.pos = course.harbours[course.from].at;
+        fresh.pos = course.starts_from(sim.sim.state.pos);
         fresh.time = sim.sim.state.time;
         sim.sim.recover(fresh);
         // And a fresh sail plan with her, or the gennaker that just blew out is still
@@ -425,4 +438,52 @@ pub fn restart(
 pub fn clock(seconds: f64) -> String {
     let s = seconds.max(0.0);
     format!("{}:{:04.1}", (s / 60.0) as u32, s % 60.0)
+}
+
+#[cfg(test)]
+mod a_sea_with_nowhere_in_it {
+    use super::*;
+
+    /// **A passage with no harbours is a thing that exists now.** `SAIL_LAND=0` is open
+    /// ocean — no islands, no marks, nowhere to come from — and it was added to look at
+    /// water. Everything in this file already asked the harbour list politely and took
+    /// a fallback when it was empty, except the one line that put a fresh boat back on
+    /// the water after a mishap, which indexed it. The way in was to die and press the
+    /// button that says ANOTHER BOAT, which in a ten-metre sea with nothing to run into
+    /// is the likeliest thing that happens next.
+    #[test]
+    fn a_fresh_boat_starts_where_she_went_down_if_there_is_nowhere_else() {
+        let adrift = DVec2::new(4_210.0, -889.0);
+        let nowhere = Course::new(Vec::new(), adrift);
+        // This is the panic, written out: `from` is nought because `nearest` has nothing
+        // to be nearest to, and the line that used to be here indexed the list with it.
+        assert!(nowhere.harbours.get(nowhere.from).is_none());
+        assert_eq!(nowhere.starts_from(adrift), adrift);
+        // And the rest of the file's answers for an empty sea, which were already right
+        // and are asserted here so they stay that way.
+        assert_eq!(nowhere.target(), DVec2::ZERO);
+        assert!(matches!(nowhere.leg, Leg::Idle));
+    }
+
+    /// With harbours it is the harbour, not the water.
+    #[test]
+    fn and_from_the_harbour_when_there_is_one() {
+        let at = DVec2::new(100.0, 200.0);
+        let course = Course::new(
+            vec![
+                Harbour {
+                    name: "Grimvik".into(),
+                    at,
+                    exposed_to: 0.0,
+                },
+                Harbour {
+                    name: "Fuglnes".into(),
+                    at: DVec2::new(3_000.0, 0.0),
+                    exposed_to: 0.0,
+                },
+            ],
+            DVec2::new(120.0, 210.0),
+        );
+        assert_eq!(course.starts_from(DVec2::new(-9.0, -9.0)), at);
+    }
 }
