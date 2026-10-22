@@ -672,7 +672,6 @@ pub fn work(
 
 #[cfg(test)]
 mod the_watch {
-    #[allow(unused_imports)]
     use super::*;
 
     /// Run the reef decision for a while and say what it asked for.
@@ -753,7 +752,6 @@ mod the_watch {
         );
     }
 
-    use super::*;
     use sail_core::state::Controls;
     use sail_core::units::kn_to_ms;
 
