@@ -661,7 +661,13 @@ impl Autopilot {
         !matches!(self.mode, PilotMode::ApparentWind { .. })
     }
 
-    /// How long the rudder has been hard over, for diagnostics.
+    /// How long the rudder has been hard over without the boat answering, seconds.
+    ///
+    /// **Read by the watch, not only by a gauge.** This was here for diagnostics and is
+    /// now the signal a crew shortens sail on: a helm that has run out is a boat carrying
+    /// more than she can be steered under, and that is a thing a heel gauge cannot see —
+    /// running hard she is barely over and the rudder is still hard across trying to hold
+    /// her. See `crew.rs`.
     pub fn saturated_seconds(&self) -> f64 {
         self.loop_.saturated_for()
     }

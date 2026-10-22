@@ -203,20 +203,67 @@ impl Crew {
     }
 }
 
+/// How long the pilot may be hard over and losing her before the watch acts, seconds.
+///
+/// Four. A rudder goes briefly to the stops on every wave worth the name and in every
+/// gust, and a watch that reefed for each of those would never stop; four seconds of it
+/// is not a wave, it is a boat the helm cannot hold. The same shape as `PRESSED_FOR` and
+/// for the same reason — she has to mean it.
+const LOSING_HER: f64 = 3.0;
+
+/// And how long after that the watch takes to get a slab in, seconds.
+///
+/// **Three, against the twelve a heel gets**, and the difference is the point. Twelve
+/// seconds of being over is a watch deciding the breeze has settled in; three seconds of
+/// a rudder that has run out is a boat already going round and about to be knocked flat.
+/// She still has to mean it — the dwell is what stops one wave putting a reef in — but
+/// the evidence arrived with four seconds of its own already on it.
+///
+/// Expressed as a *rate* into the same accumulator the heel uses rather than as a second
+/// path round it, which is what gives the dwell between slabs for nothing: taking one
+/// resets the accumulator, so the next needs another three seconds of a helm that is
+/// still losing her. Without that the watch reefs to bare poles inside a second, because
+/// a boat takes a few seconds to stand up and the rudder is still hard over for all of
+/// them.
+const LOSING_DWELL: f64 = 3.0;
+
 /// Where the reef wants to be, as one of the stops on the pennant.
 ///
 /// Heel, because heel is the pressure gauge every sailor on every boat actually reads,
 /// and because it is the one that already decides the outhaul. Hysteresis with real
 /// dwell either side of it: she has to mean it.
-fn shorten(crew: &mut Crew, heel: f64, dt: f64, at: f64, spilled: bool) -> Option<f64> {
+fn shorten(
+    crew: &mut Crew,
+    heel: f64,
+    dt: f64,
+    at: f64,
+    spilled: bool,
+    helm_losing: bool,
+) -> Option<f64> {
     const SLABS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
     // Over *and* out of sheet: the slab is for the wind that the mainsheet could not
     // answer. Without the second half of that condition the watch reefs its way down to
     // bare poles in a Force 5, because every slab is followed by a trim that stands her
     // straight back up on her ear.
-    let over = spilled && heel.abs() > OVERPOWERED_HEEL + rad(4.0);
-    let easy = heel.abs() < OVERPOWERED_HEEL - rad(7.0);
-    crew.pressed = if over { crew.pressed + dt } else { 0.0 };
+    //
+    // **Or the helm has run out**, which is the other way a boat says she is carrying too
+    // much and the one a heel gauge cannot see. Running hard she is not far over and the
+    // rudder is still hard across trying to hold her; that is a boat about to broach, and
+    // the answer is the same slab a heel would have asked for. No `spilled` on this
+    // branch: easing the sheet is what the trim has already been doing for seconds by the
+    // time the rudder gives up.
+    let over = (spilled && heel.abs() > OVERPOWERED_HEEL + rad(4.0)) || helm_losing;
+    // And she does not shake one out while the helm is still struggling, whatever the
+    // heel says. A reef shaken out at the moment the rudder is on the stops is a reef put
+    // straight back in, and in between is the broach.
+    let easy = heel.abs() < OVERPOWERED_HEEL - rad(7.0) && !helm_losing;
+    // The helm's evidence counts faster. See `LOSING_DWELL`.
+    let rate = if helm_losing {
+        PRESSED_FOR / LOSING_DWELL
+    } else {
+        1.0
+    };
+    crew.pressed = if over { crew.pressed + dt * rate } else { 0.0 };
     crew.easy = if easy { crew.easy + dt } else { 0.0 };
     if crew.pressed > PRESSED_FOR {
         crew.pressed = 0.0;
@@ -351,6 +398,7 @@ pub fn work(
     mut bank: ResMut<Bank>,
     mut crew: ResMut<Crew>,
     mut orders: ResMut<Orders>,
+    pilot: Res<crate::input::Pilot>,
     time: Res<Time>,
 ) {
     if !crew.standing {
@@ -484,8 +532,25 @@ pub fn work(
     // And whether shortening sail is theirs to decide at all. Trim is a watch's job;
     // a reef is a decision about the next hour, and a skipper who has made one does not
     // want it undone by somebody reading a heel gauge.
+    // **And whether the helm is losing her.**
+    //
+    // Reported from the deck: the watch should be watching the pilot, and when they can
+    // see he is not coping they ease, reef or change down — because the *course* is the
+    // thing being kept, not the sail plan.
+    //
+    // That is how it works on a boat and it was missing here: the watch read a heel
+    // gauge and nothing else, so a boat that was holding thirty degrees happily got no
+    // slab, and a boat that was broaching off a wave with the rudder hard over got none
+    // either, because broaching is not a heel — it is a helm that has run out.
+    //
+    // `saturated_for` is the pilot's own account of it: seconds with the rudder hard
+    // over and the boat still not answering. The ram has already been asked for more
+    // than it has got, so this is not a prediction, it is a report. Only when he is
+    // actually steering — hand steering saturates every time somebody holds the tiller
+    // over to tack, and that is not a reason to put a reef in.
+    let helm_losing = pilot.inner.engaged() && pilot.inner.saturated_seconds() > LOSING_HER;
     let shorten_her = if crew.may_reef {
-        shorten(&mut crew, heel, dt, at, spilled)
+        shorten(&mut crew, heel, dt, at, spilled, helm_losing)
     } else {
         None
     };
@@ -497,12 +562,16 @@ pub fn work(
         } else {
             "shaking a reef out"
         });
+        // **Which of the two reasons**, because they are different things to be told.
+        // "She is over too far" is a boat leaning; "the helm has run out" is a boat
+        // about to go round, and a watch that said the first when it meant the second
+        // would be describing a heel gauge rather than what is happening.
         info!(
             "{}",
-            if stop > at {
-                "crew: she is over too far — taking a reef in"
-            } else {
-                "crew: she has come up — shaking a reef out"
+            match (stop > at, helm_losing) {
+                (true, true) => "crew: the helm has run out — taking a reef in",
+                (true, false) => "crew: she is over too far — taking a reef in",
+                (false, _) => "crew: she has come up — shaking a reef out",
             }
         );
     }
@@ -603,6 +672,87 @@ pub fn work(
 
 #[cfg(test)]
 mod the_watch {
+    #[allow(unused_imports)]
+    use super::*;
+
+    /// Run the reef decision for a while and say what it asked for.
+    fn over(seconds: f64, heel: f64, spilled: bool, helm_losing: bool) -> Option<f64> {
+        let mut crew = Crew::default();
+        let dt = 0.05;
+        let mut asked = None;
+        for _ in 0..(seconds / dt) as usize {
+            if let Some(stop) = shorten(&mut crew, heel, dt, 0.0, spilled, helm_losing) {
+                asked = Some(stop);
+            }
+        }
+        asked
+    }
+
+    /// **A broach is not a heel.** Running hard she is barely over and the rudder is
+    /// across trying to hold her, and the watch used to read a heel gauge and nothing
+    /// else — so the one moment the boat most needed a slab was the one moment nothing
+    /// asked for one.
+    #[test]
+    fn a_helm_that_has_run_out_is_worth_a_slab() {
+        let upright = rad(12.0);
+        assert!(
+            over(20.0, upright, false, false).is_none(),
+            "twelve degrees of heel is not a reason to reef"
+        );
+        assert_eq!(
+            over(20.0, upright, false, true),
+            Some(0.25),
+            "and the same boat with the helm on the stops is"
+        );
+    }
+
+    /// It has to mean it. A rudder goes briefly to the stops on every wave worth the
+    /// name, and a watch that reefed for each of those would never stop.
+    #[test]
+    fn one_wave_is_not_a_reason() {
+        assert!(
+            over(LOSING_DWELL * 0.5, rad(12.0), false, true).is_none(),
+            "two seconds of hard helm had the watch at the pennant"
+        );
+    }
+
+    /// And a reef shaken out while the helm is still struggling is a reef put straight
+    /// back in, with a broach in between.
+    #[test]
+    fn nothing_is_shaken_out_while_he_is_still_losing_her() {
+        let mut crew = Crew::default();
+        let flat = rad(2.0);
+        let dt = 0.05;
+        // `EASY_FOR` is three minutes, which is the number this has to outlast or the
+        // test passes by never getting there.
+        let mut shaken = None;
+        for _ in 0..(240.0 / dt) as usize {
+            if let Some(stop) = shorten(&mut crew, flat, dt, 0.5, false, true) {
+                shaken = Some(stop);
+            }
+        }
+        assert!(
+            shaken.is_none_or(|s| s > 0.5),
+            "she shook a reef out with the rudder hard over"
+        );
+
+        // With the helm answering again, the same flat boat does shake one out — so the
+        // test above is about the helm and not about the dwell never elapsing.
+        assert_eq!(
+            {
+                let mut crew = Crew::default();
+                let mut out = None;
+                for _ in 0..(240.0 / dt) as usize {
+                    if let Some(stop) = shorten(&mut crew, flat, dt, 0.5, false, false) {
+                        out = Some(stop);
+                    }
+                }
+                out
+            },
+            Some(0.25)
+        );
+    }
+
     use super::*;
     use sail_core::state::Controls;
     use sail_core::units::kn_to_ms;
@@ -617,12 +767,12 @@ mod the_watch {
         let hard = OVERPOWERED_HEEL + rad(9.0);
         // Two seconds of it.
         for _ in 0..40 {
-            assert!(shorten(&mut crew, hard, 0.05, 0.0, true).is_none());
+            assert!(shorten(&mut crew, hard, 0.05, 0.0, true, false).is_none());
         }
         // And then she stays there.
         let mut took = None;
         for _ in 0..400 {
-            if let Some(stop) = shorten(&mut crew, hard, 0.05, 0.0, true) {
+            if let Some(stop) = shorten(&mut crew, hard, 0.05, 0.0, true, false) {
                 took = Some(stop);
                 break;
             }
@@ -640,7 +790,7 @@ mod the_watch {
         let mut shook = None;
         for _ in 0..8_000 {
             seconds += 0.05;
-            if let Some(stop) = shorten(&mut crew, easy, 0.05, 0.5, true) {
+            if let Some(stop) = shorten(&mut crew, easy, 0.05, 0.5, true, false) {
                 shook = Some(stop);
                 break;
             }
@@ -665,14 +815,14 @@ mod the_watch {
         // however long it goes on for.
         for _ in 0..2_000 {
             assert!(
-                shorten(&mut crew, hard, 0.05, 0.0, false).is_none(),
+                shorten(&mut crew, hard, 0.05, 0.0, false, false).is_none(),
                 "a slab was taken with the mainsheet still hard in"
             );
         }
         // And once there is no sheet left to give, the slab comes.
         let mut took = None;
         for _ in 0..600 {
-            if let Some(stop) = shorten(&mut crew, hard, 0.05, 0.0, true) {
+            if let Some(stop) = shorten(&mut crew, hard, 0.05, 0.0, true, false) {
                 took = Some(stop);
                 break;
             }
