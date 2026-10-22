@@ -143,6 +143,15 @@ impl Course {
             .unwrap_or(DVec2::ZERO)
     }
 
+    /// Whether there is a place to be bound for at all.
+    ///
+    /// False in open ocean, where there are no harbours — and the console was handing
+    /// out a range and a bearing anyway, worked out against the fallback position, which
+    /// is the world origin. Three and a half miles to NOWHERE, on a bearing, in figures.
+    pub fn bound_somewhere(&self) -> bool {
+        self.harbours.get(self.to).is_some()
+    }
+
     pub fn destination_name(&self) -> &str {
         self.harbours
             .get(self.to)

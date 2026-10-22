@@ -840,6 +840,11 @@ pub fn draw(
                 ui.add_space(4.0);
                 ui.separator();
                 let (distance, bearing) = course.to_target(sim.sim.state.pos);
+                // And whether there is anywhere to be bound for, which in open ocean
+                // there is not. `target` falls back to the world origin when the harbour
+                // list is empty, so this card was reporting a range and a bearing to the
+                // middle of a sea with nothing in it.
+                let knows = knows && course.bound_somewhere();
                 let overdue = course.remaining() < 0.0;
                 ui.label(
                     egui::RichText::new(match course.leg {

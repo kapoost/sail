@@ -440,7 +440,19 @@ pub fn draw(
                                 // different afternoon, and naming the sea separately is the
                                 // only honest way to say which one you have asked for.
                                 egui::RichText::new(format!(
-                                    "building towards {} — {hs:.1} m at {tp:.1} s",
+                                    // **The wind sea**, said so when there is a swell to
+                                    // be confused with. This line read "building towards
+                                    // slight — 1.2 m" with the instruments three inches
+                                    // away reporting seven point two, because the fetch
+                                    // relations describe the sea the wind here is making
+                                    // and know nothing about the one that arrived from
+                                    // somewhere else.
+                                    "{}building towards {} — {hs:.1} m at {tp:.1} s",
+                                    if sea.swell().is_some() {
+                                        "wind sea "
+                                    } else {
+                                        ""
+                                    },
                                     crate::weather::sea_state(hs)
                                 ))
                                 .color(egui::Color32::from_rgb(150, 150, 130))
