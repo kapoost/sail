@@ -413,6 +413,26 @@ pub fn work(
     }
     let dt = time.delta_secs_f64();
     let cfg = sim.config();
+    // **A deck working is a noisy deck**, and that is the whole difference between a
+    // manoeuvre and a leg. Trimming is not a job in this sense — it is what the hands do
+    // continuously, all passage, and a boat where somebody comments on every sheet is a
+    // boat nobody listens to. Everything else the watch gets up to is a manoeuvre, and
+    // while one is on the quiet between calls drops from forty seconds to three.
+    if crew
+        .on
+        .is_some_and(|job| job != "on the sheets" && job != "at the clutch bank")
+    {
+        hail.working();
+        // **And they say so.** A manoeuvre with nothing said during it is the quiet
+        // under way with somebody winching in the middle of it — the reef going in is
+        // announced once and then twelve seconds of silence while it happens, which is
+        // not what a working deck sounds like. One of these every three or four seconds
+        // for as long as the job is on, which is what the shorter quiet is for.
+        //
+        // Wordless: this is the sound of the work rather than a report about it. The
+        // report comes when the job is *decided*, from the places that decide.
+        hail.call(crate::sound::Call::Effort);
+    }
     let t = sim.sim.telemetry;
     let (awa, heel, aws) = (t.awa, sim.sim.state.heel, t.aws);
     crew.on = None;

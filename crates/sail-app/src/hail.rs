@@ -39,20 +39,33 @@ const SWING: f64 = 0.08;
 /// How long a call may be held waiting for its moment, in beats.
 const HELD_FOR: f64 = 1.5;
 
-/// The least time between two calls, seconds.
+/// The least time between two calls, seconds — **under way**, and **while working**.
 ///
+/// Reported from the deck as the shape it should have: talk every few seconds to a dozen
+/// or so, sometimes longer; a lot of it while manoeuvring and very little on a leg. That
+/// is not a cooldown, it is two cooldowns and a way of telling which one you are in.
+///
+/// A deck under way is quiet for minutes at a time and the quiet is the point — it is
+/// what makes the next call mean something. A deck *working* is nearly continuous talk,
+/// because everybody has a job and the jobs have to be said out loud: that is what a
+/// manoeuvre sounds like from the cockpit and it is the only time a boat is noisy.
+const QUIET_UNDER_WAY: f32 = 40.0;
+const QUIET_WORKING: f32 = 3.5;
+
+/// And how long the deck stays "working" after the last thing anybody was doing.
+///
+/// Six seconds, so a manoeuvre is one noisy stretch rather than a burst for each step of
+/// it. A tack is a dozen separate jobs and it should sound like one event.
+const STILL_AT_IT: f32 = 6.0;
+
 /// **A watch that announces everything is a watch nobody listens to.** Trimming a sheet
-/// is not an event — it is what the hands are doing continuously, all passage — and a
-/// voice for each one would be chatter that trains the player to stop hearing the voice
-/// at all, which costs the warnings their meaning. So only decisions speak: a reef in or
-/// out, a sail changed. Even those cluster, because a gust does several things at once,
-/// and twelve seconds is long enough that two calls are two events rather than one event
-/// described twice.
+/// is not an event — it is what the hands are doing continuously, all passage — so only
+/// decisions speak, and the quiet between them is what makes them mean anything.
 ///
-/// **A warning is never held back by this.** The whole reason to keep the deck quiet is
-/// so that the one call that matters arrives into quiet; a cooldown that swallowed it
-/// would have spent the quiet and then thrown away the thing it was saved for.
-const QUIET_FOR: f32 = 12.0;
+/// **A warning is never held back by any of it.** The whole reason to keep the deck
+/// quiet is so that the one call that matters arrives into quiet; a cooldown that
+/// swallowed it would have spent the quiet and then thrown away the thing it was saved
+/// for.
 
 #[derive(Resource, Default)]
 pub struct Hail {
@@ -60,6 +73,8 @@ pub struct Hail {
     rng: u32,
     /// Seconds since anybody last spoke.
     since: f32,
+    /// Seconds of "there is a job on" left. See [`STILL_AT_IT`].
+    working: f32,
 }
 
 impl Hail {
@@ -67,12 +82,18 @@ impl Hail {
     /// no music for it to go out with.
     pub fn call(&mut self, kind: Call) {
         // Quiet enough to be worth saying — or urgent enough that it does not matter.
-        // See `QUIET_FOR`.
-        if self.since < QUIET_FOR && kind != Call::Warn {
+        if self.since < self.quiet() && kind != Call::Warn {
             return;
         }
-        // The newest call wins. Two things happening at once on a boat is one person
-        // shouting about the more recent of them, not two people shouting together.
+        // The newest call wins — **except over a warning that has not gone out yet.**
+        // Two things at once on a boat is one person shouting about the more recent of
+        // them, and that is right up to the moment the earlier one was the one that
+        // mattered. A warning waiting for its quaver must not be overwritten by a grunt
+        // from somebody winching, and without this it would be: the effort call fires
+        // every frame while a job is on.
+        if matches!(self.waiting, Some((Call::Warn, _))) && kind != Call::Warn {
+            return;
+        }
         self.waiting = Some((kind, f64::NAN));
     }
 
@@ -84,8 +105,31 @@ impl Hail {
     /// through. Its own method rather than a flag on `call`, so nothing in the game can
     /// reach for it by accident.
     pub fn anyway(&mut self, kind: Call) {
-        self.since = QUIET_FOR;
+        self.since = f32::MAX;
         self.call(kind);
+    }
+
+    /// There is a job on deck. Called every frame while there is one; it decays, so a
+    /// manoeuvre is one noisy stretch rather than a burst per step of it.
+    pub fn working(&mut self) {
+        self.working = STILL_AT_IT;
+    }
+
+    /// How long the deck stays quiet before anybody speaks again.
+    ///
+    /// Not a constant: a boat working and a boat on a leg are two different places to be
+    /// standing. And not a fixed number either — the jitter is what stops it becoming a
+    /// metronome, which is what "sometimes longer" means when a sailor says it.
+    fn quiet(&self) -> f32 {
+        let base = if self.working > 0.0 {
+            QUIET_WORKING
+        } else {
+            QUIET_UNDER_WAY
+        };
+        // The same xorshift state, read without advancing it: this has to be stable
+        // within a frame or the answer changes between two calls in the same breath.
+        let wobble = 0.7 + 0.6 * ((self.rng >> 16) & 0xff) as f32 / 255.0;
+        base * wobble
     }
 
     fn pick(&mut self) -> u32 {
@@ -113,7 +157,9 @@ pub fn place(
     time: Res<Time>,
     mut was: Local<f64>,
 ) {
-    hail.since += time.delta_secs();
+    let dt = time.delta_secs();
+    hail.since += dt;
+    hail.working = (hail.working - dt).max(0.0);
     let beat = music.beat();
     let moved = beat - *was;
     *was = beat;
@@ -197,7 +243,7 @@ mod where_a_call_lands {
     #[test]
     fn chatter_is_held_back_and_a_warning_never_is() {
         let mut hail = Hail {
-            since: QUIET_FOR + 1.0,
+            since: f32::MAX,
             ..Default::default()
         };
 
@@ -221,6 +267,10 @@ mod where_a_call_lands {
 
         // The one that gets through regardless.
         hail.call(Call::Warn);
+        // And once it is queued, nothing walks over it while it waits for its quaver —
+        // which matters because the effort call fires every frame a job is on.
+        hail.call(Call::Effort);
+        hail.call(Call::Report);
         assert_eq!(
             hail.waiting.map(|(k, _)| k),
             Some(Call::Warn),
