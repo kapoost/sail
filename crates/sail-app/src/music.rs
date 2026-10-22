@@ -282,6 +282,15 @@ impl Default for Music {
 }
 
 impl Music {
+    /// Musical time, in beats since the passage began.
+    ///
+    /// Public so that things which are not music can be placed *in* it — a call from
+    /// the deck lands on a quaver rather than wherever the frame happened to fall. See
+    /// `hail.rs`.
+    pub fn beat(&self) -> f64 {
+        self.beat
+    }
+
     fn next(&mut self) -> f32 {
         self.rng ^= self.rng << 13;
         self.rng ^= self.rng >> 17;

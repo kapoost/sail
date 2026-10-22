@@ -399,7 +399,7 @@ pub fn work(
     mut crew: ResMut<Crew>,
     mut orders: ResMut<Orders>,
     pilot: Res<crate::input::Pilot>,
-    sound: Res<crate::sound::SoundHandle>,
+    mut hail: ResMut<crate::hail::Hail>,
     time: Res<Time>,
 ) {
     if !crew.standing {
@@ -570,7 +570,11 @@ pub fn work(
         // And somebody says it out loud. The index picks a group rather than a line —
         // the words are on the console, and what a call carries is which of the two
         // things is happening and how urgently. See `SoundHandle::shout`.
-        sound.0.shout(if helm_losing { 0 } else { 1 });
+        hail.call(if helm_losing {
+            crate::sound::Call::Warn
+        } else {
+            crate::sound::Call::Report
+        });
         info!(
             "{}",
             match (stop > at, helm_losing) {

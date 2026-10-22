@@ -72,6 +72,7 @@ impl Default for SeaParams {
             bell: AtomicU32::default(),
             shout: AtomicU32::default(),
             voices: Vec::new(),
+            groups: [(0, 0); Call::KINDS],
             water_level: AtomicU32::default(),
             sea_surge: AtomicU32::default(),
             sea_slam: AtomicU32::default(),
@@ -124,6 +125,14 @@ pub struct SeaParams {
     /// written again — so the audio thread reads them without a lock and without an
     /// atomic, which is the only way a sample buffer belongs in a callback.
     voices: Vec<Vec<f32>>,
+    /// Where each kind of call starts and ends in that list.
+    ///
+    /// Grouped by the **name of the file**, which is the one thing a person holding a
+    /// microphone can control without being told about data structures: `warn-03.wav` is
+    /// a warning. A recording whose name says nothing goes in the general pool and is
+    /// used for anything, which is what you want from the first thirty files somebody
+    /// records and not what you want from the three hundredth.
+    groups: [(usize, usize); Call::KINDS],
     water_level: AtomicU32,
     water_cutoff: AtomicU32,
     /// A wave arriving: how hard she was hit, 0 to 1, taken rather than read.
@@ -330,13 +339,16 @@ impl SeaParams {
     /// whole point: the question a voice has to answer here is whether it carries
     /// *through* thirty knots of synthesised wind, and a one-shot played beside the mix
     /// would answer a different one.
-    pub fn shout(&self, which: usize) {
-        if self.voices.is_empty() {
+    pub fn shout(&self, kind: Call, pick: u32) {
+        let (from, to) = self.groups[kind as usize];
+        if to <= from {
             return;
         }
-        let i = (which % self.voices.len()) as u32;
-        let gen = (self.shout.load(Ordering::Relaxed) >> 8).wrapping_add(1) & 0xff_ffff;
-        self.shout.store((gen << 8) | i, Ordering::Relaxed);
+        let i = (from + (pick as usize) % (to - from)) as u32;
+        // Ten bits for the index — a thousand recordings is more than anybody will make
+        // in an evening — and the rest a generation, so the same call twice is twice.
+        let gen = (self.shout.load(Ordering::Relaxed) >> 10).wrapping_add(1) & 0x3f_ffff;
+        self.shout.store((gen << 10) | i, Ordering::Relaxed);
     }
 
     /// How many notes have been asked for and how many were dropped, since the
@@ -1253,9 +1265,9 @@ impl Iterator for SeaStream {
         // is cut off by the next one — because two people shouting over each other is
         // what actually happens and is also the only sane thing to do with one play head.
         let asked = self.params.shout.load(Ordering::Relaxed);
-        if asked >> 8 != self.shout_seen {
-            self.shout_seen = asked >> 8;
-            self.shout_at = Some(((asked & 0xff) as usize, 0));
+        if asked >> 10 != self.shout_seen {
+            self.shout_seen = asked >> 10;
+            self.shout_at = Some(((asked & 0x3ff) as usize, 0));
         }
         let mut shout = 0.0;
         if let Some((which, at)) = self.shout_at {
@@ -1318,13 +1330,14 @@ impl Source for SeaStream {
 /// is forty lines, the format has not changed since 1991, and a dependency that decodes
 /// every audio format in the world is a poor trade for a program that has no audio files
 /// in it at all.
-fn recorded() -> Vec<Vec<f32>> {
+fn recorded() -> (Vec<Vec<f32>>, [(usize, usize); Call::KINDS]) {
+    let empty = (Vec::new(), [(0, 0); Call::KINDS]);
     let Ok(dir) = crate::knob::var("SAIL_VOICE") else {
-        return Vec::new();
+        return empty;
     };
     let Ok(entries) = std::fs::read_dir(&dir) else {
         warn!("voice: cannot read {dir}");
-        return Vec::new();
+        return empty;
     };
     let mut names: Vec<_> = entries
         .flatten()
@@ -1333,18 +1346,77 @@ fn recorded() -> Vec<Vec<f32>> {
         .collect();
     // Sorted, so an index means the same call between runs.
     names.sort();
-    let mut out = Vec::new();
-    for path in names {
-        let Ok(bytes) = std::fs::read(&path) else {
-            continue;
-        };
-        match wav_mono(&bytes) {
-            Some((samples, rate)) if !samples.is_empty() => out.push(at_our_rate(samples, rate)),
-            _ => warn!("voice: {} is not 16-bit mono PCM", path.display()),
+
+    let kind_of = |path: &std::path::Path| -> Option<usize> {
+        let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+        Call::all().iter().position(|c| name.starts_with(c.tag()))
+    };
+
+    // Loaded in kind order, so each group is one run of the list and the audio thread
+    // can pick from it with two numbers instead of a search.
+    let mut out: Vec<Vec<f32>> = Vec::new();
+    let mut groups = [(0usize, 0usize); Call::KINDS];
+    let mut loose = Vec::new();
+    for (k, group) in groups.iter_mut().enumerate() {
+        let start = out.len();
+        for path in &names {
+            match kind_of(path) {
+                Some(j) if j == k => {}
+                Some(_) => continue,
+                None => {
+                    if k == 0 {
+                        loose.push(path.clone());
+                    }
+                    continue;
+                }
+            }
+            if let Some(samples) = read_call(path) {
+                out.push(samples);
+            }
+        }
+        *group = (start, out.len());
+    }
+
+    // **Anything unnamed is used for everything.** The first thirty files somebody
+    // records are not going to be sorted into four buckets, and a game that said nothing
+    // until they were would be a poor way to find out whether recording them was worth
+    // it at all. Named files take over a kind as soon as there is one.
+    if !loose.is_empty() {
+        let start = out.len();
+        for path in &loose {
+            if let Some(samples) = read_call(path) {
+                out.push(samples);
+            }
+        }
+        let general = (start, out.len());
+        for (k, group) in groups.iter_mut().enumerate() {
+            if group.0 == group.1 {
+                *group = general;
+                info!(
+                    "voice: nothing named {} — using the general pool",
+                    Call::all()[k].tag()
+                );
+            }
         }
     }
+
+    for (k, (a, b)) in groups.iter().enumerate() {
+        info!("voice: {} {}", b - a, Call::all()[k].tag());
+    }
     info!("voice: {} calls from {dir}", out.len());
-    out
+    (out, groups)
+}
+
+/// One recording, at the rate we play at, or nothing with a reason.
+fn read_call(path: &std::path::Path) -> Option<Vec<f32>> {
+    let bytes = std::fs::read(path).ok()?;
+    match wav_mono(&bytes) {
+        Some((samples, rate)) if !samples.is_empty() => Some(at_our_rate(samples, rate)),
+        _ => {
+            warn!("voice: {} is not 16-bit mono PCM", path.display());
+            None
+        }
+    }
 }
 
 /// The samples out of a RIFF/WAVE file, if it is the one shape this reads.
@@ -1422,8 +1494,10 @@ fn wav_mono(bytes: &[u8]) -> Option<(Vec<f32>, u32)> {
 }
 
 pub fn setup(mut commands: Commands, mut assets: ResMut<Assets<SeaVoice>>) {
+    let (voices, groups) = recorded();
     let params = Arc::new(SeaParams {
-        voices: recorded(),
+        voices,
+        groups,
         ..SeaParams::default()
     });
     // Seed the filter targets before the first frame writes them. A default of zero
@@ -1463,6 +1537,7 @@ pub fn setup(mut commands: Commands, mut assets: ResMut<Assets<SeaVoice>>) {
 /// the wrong thing about the mix. The sliders put it back.
 fn rehearse(
     sound: Res<SoundHandle>,
+    mut hail: ResMut<crate::hail::Hail>,
     time: Res<Time>,
     mut at: Local<usize>,
     mut since: Local<f32>,
@@ -1485,8 +1560,11 @@ fn rehearse(
         return;
     }
     *since = 0.0;
-    info!("voice: call {}", *at);
-    sound.0.shout(*at);
+    // Through the same path a real call takes, so this auditions where a call *lands*
+    // as well as what it sounds like — which is half of what there is to judge.
+    let kind = Call::all()[*at % Call::KINDS];
+    info!("voice: {kind:?}");
+    hail.call(kind);
     *at += 1;
 }
 
@@ -1504,6 +1582,43 @@ pub fn plugin(app: &mut App) {
 /// whether it carries. That is the entire reason the voice is mixed in here rather than
 /// played beside the mix.
 const SHOUT: f32 = 0.9;
+
+/// What a call is for.
+///
+/// **Not what it says** — the words are on the console and a voice repeating them would
+/// be a voice reading a caption. This is the *shape* of the utterance: how long, how
+/// urgent, and whether it is a person on this deck or somebody hailing across water.
+/// Four is enough to cover everything the game currently says and few enough that a
+/// recording session is one evening.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Call {
+    /// Short, sharp, rising. Something is going wrong now.
+    Warn,
+    /// Level and then falling. A thing has been done and is being reported.
+    Report,
+    /// One or two syllables, falling. Heard and understood.
+    Aye,
+    /// Wordless: a winch, a halyard, a reef being hauled down.
+    Effort,
+}
+
+impl Call {
+    pub const KINDS: usize = 4;
+
+    /// The prefix a file carries to belong to this kind.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Call::Warn => "warn",
+            Call::Report => "report",
+            Call::Aye => "aye",
+            Call::Effort => "effort",
+        }
+    }
+
+    pub fn all() -> [Call; Self::KINDS] {
+        [Call::Warn, Call::Report, Call::Aye, Call::Effort]
+    }
+}
 
 /// Diameter of a shroud, metres. Sets the pitch of the whine through the Strouhal
 /// relation — thinner wire sings higher, which is true and free.
@@ -2490,6 +2605,7 @@ mod what_was_recorded {
         let params = Arc::new(SeaParams {
             // A tenth of a second of steady signal: not a sound, but unmistakable.
             voices: vec![vec![0.5; SAMPLE_RATE as usize / 10]],
+            groups: [(0, 1); Call::KINDS],
             ..SeaParams::default()
         });
         params.set_master(1.0);
@@ -2505,7 +2621,7 @@ mod what_was_recorded {
         loudest(&mut stream, SAMPLE_RATE as usize / 2);
         let quiet = loudest(&mut stream, SAMPLE_RATE as usize / 10);
 
-        params.shout(0);
+        params.shout(Call::Warn, 0);
         let called = loudest(&mut stream, SAMPLE_RATE as usize / 10);
         assert!(
             called > quiet + 0.1,
@@ -2526,11 +2642,12 @@ mod what_was_recorded {
     fn the_same_call_twice_is_twice() {
         let params = Arc::new(SeaParams {
             voices: vec![vec![0.5; SAMPLE_RATE as usize / 20]],
+            groups: [(0, 1); Call::KINDS],
             ..SeaParams::default()
         });
-        params.shout(0);
+        params.shout(Call::Warn, 0);
         let first = params.shout.load(Ordering::Relaxed);
-        params.shout(0);
+        params.shout(Call::Warn, 0);
         assert_ne!(first, params.shout.load(Ordering::Relaxed));
         assert_eq!(first & 0xff, params.shout.load(Ordering::Relaxed) & 0xff);
     }

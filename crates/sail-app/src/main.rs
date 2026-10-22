@@ -28,6 +28,7 @@ mod fittings;
 mod fleet;
 mod frame;
 mod glance;
+mod hail;
 mod help;
 mod horizon;
 mod hud;
@@ -413,6 +414,7 @@ fn main() {
         reel::plugin,
         steam::plugin,
         earned::plugin,
+        hail::plugin,
         retro::plugin,
         ink::plugin,
     ))

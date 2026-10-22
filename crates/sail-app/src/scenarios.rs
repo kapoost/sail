@@ -38,6 +38,11 @@ fn at_sea() -> App {
     app.init_resource::<crate::input::HelmSource>();
     app.init_resource::<crate::input::Pilot>();
     app.init_resource::<crate::crew::Crew>();
+    // The watch calls out now, and a call goes through the rhythm rather than straight
+    // at the audio thread — so the thing that holds it needs to exist even in a harness
+    // with no music in it. It falls through immediately when there is no clock running,
+    // which is exactly the case here.
+    app.init_resource::<crate::hail::Hail>();
     app.init_resource::<crate::orders::Orders>();
     app
 }
