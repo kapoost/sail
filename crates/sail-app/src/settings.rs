@@ -260,422 +260,483 @@ pub fn draw(
                 ui.separator();
                 ui.add_space(8.0);
 
-                if settings.tab == Tab::Sound {
-                    heading(ui, "SOUND");
-                    let mut volume = settings.volume;
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut volume, 0.0..=1.0)
-                                .show_value(false)
-                                .text("volume"),
-                        )
-                        .changed()
-                    {
-                        settings.volume = volume;
-                    }
-                    // Separate from the master, because the sea and the music are two
-                    // different things to want. Somebody who sails with the wind in their
-                    // ears and nothing else is not turning the game down, they are turning
-                    // one instrument out of the mix — and that is a reasonable thing to do
-                    // with a soundtrack that is generated rather than composed for them.
-                    // Copied out and back rather than borrowed twice, because the settings
-                    // resource is one borrow and these are two sliders in it.
-                    let (mut sea, mut boat) = (settings.sea, settings.boat);
-                    ui.add(
-                        egui::Slider::new(&mut sea, 0.0..=1.0)
-                            .show_value(false)
-                            .text("sea"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut boat, 0.0..=1.0)
-                            .show_value(false)
-                            .text("boat"),
-                    );
-                    settings.sea = sea;
-                    settings.boat = boat;
-                    let mut music = settings.music;
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut music, 0.0..=1.0)
-                                .show_value(false)
-                                .text("music"),
-                        )
-                        .changed()
-                    {
-                        settings.music = music;
-                    }
-                    let muted = sound.0.muted();
-                    if ui
-                        .button(if muted { "UNMUTE  (K)" } else { "MUTE  (K)" })
-                        .clicked()
-                    {
-                        sound.0.set_muted(!muted);
-                    }
-                }
-
-                if settings.tab == Tab::Picture {
-                    heading(ui, "PICTURE");
-                    // Where you are sitting. Two places on a small boat: at the helm, or
-                    // astern of her looking back, which is the one that shows you what the
-                    // sails are doing.
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("view")
-                                .color(egui::Color32::from_rgb(150, 150, 130))
-                                .monospace()
-                                .size(11.0),
-                        );
-                        for (name, which) in [
-                            ("at the helm", crate::camera::View::Cockpit),
-                            ("from astern", crate::camera::View::Chase),
-                        ] {
-                            if ui.selectable_label(**view == which, name).clicked() {
-                                **view = which;
-                            }
-                        }
-                    });
-                    // The drawn sea. Not a quality setting: a different picture, and the one
-                    // this boat was always headed for.
-                    if ui.selectable_label(ink.0, "the ink drawing").clicked() {
-                        ink.0 = !ink.0;
-                    }
-                    pixels(ui, retro);
-                    // Where the picture is drawn. `F11` is the same switch without
-                    // opening this, and both of them end up in the same resource —
-                    // see `screen.rs`, which also explains why the window can be
-                    // dragged about at all now.
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("window")
-                                .color(egui::Color32::from_rgb(150, 150, 130))
-                                .monospace()
-                                .size(11.0),
-                        );
-                        for which in [crate::screen::Screen::Windowed, crate::screen::Screen::Full]
-                        {
+                // **The page scrolls, and the tabs do not.**
+                //
+                // Reported from the deck: the list of things you have done runs off the
+                // bottom. It will keep doing that — the list is twelve now and the
+                // missions page is the one that grows — so a taller panel only moves the
+                // cliff. What this wants is a page that can be longer than the window,
+                // with the tabs staying where they are so you can always get off it.
+                //
+                // Three quarters of the window rather than all of it: a panel that
+                // reaches both edges stops reading as a panel, and the water behind it
+                // is the thing the game is.
+                let room = (ui.ctx().viewport_rect().height() * 0.75 - 90.0).max(180.0);
+                egui::ScrollArea::vertical()
+                    .max_height(room)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        if settings.tab == Tab::Sound {
+                            heading(ui, "SOUND");
+                            let mut volume = settings.volume;
                             if ui
-                                .selectable_label(**screen == which, which.name())
-                                .on_hover_text("F11, or Alt Enter")
+                                .add(
+                                    egui::Slider::new(&mut volume, 0.0..=1.0)
+                                        .show_value(false)
+                                        .text("volume"),
+                                )
+                                .changed()
+                            {
+                                settings.volume = volume;
+                            }
+                            // Separate from the master, because the sea and the music are two
+                            // different things to want. Somebody who sails with the wind in their
+                            // ears and nothing else is not turning the game down, they are turning
+                            // one instrument out of the mix — and that is a reasonable thing to do
+                            // with a soundtrack that is generated rather than composed for them.
+                            // Copied out and back rather than borrowed twice, because the settings
+                            // resource is one borrow and these are two sliders in it.
+                            let (mut sea, mut boat) = (settings.sea, settings.boat);
+                            ui.add(
+                                egui::Slider::new(&mut sea, 0.0..=1.0)
+                                    .show_value(false)
+                                    .text("sea"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut boat, 0.0..=1.0)
+                                    .show_value(false)
+                                    .text("boat"),
+                            );
+                            settings.sea = sea;
+                            settings.boat = boat;
+                            let mut music = settings.music;
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut music, 0.0..=1.0)
+                                        .show_value(false)
+                                        .text("music"),
+                                )
+                                .changed()
+                            {
+                                settings.music = music;
+                            }
+                            let muted = sound.0.muted();
+                            if ui
+                                .button(if muted { "UNMUTE  (K)" } else { "MUTE  (K)" })
                                 .clicked()
                             {
-                                **screen = which;
+                                sound.0.set_muted(!muted);
                             }
                         }
-                    });
-                    if ui.selectable_label(hud.0, "the diagnostic panel").clicked() {
-                        hud.0 = !hud.0;
-                    }
-                    // The counter, which is the one number here that is about the
-                    // machine rather than the boat — and is off until somebody wants it.
-                    if ui
-                        .selectable_label(counter.0, "the frame counter")
-                        .on_hover_text(
-                            "frames a second, and the worst frame of the last two — \
+
+                        if settings.tab == Tab::Picture {
+                            heading(ui, "PICTURE");
+                            // Where you are sitting. Two places on a small boat: at the helm, or
+                            // astern of her looking back, which is the one that shows you what the
+                            // sails are doing.
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("view")
+                                        .color(egui::Color32::from_rgb(150, 150, 130))
+                                        .monospace()
+                                        .size(11.0),
+                                );
+                                for (name, which) in [
+                                    ("at the helm", crate::camera::View::Cockpit),
+                                    ("from astern", crate::camera::View::Chase),
+                                ] {
+                                    if ui.selectable_label(**view == which, name).clicked() {
+                                        **view = which;
+                                    }
+                                }
+                            });
+                            // The drawn sea. Not a quality setting: a different picture, and the one
+                            // this boat was always headed for.
+                            if ui.selectable_label(ink.0, "the ink drawing").clicked() {
+                                ink.0 = !ink.0;
+                            }
+                            pixels(ui, retro);
+                            // Where the picture is drawn. `F11` is the same switch without
+                            // opening this, and both of them end up in the same resource —
+                            // see `screen.rs`, which also explains why the window can be
+                            // dragged about at all now.
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("window")
+                                        .color(egui::Color32::from_rgb(150, 150, 130))
+                                        .monospace()
+                                        .size(11.0),
+                                );
+                                for which in
+                                    [crate::screen::Screen::Windowed, crate::screen::Screen::Full]
+                                {
+                                    if ui
+                                        .selectable_label(**screen == which, which.name())
+                                        .on_hover_text("F11, or Alt Enter")
+                                        .clicked()
+                                    {
+                                        **screen = which;
+                                    }
+                                }
+                            });
+                            if ui.selectable_label(hud.0, "the diagnostic panel").clicked() {
+                                hud.0 = !hud.0;
+                            }
+                            // The counter, which is the one number here that is about the
+                            // machine rather than the boat — and is off until somebody wants it.
+                            if ui
+                                .selectable_label(counter.0, "the frame counter")
+                                .on_hover_text(
+                                    "frames a second, and the worst frame of the last two — \
                              which is the one you feel",
-                        )
-                        .clicked()
-                    {
-                        counter.0 = !counter.0;
-                    }
-                }
-
-                if settings.tab == Tab::Weather {
-                    heading(ui, "WEATHER");
-                    ui.label(
-                        egui::RichText::new(if settings.weather_touched {
-                            "set by hand — this is practice, not the day you were given"
-                        } else {
-                            "as drawn for this passage"
-                        })
-                        .color(egui::Color32::from_rgb(150, 150, 130))
-                        .monospace()
-                        .size(10.0),
-                    );
-                    ui.add_space(4.0);
-
-                    // The hour is the app's own, so it is always adjustable: the sun moves
-                    // whatever is driving the wind.
-                    let mut hour = sky.hour;
-                    if ui
-                        // The whole clock, not the daylight half of it: night is a
-                        // thing you can sail now, and a slider that stops at eight in
-                        // the evening is a slider that says it is not.
-                        .add(egui::Slider::new(&mut hour, 0.0..=23.9).text("hour"))
-                        .changed()
-                    {
-                        // Through the clock's offset: the hour itself is read off the
-                        // passage, which is shared with everybody else in the game and
-                        // is not this machine's to move.
-                        clock.put_at(hour, sky.hour);
-                        settings.weather_touched = true;
-                    }
-
-                    // The sea. One dial and only one, because wave height is a *consequence*
-                    // — of the wind, the fetch and how long it has blown — and a control that
-                    // set it directly could make three metres at six knots or flat water at
-                    // thirty, either of which a sailor spots instantly. Fetch is the honest
-                    // one: it is a real property of where you are, and the height follows
-                    // from the same relations the waves themselves use.
-                    let tws = sim.sim.telemetry.tws;
-                    let t = sim.sim.state.time;
-                    if let Some(sea) = sim.sim.water.adjustable() {
-                        let mut km = (sea.fetch() / 1000.0) as f32;
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut km, 3.0..=320.0)
-                                    .logarithmic(true)
-                                    .text("fetch, km"),
-                            )
-                            .changed()
-                        {
-                            sea.set_fetch(km as f64 * 1000.0);
-                            settings.weather_touched = true;
+                                )
+                                .clicked()
+                            {
+                                counter.0 = !counter.0;
+                            }
                         }
-                        let (hs, tp) = sail_core::water::fetch_limited_sea(tws, sea.fetch());
-                        ui.horizontal(|ui| {
+
+                        if settings.tab == Tab::Weather {
+                            heading(ui, "WEATHER");
                             ui.label(
-                                // Named as well as measured. Douglas is the *sea* scale and
-                                // it is not Beaufort — the same force over twenty miles of
-                                // fetch and over two hundred is the same wind and quite a
-                                // different afternoon, and naming the sea separately is the
-                                // only honest way to say which one you have asked for.
+                                egui::RichText::new(if settings.weather_touched {
+                                    "set by hand — this is practice, not the day you were given"
+                                } else {
+                                    "as drawn for this passage"
+                                })
+                                .color(egui::Color32::from_rgb(150, 150, 130))
+                                .monospace()
+                                .size(10.0),
+                            );
+                            ui.add_space(4.0);
+
+                            // The hour is the app's own, so it is always adjustable: the sun moves
+                            // whatever is driving the wind.
+                            let mut hour = sky.hour;
+                            if ui
+                                // The whole clock, not the daylight half of it: night is a
+                                // thing you can sail now, and a slider that stops at eight in
+                                // the evening is a slider that says it is not.
+                                .add(egui::Slider::new(&mut hour, 0.0..=23.9).text("hour"))
+                                .changed()
+                            {
+                                // Through the clock's offset: the hour itself is read off the
+                                // passage, which is shared with everybody else in the game and
+                                // is not this machine's to move.
+                                clock.put_at(hour, sky.hour);
+                                settings.weather_touched = true;
+                            }
+
+                            // The sea. One dial and only one, because wave height is a *consequence*
+                            // — of the wind, the fetch and how long it has blown — and a control that
+                            // set it directly could make three metres at six knots or flat water at
+                            // thirty, either of which a sailor spots instantly. Fetch is the honest
+                            // one: it is a real property of where you are, and the height follows
+                            // from the same relations the waves themselves use.
+                            let tws = sim.sim.telemetry.tws;
+                            let t = sim.sim.state.time;
+                            if let Some(sea) = sim.sim.water.adjustable() {
+                                let mut km = (sea.fetch() / 1000.0) as f32;
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut km, 3.0..=320.0)
+                                            .logarithmic(true)
+                                            .text("fetch, km"),
+                                    )
+                                    .changed()
+                                {
+                                    sea.set_fetch(km as f64 * 1000.0);
+                                    settings.weather_touched = true;
+                                }
+                                let (hs, tp) =
+                                    sail_core::water::fetch_limited_sea(tws, sea.fetch());
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        // Named as well as measured. Douglas is the *sea* scale and
+                                        // it is not Beaufort — the same force over twenty miles of
+                                        // fetch and over two hundred is the same wind and quite a
+                                        // different afternoon, and naming the sea separately is the
+                                        // only honest way to say which one you have asked for.
+                                        egui::RichText::new(format!(
+                                            // **The wind sea**, said so when there is a swell to
+                                            // be confused with. This line read "building towards
+                                            // slight — 1.2 m" with the instruments three inches
+                                            // away reporting seven point two, because the fetch
+                                            // relations describe the sea the wind here is making
+                                            // and know nothing about the one that arrived from
+                                            // somewhere else.
+                                            "{}building towards {} — {hs:.1} m at {tp:.1} s",
+                                            if sea.swell().is_some() {
+                                                "wind sea "
+                                            } else {
+                                                ""
+                                            },
+                                            crate::weather::sea_state(hs)
+                                        ))
+                                        .color(egui::Color32::from_rgb(150, 150, 130))
+                                        .monospace()
+                                        .size(10.0),
+                                    );
+                                    // Because the real thing takes two and a half hours to build and
+                                    // five to lie down, which is right and is exactly what you do not
+                                    // want when you have just moved a slider to look at something.
+                                    if ui.button("SETTLE NOW").clicked() {
+                                        sea.settle(tws, t);
+                                        settings.weather_touched = true;
+                                    }
+                                });
+
+                                // **And the swell, which is three dials because it is not a
+                                // consequence of anything here.**
+                                //
+                                // The paragraph above says wave height gets one honest dial and
+                                // that dial is the fetch, because height follows from the wind,
+                                // the fetch and the time it has blown — and that argument is
+                                // right about the *wind sea* and does not reach this. A swell is
+                                // a boundary condition: it was made by a storm that stopped two
+                                // days ago a thousand miles away, nothing here has any say over
+                                // how big it is, and there is no local quantity it could be
+                                // derived from. So it is set directly, and setting it directly is
+                                // the honest shape rather than a shortcut.
+                                //
+                                // Nought metres is no swell at all, which is how it is turned off
+                                // — rather than a checkbox beside a slider that then means
+                                // nothing.
+                                ui.add_space(6.0);
+                                let was = sea.swell();
+                                let mut hs = was.map_or(0.0_f32, |s| s.hs as f32);
+                                let mut period = was.map_or(14.0_f32, |s| s.tp as f32);
+                                let mut from = was.map_or(270.0_f32, |s| {
+                                    sail_core::units::deg(s.run + std::f64::consts::PI)
+                                        .rem_euclid(360.0)
+                                        as f32
+                                });
+                                let mut moved = ui
+                                    .add(egui::Slider::new(&mut hs, 0.0..=12.0).text("swell, m"))
+                                    .changed();
+                                if hs > 0.0 {
+                                    // Eight seconds is a tired wind sea that has outrun its
+                                    // wind; twenty-two is an ocean that has been travelling for
+                                    // days. Below eight it is not a swell, it is chop.
+                                    moved |= ui
+                                        .add(
+                                            egui::Slider::new(&mut period, 8.0..=22.0)
+                                                .text("swell, s"),
+                                        )
+                                        .changed();
+                                    // The bearing it comes *from*, like the wind and like every
+                                    // forecast anybody reads out.
+                                    moved |= ui
+                                        .add(
+                                            egui::Slider::new(&mut from, 0.0..=359.0)
+                                                .text("swell from"),
+                                        )
+                                        .changed();
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{:.0} m long, and the sea is {:.1} m with it",
+                                            1.56 * period * period,
+                                            (hs * hs
+                                                + (sea.wind_sea_height() * sea.wind_sea_height())
+                                                    as f32)
+                                                .sqrt()
+                                        ))
+                                        .color(egui::Color32::from_rgb(150, 150, 130))
+                                        .monospace()
+                                        .size(10.0),
+                                    );
+                                }
+                                if moved {
+                                    sea.set_swell(
+                                        (hs > 0.0).then_some(sail_core::water::Swell {
+                                            hs: hs as f64,
+                                            tp: period as f64,
+                                            run: sail_core::units::rad(from as f64)
+                                                + std::f64::consts::PI,
+                                        }),
+                                        t,
+                                    );
+                                    settings.weather_touched = true;
+                                }
+                            }
+
+                            // And the wind, if whatever is behind the field has dials on it. A real
+                            // forecast would not, and would say so here rather than pretending.
+                            let Some(wind) = sim.sim.wind.adjustable() else {
+                                ui.label(
+                                    egui::RichText::new(
+                                        "the wind is coming from a forecast and cannot be set",
+                                    )
+                                    .color(egui::Color32::from_rgb(150, 150, 130))
+                                    .monospace()
+                                    .size(10.0),
+                                );
+                                footer(ui, &mut close);
+                                return;
+                            };
+                            // In Beaufort, because that is what a sailor thinks in: nobody says
+                            // "seventeen knots", they say "a fresh breeze" or "a five". The knots are
+                            // printed beside it because the instruments are in knots and the two have
+                            // to be connectable, and the slider lands on the *middle* of a force
+                            // rather than its edge — a dial that gives you 21.9 knots when you asked
+                            // for a six is a dial you will say is broken.
+                            let mut force = crate::weather::force(sail_core::units::ms_to_kn(
+                                wind.synoptic.base_speed,
+                            ));
+                            // **To twelve, not to nine.** Nine is where the *draw* stops, and it
+                            // stops there for a reason that is about the boat: thirty-four knots
+                            // is where a thirty-four footer is out by mistake rather than by
+                            // choice, and no day this game hands somebody who did not ask should
+                            // be worse than that. A slider is not a day handed to anybody. It is
+                            // where you go to ask what something looks like, and the top of the
+                            // scale is a question the water can answer.
+                            //
+                            // Nothing is promised about the boat up there and the line underneath
+                            // says so. She is a cork in a storm and that is not a defect.
+                            if ui
+                                .add(egui::Slider::new(&mut force, 1..=12).text("wind, force"))
+                                .changed()
+                            {
+                                // `blows` rather than the base on its own: the base is the day the
+                                // trends wander about, and setting it alone leaves the wind where
+                                // it was for the next half hour. A slider moved to force 8 has to
+                                // give force 8.
+                                //
+                                // **And the sky stays where it was put.** Cloud is correlated
+                                // with the wind's trend in this model — `cover()` carries 0.45 of
+                                // it — so zeroing the trend moves the cover by up to a third,
+                                // which is nearly three oktas of sky changing because somebody
+                                // touched a slider labelled "wind". True to the model and a
+                                // surprise on the screen; the cloud has its own slider two lines
+                                // down and that is the one that should move it.
+                                let sky_was = wind.synoptic.cover();
+                                wind.synoptic.blows(sail_core::units::kn_to_ms(
+                                    crate::weather::force_wind(force),
+                                ));
+                                wind.synoptic.start_cover(sky_was);
+                                settings.weather_touched = true;
+                            }
+                            // And the line under it reads the wind rather than the day, so that
+                            // when the two have drifted apart again it says which one you are in.
+                            let knots = sail_core::units::ms_to_kn(wind.synoptic.speed_now());
+                            ui.label(
                                 egui::RichText::new(format!(
-                                    // **The wind sea**, said so when there is a swell to
-                                    // be confused with. This line read "building towards
-                                    // slight — 1.2 m" with the instruments three inches
-                                    // away reporting seven point two, because the fetch
-                                    // relations describe the sea the wind here is making
-                                    // and know nothing about the one that arrived from
-                                    // somewhere else.
-                                    "{}building towards {} — {hs:.1} m at {tp:.1} s",
-                                    if sea.swell().is_some() {
-                                        "wind sea "
+                                    "{} — {:.0} kn{}",
+                                    crate::weather::beaufort(knots),
+                                    knots,
+                                    // Said once, where it matters, rather than as a warning
+                                    // nobody reads: past a nine this boat is not sailing, she is
+                                    // surviving, and shortly after that she is not doing either.
+                                    if knots > 48.0 {
+                                        " · past anything she can sail in"
                                     } else {
                                         ""
-                                    },
-                                    crate::weather::sea_state(hs)
+                                    }
                                 ))
                                 .color(egui::Color32::from_rgb(150, 150, 130))
                                 .monospace()
                                 .size(10.0),
                             );
-                            // Because the real thing takes two and a half hours to build and
-                            // five to lie down, which is right and is exactly what you do not
-                            // want when you have just moved a slider to look at something.
-                            if ui.button("SETTLE NOW").clicked() {
-                                sea.settle(tws, t);
+                            let mut oktas = (wind.synoptic.cover() * 8.0).round() as u8;
+                            if ui
+                                .add(egui::Slider::new(&mut oktas, 0..=8).text("cloud, oktas"))
+                                .changed()
+                            {
+                                wind.synoptic.start_cover(oktas as f64 / 8.0);
                                 settings.weather_touched = true;
                             }
-                        });
-
-                        // **And the swell, which is three dials because it is not a
-                        // consequence of anything here.**
-                        //
-                        // The paragraph above says wave height gets one honest dial and
-                        // that dial is the fetch, because height follows from the wind,
-                        // the fetch and the time it has blown — and that argument is
-                        // right about the *wind sea* and does not reach this. A swell is
-                        // a boundary condition: it was made by a storm that stopped two
-                        // days ago a thousand miles away, nothing here has any say over
-                        // how big it is, and there is no local quantity it could be
-                        // derived from. So it is set directly, and setting it directly is
-                        // the honest shape rather than a shortcut.
-                        //
-                        // Nought metres is no swell at all, which is how it is turned off
-                        // — rather than a checkbox beside a slider that then means
-                        // nothing.
-                        ui.add_space(6.0);
-                        let was = sea.swell();
-                        let mut hs = was.map_or(0.0_f32, |s| s.hs as f32);
-                        let mut period = was.map_or(14.0_f32, |s| s.tp as f32);
-                        let mut from = was.map_or(270.0_f32, |s| {
-                            sail_core::units::deg(s.run + std::f64::consts::PI).rem_euclid(360.0)
-                                as f32
-                        });
-                        let mut moved = ui
-                            .add(egui::Slider::new(&mut hs, 0.0..=12.0).text("swell, m"))
-                            .changed();
-                        if hs > 0.0 {
-                            // Eight seconds is a tired wind sea that has outrun its
-                            // wind; twenty-two is an ocean that has been travelling for
-                            // days. Below eight it is not a swell, it is chop.
-                            moved |= ui
-                                .add(egui::Slider::new(&mut period, 8.0..=22.0).text("swell, s"))
-                                .changed();
-                            // The bearing it comes *from*, like the wind and like every
-                            // forecast anybody reads out.
-                            moved |= ui
-                                .add(egui::Slider::new(&mut from, 0.0..=359.0).text("swell from"))
-                                .changed();
+                            // **Fog, which is not cloud**, and gets its own dial for
+                            // exactly that reason: cover is what is above you and fog is
+                            // what you are inside, and the classic way to get one is a
+                            // clear night with a cold sea under warm air.
+                            //
+                            // A dial for *asking*, like the wind: the day draws its own
+                            // and a breeze blows it away by itself, so a number set here
+                            // is a question about what that looks like rather than a
+                            // setting that sticks.
+                            // Reads back what the *air* is carrying, not what you can
+                            // see through: a slider showing the thinned figure would
+                            // snap away from wherever it was put the moment there was
+                            // any breeze.
+                            let mut fog = (wind.synoptic.fog_aloft() * 100.0).round() as u8;
+                            if ui
+                                .add(egui::Slider::new(&mut fog, 0..=100).text("fog, %"))
+                                .changed()
+                            {
+                                wind.synoptic.start_fog(fog as f64 / 100.0);
+                                settings.weather_touched = true;
+                            }
                             ui.label(
                                 egui::RichText::new(format!(
-                                    "{:.0} m long, and the sea is {:.1} m with it",
-                                    1.56 * period * period,
-                                    (hs * hs
-                                        + (sea.wind_sea_height() * sea.wind_sea_height()) as f32)
-                                        .sqrt()
+                                    "{} — {}",
+                                    crate::weather::how_thick(wind.synoptic.fog()),
+                                    crate::weather::how_far(crate::sky::visibility(&sky)),
                                 ))
                                 .color(egui::Color32::from_rgb(150, 150, 130))
                                 .monospace()
                                 .size(10.0),
                             );
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("squalls")
+                                        .color(egui::Color32::from_rgb(150, 150, 130))
+                                        .monospace()
+                                        .size(11.0),
+                                );
+                                for (name, interval) in [
+                                    ("none", f64::INFINITY),
+                                    ("odd one", 2_400.0),
+                                    ("squally", 900.0),
+                                    ("constant", 180.0),
+                                ] {
+                                    let on = (wind.squall_interval - interval).abs() < 1.0
+                                        || (wind.squall_interval.is_infinite()
+                                            && interval.is_infinite());
+                                    if ui.selectable_label(on, name).clicked() {
+                                        wind.squall_interval = interval;
+                                        // So the change is felt rather than waited for.
+                                        wind.next_squall = wind.next_squall.min(interval * 0.25);
+                                        settings.weather_touched = true;
+                                    }
+                                }
+                            });
                         }
-                        if moved {
-                            sea.set_swell(
-                                (hs > 0.0).then_some(sail_core::water::Swell {
-                                    hs: hs as f64,
-                                    tp: period as f64,
-                                    run: sail_core::units::rad(from as f64) + std::f64::consts::PI,
-                                }),
-                                t,
-                            );
-                            settings.weather_touched = true;
-                        }
-                    }
 
-                    // And the wind, if whatever is behind the field has dials on it. A real
-                    // forecast would not, and would say so here rather than pretending.
-                    let Some(wind) = sim.sim.wind.adjustable() else {
+                        if settings.tab == Tab::Passage {
+                            passage(ui, &mut course);
+                            a_new_sea(ui, &mut another_sea, &home.stores);
+                        }
+                        if settings.tab == Tab::Drill {
+                            drill(ui, &mut missions);
+                        }
+                        if settings.tab == Tab::Network {
+                            together(ui, &mut net, &fleet, sim.sim.state.pos);
+                        } else {
+                            // Stop looking the moment the page is not showing. The comment on
+                            // `scan` said it only ran while the page was open and that was not
+                            // true of the first version: nothing ever dropped it, so one visit to
+                            // the page left the game broadcasting at everybody's switch once a
+                            // second for the rest of the passage.
+                            //
+                            // And this is a separate `if` rather than the tail of a chain for the
+                            // same reason, learnt twice: hanging a third page off the front of it
+                            // put the clear behind *that* page's arm, so opening TOGETHER and then
+                            // stepping to DRILL left the scan running. Found in review.
+                            net.scan = None;
+                        }
+                        ui.add_space(6.0);
                         ui.label(
-                            egui::RichText::new(
-                                "the wind is coming from a forecast and cannot be set",
-                            )
-                            .color(egui::Color32::from_rgb(150, 150, 130))
+                            egui::RichText::new(if net.link.is_some() {
+                                "the fleet is sailing — this does not stop the sea"
+                            } else {
+                                "the sea is stopped while this is open"
+                            })
                             .monospace()
-                            .size(10.0),
+                            .size(10.0)
+                            .color(egui::Color32::from_rgb(130, 136, 146)),
                         );
                         footer(ui, &mut close);
-                        return;
-                    };
-                    // In Beaufort, because that is what a sailor thinks in: nobody says
-                    // "seventeen knots", they say "a fresh breeze" or "a five". The knots are
-                    // printed beside it because the instruments are in knots and the two have
-                    // to be connectable, and the slider lands on the *middle* of a force
-                    // rather than its edge — a dial that gives you 21.9 knots when you asked
-                    // for a six is a dial you will say is broken.
-                    let mut force =
-                        crate::weather::force(sail_core::units::ms_to_kn(wind.synoptic.base_speed));
-                    // **To twelve, not to nine.** Nine is where the *draw* stops, and it
-                    // stops there for a reason that is about the boat: thirty-four knots
-                    // is where a thirty-four footer is out by mistake rather than by
-                    // choice, and no day this game hands somebody who did not ask should
-                    // be worse than that. A slider is not a day handed to anybody. It is
-                    // where you go to ask what something looks like, and the top of the
-                    // scale is a question the water can answer.
-                    //
-                    // Nothing is promised about the boat up there and the line underneath
-                    // says so. She is a cork in a storm and that is not a defect.
-                    if ui
-                        .add(egui::Slider::new(&mut force, 1..=12).text("wind, force"))
-                        .changed()
-                    {
-                        // `blows` rather than the base on its own: the base is the day the
-                        // trends wander about, and setting it alone leaves the wind where
-                        // it was for the next half hour. A slider moved to force 8 has to
-                        // give force 8.
-                        //
-                        // **And the sky stays where it was put.** Cloud is correlated
-                        // with the wind's trend in this model — `cover()` carries 0.45 of
-                        // it — so zeroing the trend moves the cover by up to a third,
-                        // which is nearly three oktas of sky changing because somebody
-                        // touched a slider labelled "wind". True to the model and a
-                        // surprise on the screen; the cloud has its own slider two lines
-                        // down and that is the one that should move it.
-                        let sky_was = wind.synoptic.cover();
-                        wind.synoptic.blows(sail_core::units::kn_to_ms(
-                            crate::weather::force_wind(force),
-                        ));
-                        wind.synoptic.start_cover(sky_was);
-                        settings.weather_touched = true;
-                    }
-                    // And the line under it reads the wind rather than the day, so that
-                    // when the two have drifted apart again it says which one you are in.
-                    let knots = sail_core::units::ms_to_kn(wind.synoptic.speed_now());
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} — {:.0} kn{}",
-                            crate::weather::beaufort(knots),
-                            knots,
-                            // Said once, where it matters, rather than as a warning
-                            // nobody reads: past a nine this boat is not sailing, she is
-                            // surviving, and shortly after that she is not doing either.
-                            if knots > 48.0 {
-                                " · past anything she can sail in"
-                            } else {
-                                ""
-                            }
-                        ))
-                        .color(egui::Color32::from_rgb(150, 150, 130))
-                        .monospace()
-                        .size(10.0),
-                    );
-                    let mut oktas = (wind.synoptic.cover() * 8.0).round() as u8;
-                    if ui
-                        .add(egui::Slider::new(&mut oktas, 0..=8).text("cloud, oktas"))
-                        .changed()
-                    {
-                        wind.synoptic.start_cover(oktas as f64 / 8.0);
-                        settings.weather_touched = true;
-                    }
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("squalls")
-                                .color(egui::Color32::from_rgb(150, 150, 130))
-                                .monospace()
-                                .size(11.0),
-                        );
-                        for (name, interval) in [
-                            ("none", f64::INFINITY),
-                            ("odd one", 2_400.0),
-                            ("squally", 900.0),
-                            ("constant", 180.0),
-                        ] {
-                            let on = (wind.squall_interval - interval).abs() < 1.0
-                                || (wind.squall_interval.is_infinite() && interval.is_infinite());
-                            if ui.selectable_label(on, name).clicked() {
-                                wind.squall_interval = interval;
-                                // So the change is felt rather than waited for.
-                                wind.next_squall = wind.next_squall.min(interval * 0.25);
-                                settings.weather_touched = true;
-                            }
-                        }
                     });
-                }
-
-                if settings.tab == Tab::Passage {
-                    passage(ui, &mut course);
-                    a_new_sea(ui, &mut another_sea, &home.stores);
-                }
-                if settings.tab == Tab::Drill {
-                    drill(ui, &mut missions);
-                }
-                if settings.tab == Tab::Network {
-                    together(ui, &mut net, &fleet, sim.sim.state.pos);
-                } else {
-                    // Stop looking the moment the page is not showing. The comment on
-                    // `scan` said it only ran while the page was open and that was not
-                    // true of the first version: nothing ever dropped it, so one visit to
-                    // the page left the game broadcasting at everybody's switch once a
-                    // second for the rest of the passage.
-                    //
-                    // And this is a separate `if` rather than the tail of a chain for the
-                    // same reason, learnt twice: hanging a third page off the front of it
-                    // put the clear behind *that* page's arm, so opening TOGETHER and then
-                    // stepping to DRILL left the scan running. Found in review.
-                    net.scan = None;
-                }
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new(if net.link.is_some() {
-                        "the fleet is sailing — this does not stop the sea"
-                    } else {
-                        "the sea is stopped while this is open"
-                    })
-                    .monospace()
-                    .size(10.0)
-                    .color(egui::Color32::from_rgb(130, 136, 146)),
-                );
-                footer(ui, &mut close);
             });
         });
     if close {
