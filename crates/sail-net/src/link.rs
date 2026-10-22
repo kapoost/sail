@@ -57,6 +57,15 @@ pub struct Link {
     /// paperwork for the type system rather than synchronisation.
     incoming: Mutex<Receiver<Event>>,
     pub id: Option<BoatId>,
+    /// The port this client is speaking from.
+    ///
+    /// An ephemeral one the operating system picked, so it is not known until the socket
+    /// is bound and it is different every time. Kept because "which port am I talking
+    /// from" is the first question anybody debugging a one-way link asks — and because a
+    /// test that wants to send this client a packet has no other way to find it. Without
+    /// it, the test for the forged-refusal guard swept every port on the machine, which
+    /// worked and also shelled the sockets of every other test running beside it.
+    at: SocketAddr,
 }
 
 /// A name cut to what `Sane` will carry, on a character boundary.
@@ -90,6 +99,8 @@ impl Link {
         // it hears from.
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.set_read_timeout(Some(Duration::from_millis(20)))?;
+        // Asked once, here, because the socket is about to be moved onto the thread.
+        let at = socket.local_addr()?;
         let (out_tx, out_rx) = channel::<Drawn>();
         let (in_tx, in_rx) = channel::<Event>();
         // Cut to what the wire will carry, here rather than at the far end. A name too
@@ -111,7 +122,13 @@ impl Link {
             outgoing: out_tx,
             incoming: Mutex::new(in_rx),
             id: None,
+            at,
         })
+    }
+
+    /// Where this client is speaking from. See the field.
+    pub fn at(&self) -> SocketAddr {
+        self.at
     }
 
     /// Here is my boat. Dropped on the floor if the thread has gone, which is right:

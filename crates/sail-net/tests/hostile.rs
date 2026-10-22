@@ -427,18 +427,23 @@ fn a_refusal_from_the_wrong_port_is_not_a_refusal() {
     );
 
     // Everything about this is right except the port it comes from.
+    //
+    // **Aimed, not swept.** The first version of this had no way to find the client's
+    // own socket, so it sent a refusal to every port on the machine — which demonstrated
+    // the guard and also shelled the sockets of every other test running beside it, so
+    // that a server somewhere else in this file answered a stray `Hello` and the test
+    // waiting on *that* read a refusal meant for nobody. Two of these failed on CI and
+    // neither of them was the one that was wrong. `Link::at` exists so this can be one
+    // packet at one address.
     let forger = stranger();
     let no = encode(&ToClient::No {
         because: "get off my water".into(),
     });
-    // Aimed at the client's own socket. Its address is not something a test can ask for,
-    // so this sweeps the ephemeral range the way an attacker on the box would — which is
-    // also the point: on one machine that sweep is cheap.
-    for guess in 1024..=65535u16 {
-        if guess == port {
-            continue;
-        }
-        let _ = forger.send_to(&no, ("127.0.0.1", guess));
+    let her = alice.at();
+    assert_ne!(forger.local_addr().unwrap().port(), her.port());
+    for _ in 0..20 {
+        let _ = forger.send_to(&no, ("127.0.0.1", her.port()));
+        std::thread::sleep(Duration::from_millis(20));
     }
     assert!(
         !wait_for(&mut alice, 2.0, |e| matches!(e, Event::Lost(_))),

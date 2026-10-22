@@ -36,9 +36,15 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
 1. **The engine stays a reversible decision.** Bevy, Fyrox and Godot-via-gdext are all
    still on the table; the presentation layer is a few days of work on top of this
    crate, not a rewrite.
-2. **The physics is testable without opening a window.** The core's tests assert
-   against figures a sailor knows from the water — four hundred and ten across the
-   workspace, run by CI on every push. When one
+<!-- The two numbers in the next paragraph are read by `site/build.py`, which builds the
+     website out of this file so that a page cannot disagree with the program. They have
+     to be digits and they have to be in that order: "N tests in the core ... M across the
+     workspace". Written in words once, and the site build went red on every push for six
+     hours without anybody noticing, because nothing else depends on it. -->
+
+2. **The physics is testable without opening a window.** 149 tests in the core assert
+   against figures a sailor knows from the water — 433 across the workspace, run by CI
+   on every push. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
 
