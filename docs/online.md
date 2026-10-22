@@ -144,11 +144,31 @@ NAT hole-punching is the third answer and it is not worth it here: it is the har
 of multiplayer networking and it exists to avoid renting a server, which at this scale is
 cheaper than the bug reports.
 
-**M4 — a reason to be there.**
-Everything above puts another boat on your water. None of it gives you anything to *do*
-together. The shortest list worth having: the same consignment offered to everyone, a
-start line and a finish, and each other's names and times. Racing a leg is the whole
-game, and it needs no new physics.
+**M4 — a reason to be there.** ~~Built.~~
+Everything above puts another boat on your water. None of it gave you anything to *do*
+together. The shortest list worth having was: the same consignment offered to everyone, a
+start and a finish, and each other's names and times — and that is what is there.
+
+The relay names the leg, because somebody has to and the relay is the only thing in the
+game that is not one of the boats. A leg is **two harbour indices and a time**, three
+bytes, and it means the same two places on every screen because both ends build the
+archipelago with `Archipelago::of_seed` — which was moved into `sail-core` for exactly
+this and for no other reason. Two copies of those four numbers would have meant everybody
+sailing to a different port while every console said they were bound for the same one.
+
+The allowance comes off **the harbour she is leaving**, not off where each boat happens
+to be floating, or one job would carry two deadlines and whoever started nearer would be
+given longer as well. Arriving on a shared leg does not pick the next one: she reports
+her time and waits, and the relay calls the next leg for everybody at once — when all of
+them are in, or after half an hour, because one person shutting the lid must not hold the
+fleet on a leg nobody is sailing. A latecomer is handed the leg in progress rather than
+nothing.
+
+What is **not** there, said plainly: no start line to cross and no gun — the start is the
+moment the leg is called, which everybody's clock already agrees about. And the times are
+reported by the boats rather than measured by the relay, which cannot know where an
+arrival circle is. Somebody could lie about one. This is a game between friends and that
+was decided once already, two bullets down.
 
 ## Decided, so nobody has to decide it twice
 

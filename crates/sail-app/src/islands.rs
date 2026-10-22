@@ -277,5 +277,7 @@ pub fn generate(seed: u64) -> Archipelago {
     // over three hundred days lands between twenty-four and thirty-four islands with a
     // median of thirty-two. Asking for more would not make a denser chain, only a
     // longer list of berths it refuses.
-    Archipelago::generate_around(seed ^ 0x15_1A_4D, 5_600.0, 34, 900.0)
+    // The numbers moved to `sail_core::land`, because the relay needs this same
+    // archipelago to be able to name a harbour to everybody. See `Archipelago::of_seed`.
+    Archipelago::of_seed(seed)
 }

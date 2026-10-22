@@ -310,3 +310,76 @@ fn you_can_knock_on_a_game_before_joining_it() {
     }
     let _ = std::fs::remove_file(&word);
 }
+
+/// **A leg everybody is on.**
+///
+/// The thing M4 exists for: the sea was already shared and there was nothing to do in it
+/// together. The relay names two harbours out of the same seed the game builds its world
+/// from, so a pair of indices means the same two places on every screen — and when
+/// somebody is in, everybody is told who and in what.
+#[test]
+fn the_relay_hands_out_the_same_leg_and_collects_the_times() {
+    let port = 7799;
+    let server = Server(
+        Command::new(env!("CARGO_BIN_EXE_sail-server"))
+            .args(["--port", &port.to_string(), "--seed", "31"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("the server binary is built by cargo before this test runs"),
+    );
+    let at = format!("127.0.0.1:{port}");
+
+    let mut alice = Link::join(&at, "alice", "").expect("a socket");
+    let mut bob = Link::join(&at, "bob", "").expect("a socket");
+
+    // Both are given a leg, and it is the same leg. Either in the welcome — whoever
+    // joins after it was called — or in the broadcast that calls it.
+    let leg_of = |link: &mut Link| -> Option<sail_net::Passage> {
+        let mut found = None;
+        wait_for(link, 12.0, |e| {
+            match e {
+                Event::Joined {
+                    passage: Some(p), ..
+                } => found = Some(*p),
+                Event::Leg(p) => found = Some(*p),
+                _ => {}
+            }
+            found.is_some()
+        });
+        found
+    };
+    let hers = leg_of(&mut alice).expect("alice was given no leg");
+    let his = leg_of(&mut bob).expect("bob was given no leg");
+    assert_eq!(hers, his, "two boats on the same water, on different jobs");
+    assert_ne!(hers.from, hers.to, "a leg from a place to itself");
+
+    // And the harbours it names are harbours this sea actually has — which is the whole
+    // reason `Archipelago::of_seed` lives in `sail-core` instead of being typed out
+    // twice. If those parameters ever drift apart, this is what notices.
+    let harbours = sail_core::land::Archipelago::of_seed(31).harbours();
+    assert!(
+        (hers.from as usize) < harbours.len() && (hers.to as usize) < harbours.len(),
+        "the relay named harbour {} or {} and this sea has {}",
+        hers.from,
+        hers.to,
+        harbours.len()
+    );
+
+    // Alice is in. Bob is told, by name and with her time.
+    alice.arrived(612.5);
+    let mut told = None;
+    wait_for(&mut bob, 10.0, |e| {
+        if let Event::Home { name, seconds, .. } = e {
+            told = Some((name.clone(), *seconds));
+        }
+        told.is_some()
+    });
+    let (who, seconds) = told.expect("bob was never told anybody was in");
+    assert_eq!(who, "alice");
+    assert!(
+        (seconds - 612.5).abs() < 0.01,
+        "her time came back as {seconds}"
+    );
+
+    drop(server);
+}

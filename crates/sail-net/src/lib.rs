@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 /// Bumped whenever a message changes shape. Two versions that disagree refuse each other
 /// at the handshake rather than at the first malformed snapshot, because "my friend's
 /// boat is in the sky" is a much worse afternoon than "you are both on different builds".
-pub const PROTOCOL: u16 = 3;
+pub const PROTOCOL: u16 = 4;
 
 /// Whether an address is on the same network as us, for the things that only make
 /// sense there.
@@ -278,6 +278,28 @@ impl Squall {
     }
 }
 
+/// A leg everybody is sailing.
+///
+/// **This is the thing that makes another boat worth being near.** Everything else in
+/// this file puts somebody on your water; none of it gives you anything to do with them.
+/// A consignment offered to all of us, a start, and each other's times is the shortest
+/// list that turns a shared sea into a reason to be out on it — and it needs no new
+/// physics, which is why it is the one worth having first.
+///
+/// Harbours by **index**, which is what the whole thing hangs on: both ends build the
+/// archipelago from the same seed with `Archipelago::of_seed`, so the fourth harbour is
+/// the fourth harbour. That function lives in `sail-core` for exactly this reason — two
+/// copies of those parameters would mean everybody sailing to a different port while
+/// every console said they were bound for the same one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Passage {
+    pub from: u16,
+    pub to: u16,
+    /// Server time the leg was called, seconds. Everybody's clock is already following
+    /// this, so it needs nothing else to be a start gun.
+    pub began: f32,
+}
+
 /// The sea everybody is in, sent once at the handshake.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct World {
@@ -334,6 +356,16 @@ pub enum ToServer {
         id: BoatId,
         drawn: Drawn,
     },
+    /// In, with the time it took.
+    ///
+    /// Said by the boat rather than worked out by the relay, because the relay does not
+    /// simulate anybody and has no way of knowing where the arrival circle is. A time
+    /// somebody could lie about — and it stays that way, because this is a game between
+    /// friends and `docs/online.md` decided that once already.
+    Arrived {
+        id: BoatId,
+        seconds: f32,
+    },
     Leaving {
         id: BoatId,
     },
@@ -347,6 +379,17 @@ pub enum ToClient {
         your_id: BoatId,
         world: World,
         sky: Sky,
+        /// The leg under way, if there is one. A latecomer gets the one in progress
+        /// rather than being left without a job until the next.
+        passage: Option<Passage>,
+    },
+    /// A new leg, for everybody.
+    Leg(Passage),
+    /// Somebody is in.
+    Home {
+        id: BoatId,
+        name: String,
+        seconds: f32,
     },
     /// Somebody else's boat. Sent as its own message rather than batched, so a packet
     /// lost is one boat stale for a frame rather than the whole fleet.
@@ -500,6 +543,15 @@ impl Sane for Squall {
     }
 }
 
+impl Sane for Passage {
+    fn sane(&self) -> bool {
+        // The indices are checked against the archipelago where it exists, not here:
+        // this crate has the seed but has no business generating a world to validate a
+        // packet. What it can say is that the clock is a clock.
+        self.began.is_finite() && self.began >= 0.0 && self.from != self.to
+    }
+}
+
 impl Sane for World {
     fn sane(&self) -> bool {
         finite(&[
@@ -522,6 +574,7 @@ impl Sane for ToServer {
             }
             ToServer::WhoIsThere { word } => word.len() <= NAME_LIMIT,
             ToServer::Here { drawn, .. } => drawn.sane(),
+            ToServer::Arrived { seconds, .. } => seconds.is_finite() && *seconds >= 0.0,
             ToServer::Leaving { .. } => true,
         }
     }
@@ -530,7 +583,16 @@ impl Sane for ToServer {
 impl Sane for ToClient {
     fn sane(&self) -> bool {
         match self {
-            ToClient::Welcome { world, sky, .. } => world.sane() && sky.sane(),
+            ToClient::Welcome {
+                world,
+                sky,
+                passage,
+                ..
+            } => world.sane() && sky.sane() && passage.is_none_or(|p| p.sane()),
+            ToClient::Leg(passage) => passage.sane(),
+            ToClient::Home { name, seconds, .. } => {
+                name.len() <= NAME_LIMIT && seconds.is_finite() && *seconds >= 0.0
+            }
             ToClient::Boat { name, drawn, .. } => name.len() <= NAME_LIMIT && drawn.sane(),
             ToClient::Gone { .. } => true,
             ToClient::Weather { sky, squalls } => {

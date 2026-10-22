@@ -27,6 +27,16 @@ pub enum Event {
         id: BoatId,
         world: crate::World,
         sky: crate::Sky,
+        /// The leg under way, if there is one.
+        passage: Option<crate::Passage>,
+    },
+    /// A new leg, for everybody.
+    Leg(crate::Passage),
+    /// Somebody is in, with the time it took them.
+    Home {
+        id: BoatId,
+        name: String,
+        seconds: f32,
     },
     /// Somebody's boat, as of a moment ago.
     Boat {
@@ -48,9 +58,20 @@ pub enum Event {
     Lost(String),
 }
 
+/// Something the boat wants to tell the relay.
+///
+/// Two kinds, and the second is why this is an enum rather than a channel of snapshots:
+/// a snapshot goes out fifteen times a second for ever, and an arrival goes out once.
+/// One channel keeps them in order, which matters — a snapshot sent after the arrival
+/// but delivered before it would be a boat reporting she is in and then still sailing.
+enum Say {
+    Here(Drawn),
+    Arrived(f32),
+}
+
 /// A connection to a game, held by the client.
 pub struct Link {
-    outgoing: Sender<Drawn>,
+    outgoing: Sender<Say>,
     /// Behind a mutex only because a channel receiver is `Send` and not `Sync`, and a
     /// game engine wants to hold this in a resource that several threads could in
     /// principle reach. One system touches it, so the lock is never contended; it is
@@ -101,7 +122,7 @@ impl Link {
         socket.set_read_timeout(Some(Duration::from_millis(20)))?;
         // Asked once, here, because the socket is about to be moved onto the thread.
         let at = socket.local_addr()?;
-        let (out_tx, out_rx) = channel::<Drawn>();
+        let (out_tx, out_rx) = channel::<Say>();
         let (in_tx, in_rx) = channel::<Event>();
         // Cut to what the wire will carry, here rather than at the far end. A name too
         // long to be sane is refused by the receiver, and a player whose game silently
@@ -134,7 +155,12 @@ impl Link {
     /// Here is my boat. Dropped on the floor if the thread has gone, which is right:
     /// losing the network is not a reason to stop sailing.
     pub fn send(&self, drawn: Drawn) {
-        let _ = self.outgoing.send(drawn);
+        let _ = self.outgoing.send(Say::Here(drawn));
+    }
+
+    /// In, with the time it took.
+    pub fn arrived(&self, seconds: f32) {
+        let _ = self.outgoing.send(Say::Arrived(seconds));
     }
 
     pub fn drain(&mut self) -> Vec<Event> {
@@ -167,7 +193,7 @@ fn run(
     server: SocketAddr,
     name: String,
     word: String,
-    outgoing: Receiver<Drawn>,
+    outgoing: Receiver<Say>,
     incoming: Sender<Event>,
 ) {
     use std::time::Instant;
@@ -183,9 +209,13 @@ fn run(
         // if the game is running at two hundred frames a second and the socket at
         // fifteen, the nineteen snapshots in between are already wrong by the time they
         // would go out.
+        // An arrival is held until there is an id to send it under, and jumps the queue
+        // of snapshots: it is one message and it is the one that matters.
+        let mut arrived: Option<f32> = None;
         loop {
             match outgoing.try_recv() {
-                Ok(drawn) => latest = Some(drawn),
+                Ok(Say::Here(drawn)) => latest = Some(drawn),
+                Ok(Say::Arrived(seconds)) => arrived = Some(seconds),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     // The game has gone. Say goodbye, so the others lose the boat at
@@ -233,6 +263,9 @@ fn run(
             }
         }
 
+        if let (Some(id), Some(seconds)) = (id, arrived) {
+            let _ = socket.send_to(&encode(&ToServer::Arrived { id, seconds }), server);
+        }
         if let (Some(id), Some(drawn)) = (id, latest) {
             if sent.elapsed() >= every {
                 sent = Instant::now();
@@ -279,6 +312,7 @@ fn run(
                     your_id,
                     world,
                     sky,
+                    passage,
                 } => {
                     if protocol != PROTOCOL {
                         let _ = incoming.send(Event::Lost(format!(
@@ -294,8 +328,15 @@ fn run(
                             id: your_id,
                             world,
                             sky,
+                            passage,
                         });
                     }
+                }
+                ToClient::Leg(passage) => {
+                    let _ = incoming.send(Event::Leg(passage));
+                }
+                ToClient::Home { id, name, seconds } => {
+                    let _ = incoming.send(Event::Home { id, name, seconds });
                 }
                 ToClient::Boat {
                     id: who,

@@ -900,6 +900,33 @@ pub fn draw(
                     ),
                     ("DONE", &format!("{}", course.delivered)),
                 );
+                // **Who is in, and in what.**
+                //
+                // The whole reason a leg is handed out to everybody is so that there is
+                // something to compare at the end of it, and a time nobody can see is
+                // not a comparison. Newest first, and only while there is a shared leg:
+                // on your own this is a line that would never have anything in it.
+                if !in_hand.net.finished.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("IN")
+                            .color(paint::LABEL)
+                            .monospace()
+                            .size(9.0),
+                    );
+                    for (_, who, seconds) in in_hand.net.finished.iter().take(4) {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{:<10} {}",
+                                who.chars().take(10).collect::<String>(),
+                                clock(*seconds as f64)
+                            ))
+                            .color(paint::LIVE)
+                            .monospace()
+                            .size(11.0),
+                        );
+                    }
+                }
                 // **The casks, but only once there are any.** A counter that reads zero
                 // all passage is a line of instrument saying nothing, and this panel is
                 // already the one thing on screen that cannot be folded away. What is on
@@ -2378,6 +2405,10 @@ fn hands(ui: &mut egui::Ui, standing: bool) -> egui::Response {
 pub struct InHand<'w> {
     pub fishing: ResMut<'w, crate::fishing::Fishing>,
     pub sighting: ResMut<'w, crate::sight::Sighting>,
+    /// Not a thing in anybody's hand — it is here because a system may have sixteen
+    /// parameters and this panel wanted a seventeenth. The card needs to know who else
+    /// is in on this leg; see `net.finished`.
+    pub net: Res<'w, crate::net::Net>,
 }
 
 /// A narrow lamp for a thing you pick up: three of them fit the window they live in.

@@ -36,6 +36,14 @@ pub fn plugin(app: &mut App) {
 
 #[derive(Resource, Default)]
 pub struct Net {
+    /// The leg the relay has called, if it has called one.
+    ///
+    /// Held here rather than written straight into the `Course` because the packet
+    /// reader has no business owning the consignment system: it takes what arrived and
+    /// a system beside the course takes it from here. The same move as `rebuild`.
+    pub leg: Option<sail_net::Passage>,
+    /// Who is in on this leg and how long it took them, newest first.
+    pub finished: Vec<(sail_net::BoatId, String, f32)>,
     pub link: Option<Link>,
     /// What went wrong, for the panel. Empty while things are well.
     pub trouble: String,
@@ -214,7 +222,15 @@ pub fn exchange(
     let events = link.drain();
     for event in events {
         match event {
-            Event::Joined { id, world, sky } => {
+            Event::Joined {
+                id,
+                world,
+                sky,
+                passage,
+            } => {
+                // The leg everybody is on, taken whether or not the sea is changing —
+                // see the rebuild below, which only happens when the seed differs.
+                net.leg = passage;
                 net.joined = true;
                 net.trouble.clear();
                 info!("joined as boat {id}");
@@ -268,6 +284,26 @@ pub fn exchange(
                     info!("their sea is seed {} — going there", world.seed);
                     net.rebuild = Some(world);
                 }
+            }
+            Event::Leg(passage) => {
+                info!(
+                    "leg: harbour {} to harbour {}, called at {:.0} s",
+                    passage.from, passage.to, passage.began
+                );
+                net.leg = Some(passage);
+            }
+            Event::Home { id, name, seconds } => {
+                // Kept newest first and short: this is a scoreboard for one leg, not a
+                // table of records, and a card on a console has room for three names.
+                net.finished.retain(|(who, _, _)| *who != id);
+                net.finished.insert(0, (id, name.clone(), seconds));
+                net.finished.truncate(8);
+                info!(
+                    "{name} is in — {:.0}m{:02.0}s",
+                    seconds / 60.0,
+                    seconds % 60.0
+                );
+                sound.0.ring(2);
             }
             Event::Boat { id, name, drawn } => {
                 // Two strokes for a boat arriving: it is the one thing that happens out

@@ -28,6 +28,9 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Update, update.in_set(Deck::Dress));
     app.add_systems(Update, float_marks.in_set(Deck::Dress));
     app.add_systems(Update, restart.in_set(Deck::Weather));
+    // Before `update`, which is where an arrival is noticed: a leg called this frame
+    // should be the leg she is sailing this frame.
+    app.add_systems(Update, shared_leg.in_set(Deck::Dress).before(update));
 }
 
 /// How close counts as arrived, metres. An anchorage, not a berth: you are there when
@@ -96,6 +99,12 @@ pub struct Course {
     /// Counts up while the boat sits in the arrival circle, so a fast pass through it
     /// does not count as a delivery.
     settling: f64,
+    /// Whether the relay is handing out the legs.
+    ///
+    /// When it is, arriving does not pick a new one: the next leg is called for
+    /// everybody at once, and a boat that chose her own would be sailing somewhere
+    /// nobody else is going while her console said otherwise.
+    shared: bool,
 }
 
 impl Course {
@@ -117,6 +126,7 @@ impl Course {
             tacks: 0,
             last_tack_side: 0.0,
             settling: 0.0,
+            shared: false,
         };
         course.take_consignment(start);
         course
@@ -227,6 +237,42 @@ impl Course {
         self.elapsed = 0.0;
         self.settling = 0.0;
         self.leg = Leg::Carrying;
+    }
+}
+
+impl Course {
+    /// Take the leg the relay has called, instead of choosing one.
+    ///
+    /// **The same job for everybody**, which is the whole of what makes another boat
+    /// worth being near: the sea was already shared and there was nothing to do in it
+    /// together. The indices come off the wire and mean the same two harbours on every
+    /// screen, because both ends build the archipelago with `Archipelago::of_seed`.
+    ///
+    /// The allowance is worked out from **the harbour she is leaving**, not from where
+    /// this boat happens to be floating — or two people on the same leg would be given
+    /// different deadlines for it, which is the one thing a shared job may not do.
+    pub fn take_shared(&mut self, from: usize, to: usize) -> bool {
+        if from == to || from >= self.harbours.len() || to >= self.harbours.len() {
+            return false;
+        }
+        self.from = from;
+        self.to = to;
+        let start = self.harbours[from].at;
+        let distance = (self.harbours[to].at - start).length();
+        self.allowed = distance / kn_to_ms(PLANNING_SPEED_KN) + SLACK;
+        self.elapsed = 0.0;
+        self.settling = 0.0;
+        self.leg = Leg::Carrying;
+        true
+    }
+
+    /// Whether this leg was handed out rather than chosen here.
+    pub fn is_shared(&self) -> bool {
+        self.shared
+    }
+
+    pub fn share(&mut self, shared: bool) {
+        self.shared = shared;
     }
 }
 
@@ -360,6 +406,7 @@ pub fn setup(
 pub fn update(
     sim: Res<Sim>,
     time: Res<Time>,
+    net: Res<crate::net::Net>,
     mut course: ResMut<Course>,
     mut marks: Query<&mut Floating, With<Destination>>,
 ) {
@@ -399,12 +446,79 @@ pub fn update(
         course.delivered += 1;
         course.best_margin = Some(course.best_margin.map_or(margin, |b| b.max(margin)));
         course.from = course.to;
-        let here = course.target();
-        course.take_consignment(here);
+        if course.is_shared() {
+            // **The relay calls the next leg, for everybody at once.** A boat that
+            // picked her own here would sail off to somewhere nobody else is going,
+            // with her console insisting she was on the same job as the rest of them.
+            // She waits, and the wait is the end of the leg — which is what a finish is.
+            course.leg = Leg::Idle;
+            if let Some(link) = net.link.as_ref() {
+                link.arrived(course.elapsed as f32);
+            }
+        } else {
+            let here = course.target();
+            course.take_consignment(here);
+        }
         for mut mark in &mut marks {
             mark.at = course.target();
         }
     }
+}
+
+/// Take the leg the relay has called.
+///
+/// **Its own system rather than a line in the packet reader**, for the same reason
+/// rebuilding the world is: the reader takes what arrived off the wire, and deciding
+/// what the boat is doing about it belongs beside the thing that decides that.
+pub fn shared_leg(
+    mut net: ResMut<crate::net::Net>,
+    mut course: ResMut<Course>,
+    mut marks: Query<&mut Floating, With<Destination>>,
+) {
+    // The link has gone: back to picking her own jobs. A boat left idle for ever
+    // because the relay that was handing out legs is no longer there would be a boat
+    // with nothing to do and no way of knowing why.
+    if net.link.is_none() {
+        if course.is_shared() {
+            course.share(false);
+            if course.leg == Leg::Idle {
+                let here = course.harbours.get(course.from).map(|h| h.at);
+                if let Some(here) = here {
+                    course.take_consignment(here);
+                }
+            }
+            info!("course: on her own again");
+        }
+        return;
+    }
+    let Some(passage) = net.leg.take() else {
+        return;
+    };
+    course.share(true);
+    if !course.take_shared(passage.from as usize, passage.to as usize) {
+        // A leg naming a harbour this archipelago has not got is a leg from a relay
+        // that built a different world. Said out loud: it is the one failure that would
+        // otherwise look like the console simply not updating.
+        warn!(
+            "leg: harbours {} and {} are not in this sea of {}",
+            passage.from,
+            passage.to,
+            course.harbours.len()
+        );
+        return;
+    }
+    for mut mark in &mut marks {
+        mark.at = course.target();
+    }
+    info!(
+        "leg: {} to {}, {:.1} nm, allowed {:.0} min",
+        course.harbours[passage.from as usize].name,
+        course.destination_name(),
+        (course.harbours[passage.to as usize].at - course.harbours[passage.from as usize].at)
+            .length()
+            / 1852.0,
+        course.allowed / 60.0
+    );
 }
 
 /// Give up on this consignment and take another from where you are.
@@ -447,6 +561,63 @@ pub fn restart(
 pub fn clock(seconds: f64) -> String {
     let s = seconds.max(0.0);
     format!("{}:{:04.1}", (s / 60.0) as u32, s % 60.0)
+}
+
+#[cfg(test)]
+mod a_leg_everybody_is_on {
+    use super::*;
+
+    fn two_ports() -> Course {
+        Course::new(
+            vec![
+                Harbour {
+                    name: "Grimvik".into(),
+                    at: DVec2::new(0.0, 0.0),
+                    exposed_to: 0.0,
+                },
+                Harbour {
+                    name: "Fuglnes".into(),
+                    at: DVec2::new(4_000.0, 0.0),
+                    exposed_to: 0.0,
+                },
+            ],
+            DVec2::ZERO,
+        )
+    }
+
+    /// **The same job has to be the same job**, and the part of it that is easiest to
+    /// get wrong is the clock: an allowance worked out from where each boat is floating
+    /// gives two people different deadlines for one leg, and whoever happened to be
+    /// nearer the start would be given longer as well.
+    #[test]
+    fn the_allowance_is_the_same_wherever_she_happens_to_be() {
+        let mut near = two_ports();
+        let mut far = two_ports();
+        assert!(near.take_shared(0, 1));
+        assert!(far.take_shared(0, 1));
+        assert_eq!(near.allowed, far.allowed);
+        // And it is the leg's own length that decides it, not nothing.
+        assert!(near.allowed > 4_000.0 / kn_to_ms(PLANNING_SPEED_KN));
+
+        // A leg this sea has not got is refused rather than taken half way.
+        let mut course = two_ports();
+        let was = (course.from, course.to);
+        assert!(!course.take_shared(0, 9), "a harbour that is not there");
+        assert!(!course.take_shared(1, 1), "a leg from a place to itself");
+        assert_eq!((course.from, course.to), was);
+    }
+
+    /// Whose legs these are decides what happens on arrival, so it has to survive the
+    /// link going away: a boat left idle for ever because the relay that was handing out
+    /// jobs has gone is a boat with nothing to do and no way of knowing why.
+    #[test]
+    fn she_goes_back_to_her_own_jobs() {
+        let mut course = two_ports();
+        course.share(true);
+        assert!(course.is_shared());
+        course.share(false);
+        assert!(!course.is_shared());
+    }
 }
 
 #[cfg(test)]

@@ -284,6 +284,7 @@ fn the_check_is_in_the_decoding() {
             cover: 0.5,
             t: 1.0,
         },
+        passage: None,
     });
     assert!(
         decode::<ToClient>(&welcome).is_none(),

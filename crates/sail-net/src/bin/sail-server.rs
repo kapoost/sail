@@ -33,8 +33,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use sail_core::wind::{SyntheticWind, WindField};
 use sail_net::{
-    decode, encode, on_our_own_network, BoatId, Drawn, Sky, Squall, ToClient, ToServer, World,
-    FORGOTTEN, PORT, PROTOCOL,
+    decode, encode, on_our_own_network, BoatId, Drawn, Passage, Sky, Squall, ToClient, ToServer,
+    World, FORGOTTEN, PORT, PROTOCOL,
 };
 
 struct Aboard {
@@ -128,6 +128,14 @@ fn main() -> std::io::Result<()> {
     // the tap. Five a second is more than enough for the real case — somebody typing
     // the word wrong, once a second, and reading what came back — and nothing at all for
     // anybody sweeping the port.
+    /// How long a leg may stand before the relay calls another, seconds.
+    ///
+    /// Half an hour. The legs this archipelago offers are a mile and three quarters or
+    /// so, which is twenty minutes with the wind where you want it and an hour if you
+    /// have to work for it — so this is not a deadline, it is a floor under "somebody
+    /// shut the lid and went to bed".
+    const LEG_AT_MOST: f32 = 1_800.0;
+
     const REFUSALS_A_SECOND: u32 = 5;
     let mut refused = 0u32;
     let mut refusals_since = Instant::now();
@@ -146,6 +154,24 @@ fn main() -> std::io::Result<()> {
     // (N-1)-squared in the worst case and twelve boats at fifteen snapshots is still
     // under a megabit.
     const ABOARD: usize = 12;
+
+    // **The legs everybody sails**, picked here because somebody has to pick and the
+    // relay is the only thing in this game that is not one of the boats.
+    //
+    // The harbours come out of the same seed and the same generator the game uses — see
+    // `Archipelago::of_seed`, which exists so that this is not a second copy of four
+    // numbers. A leg is then a pair of indices into that list: three bytes, and the same
+    // two places on every screen.
+    let harbours = sail_core::land::Archipelago::of_seed(seed).harbours();
+    if harbours.len() < 2 {
+        println!(
+            "this sea has {} harbours in it — no legs to sail",
+            harbours.len()
+        );
+    }
+    let mut leg: Option<Passage> = None;
+    let mut home: Vec<BoatId> = Vec::new();
+    let mut dice = sail_core::rng::Pcg32::new(seed ^ 0x1E6);
 
     let mut fleet: HashMap<SocketAddr, Aboard> = HashMap::new();
     let mut next_id: BoatId = 1;
@@ -251,6 +277,10 @@ fn main() -> std::io::Result<()> {
                         your_id: id,
                         world,
                         sky: sky_now(&wind, t),
+                        // The leg in progress rather than nothing: somebody who joins
+                        // late gets the job everybody else is on, which is most of the
+                        // point of there being one.
+                        passage: leg,
                     });
                     let _ = socket.send_to(&welcome, from);
                 }
@@ -306,6 +336,24 @@ fn main() -> std::io::Result<()> {
                         }
                     }
                 }
+                ToServer::Arrived { id, seconds } => {
+                    // From the boat that claims it, and only once.
+                    if fleet.get(&from).map(|b| b.id) != Some(id) || home.contains(&id) {
+                        continue;
+                    }
+                    home.push(id);
+                    let name = fleet.get(&from).map(|b| b.name.clone()).unwrap_or_default();
+                    println!(
+                        "{name} is in — {:.0}m{:02.0}s",
+                        seconds / 60.0,
+                        seconds % 60.0
+                    );
+                    broadcast(
+                        &socket,
+                        &fleet,
+                        &encode(&ToClient::Home { id, name, seconds }),
+                    );
+                }
                 ToServer::Leaving { id } => {
                     if fleet.get(&from).map(|b| b.id) == Some(id) {
                         fleet.remove(&from);
@@ -326,6 +374,33 @@ fn main() -> std::io::Result<()> {
             fleet.remove(&addr);
             println!("{id} went quiet");
             broadcast(&socket, &fleet, &encode(&ToClient::Gone { id }));
+        }
+
+        // **A leg, and the next one once this is over.**
+        //
+        // Over means everybody aboard is in — or nobody has come in for long enough that
+        // waiting is worse than starting again, because a boat that joined, sailed off
+        // and shut the lid would otherwise hold the whole fleet on a leg nobody is
+        // sailing.
+        let everybody_in = !fleet.is_empty() && fleet.values().all(|b| home.contains(&b.id));
+        let stale = leg.is_some_and(|l: Passage| t - l.began > LEG_AT_MOST);
+        if harbours.len() >= 2 && !fleet.is_empty() && (leg.is_none() || everybody_in || stale) {
+            // Drawn rather than chosen: a relay that picked the nearest pair would send
+            // everybody back and forth between the same two all evening.
+            let a = (dice.next_f64() * harbours.len() as f64) as usize % harbours.len();
+            let mut b = (dice.next_f64() * harbours.len() as f64) as usize % harbours.len();
+            if b == a {
+                b = (a + 1) % harbours.len();
+            }
+            let next = Passage {
+                from: a as u16,
+                to: b as u16,
+                began: t,
+            };
+            leg = Some(next);
+            home.clear();
+            println!("leg: {} to {}", harbours[a].name, harbours[b].name);
+            broadcast(&socket, &fleet, &encode(&ToClient::Leg(next)));
         }
 
         // The weather, once a second. The gust field is not in here and does not need to

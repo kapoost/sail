@@ -923,6 +923,25 @@ impl Archipelago {
             .collect()
     }
 
+    /// The archipelago a seed makes, with the parameters that decide what it is.
+    ///
+    /// **Here rather than in the game**, and that is not tidiness. The relay has to be
+    /// able to name a harbour to everybody — a shared leg is a pair of indices into this
+    /// list — and an index only means the same place if both ends built the same
+    /// archipelago. Two call sites with the same four numbers typed into them is two
+    /// call sites that will eventually disagree, and the way that failure shows up is
+    /// everybody sailing to a different port while the console says they are all bound
+    /// for the same one.
+    ///
+    /// Five and a half kilometres each way, which brings the harbours within a sailable
+    /// leg of each other: measured, the median gap is under four miles and the nearest
+    /// neighbour under two. Thirty-four is a ceiling and not a count — the generator
+    /// walks a chain, fills the band it drew and stops where the water runs out, which
+    /// over three hundred days lands between twenty-four and thirty-four islands.
+    pub fn of_seed(seed: u64) -> Self {
+        Self::generate_around(seed ^ 0x15_1A_4D, 5_600.0, 34, 900.0)
+    }
+
     pub fn harbours(&self) -> Vec<Harbour> {
         // Two hundred and forty metres rather than three hundred and twenty. A smaller
         // archipelago has fewer islands over any given size, and the harbours are what
