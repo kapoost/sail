@@ -698,6 +698,41 @@ pub fn draw(
                         telemetry.under_keel < 1.5,
                     );
                 });
+                // **And the tide, which is two questions and one line.** How much water
+                // there is now, and when the next turn is — because a tide is not a
+                // reading you act on, it is a reading you *plan* on: the bar with two
+                // metres over it at dawn has four over it at eleven, and the only way
+                // that is a decision rather than a surprise is if the hour is on the
+                // screen beside the depth.
+                //
+                // Whichever turn is nearer, named. "HW 2:14" and "LW 0:36" are the two
+                // things anybody writes on the back of their hand before leaving.
+                if sim.sim.tide.range() > 0.05 {
+                    let now = sim.sim.state.time;
+                    let high = sim.sim.tide.until_high(now);
+                    let low = sim.sim.tide.until_low(now);
+                    let (turn, until) = if high < low {
+                        ("HW", high)
+                    } else {
+                        ("LW", low)
+                    };
+                    readout(
+                        ui,
+                        "TIDE",
+                        &format!("{:+.1} m {turn} {}", telemetry.tide, hours_minutes(until)),
+                    );
+                    // The stream only when there is one worth steering for. A fifth of a
+                    // knot is inside the error of everything else on this screen; a knot
+                    // and a half across your track is twenty degrees of course to steer,
+                    // and that is the number this line exists to give.
+                    let rate = sail_core::units::ms_to_kn(telemetry.stream.length());
+                    if rate > 0.2 {
+                        let set =
+                            sail_core::units::deg(telemetry.stream.x.atan2(telemetry.stream.y))
+                                .rem_euclid(360.0);
+                        readout(ui, "STREAM", &format!("{rate:.1} kn {set:03.0}"));
+                    }
+                }
                 let (glass, tendency) = sim.sim.wind.barometer();
                 readout(
                     ui,
@@ -1753,6 +1788,15 @@ fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &st
 /// steady, and three or more is the one that gets a name — a fall of three in three
 /// hours is the classic "gale warning on the glass" and is why it is worth a word of its
 /// own rather than a number nobody weighs.
+/// Hours and minutes, for a thing that is a time away rather than a duration.
+///
+/// "2:14", not "134 min". A tide is planned against a clock — "we leave at half two" —
+/// and the two notations are not the same thought even when they are the same number.
+fn hours_minutes(seconds: f64) -> String {
+    let total = (seconds / 60.0).round().max(0.0) as i64;
+    format!("{}:{:02}", total / 60, total % 60)
+}
+
 fn tendency_words(three_hourly: f64) -> String {
     let rate = three_hourly.abs();
     let how = if rate < 0.5 {

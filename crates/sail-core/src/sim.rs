@@ -110,6 +110,12 @@ pub struct Simulation {
     /// a head one.
     prev_slope_along: f64,
     prev_slope_athwart: f64,
+    /// The tide, which is the other half of what the land is doing.
+    ///
+    /// Here rather than on the land, because a world with no islands in it still has a
+    /// tide running through it, and because the open-water tests and the polar want a
+    /// `Tide::none()` they can rely on.
+    pub tide: crate::tide::Tide,
     /// The land, if there is any. Shared, because the presentation layer draws the
     /// same islands the physics runs aground on.
     pub land: Option<std::sync::Arc<crate::land::Archipelago>>,
@@ -141,6 +147,7 @@ impl Simulation {
             strain_stay: 0.0,
             capsizing: 0.0,
             prev_state: state,
+            tide: crate::tide::Tide::none(),
             land: None,
             prev_slope_along: 0.0,
             prev_slope_athwart: 0.0,
@@ -275,7 +282,7 @@ impl Simulation {
         // describes the whole of the local water — and the alternative, asking per
         // query, would trace rays a hundred times a substep for an answer that does
         // not change across the hull.
-        let (depth, shelter) = match &self.land {
+        let (charted, shelter) = match &self.land {
             Some(land) => {
                 let from = direction_of(self.wind.sample(st.pos, st.time));
                 (land.depth(st.pos), land.shelter(st.pos, from))
@@ -283,6 +290,17 @@ impl Simulation {
             None => (crate::land::OPEN_WATER, 1.0),
         };
         self.water.set_shelter(shelter);
+        // **What the chart says, plus what the tide has brought.** A sounding is the
+        // least water there ever is — that is what a chart datum is for — so the depth
+        // the sounder reads is the sounding plus the height of the tide, and the two
+        // differ by more than a keel. A bar with two metres on it at the lowest is four
+        // at the top of an ordinary tide, and the whole question of when to go is that
+        // difference.
+        let depth = charted + self.tide.height(st.time);
+        // And the stream it arrived on. Taken once at the boat, like the depth and the
+        // shelter, and for the same reason: it varies over a kilometre and she is eleven
+        // metres long.
+        let stream = self.tide.stream(st.time, depth);
 
         self.wind.step(dt);
         let wind_ref = self.wind.sample(st.pos, st.time);
@@ -303,7 +321,14 @@ impl Simulation {
         // ground stop being the same number here; the hull cares about the former and
         // the apparent wind about the latter.
         let water_velocity = self.water.velocity(st.pos, st.time);
-        let water_drift = DVec2::new(water_velocity.x, water_velocity.y);
+        // **And the tide is water moving too.** It goes in here rather than into the
+        // position integration, and that is the whole trick: a boat is not carried
+        // sideways by an arrow added to her track, she is carried because her keel and
+        // her rudder are in water that is going somewhere, and everything downstream of
+        // this subtraction already knew what to do about that. Leeway, the feel of the
+        // helm, the speed she makes through it — all of it comes out right for free, and
+        // the log reads what the log would read while the ground slides past.
+        let water_drift = DVec2::new(water_velocity.x, water_velocity.y) + stream;
         let relative = st.to_body(velocity - water_drift);
         let surge_rel = relative.x;
         let sway_rel = relative.y;
@@ -882,7 +907,7 @@ impl Simulation {
         let lp_water = self
             .water
             .velocity_at_depth(st.pos, cfg.lateral_plane_depth, st.time);
-        let lp_rel = st.to_body(velocity - DVec2::new(lp_water.x, lp_water.y));
+        let lp_rel = st.to_body(velocity - DVec2::new(lp_water.x, lp_water.y) - stream);
         let lp_sway = lp_rel.y + st.yaw_rate * cfg.x_clr;
         let lp_speed = (lp_rel.x * lp_rel.x + lp_sway * lp_sway).sqrt();
         let lp_flow_angle = if lp_speed < 1e-3 {
@@ -903,7 +928,7 @@ impl Simulation {
         let rud_water = self
             .water
             .velocity_at_depth(st.pos, cfg.rudder_depth, st.time);
-        let rud_rel = st.to_body(velocity - DVec2::new(rud_water.x, rud_water.y));
+        let rud_rel = st.to_body(velocity - DVec2::new(rud_water.x, rud_water.y) - stream);
         let rud_sway = rud_rel.y + st.yaw_rate * cfg.x_rudder;
         let rud_speed = (rud_rel.x * rud_rel.x + rud_sway * rud_sway).sqrt();
         let rud_flow_angle = if rud_speed < 1e-3 {
@@ -1544,6 +1569,8 @@ impl Simulation {
             bend_jib,
             depth,
             under_keel: depth - cfg.draft,
+            tide: self.tide.height(st.time),
+            stream,
             tws,
             twd,
             twa: wrap_pi(wind_body.y.atan2(wind_body.x)),

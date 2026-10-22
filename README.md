@@ -42,8 +42,8 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
      workspace". Written in words once, and the site build went red on every push for six
      hours without anybody noticing, because nothing else depends on it. -->
 
-2. **The physics is testable without opening a window.** 155 tests in the core assert
-   against figures a sailor knows from the water — 462 across the workspace, run by CI
+2. **The physics is testable without opening a window.** 169 tests in the core assert
+   against figures a sailor knows from the water — 476 across the workspace, run by CI
    on every push. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.

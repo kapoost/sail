@@ -384,8 +384,17 @@ impl Mishap {
 pub struct Telemetry {
     /// Water under the keel's deepest point, metres. Negative means she is on it.
     pub under_keel: f64,
-    /// Depth of water, metres, as a sounder reads it.
+    /// Depth of water, metres, as a sounder reads it — the charted sounding plus the
+    /// tide, which is what makes a bar passable in the afternoon and not at dawn.
     pub depth: f64,
+    /// Height of the tide above mean level, metres, and the stream it arrived on, m/s
+    /// over the ground.
+    ///
+    /// Published because a tide you cannot read is indistinguishable from a bug: the
+    /// boat crabs sideways, the log and the ground disagree, and without a number
+    /// saying why, the only available explanation is that the steering is broken.
+    pub tide: f64,
+    pub stream: glam::DVec2,
     /// True wind speed and direction at reference height.
     pub tws: f64,
     pub twd: f64,

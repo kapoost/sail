@@ -560,6 +560,52 @@ pub fn draw(
                                 }
                             }
 
+                            // **The tide, as a state rather than a time.** Nobody thinks in
+                            // phase angles: they think "an hour before high water", and
+                            // what they want to see is what that looks like from the
+                            // cockpit. So the dial asks for a height and the model moves
+                            // its own clock to suit — the water is not held there, it goes
+                            // on rising or falling from where it was put, which is the
+                            // only way the dial can be used to find out what a falling
+                            // tide does to a sound.
+                            //
+                            // Above the wind's dials because it is not the wind's: the
+                            // block below takes the field's dials and returns early when
+                            // there are none, and an open-ocean world with no tide in it
+                            // should still be able to set its swell.
+                            if sim.sim.tide.amplitude() > 0.05 {
+                                let now = sim.sim.state.time;
+                                let swing = sim.sim.tide.amplitude() as f32;
+                                let mut height = sim.sim.tide.height(now) as f32;
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut height, -swing..=swing)
+                                            .text("tide, m"),
+                                    )
+                                    .changed()
+                                {
+                                    sim.sim.tide.put_at(height as f64, now);
+                                    settings.weather_touched = true;
+                                }
+                                let stream = sail_core::units::ms_to_kn(
+                                    sim.sim.telemetry.stream.length(),
+                                );
+                                let high = sim.sim.tide.until_high(now);
+                                let low = sim.sim.tide.until_low(now);
+                                let (turn, until) =
+                                    if high < low { ("high", high) } else { ("low", low) };
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{:.1} m range · {stream:.1} kn · {turn} water in {:.0} min",
+                                        sim.sim.tide.range(),
+                                        until / 60.0,
+                                    ))
+                                    .color(egui::Color32::from_rgb(150, 150, 130))
+                                    .monospace()
+                                    .size(10.0),
+                                );
+                            }
+
                             // And the wind, if whatever is behind the field has dials on it. A real
                             // forecast would not, and would say so here rather than pretending.
                             let Some(wind) = sim.sim.wind.adjustable() else {

@@ -320,9 +320,25 @@ rather than this one.
 live, wishlists open, demo app built from the same binary. *Ends when a stranger can
 wishlist it and play the demo.*
 
-**M3 — Content wave one.** Tides and fog; ~~night~~ landed early, with the lights
-flashing their own characters. *Ends when a night entry into a strange
-harbour in poor visibility is a thing you can do and want to tell somebody about.*
+**M3 — Content wave one.** ~~Tides~~ and ~~fog~~ both in; ~~night~~ landed early, with
+the lights flashing their own characters.
+
+*Fog* is weather of its own — a slow process in the synoptic that a breeze blows away,
+so a bank sits in a calm and burns off when it fills in. It takes the visibility down to
+sixty metres, puts the dome out as well as the water, and reaches the bearing compass:
+a headland the renderer has fogged out can no longer be named or shot.
+
+*Tide* is height and stream from one constituent, M2. The height goes on the sounding —
+so a bar that is passable at eleven is not at dawn — and the stream goes in as *water*,
+which means the keel and the rudder feel it and everything downstream of that comes out
+right by itself: she crabs, the log still reads her speed through it, and a fair tide
+costs her a little apparent wind. The range belongs to the coast and the hour to the
+day, which is what makes tidal planning a thing rather than a constant.
+
+*Ends when a night entry into a strange harbour in poor visibility is a thing you can do
+and want to tell somebody about.* What is left for that: the harbour approach itself —
+the lights are there, the fog is there, the water is there, and nobody has yet sailed
+one in anger to find out what is missing.
 
 **M4 — Early Access launch.** Trailer, capsules, price, date announced four to six weeks
 ahead. *Ends on the day it is for sale.*

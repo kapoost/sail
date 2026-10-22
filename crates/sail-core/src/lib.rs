@@ -45,6 +45,7 @@ pub mod rng;
 pub mod sail;
 pub mod sim;
 pub mod state;
+pub mod tide;
 pub mod units;
 pub mod water;
 pub mod wind;

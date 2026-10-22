@@ -186,6 +186,17 @@ impl Sim {
                 .with_land(land)
         };
 
+        // The tide the place has, on the hour this day happens to bring. The two seeds
+        // are the same two as the islands and the weather, and for the same reason: a
+        // coast keeps its range between visits, and a passage that always opened at
+        // slack water would have no tidal planning in it.
+        sim.tide = sail_core::tide::Tide::of(archipelago, weather.seed);
+        info!(
+            "tide: {:.1} m range, high water in {:.0} min",
+            sim.tide.range(),
+            sim.tide.until_high(0.0) / 60.0
+        );
+
         // Sheets hard in is the wrong place to start. At three knots close-hauled the
         // apparent wind is well forward of where it settles, so block-to-block sheets
         // put both sails past their best angle and the boat cannot accelerate out of
