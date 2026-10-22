@@ -50,6 +50,20 @@ const WIND_SHAPE: f64 = 2.0;
 const WIND_MIN_KN: f64 = 9.0;
 const WIND_MAX_KN: f64 = 34.0;
 
+/// And how far `SAIL_WIND` may go, which is a different question.
+///
+/// **A drawn day is capped; a dial is a question.** The ceiling above is about what the
+/// game hands somebody who did not ask — thirty-four knots is where a boat this size is
+/// out by mistake rather than by choice, and no draw should exceed it. But a dial exists
+/// to ask the model what something looks like, and "what does a fifteen-metre sea
+/// actually look like" is a question the water can answer and the clamp was refusing on
+/// the boat's behalf.
+///
+/// Ninety knots is a hurricane and is where the answers stop being about sailing.
+/// Nothing is promised about the boat up there — she is a cork — but the sea is the
+/// same spectrum it always was, and that is the thing being asked about.
+const WIND_ASKED_MAX_KN: f64 = 90.0;
+
 /// Fetch band, metres: a sheltered bay at one end, a long open coast at the other.
 ///
 /// Twelve kilometres is a sheltered bay with a decent run across it, and the floor is
@@ -152,7 +166,7 @@ impl Weather {
         let knots = crate::knob::var("SAIL_WIND")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
-            .map_or(knots, |k| k.clamp(WIND_MIN_KN, WIND_MAX_KN));
+            .map_or(knots, |k| k.clamp(WIND_MIN_KN, WIND_ASKED_MAX_KN));
         let tws = kn_to_ms(knots);
 
         let wind_from = rng.next_f64() * std::f64::consts::TAU;
@@ -165,9 +179,23 @@ impl Weather {
             -magnitude
         };
 
-        // Log-uniform fetch.
-        let f = rng.next_f64();
-        let fetch = FETCH_MIN * (FETCH_MAX / FETCH_MIN).powf(f);
+        // Log-uniform fetch — or `SAIL_FETCH`, in kilometres, for the same reason
+        // `SAIL_WIND` exists.
+        //
+        // **Fetch is what makes a sea big, more than wind is.** Thirty-four knots over
+        // the three hundred kilometres this archipelago can offer is three and a half
+        // metres; the same wind over the fifteen hundred a Southern Ocean low has behind
+        // it is nearly twice that, and at fifty knots fully developed it is fifteen. The
+        // draw stays inside what a shelf sea has, because that is where this game is
+        // sailed. The dial does not, because the question is about the water.
+        let fetch = crate::knob::var("SAIL_FETCH")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .map(|km| (km * 1_000.0).clamp(1_000.0, 4_000_000.0))
+            .unwrap_or_else(|| {
+                let f = rng.next_f64();
+                FETCH_MIN * (FETCH_MAX / FETCH_MIN).powf(f)
+            });
         let (hs, tp) = fetch_limited_sea(tws, fetch);
 
         // What a skipper would already have tied in. Asked of the model rather than
@@ -312,7 +340,34 @@ pub fn force(knots: f64) -> u8 {
         k if k < 34.0 => 7,
         k if k < 41.0 => 8,
         k if k < 48.0 => 9,
-        _ => 10,
+        k if k < 56.0 => 10,
+        k if k < 64.0 => 11,
+        _ => 12,
+    }
+}
+
+/// What each force is called.
+///
+/// Its own table so that [`force`] and [`beaufort`] cannot disagree, which they did:
+/// the number came from one list of thresholds and the name from a second list beside
+/// it, and the second was shifted by a whole force. Thirty knots was reported as
+/// "force 8, gale" by the words and as 7 by the number, in the same program, off the
+/// same wind. One table, two readers.
+fn named(force: u8) -> &'static str {
+    match force {
+        0 => "calm",
+        1 => "light air",
+        2 => "light breeze",
+        3 => "gentle breeze",
+        4 => "moderate breeze",
+        5 => "fresh breeze",
+        6 => "strong breeze",
+        7 => "near gale",
+        8 => "gale",
+        9 => "severe gale",
+        10 => "storm",
+        11 => "violent storm",
+        _ => "hurricane",
     }
 }
 
@@ -322,7 +377,7 @@ pub fn force(knots: f64) -> u8 {
 /// that lands on 21.9 knots is a five, and the person who moved it will say the dial is
 /// broken rather than that they are a knot short.
 pub fn force_wind(force: u8) -> f64 {
-    match force.min(10) {
+    match force.min(12) {
         0 => 0.5,
         1 => 2.0,
         2 => 5.0,
@@ -333,7 +388,9 @@ pub fn force_wind(force: u8) -> f64 {
         7 => 30.5,
         8 => 37.0,
         9 => 44.0,
-        _ => 52.0,
+        10 => 52.0,
+        11 => 60.0,
+        _ => 70.0,
     }
 }
 
@@ -357,17 +414,9 @@ pub fn sea_state(hs: f64) -> &'static str {
 }
 
 /// The scale a sailor actually thinks in.
-pub fn beaufort(knots: f64) -> &'static str {
-    match knots {
-        k if k < 4.0 => "force 2, light breeze",
-        k if k < 7.0 => "force 3, gentle breeze",
-        k if k < 11.0 => "force 4, moderate",
-        k if k < 17.0 => "force 5, fresh",
-        k if k < 22.0 => "force 6, strong",
-        k if k < 28.0 => "force 7, near gale",
-        k if k < 34.0 => "force 8, gale",
-        _ => "force 9, severe gale",
-    }
+pub fn beaufort(knots: f64) -> String {
+    let f = force(knots);
+    format!("force {f}, {}", named(f))
 }
 
 fn point_of_sail(twa: f64) -> &'static str {
@@ -377,6 +426,55 @@ fn point_of_sail(twa: f64) -> &'static str {
         a if a < 100.0 => "on a beam reach",
         a if a < 140.0 => "on a broad reach",
         _ => "running",
+    }
+}
+
+#[cfg(test)]
+mod what_the_wind_is_called {
+    use super::*;
+
+    /// **The number and the name came from two tables and the tables disagreed.**
+    /// Thirty knots was `force(30) == 7` and `beaufort(30) == "force 8, gale"` — the
+    /// same wind, in the same program, named a whole force apart, because the words
+    /// list had been written beside the numbers list rather than out of it.
+    #[test]
+    fn the_number_and_the_name_are_the_same_wind() {
+        for knots in 0..100 {
+            let said = beaufort(knots as f64);
+            let number = force(knots as f64);
+            assert!(
+                said.starts_with(&format!("force {number},")),
+                "{knots} kn is force {number} and is called {said:?}"
+            );
+        }
+    }
+
+    /// And the thresholds are the scale as it is actually written down, including the
+    /// top end — which only became reachable when `SAIL_WIND` stopped being clamped to
+    /// what a drawn day may contain.
+    #[test]
+    fn the_scale_is_the_one_in_the_almanac() {
+        for (knots, expect) in [
+            (0.0, 0),
+            (3.9, 1),
+            (10.0, 3),
+            (27.9, 6),
+            (30.0, 7),
+            (34.0, 8),
+            (41.0, 9),
+            (48.0, 10),
+            (56.0, 11),
+            (64.0, 12),
+            (90.0, 12),
+        ] {
+            assert_eq!(force(knots), expect, "{knots} kn");
+        }
+        assert!(beaufort(80.0).ends_with("hurricane"));
+        // And a force asked for comes back as a wind inside that force.
+        for f in 0..=12u8 {
+            let kn = force_wind(f);
+            assert_eq!(force(kn), f, "force {f} asked for gave {kn} kn");
+        }
     }
 }
 

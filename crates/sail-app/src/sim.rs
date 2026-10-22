@@ -89,6 +89,46 @@ impl Sim {
             weather.wind_from,
             weather.seed ^ 0xC0FFEE,
         );
+        // **`SAIL_SWELL=6,16,270` puts an ocean through it**: six metres at sixteen
+        // seconds from due west, whatever the wind here is doing.
+        //
+        // The comment four lines above has been saying "a coastal fetch, without the long
+        // ocean swell that would dwarf a thirty-four footer" since the sea was written,
+        // and it was true because there was no way to have one — every wave came out of
+        // `(tws, fetch)`, so the sea could only run where the wind ran and could only be
+        // as big as the wind at the boat justified. That is a shelf sea on a windy
+        // afternoon and it is not an ocean: a six-metre swell at sixteen seconds arrives
+        // under a fifteen-knot breeze from a storm that stopped two days ago a thousand
+        // miles away, and it is the thing you are sailing over.
+        //
+        // Height, period, and the bearing it comes *from* — the same convention as the
+        // wind, because that is the one a forecast uses and the one a sailor says out
+        // loud. The model holds the direction it runs towards, which is the other way
+        // round, and that conversion is done here once rather than in somebody's head.
+        if let Some(swell) = crate::knob::var("SAIL_SWELL").ok().and_then(|v| {
+            let mut n = v.split(',').map(|p| p.trim().parse::<f64>());
+            match (n.next(), n.next(), n.next()) {
+                (Some(Ok(hs)), Some(Ok(tp)), Some(Ok(from))) if hs > 0.0 && tp > 0.0 => {
+                    Some(sail_core::water::Swell {
+                        hs,
+                        tp,
+                        run: sail_core::units::rad(from) + std::f64::consts::PI,
+                    })
+                }
+                _ => {
+                    warn!("SAIL_SWELL wants height,period,bearing — for example 6,16,270");
+                    None
+                }
+            }
+        }) {
+            sea.set_swell(Some(swell), 0.0);
+            info!(
+                "swell: {:.1} m at {:.0} s from {:03.0}",
+                swell.hs,
+                swell.tp,
+                sail_core::units::deg(swell.run + std::f64::consts::PI).rem_euclid(360.0)
+            );
+        }
         // `SAIL_SEA=built` opens with the sea the wind has already made, instead of the
         // flat water it starts on and the two and a half hours it takes to build.
         //
@@ -111,11 +151,28 @@ impl Sim {
         }
         // The archipelago, and a wind that knows it is there. The land goes in before
         // the first substep so the boat is never started on a rock.
-        let land = std::sync::Arc::new(crate::islands::generate(archipelago));
-        let wind = sail_core::land::ShelteredWind::new(Box::new(wind), land.clone());
-        let mut sim = Simulation::new(cfg, state, Box::new(wind))
-            .with_water(Box::new(sea))
-            .with_land(land);
+        //
+        // **`SAIL_LAND=0` leaves it out**, which is open ocean: no islands, no marks, no
+        // harbours, no shelter and no bottom to run onto. It is a dial for looking at
+        // water — a big sea in an archipelago is a sea with a coast on three sides of it,
+        // and the question "what does this actually look like at thirty-four knots over
+        // three hundred kilometres of fetch" is one you cannot ask with land in the way.
+        //
+        // The simulation has always been able to do this: `land` is an `Option` and
+        // every reader of it already copes, which is what made the dial three lines
+        // rather than an afternoon. The one thing that goes with the land is the
+        // sheltering, and a wind sheltered by nothing is the wind.
+        let ashore = crate::knob::var("SAIL_LAND").is_ok_and(|v| v == "0" || v == "none");
+        let mut sim = if ashore {
+            info!("no land: open ocean");
+            Simulation::new(cfg, state, Box::new(wind)).with_water(Box::new(sea))
+        } else {
+            let land = std::sync::Arc::new(crate::islands::generate(archipelago));
+            let wind = sail_core::land::ShelteredWind::new(Box::new(wind), land.clone());
+            Simulation::new(cfg, state, Box::new(wind))
+                .with_water(Box::new(sea))
+                .with_land(land)
+        };
 
         // Sheets hard in is the wrong place to start. At three knots close-hauled the
         // apparent wind is well forward of where it settles, so block-to-block sheets

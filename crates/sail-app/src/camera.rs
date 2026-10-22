@@ -843,8 +843,19 @@ pub fn follow(
                 // from somewhere else, not to look away from her.
                 let swing =
                     Quat::from_rotation_y(aim.yaw) * Quat::from_rotation_x(-aim.pitch * 0.6);
+                // **And she is further away in a big sea**, because from twenty-one
+                // metres a boat in a ten-metre swell spends half her time behind a wall
+                // of water, and the wall is the thing worth looking at.
+                //
+                // Deliberately slow to start. An ordinary gale here is three and a half
+                // metres and moves this by a fifth, which is not a change anybody will
+                // notice; the band it is really for is the one the fetch dial opened up,
+                // where the waves are taller than the mast. Capped, because past four
+                // times out she is a speck and the camera is no longer following a boat.
+                let sea = sim.sim.water.significant_height().max(0.0) as f32;
+                let out = 1.0 + ((sea - 2.0).max(0.0) / 8.0).min(3.0);
                 let target = Vec3::new(hull.x, head.heave, hull.z)
-                    + heading * swing * Vec3::new(0.0, 9.0, 21.0);
+                    + heading * swing * Vec3::new(0.0, 9.0 * out, 21.0 * out);
                 if !chase.initialised {
                     chase.position = target;
                     chase.initialised = true;

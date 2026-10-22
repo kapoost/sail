@@ -381,6 +381,8 @@ pub struct WindSea {
     owed: f64,
     /// How much of the open sea reaches here; 1 in clear water, less in a lee.
     shelter: f64,
+    /// A sea made somewhere else, if one has reached here. See [`Swell`].
+    swell: Option<Swell>,
 }
 
 /// Components in the sea.
@@ -419,7 +421,73 @@ const LONGEST: f64 = 2.0;
 /// fully developed sea and it is what makes the peak dominate without the short waves
 /// vanishing — the short tail is small in height and large in slope, which is exactly
 /// what breaks into whitecaps.
-fn band(i: usize) -> (f64, f64, f64) {
+/// A sea made somewhere else.
+///
+/// **Swell is not the local wind and this model used to say it was.** Every wave here
+/// came out of `(tws, fetch)`, so a sea could only ever run where the wind ran and could
+/// only ever be as big as the wind at the boat justified. That is true of a shelf sea on
+/// a windy afternoon and false of an ocean: a six-metre swell at sixteen seconds arrives
+/// under a fifteen-knot breeze, from a storm that stopped blowing two days ago a thousand
+/// miles away, and it is the thing you are actually sailing over.
+///
+/// It is **narrow** where a wind sea is broad, and that is what makes it legible rather
+/// than just large: a wind sea is energy spread over a wide band of periods and sixty
+/// degrees of direction, and a swell has sorted itself on the way — the long waves travel
+/// faster and arrive first, so what reaches you is a few periods wide and a few degrees
+/// wide, regular, and from one bearing that has nothing to do with the wind on your face.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Swell {
+    /// Significant height of the swell alone, metres.
+    pub hs: f64,
+    /// Its period, seconds. Long: ten is a tired wind sea, sixteen is an ocean.
+    pub tp: f64,
+    /// The direction it runs *towards*, radians, like `running_towards`.
+    pub run: f64,
+}
+
+/// How many of the twenty-one components a swell takes when there is one.
+///
+/// **Taken from the wind sea rather than added beside it**, which is the whole reason
+/// this did not need a wider buffer, a bigger uniform or a line of shader changed: the
+/// card reads twenty-one components and still does. Six is enough for a train that is
+/// narrow in both period and direction — the thing that needed twenty-one was the wind
+/// sea, whose whole problem is that five of them make an interference pattern instead of
+/// a sea — and fifteen is still three times that.
+const SWELL_BANDS: usize = 6;
+
+/// The shape of one swell component: period ratio, angular offset, weight.
+///
+/// Narrow on purpose, and the numbers are what makes it read as swell. A sixth of the
+/// wind sea's spread in direction — six degrees against sixty — and a tenth of its range
+/// in period, so the train arrives as a set of long parallel ridges rather than as a
+/// heap. The same two irrational sequences as `band`, for the same reason: an even ladder
+/// beats with itself.
+fn swell_band(i: usize, of: usize) -> (f64, f64, f64) {
+    const GOLDEN: f64 = 0.618_033_988_749_894_8;
+    const ROOT_TWO: f64 = 0.414_213_562_373_095_1;
+    let jitter = ((i as f64 * ROOT_TWO) % 1.0) - 0.5;
+    let u = (i as f64 + 0.5 + jitter * 0.9) / of as f64;
+    // A tenth either side of the peak period, geometric so the spacing is even in
+    // frequency the way the wind sea's is — and long end first, also the way the wind
+    // sea's is, so that the whole list of components stays ordered from the longest
+    // wave to the shortest. Something downstream reads that ordering.
+    let period_ratio = 1.10 * (0.90_f64 / 1.10).powf(u);
+    // Six degrees of spread, split the way the wind sea's is: golden angle, so no two
+    // components ever sit at the same offset.
+    let place = ((i as f64 * GOLDEN) % 1.0) * 2.0 - 1.0;
+    let spread = 0.105 * place;
+    // Flat-topped rather than Pierson-Moskowitz: a swell has already lost the short end
+    // of its spectrum to dispersion, which is why it is a swell.
+    let weight = 1.0 - 0.25 * (u - 0.5).abs();
+    (period_ratio, spread, weight)
+}
+
+/// The wind sea's band shape, over however many bands it has been given.
+///
+/// Parametrised because a swell takes six of the twenty-one and the wind sea has to
+/// spread itself over what is left. With no swell `of` is `BANDS` and every number this
+/// returns is the number it always returned.
+fn band_in(i: usize, of: usize) -> (f64, f64, f64) {
     // Golden angle and the fractional part of i√2: two irrational sequences, one for
     // where the component sits in frequency inside its band and one for where it sits
     // in direction. A perfectly even ladder of frequencies beats — adjacent rungs a
@@ -430,7 +498,7 @@ fn band(i: usize) -> (f64, f64, f64) {
     const GOLDEN: f64 = 0.618_033_988_749_894_8;
     const ROOT_TWO: f64 = 0.414_213_562_373_095_1;
     let jitter = ((i as f64 * ROOT_TWO) % 1.0) - 0.5;
-    let u = (i as f64 + 0.5 + jitter * 0.9) / BANDS as f64;
+    let u = (i as f64 + 0.5 + jitter * 0.9) / of as f64;
     // Geometric in *frequency*, from the long end to the short.
     let fr = (1.0 / LONGEST) * ((1.0 / SHORTEST) / (1.0 / LONGEST)).powf(u);
     let period_ratio = 1.0 / fr;
@@ -479,6 +547,7 @@ impl WindSea {
             phases,
             owed: 0.0,
             shelter: 1.0,
+            swell: None,
         };
         sea.reshape(0.0, &[0.0; BANDS]);
         sea
@@ -493,8 +562,39 @@ impl WindSea {
     /// in, a jump of several wavelengths. Folding that into the stored phase keeps the
     /// water continuous where the boat is, which is the only place anyone can tell.
     fn reshape(&mut self, t: f64, was: &[f64; BANDS]) {
-        let shape: Vec<(f64, f64, f64)> = (0..BANDS).map(band).collect();
-        let norm: f64 = shape.iter().map(|(_, _, w)| w * w).sum::<f64>().sqrt();
+        // **Two trains out of one list of components.** A swell takes the first few
+        // bands and the wind sea spreads over the rest; with no swell the wind sea has
+        // all twenty-one and every number below is the number it always was.
+        //
+        // The swell goes *first* because the components are built long to short and
+        // something depends on that: `carries_everything` asks only the last one whether
+        // the mesh can carry it, on the grounds that the last is the shortest. A swell is
+        // the longest thing in the sea, so at the front it keeps that true; at the back it
+        // would have made the mesh think it could not draw a sea it draws perfectly well.
+        let swell_bands = if self.swell.is_some() { SWELL_BANDS } else { 0 };
+        let wind_bands = BANDS - swell_bands;
+        let shape: Vec<(f64, f64, f64)> = (0..BANDS)
+            .map(|i| {
+                if i < swell_bands {
+                    swell_band(i, swell_bands)
+                } else {
+                    band_in(i - swell_bands, wind_bands)
+                }
+            })
+            .collect();
+        // Each train normalised over its own bands, because each carries its own height.
+        // One normalisation over all twenty-one would have shared the two seas' energy
+        // out between them in whatever proportion the band weights happened to fall.
+        let norm_swell: f64 = shape[..swell_bands]
+            .iter()
+            .map(|(_, _, w)| w * w)
+            .sum::<f64>()
+            .sqrt();
+        let norm_wind: f64 = shape[swell_bands..]
+            .iter()
+            .map(|(_, _, w)| w * w)
+            .sum::<f64>()
+            .sqrt();
         self.components = (0..BANDS)
             .map(|i| {
                 // Hs is four times the root-mean-square elevation, and for a sum of
@@ -510,11 +610,15 @@ impl WindSea {
                 // metre is a metre.
                 const QUADRATURE: f64 = 0.353_553_390_593_273_8; // 1 / (2 root 2)
                 let (period_ratio, spread, weight) = shape[i];
-                let amplitude = self.hs * QUADRATURE * weight / norm;
+                let (hs, tp, run, norm) = match self.swell {
+                    Some(swell) if i < swell_bands => (swell.hs, swell.tp, swell.run, norm_swell),
+                    _ => (self.hs, self.tp, self.run, norm_wind),
+                };
+                let amplitude = hs * QUADRATURE * weight / norm;
                 let mut c = WaveComponent::from_period(
                     amplitude,
-                    self.tp * period_ratio,
-                    self.run + spread,
+                    tp * period_ratio,
+                    run + spread,
                     self.phases[i],
                 );
                 c.phase = crate::units::wrap_tau(self.phases[i] + (c.omega - was[i]) * t);
@@ -559,6 +663,31 @@ impl WindSea {
         &self.components
     }
 
+    /// The swell running through here, if one is.
+    pub fn swell(&self) -> Option<Swell> {
+        self.swell
+    }
+
+    /// Put one through, or take it away.
+    ///
+    /// A swell is a property of the ocean rather than of the boat: it does not grow or
+    /// die with the local wind, because the wind that made it stopped two days ago. So
+    /// there is no relaxation here and none is wanted — it is set, and it stays until
+    /// something sets it again.
+    pub fn set_swell(&mut self, swell: Option<Swell>, t: f64) {
+        if self.swell == swell {
+            return;
+        }
+        self.swell = swell;
+        let was: [f64; BANDS] = std::array::from_fn(|i| self.components[i].omega);
+        self.reshape(t, &was);
+    }
+
+    /// The wind sea alone, without whatever is running through it.
+    pub fn wind_sea_height(&self) -> f64 {
+        self.hs
+    }
+
     /// Period of the dominant component, seconds.
     /// Whether a mesh of this resolution can carry every component at full weight.
     ///
@@ -580,6 +709,18 @@ impl WindSea {
     /// a wind shift it had followed correctly.
     pub fn running_towards(&self) -> f64 {
         crate::units::wrap_tau(self.run)
+    }
+
+    /// The period of whichever train has the energy.
+    ///
+    /// A two-metre wind sea under a six-metre swell is a sixteen-second sea, not a
+    /// five-second one, and a forecast that said five would be describing the ripples on
+    /// top of the thing you are actually riding.
+    pub fn dominant_period(&self) -> f64 {
+        match self.swell {
+            Some(swell) if swell.hs > self.hs => swell.tp,
+            _ => self.tp,
+        }
     }
 
     pub fn peak_period(&self) -> f64 {
@@ -845,8 +986,20 @@ impl WaterSurface for WindSea {
         }
     }
 
+    /// **Both seas, added the way two independent seas add.**
+    ///
+    /// Energy is additive and height is not: two three-metre seas crossing make four and
+    /// a bit, not six. So it is the quadrature sum, and a boat in a six-metre swell under
+    /// a two-metre wind sea is told six point three — which is what she is in.
+    ///
+    /// Everything that reads this gets the combined figure, and that is the point: the
+    /// instruments, the music, the camera pulling back, the card. The wind sea alone is
+    /// [`wind_sea_height`](WindSea::wind_sea_height) for whoever wants the other half.
     fn significant_height(&self) -> f64 {
-        self.hs
+        match self.swell {
+            Some(swell) => (self.hs * self.hs + swell.hs * swell.hs).sqrt(),
+            None => self.hs,
+        }
     }
 }
 
