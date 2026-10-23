@@ -92,11 +92,13 @@ impl Default for SeaParams {
             music_level: AtomicU32::default(),
             sea_level: AtomicU32::default(),
             boat_level: AtomicU32::default(),
+            crew_level: AtomicU32::default(),
         };
         store(&p.master, 1.0);
         store(&p.music_level, 0.45);
         store(&p.sea_level, 1.0);
         store(&p.boat_level, 1.0);
+        store(&p.crew_level, 1.0);
         p
     }
 }
@@ -213,6 +215,8 @@ pub struct SeaParams {
     /// all of them, because a warning that can be mixed away is not a warning.
     sea_level: AtomicU32,
     boat_level: AtomicU32,
+    /// The watch, on its own fader. See `set_crew`.
+    crew_level: AtomicU32,
 }
 
 fn store(slot: &AtomicU32, v: f32) {
@@ -380,6 +384,21 @@ impl SeaParams {
 
     pub fn set_boat(&self, level: f32) {
         store(&self.boat_level, level.clamp(0.0, 1.0));
+    }
+
+    /// The watch calling, which is its own fader and not the gear's.
+    ///
+    /// **Because it is the one sound in the game that is a person.** The rest of what
+    /// the boat makes is weather acting on objects, and somebody who turns the gear down
+    /// is asking for less clatter — not for the crew to stop telling them the main is
+    /// about to go. The two wants are different often enough to be two sliders: a player
+    /// sailing to the sound of the rigging wants the calls up, and a player who has
+    /// heard every one of them forty times wants them down without losing the winch.
+    ///
+    /// It was on the boat's fader and that was defensible right up until anybody tried
+    /// to use it.
+    pub fn set_crew(&self, level: f32) {
+        store(&self.crew_level, level.clamp(0.0, 1.0));
     }
 
     pub fn set_muted(&self, muted: bool) {
@@ -862,6 +881,7 @@ impl Iterator for SeaStream {
             t_music,
             t_sea,
             t_boat,
+            t_crew,
         ) = {
             let p = &self.params;
             (
@@ -888,6 +908,7 @@ impl Iterator for SeaStream {
                 load(&p.music_level),
                 load(&p.sea_level),
                 load(&p.boat_level),
+                load(&p.crew_level),
             )
         };
 
@@ -1282,11 +1303,12 @@ impl Iterator for SeaStream {
 
         let mix = ((wind + water + thump + rain) * t_sea
             + (rig + flog + gear + bell) * t_boat
-            // **On the boat's bus, not the sea's.** A voice on deck is a thing aboard,
-            // so it rides the same fader as the rigging and the winches — turn the boat
-            // down and the watch goes quiet with it, which is the behaviour anybody
-            // would expect from a control labelled "boat".
-            + shout * SHOUT * t_boat)
+            // **Its own fader, and not the gear's.** It rode with the rigging and the
+            // winches, which is defensible — a voice on deck is a thing aboard — and
+            // wrong the moment anybody reached for the control: turning the clatter
+            // down should not stop the watch telling you the main is about to go. See
+            // `SeaParams::set_crew`.
+            + shout * SHOUT * t_crew)
             * MASTER
             * t_master
             + song * t_music * t_master * duck
@@ -2652,6 +2674,49 @@ mod what_was_recorded {
         loudest(&mut stream, SAMPLE_RATE as usize / 5);
         let after = loudest(&mut stream, SAMPLE_RATE as usize / 10);
         assert!(after < quiet + 0.1, "it was still going: {after:.3}");
+    }
+
+    /// **The watch has its own fader, and the gear's does not touch it.**
+    ///
+    /// The point of the control, as a test: somebody turning the clatter down is asking
+    /// for less winch, not for the crew to stop telling them the main is about to go.
+    /// It rode on the boat's fader until somebody reached for that slider.
+    #[test]
+    fn the_crew_fader_is_not_the_gear_fader() {
+        let band = || {
+            let params = Arc::new(SeaParams {
+                voices: vec![vec![0.5; SAMPLE_RATE as usize / 10]],
+                groups: [(0, 1); Call::KINDS],
+                ..SeaParams::default()
+            });
+            params.set_master(1.0);
+            params.set_sea(0.0);
+            params.set_music(0.0);
+            params
+        };
+        let loudest = |s: &mut SeaStream, n: usize| {
+            (0..n).fold(0.0_f32, |m, _| m.max(s.next().unwrap_or(0.0).abs()))
+        };
+        let call_with = |boat: f32, crew: f32| {
+            let params = band();
+            params.set_boat(boat);
+            params.set_crew(crew);
+            let mut stream = SeaStream::new(params.clone());
+            loudest(&mut stream, SAMPLE_RATE as usize / 2);
+            params.shout(Call::Warn, 0);
+            loudest(&mut stream, SAMPLE_RATE as usize / 10)
+        };
+
+        // The gear right down, the watch right up: still heard.
+        let heard = call_with(0.0, 1.0);
+        assert!(heard > 0.1, "the gear fader silenced the watch: {heard:.3}");
+        // And the other way round, which is the half somebody asks for after an
+        // evening of hearing the same dozen calls.
+        let hushed = call_with(1.0, 0.0);
+        assert!(
+            hushed < 0.05,
+            "the watch fader did not quiet the watch: {hushed:.3}"
+        );
     }
 
     /// Two of the same call in a row are two calls. With a bare index they would be one:

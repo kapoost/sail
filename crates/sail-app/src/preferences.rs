@@ -37,6 +37,7 @@ pub struct Kept {
     pub music: f32,
     pub sea: f32,
     pub boat: f32,
+    pub crew: f32,
     /// Where you are sitting: at the helm, or astern of her.
     pub cockpit: bool,
     /// The drawn sea rather than the lit one.
@@ -59,6 +60,7 @@ impl Default for Kept {
             music: settings.music,
             sea: settings.sea,
             boat: settings.boat,
+            crew: settings.crew,
             cockpit: false,
             ink: false,
             pixels: Retro::default_step(),
@@ -84,6 +86,10 @@ impl Kept {
                 "music" => kept.music = value.trim().parse().unwrap_or(kept.music),
                 "sea" => kept.sea = value.trim().parse().unwrap_or(kept.sea),
                 "boat" => kept.boat = value.trim().parse().unwrap_or(kept.boat),
+                // A file written before the watch had a fader simply has no line for
+                // it, and the default stands — which is why this did not want a new
+                // format number.
+                "crew" => kept.crew = value.trim().parse().unwrap_or(kept.crew),
                 "cockpit" => kept.cockpit = yes(value),
                 "ink" => kept.ink = yes(value),
                 "counter" => kept.counter = yes(value),
@@ -107,11 +113,12 @@ impl Kept {
         let flag = |on: bool| if on { "1" } else { "0" };
         format!(
             "sail settings {FORMAT}\nvolume {:.3}\nmusic {:.3}\nsea {:.3}\nboat {:.3}\n\
-             cockpit {}\nink {}\npixels {}\ncounter {}\nfull {}\nhud {}\n",
+             crew {:.3}\ncockpit {}\nink {}\npixels {}\ncounter {}\nfull {}\nhud {}\n",
             self.volume,
             self.music,
             self.sea,
             self.boat,
+            self.crew,
             flag(self.cockpit),
             flag(self.ink),
             match self.pixels {
@@ -233,6 +240,7 @@ fn as_set(settings: &Settings, picture: &Picture, kept: &Kept) -> Kept {
         music: settings.music,
         sea: settings.sea,
         boat: settings.boat,
+        crew: settings.crew,
         cockpit: *picture.view == View::Cockpit,
         ink: if ink_asked { kept.ink } else { picture.ink.0 },
         pixels: if pixels_asked {
@@ -285,6 +293,7 @@ mod what_is_remembered {
             music: 0.0,
             sea: 0.9,
             boat: 0.75,
+            crew: 0.33,
             cockpit: true,
             ink: true,
             pixels: Some(0),
@@ -310,6 +319,7 @@ mod what_is_remembered {
                     "music" => kept.music = value.trim().parse().unwrap(),
                     "sea" => kept.sea = value.trim().parse().unwrap(),
                     "boat" => kept.boat = value.trim().parse().unwrap(),
+                    "crew" => kept.crew = value.trim().parse().unwrap(),
                     "cockpit" => kept.cockpit = yes(value),
                     "ink" => kept.ink = yes(value),
                     "counter" => kept.counter = yes(value),

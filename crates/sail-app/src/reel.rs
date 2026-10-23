@@ -101,6 +101,7 @@ pub enum Act {
         master: f32,
         sea: f32,
         boat: f32,
+        crew: f32,
         music: f32,
     },
     /// How thick the fog is, nought to one — the weather page's own dial.
@@ -437,6 +438,9 @@ pub const DEMO: &[(f64, Act)] = &[
             master: 0.9,
             sea: 0.05,
             boat: 1.0,
+            // Up, because a demo is where the watch is worth hearing: a call is the
+            // one sound in the film with a person in it.
+            crew: 0.9,
             music: 0.0,
         },
     ),
@@ -821,6 +825,7 @@ fn play(act: Act, sim: &mut Sim, stage: &mut Stage) {
             master,
             sea,
             boat,
+            crew,
             music,
         } => {
             // The same resource the sound page writes, which is read into the mixer
@@ -829,6 +834,7 @@ fn play(act: Act, sim: &mut Sim, stage: &mut Stage) {
             stage.props.mix.volume = master;
             stage.props.mix.sea = sea;
             stage.props.mix.boat = boat;
+            stage.props.mix.crew = crew;
             stage.props.mix.music = music;
         }
         Act::Fog(thickness) => {

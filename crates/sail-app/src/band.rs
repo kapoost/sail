@@ -190,6 +190,7 @@ pub fn record(path: &str, seconds: f64, seed: u64) -> std::io::Result<()> {
     params.set_master(1.0);
     params.set_music(1.0);
     params.set_boat(1.0);
+    params.set_crew(0.9);
     params.set_sea(0.05);
 
     let mut world = App::new();

@@ -74,6 +74,9 @@ pub struct Settings {
     pub sea: f32,
     /// Her rigging, her gear and her sails making a noise.
     pub boat: f32,
+    /// And the watch, which is the one sound aboard that is a person — see
+    /// `sound::SeaParams::set_crew` for why that is worth a fader of its own.
+    pub crew: f32,
     /// Whether the weather has been touched. Until it is, the panel shows the day as
     /// drawn and says so; after it, it stops pretending the forecast still applies.
     pub weather_touched: bool,
@@ -106,6 +109,10 @@ impl Default for Settings {
             // speaks when it has something to say.
             sea: 0.055,
             boat: 0.42,
+            // Level with the gear rather than over it. A call is short and it is the
+            // only thing out there with words in it, so it carries without being loud —
+            // and a watch mixed above the boat she is standing on is a voiceover.
+            crew: 0.55,
             weather_touched: false,
         }
     }
@@ -125,6 +132,7 @@ pub fn apply(settings: Res<Settings>, sound: Res<SoundHandle>) {
     sound.0.set_master(settings.volume);
     sound.0.set_sea(settings.sea);
     sound.0.set_boat(settings.boat);
+    sound.0.set_crew(settings.crew);
     sound.0.set_music(settings.music);
 }
 
@@ -296,7 +304,14 @@ pub fn draw(
                             // with a soundtrack that is generated rather than composed for them.
                             // Copied out and back rather than borrowed twice, because the settings
                             // resource is one borrow and these are two sliders in it.
-                            let (mut sea, mut boat) = (settings.sea, settings.boat);
+                            //
+                            // **And the watch is a fourth, not part of the boat.** It
+                            // rode on the gear's fader, which is defensible — a voice
+                            // on deck is a thing aboard — and wrong the moment anybody
+                            // reached for the control: turning the clatter down should
+                            // not stop the crew telling you the main is about to go.
+                            let (mut sea, mut boat, mut crew) =
+                                (settings.sea, settings.boat, settings.crew);
                             ui.add(
                                 egui::Slider::new(&mut sea, 0.0..=1.0)
                                     .show_value(false)
@@ -307,8 +322,14 @@ pub fn draw(
                                     .show_value(false)
                                     .text("boat"),
                             );
+                            ui.add(
+                                egui::Slider::new(&mut crew, 0.0..=1.0)
+                                    .show_value(false)
+                                    .text("crew"),
+                            );
                             settings.sea = sea;
                             settings.boat = boat;
+                            settings.crew = crew;
                             let mut music = settings.music;
                             if ui
                                 .add(
