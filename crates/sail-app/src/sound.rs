@@ -1493,20 +1493,34 @@ fn wav_mono(bytes: &[u8]) -> Option<(Vec<f32>, u32)> {
     None
 }
 
+impl SeaParams {
+    /// The block the deck is given: the dials at their opening values, and whatever the
+    /// watch has been recorded saying loaded into it.
+    ///
+    /// **One place rather than two.** The audio thread gets this and so does `band.rs`,
+    /// which records the music with no window and no device — and a second copy of this
+    /// that forgot the voices is exactly the bug that was found by rendering a film with
+    /// a silent crew in it.
+    pub fn as_handed_to_the_deck() -> Self {
+        let (voices, groups) = recorded();
+        let params = Self {
+            voices,
+            groups,
+            ..Self::default()
+        };
+        // Seed the filter targets before the first frame writes them. A default of zero
+        // would pull every cutoff towards DC for the first few milliseconds, which is an
+        // audible thud on startup.
+        store(&params.wind_cutoff, 400.0);
+        store(&params.water_cutoff, 500.0);
+        store(&params.rig_hz, 200.0);
+        store(&params.flog_hz, 4.0);
+        params
+    }
+}
+
 pub fn setup(mut commands: Commands, mut assets: ResMut<Assets<SeaVoice>>) {
-    let (voices, groups) = recorded();
-    let params = Arc::new(SeaParams {
-        voices,
-        groups,
-        ..SeaParams::default()
-    });
-    // Seed the filter targets before the first frame writes them. A default of zero
-    // would pull every cutoff towards DC for the first few milliseconds, which is an
-    // audible thud on startup.
-    store(&params.wind_cutoff, 400.0);
-    store(&params.water_cutoff, 500.0);
-    store(&params.rig_hz, 200.0);
-    store(&params.flog_hz, 4.0);
+    let params = Arc::new(SeaParams::as_handed_to_the_deck());
     let voice = SeaVoice {
         params: params.clone(),
     };
@@ -1647,7 +1661,11 @@ pub struct Worked {
 pub fn update(
     sound: Res<SoundHandle>,
     sim: Res<Sim>,
-    rain: Res<crate::rain::Rain>,
+    // **Optional, because the rain is a drawn thing.** It is a mesh and a few thousand
+    // drops, built by the renderer, and a world with no window has none — which is
+    // exactly the world `band.rs` runs to record the music. The sound of rain is the
+    // one thing this reads off it, and no curtain means no rain.
+    rain: Option<Res<crate::rain::Rain>>,
     fishing: Res<crate::fishing::Fishing>,
     time: Res<Time>,
     mut was: Local<Worked>,
@@ -1763,7 +1781,8 @@ pub fn update(
 
     // Rain. The one voice here driven by something other than the boat, and the first
     // sound in the game that tells you about the weather rather than about the sailing.
-    store(&p.rain_level, rain.fall.clamp(0.0, 1.0).powf(0.8));
+    let falling = rain.map_or(0.0, |r| r.fall);
+    store(&p.rain_level, falling.clamp(0.0, 1.0).powf(0.8));
 
     // --- Gear ----------------------------------------------------------------
     //

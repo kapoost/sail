@@ -319,9 +319,16 @@ time. A headless world is built, the weather walks through the demo's scenes, th
 `music::compose` runs against it sixty times a second, and the same synthesiser the deck
 hears is turned by hand and written to a file.
 
-What comes out is **the band alone**: the sea and the gear are muted at the mixer rather
-than removed from the model, so the music still knows what the weather is doing. A stem,
-to lay under a picture that has its own sound or none.
+What comes out is **the band, the gear and the watch**, with the sea only as a whisper —
+the same four numbers the demo's own mixer sets. None of the gear is faked: the lines
+are hauled through `clutch::handle` at the rates the real gear runs at and `sound::update`
+hears them by differencing the controls, so a furling drum takes twelve seconds here
+because a furling drum takes twelve seconds. The watch calls through `hail::place`, which
+lands each one against the beat the band is playing.
+
+The calls are **silent unless `SAIL_VOICE` points at a directory of recordings**, and
+that is the right default: the ones on the development machine are public-domain
+stand-ins. Point it at your own and they appear, in rhythm, with nothing else to change.
 
 The scenes it plays to are **the cut's, not the reel's** — `reel.rs` is a hundred and
 thirty-eight seconds of take and the film is fifty, so music written against the take

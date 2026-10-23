@@ -16,13 +16,25 @@
 //! minute of music, and it is the *same* music: the same composer, the same voices, the
 //! same decisions about mode and metre.
 //!
-//! # The sea is turned off, and that is the point
+//! # What is in the mix, and what is not
 //!
-//! What comes out is the band alone. The sea, the rigging and the gear are muted at the
-//! mixer rather than removed from the model — they are still being calculated, the music
-//! still knows what the weather is doing — so what is written is a stem, in the sense a
-//! recording engineer means: one part of a mix, to be laid under a picture that already
-//! has its own sound or none.
+//! The band, **the gear and the watch** — and the sea only as a whisper. Which is the
+//! same decision the demo's own mixer makes and for the same reason: the sea is this
+//! program's loudest voice and the worst thing to put under a cut, while a winch, a
+//! furling drum and a reef line being hauled are the sounds that say a boat is a
+//! machine being worked.
+//!
+//! None of it is faked. The lines are hauled through `clutch::handle` at the rates the
+//! real gear runs at, and `sound::update` hears them the way it always does: by
+//! differencing the controls frame to frame. A drum takes twelve seconds here because a
+//! drum takes twelve seconds.
+//!
+//! **The watch calls through `hail::place`**, so the calls land in the music's own
+//! rhythm — slightly before or after the beat, which is what was built for them. They
+//! are silent unless `SAIL_VOICE` points at a directory of recordings, and that is the
+//! correct default: the ones on this machine are public-domain stand-ins, fine on the
+//! deck and not fine in a film anybody else will see. Record your own and they appear,
+//! in rhythm, with nothing else to change.
 //!
 //! # The scenes are the cut's, not the reel's
 //!
@@ -111,6 +123,48 @@ const CUT: &[Scene] = &[
     },
 ];
 
+/// A job the watch does, at a second of the film.
+///
+/// Only the ones the picture shows. A soundtrack with a winch in it over a shot of a
+/// boat doing nothing is worse than a silent one — it tells the ear a lie the eye can
+/// check.
+enum Job {
+    /// Haul the furling line to here: nought set, one rolled away.
+    Furl(f64),
+    /// And the reef line, in slabs of a quarter.
+    Reef(f64),
+    /// A boom across, a clutch thrown: one sharp sound.
+    Clack(f32),
+    /// Somebody says something. Silent without recordings — see the module note.
+    Say(crate::sound::Call),
+}
+
+/// What is being done on deck, when. The seconds are the film's.
+const WORK: &[(f64, Job)] = &[
+    // The approach to the mark: the genoa comes in, which is the twelve seconds of drum
+    // the picture spends with the forestay clearing.
+    (8.0, Job::Say(crate::sound::Call::Report)),
+    (8.4, Job::Furl(1.0)),
+    (12.0, Job::Say(crate::sound::Call::Effort)),
+    // Round the mark. The boom goes across as she bears away, and the kite goes up out
+    // of the turn.
+    (14.0, Job::Clack(0.8)),
+    (14.3, Job::Say(crate::sound::Call::Aye)),
+    (15.0, Job::Furl(0.0)),
+    (18.0, Job::Say(crate::sound::Call::Effort)),
+    // Fog, and nothing to do in it but listen.
+    // Then snugging down, which happens *before* the gale in the film and in life.
+    (25.5, Job::Say(crate::sound::Call::Warn)),
+    (26.0, Job::Furl(1.0)),
+    (26.2, Job::Reef(0.75)),
+    (29.0, Job::Say(crate::sound::Call::Effort)),
+    (33.0, Job::Say(crate::sound::Call::Report)),
+    // And her evening clothes, at the platform.
+    (41.0, Job::Reef(0.0)),
+    (41.4, Job::Furl(0.0)),
+    (44.0, Job::Say(crate::sound::Call::Aye)),
+];
+
 /// How long the whole thing runs if nobody says otherwise: the length of the cut.
 const RUNS_FOR: f64 = 49.5;
 
@@ -129,13 +183,14 @@ pub fn asked() -> Option<(String, f64)> {
 
 /// Sail the cut with nobody watching, and write down what the band played.
 pub fn record(path: &str, seconds: f64, seed: u64) -> std::io::Result<()> {
-    let params = Arc::new(SeaParams::default());
-    // The mix this is for: the band alone, at the top of its range, with the sea and the
-    // gear muted at the mixer rather than taken out of the model — see the module note.
+    // The same block the deck is handed, voices and all — see its own note.
+    let params = Arc::new(SeaParams::as_handed_to_the_deck());
+    // The mix this is for — the same four numbers the demo's own first beat sets, and
+    // for the same reasons. See the module note.
     params.set_master(1.0);
     params.set_music(1.0);
-    params.set_sea(0.0);
-    params.set_boat(0.0);
+    params.set_boat(1.0);
+    params.set_sea(0.05);
 
     let mut world = App::new();
     world.add_plugins(MinimalPlugins);
@@ -150,7 +205,23 @@ pub fn record(path: &str, seconds: f64, seed: u64) -> std::io::Result<()> {
     world.insert_resource(crate::fishing::Fishing::new(seed));
     world.init_resource::<crate::course::Course>();
     world.init_resource::<crate::music::Music>();
-    world.add_systems(Update, (crate::sim::advance, crate::music::compose).chain());
+    world.init_resource::<crate::clutch::Bank>();
+    world.init_resource::<crate::hail::Hail>();
+    world.init_resource::<ButtonInput<KeyCode>>();
+    // The order is the order it happens in: hands on the lines, then the boat answers,
+    // then the ear is told what it all sounded like, then the band plays over it, then
+    // whatever the watch had to say is fitted into the rhythm the band just set.
+    world.add_systems(
+        Update,
+        (
+            crate::clutch::handle,
+            crate::sim::advance,
+            crate::sound::update,
+            crate::music::compose,
+            crate::hail::place,
+        )
+            .chain(),
+    );
 
     // The synthesiser, turned by hand. Same struct the audio thread is handed; it does
     // not know or care that nothing is listening.
@@ -160,6 +231,7 @@ pub fn record(path: &str, seconds: f64, seed: u64) -> std::io::Result<()> {
 
     let mut at = 0.0;
     let mut scene = usize::MAX;
+    let mut done = 0usize;
     while at < seconds {
         // Which scene the film is in, set once when it changes rather than every step:
         // `blows` and `start_cover` solve for a trend, and solving for it sixty times a
@@ -171,6 +243,10 @@ pub fn record(path: &str, seconds: f64, seed: u64) -> std::io::Result<()> {
         if now != scene {
             scene = now;
             set_the_weather(&mut world, &CUT[now]);
+        }
+        while done < WORK.len() && WORK[done].0 <= at {
+            set_to_work(&mut world, &WORK[done].1);
+            done += 1;
         }
         world.update();
         for _ in 0..per_step {
@@ -210,6 +286,57 @@ fn set_the_weather(world: &mut App, scene: &Scene) {
     let twd = sim.sim.telemetry.twd;
     sim.sim.state.heading =
         sail_core::units::wrap_tau(twd + std::f64::consts::PI - sail_core::units::rad(scene.twa));
+}
+
+/// Put a hand on a line, or a word in somebody's mouth.
+///
+/// Through the same doors the deck uses: the clutch bank hauls at the gear's own rate
+/// and `sound::update` hears it by differencing the controls, exactly as it does when a
+/// player holds the key down.
+fn set_to_work(world: &mut App, job: &Job) {
+    use crate::clutch::{Line, BANK};
+    let at = |line: Line| BANK.iter().position(|l| *l == line);
+    // **The deck is working, and something has to say so.** `Hail` keeps two silences —
+    // forty seconds on a leg, three and a half with a job on — and the one that decides
+    // which is `crew::work`, which is not in this world: there is nobody aboard, the
+    // lines are hauled by the table above. Without this, six of seven calls were
+    // refused as too soon after the last and a film about a sail change had one word in
+    // it. The jobs below *are* the work, so they say so.
+    if matches!(job, Job::Furl(_) | Job::Reef(_) | Job::Clack(_)) {
+        world
+            .world_mut()
+            .resource_mut::<crate::hail::Hail>()
+            .working();
+    }
+    match job {
+        Job::Furl(to) => {
+            if let Some(which) = at(Line::Furl) {
+                world
+                    .world_mut()
+                    .resource_mut::<crate::clutch::Bank>()
+                    .target[which] = Some(*to);
+            }
+        }
+        Job::Reef(to) => {
+            if let Some(which) = at(Line::Reef) {
+                world
+                    .world_mut()
+                    .resource_mut::<crate::clutch::Bank>()
+                    .target[which] = Some(*to);
+            }
+        }
+        Job::Clack(how_hard) => {
+            world.world().resource::<SoundHandle>().0.clack(*how_hard);
+        }
+        Job::Say(kind) => {
+            // Queued rather than shouted: `hail::place` decides when it lands, against
+            // the beat the band is playing.
+            world
+                .world_mut()
+                .resource_mut::<crate::hail::Hail>()
+                .call(*kind);
+        }
+    }
 }
 
 /// Sixteen-bit mono PCM, which is what every editor on earth will open.
@@ -264,6 +391,20 @@ mod the_band_plays_to_the_cut {
             "the last scene starts at {} and the film is {RUNS_FOR} long",
             last.at
         );
+    }
+
+    /// **The deck's work runs forwards too**, and for a worse reason than the scenes:
+    /// the jobs are played off a cursor that only ever moves on, so one out of order is
+    /// one that never happens — a reef that is never tied, in silence, with nothing to
+    /// show for it.
+    #[test]
+    fn the_work_is_in_order_and_inside_the_film() {
+        let mut last = -1.0;
+        for (at, _) in WORK {
+            assert!(*at >= last, "a job at {at} comes after {last}");
+            assert!(*at < RUNS_FOR, "a job at {at} is after the film has ended");
+            last = *at;
+        }
     }
 
     /// And the header says what the body is. Forty-four bytes, and every editor that
