@@ -687,6 +687,18 @@ pub fn dress(
             )
         };
     }
+    // Worth a line in the log every time it moves, and not only at startup: "why can I
+    // not see the island" and "why can I see for miles" are both answered by it, and
+    // neither is answerable from the picture alone. Debug rather than info because this
+    // one fires whenever the weather does.
+    debug!(
+        "haze: visibility {:.0} m, fog {:.0}%, cover {:.0}%, sun {:.0} deg",
+        crate::sky::visibility(&sky),
+        sky.fog * 100.0,
+        sky.cover * 100.0,
+        sky.elevation().to_degrees()
+    );
+
     // The structural half, which is the part that must not happen every time the cloud
     // thickens: adding or removing a component moves the entity between archetypes.
     if !turned {

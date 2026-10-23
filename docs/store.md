@@ -258,6 +258,56 @@ window and get the mouse out of the frame before the first beat fires.
 
 There is **no brig in this one** and nothing to signal to — it is the boat and the sea.
 
+### And the demo — `SAIL_REEL=demo`
+
+**The one with sound in it.** The other two are filmed by the game's own capture, which
+tops out at about twelve frames a second and has no audio at all; a demo whose whole
+point is a winch, a sheet and water along the topsides cannot be filmed by something
+that cannot hear. So this one is recorded off the screen by a screen recorder, and
+`dist/demo.sh` is the thing that sets it up, counts down and prints the cut list.
+
+Five scenes, one take, a hundred and thirty-eight seconds of material for a demo of about
+forty-five.
+
+| From | To | The shot |
+|---|---|---|
+| 0:13 | 0:22 | **The sun out of the water** on a flat sea. Opens at 03:45 with the clock at 520, so the twelve seconds before this are night going to twilight |
+| 0:26 | 0:34 | **The beat to the mark.** Force 4, the buoy forty metres ahead on the layline, three boats racing for the same water |
+| 0:38 | 0:46 | **The bear-away** round the buoy, the camera walking round her, the genoa half rolled |
+| 0:58 | 1:06 | **The gennaker drawing**, from the cockpit |
+| 1:06 | 1:14 | **The brig out of the fog** — visibility about 350 m, she is laid at 260 |
+| 1:16 | 1:26 | **Snugging down** in the fog: the drum, the reef line, the winch. More a sound than a picture |
+| 1:32 | 1:40 | **The gale** from the chase seat, which pulls back as the sea gets up |
+| 1:42 | 1:54 | **The same gale from astern**, where the wake tilts as she lies over |
+| 2:07 | 2:17 | **The platform**, and the afterglow on the water beside it. She spends the first eight seconds of the scene shaking the gale's reefs out |
+
+What sets the lengths, measured rather than chosen:
+
+* **The furling drum is twenty-four seconds**, which is why the rounding scene is
+  forty-two: the kite is ordered eight seconds before the bear-away, goes up out of the
+  turn the way it does in a race, and is not drawing until twenty-four after the order.
+  Three shots come out of that one scene, so it earns its length.
+* **The day she is given is not the day this is.** A drawn morning can open at force
+  seven with three slabs tied in and the genoa rolled away. Shaking that out takes the
+  reef line ten seconds and the drum twelve — so the sail is set at about twelve
+  seconds, and the sunrise is timed to break over the horizon at the same moment.
+* **Canvas comes off before the gale, not during it** — sixteen seconds of warning, and
+  that number was measured twice. Eight was the first guess and force 8 arrived with a
+  third of a gennaker still flying: the drum takes twelve to roll a kite away and the
+  reef line nine to run three slabs out. It held that time. The two ways this take can
+  be spoiled are a blown-out sail and a knockdown, and both are the same mistake.
+* **Fog will not survive a breeze**, so the brig scene is a calm one. That is weather
+  and not a workaround — see `wind.rs`.
+
+The mix is part of the timetable: **the sea at a twentieth, the boat at full, the music
+off**. The sea is this program's loudest voice and the worst thing to put under a cut —
+broadband, never stops, and it buries every sound that says a boat is a machine being
+worked. The music is written to the cut afterwards, against these scenes' own shape.
+
+And `dist/demo.sh` unsets `SAIL_VOICE` on purpose. The voices on the development machine
+are public-domain recordings standing in for the real thing: fine on the deck, not fine
+on a shop page.
+
 ### Getting the window back out of the recording
 
 `dist/crop.sh <recording.mov> [from] [to]` finds the game's window in a screen recording,

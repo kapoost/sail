@@ -506,14 +506,19 @@ pub fn dress(
 }
 
 /// What the deck is told: the clock, the line, and which end of it is worth having.
+///
+/// **It goes away with the console**, because H means a clean look at the water and a
+/// line of race text across the top is not one. The same key, the same meaning, and it
+/// is what lets the reel film a mark rounding with nothing on the screen but the boats.
 pub fn draw(
     mut contexts: bevy_egui::EguiContexts,
     race: Res<Race>,
     sim: Res<Sim>,
     chart: Res<crate::chart::Chart>,
+    console: Res<crate::panel::Console>,
 ) -> Result {
     use bevy_egui::egui;
-    if !race.running() || chart.spread {
+    if !race.running() || chart.spread || console.hidden {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
