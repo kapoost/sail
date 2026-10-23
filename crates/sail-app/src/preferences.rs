@@ -192,13 +192,25 @@ fn dialled() -> [bool; 4] {
 }
 
 /// And write it back when it changes, which is a few times an evening.
+///
+/// **Not while a reel is running**, and that is the same rule as `dialled` one paragraph
+/// up: a dial must not leak into the file, and a *camera* is a dial with a timetable.
+/// The demo reel hides the console, turns the HUD off and sets its own mix — the sea at
+/// a twentieth, the gear at full, the music off — because that is the mix a take wants.
+/// All four were being written back, so running the reel once left whoever sailed next
+/// with no music and a silent sea, in a file they never touched. Found by somebody
+/// saying they could not hear the crew.
 pub fn remember(
     mut kept: ResMut<Kept>,
     settings: Res<Settings>,
     picture: Picture,
     time: Res<Time>,
+    reel: Res<crate::reel::Reel>,
     mut since: Local<f32>,
 ) {
+    if reel.on {
+        return;
+    }
     let now = as_set(&settings, &picture, &kept);
     if now == *kept {
         return;
