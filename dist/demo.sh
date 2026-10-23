@@ -18,9 +18,12 @@
 #    window, and **turn system audio on**. In the ⌘⇧5 toolbar that is Options; if this
 #    machine has no system-audio capture, install BlackHole and route the output through
 #    it — the microphone setting records the room, not the game.
-# 3. Leave the keyboard and the mouse alone until it says it is finished. Every beat is
+# 3. In the same Options menu, **turn the mouse pointer off**. Otherwise the arrow sits
+#    in the middle of every frame of the take — it did, on the first one, and a pointer
+#    that never moves can be painted out afterwards but one that twitches cannot.
+# 4. Leave the keyboard and the mouse alone until it says it is finished. Every beat is
 #    on a clock; a hand on anything is a retake.
-# 4. Cut it up with the timecodes printed at the end.
+# 5. Cut it up with the timecodes printed at the end.
 #
 # ## One take, and why it can be
 #
@@ -66,6 +69,36 @@ catch 21.40
 built derrick
 built rack
 SAVE
+
+# **The sound is checked before the countdown, not after the take.**
+#
+# QuickTime records an *input*, so the Mac's output has to be going somewhere an input
+# can hear — a Multi-Output Device over BlackHole and the speakers. Making that device
+# and forgetting to switch the system over to it produces a recording with a sound track
+# in it that is digital silence, and nothing about the take looks wrong until it is over.
+# Measured once, at -91 dB, after two minutes and twenty of sailing.
+#
+# It is also checked *here* rather than left to the eye, because the game opens its audio
+# stream when it starts and keeps the device it was given: switching the output after
+# launching this script is too late.
+OUT=$(system_profiler SPAudioDataType 2>/dev/null       | awk '/^ {8}[A-Za-z].*:$/ {name=$0} /Default Output Device: Yes/ {print name; exit}'       | sed 's/^ *//; s/:$//')
+case "$OUT" in
+  *BlackHole*|*Multi-Output*|*Aggregate*|*Loopback*)
+    echo "  sound out: $OUT — a recorder can hear this" ;;
+  *)
+    cat <<AUDIO
+
+  The Mac is playing to "$OUT", which no recorder can hear.
+
+  Konfigurator MIDI-Audio -> + -> Utworz urzadzenie z wieloma wyjsciami, tick
+  BlackHole 2ch and the speakers, then right-click it -> Uzyj tego urzadzenia
+  do odtwarzania dzwieku. Then run this again.
+
+  (Set it BEFORE this script: the game keeps whichever device it was handed.)
+
+AUDIO
+    exit 1 ;;
+esac
 
 cat <<ORDER
 

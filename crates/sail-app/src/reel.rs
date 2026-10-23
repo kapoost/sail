@@ -481,7 +481,11 @@ pub const DEMO: &[(f64, Act)] = &[
         Act::Weather {
             force: 4,
             oktas: 3,
-            hour: None,
+            // Mid-morning rather than the hour the sunrise left behind. The demo walks
+            // through one day — dawn, morning, fog, noon, evening — and the alternative
+            // is five scenes in the same flat early light, which is what the first take
+            // came back as.
+            hour: Some(9.5),
             fetch: 40.0,
         },
     ),
@@ -535,7 +539,9 @@ pub const DEMO: &[(f64, Act)] = &[
         Act::Weather {
             force: 8,
             oktas: 7,
-            hour: None,
+            // Noon, and high cloud rather than a dark one: a gale an hour after dawn is
+            // a grey rectangle. The light is what makes a sea look big.
+            hour: Some(11.5),
             fetch: 400.0,
         },
     ),
@@ -556,7 +562,13 @@ pub const DEMO: &[(f64, Act)] = &[
     // The brig goes: a square-rigger in a force eight ocean is a different film and a
     // promise this game has not made.
     (90.5, Act::Brig(0.0)),
-    (98.0, Act::Seat(View::Astern)),
+    // **The cockpit and not the seat facing aft**, which was tried and filmed the
+    // inside of a wave: from the after end of the cockpit looking down the wake, a
+    // following sea at force eight is directly in front of the lens and the shot is
+    // forty feet of green water with no boat in it. True, and unreadable. From the
+    // cockpit looking forward you get the thing instead — the bow going in, the spray
+    // coming aft, the mast against a moving horizon.
+    (98.0, Act::Seat(View::Cockpit)),
     (106.0, Act::Seat(View::Chase)),
     // ---- SUNSET AT THE PLATFORM, 114 to 138 ---------------------------------------
     (
@@ -737,20 +749,27 @@ fn play(act: Act, sim: &mut Sim, stage: &mut Stage) {
         } => {
             // The same two resources the weather page writes, and in the same way: this
             // is a hand on the sliders, not a back door into the model.
+            //
+            // **Worked out once and used twice**, which is the whole of the fix. The sea
+            // used to be settled against `telemetry.tws` — the wind as it was *last*
+            // frame, because telemetry is a frame behind the resource it is read from.
+            // So a beat that put force two on the water and then force eight settled the
+            // gale's sea at the calm's wind and left it to build the rest by itself,
+            // which takes hours. Filmed, that is a boat lying over to a gale on water
+            // out of a different afternoon: the one shot in the demo that was supposed
+            // to be about the size of the sea, and the sea was not in it.
+            let wanted = sail_core::units::kn_to_ms(crate::weather::force_wind(force));
             if let Some(wind) = sim.sim.wind.adjustable() {
                 // `blows` rather than the base alone — see its own note. A reel that sets
                 // force 7 and gets force 4 for the next half hour films the wrong day.
-                wind.synoptic
-                    .blows(sail_core::units::kn_to_ms(crate::weather::force_wind(
-                        force,
-                    )));
+                wind.synoptic.blows(wanted);
                 wind.synoptic.start_cover(oktas as f64 / 8.0);
             }
             if let Some(sea) = sim.sim.water.adjustable() {
                 sea.set_fetch(fetch * 1000.0);
                 // Settled rather than built from nothing: a trailer cannot wait half an
                 // hour for a gale to raise its own sea.
-                sea.settle(sim.sim.telemetry.tws, 0.0);
+                sea.settle(wanted, 0.0);
             }
             // The hour moves the clock's own offset rather than the sky, because the sky
             // is derived from the passage now and would be back where it was next frame.
