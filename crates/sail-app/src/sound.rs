@@ -43,7 +43,7 @@ use sail_core::prelude::*;
 
 use crate::sim::Sim;
 
-const SAMPLE_RATE: u32 = 44_100;
+pub const SAMPLE_RATE: u32 = 44_100;
 /// Master gain. Deliberately modest — this is an ambience bed, not a soundtrack.
 const MASTER: f32 = 1.0;
 
@@ -773,7 +773,7 @@ impl Smoothed {
 }
 
 impl SeaStream {
-    fn new(params: Arc<SeaParams>) -> Self {
+    pub fn new(params: Arc<SeaParams>) -> Self {
         Self {
             voices: [Plucked::default(); 12],
             poll: 0,

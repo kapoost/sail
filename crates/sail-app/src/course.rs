@@ -70,15 +70,18 @@ pub struct Floating {
 #[derive(Component)]
 pub struct Destination;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Leg {
     /// Carrying a consignment.
     Carrying,
-    /// Nowhere to go: there is only one anchorage, or none.
+    /// Nowhere to go: there is only one anchorage, or none. The default, because a
+    /// course that has not been laid is a course with nowhere to go — which is also
+    /// what the open ocean is, and what a headless world rendering music has.
+    #[default]
     Idle,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct Course {
     /// Set by the console button; cleared by [`restart`] the same frame.
     pub wants_new: bool,

@@ -308,6 +308,28 @@ And `dist/demo.sh` unsets `SAIL_VOICE` on purpose. The voices on the development
 are public-domain recordings standing in for the real thing: fine on the deck, not fine
 on a shop page.
 
+### The music, recorded without a window — `SAIL_BAND`
+
+    SAIL_BAND=music.wav SAIL_BAND_FOR=50 target/release/sail-app
+
+**The band only plays in a game**, which is a problem for a cut: the soundtrack is made
+out of the weather note by note, so fifty seconds of it means sailing fifty seconds and
+listening. `SAIL_BAND` does it the other way round — no window, no audio device, no real
+time. A headless world is built, the weather walks through the demo's scenes, the same
+`music::compose` runs against it sixty times a second, and the same synthesiser the deck
+hears is turned by hand and written to a file.
+
+What comes out is **the band alone**: the sea and the gear are muted at the mixer rather
+than removed from the model, so the music still knows what the weather is doing. A stem,
+to lay under a picture that has its own sound or none.
+
+The scenes it plays to are **the cut's, not the reel's** — `reel.rs` is a hundred and
+thirty-eight seconds of take and the film is fifty, so music written against the take
+would change key eight seconds before a cut that is no longer there. The table is in
+`band.rs`; change the cut and change it, which is what a composer does.
+
+The tune is drawn from the seed, like the weather: `SAIL_SEED=` for another take of it.
+
 ### Getting the window back out of the recording
 
 `dist/crop.sh <recording.mov> [from] [to]` finds the game's window in a screen recording,

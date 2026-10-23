@@ -8,6 +8,7 @@
 
 mod aboard;
 mod anchorage;
+mod band;
 mod barrels;
 mod basics;
 mod boat;
@@ -255,6 +256,19 @@ fn main() {
     // *inside* it, which is only allowed if the licences travel with them. The OFL says
     // the text must accompany the font; embedding it and printing it on request is how
     // one file does that honestly.
+    // `SAIL_BAND=music.wav` records the band and nothing else, with no window and no
+    // audio device — see `band.rs`. Before the window for the same reason `--licences`
+    // is: it has to work in a build that cannot open one, and on a machine where
+    // nothing is listening.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some((path, seconds)) = band::asked() {
+        match band::record(&path, seconds, seed) {
+            Ok(()) => println!("band: {seconds:.1} s written to {path}"),
+            Err(e) => eprintln!("band: {path}: {e}"),
+        }
+        return;
+    }
+
     if std::env::args().any(|a| a == "--licences" || a == "--licenses") {
         println!("{}", include_str!("../../../assets/ATTRIBUTION.md"));
         println!("\n--- VT323, SIL Open Font Licence ---\n");
