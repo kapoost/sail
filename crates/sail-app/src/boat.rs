@@ -290,6 +290,23 @@ pub fn setup(
         cull_mode: None,
         ..default()
     });
+    // **Storm canvas is orange**, and it is not a flourish: a trysail and a storm jib
+    // are cut from high-visibility cloth because the people who might have to find you
+    // are looking for a boat the size of a fingernail in a sea the colour of slate.
+    // Every offshore rule that mentions them says so, and anybody who has seen one in
+    // the water has seen it from a long way off. It is also, for nothing, the one sail
+    // in this game you can tell is up at a glance.
+    let storm_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.95, 0.38, 0.06),
+        base_color_texture: Some(images.add(crate::sail_texture::cloth())),
+        normal_map_texture: Some(images.add(crate::sail_texture::cloth_normal())),
+        // Heavier cloth than a working sail, and it looks it: a storm sail is woven
+        // tight and takes very little shine.
+        perceptual_roughness: 0.88,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    });
     let telltale_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.85, 0.15, 0.15),
         unlit: true,
@@ -676,7 +693,7 @@ pub fn setup(
                     mesh: trysail_mesh.clone(),
                 },
                 Mesh3d(trysail_mesh.clone()),
-                MeshMaterial3d(sail_mat.clone()),
+                MeshMaterial3d(storm_mat.clone()),
                 Transform::default(),
             ));
             b.spawn((
