@@ -58,6 +58,17 @@ pub const BANK: [Line; 8] = [
 ];
 
 impl Line {
+    /// Where this line sits on the bank.
+    ///
+    /// Three places were each writing `BANK.iter().position(|l| *l == Line::Reef)` to
+    /// find out, which is the kind of duplication that survives until somebody reorders
+    /// the bank and two of the three are fixed.
+    pub fn on_the_bank(self) -> usize {
+        BANK.iter()
+            .position(|l| *l == self)
+            .expect("every line is on the bank")
+    }
+
     /// Whether this line does anything with the sail that is up.
     ///
     /// The genoa car leads the genoa's sheet, and a Code 0 or a gennaker is not sheeted
@@ -315,6 +326,40 @@ impl Line {
     }
 }
 
+impl Bank {
+    /// Bend the trysail on, taking the mainsail off her first if it is still up.
+    ///
+    /// **One call, because on deck it is one decision.** The winch's view of this is
+    /// four steps — select the reef line, haul to handed, select the halyard, haul —
+    /// and the person's view is *get the main off her and the trysail up*, which is the
+    /// same argument the headsail list won.
+    ///
+    /// Both lines are given a destination and left to run there at their own rates, and
+    /// that puts them in the right order for nothing: the reef line is nearly twice as
+    /// fast as the halyard, so the main is down well before the trysail is up whether or
+    /// not anybody thought about it. Which is also the order it has to happen in, since
+    /// they are on the same track.
+    pub fn bend_on_the_trysail(&mut self, controls: &Controls) {
+        if controls.reef < sail_core::boat::DROPPED {
+            self.target[Line::Reef.on_the_bank()] = Some(1.0);
+        }
+        self.target[Line::Trysail.on_the_bank()] = Some(1.0);
+    }
+
+    /// And take it in again. The main stays where it is: shaking three slabs out in a
+    /// gale is a separate decision and a much later one.
+    pub fn hand_the_trysail(&mut self) {
+        self.target[Line::Trysail.on_the_bank()] = Some(0.0);
+    }
+
+    /// Whether either of those jobs is still running.
+    pub fn working_the_trysail(&self, controls: &Controls) -> bool {
+        self.target[Line::Trysail.on_the_bank()].is_some()
+            || (controls.reef < sail_core::boat::DROPPED
+                && self.target[Line::Reef.on_the_bank()].is_some())
+    }
+}
+
 /// Which line is on the winch.
 #[derive(Resource, Default)]
 pub struct Bank {
@@ -423,6 +468,68 @@ pub fn handle(
 #[cfg(test)]
 mod the_bank {
     use super::*;
+
+    /// **One click takes the main off her and puts the trysail up**, in that order,
+    /// which is the order the mast track forces and the order anybody would do it in.
+    ///
+    /// Asked for from the deck in exactly those words. The failure this guards against
+    /// is the quiet one: a button that hoists the trysail and leaves the mainsail bent
+    /// on sets nothing at all — they share a track — so the halyard runs, the control
+    /// says SET, and she is still under a reefed main in a gale.
+    #[test]
+    fn bending_the_trysail_on_takes_the_main_off_her_first() {
+        let mut bank = Bank::default();
+        let third = Controls {
+            reef: 0.75,
+            ..Default::default()
+        };
+        bank.bend_on_the_trysail(&third);
+        assert_eq!(
+            bank.target[Line::Reef.on_the_bank()],
+            Some(1.0),
+            "the main was left bent on"
+        );
+        assert_eq!(bank.target[Line::Trysail.on_the_bank()], Some(1.0));
+
+        // And with the main already down it is one job, not two: nobody re-hauls a reef
+        // line that is already home.
+        let mut bank = Bank::default();
+        let handed = Controls {
+            reef: 1.0,
+            ..Default::default()
+        };
+        bank.bend_on_the_trysail(&handed);
+        assert_eq!(bank.target[Line::Reef.on_the_bank()], None);
+        assert_eq!(bank.target[Line::Trysail.on_the_bank()], Some(1.0));
+    }
+
+    /// **And the order comes out of the rates rather than out of a sequencer.** The
+    /// reef line is the faster of the two, so the main is down before the halyard is
+    /// home — which is what makes "both at once" the right instruction instead of a
+    /// bug waiting for a slow machine.
+    #[test]
+    fn the_main_is_down_before_the_trysail_is_up() {
+        let handed = Controls {
+            reef: 1.0,
+            ..Default::default()
+        };
+        let reefing = Line::Reef.rate(&handed);
+        let hoisting = Line::Trysail.rate(&handed);
+        assert!(
+            reefing > hoisting * 1.5,
+            "the reef line runs at {reefing} and the halyard at {hoisting}"
+        );
+    }
+
+    /// Handing it leaves the main alone: shaking three slabs out in a gale is a
+    /// separate decision and a much later one.
+    #[test]
+    fn handing_the_trysail_does_not_shake_the_reefs_out() {
+        let mut bank = Bank::default();
+        bank.hand_the_trysail();
+        assert_eq!(bank.target[Line::Trysail.on_the_bank()], Some(0.0));
+        assert_eq!(bank.target[Line::Reef.on_the_bank()], None);
+    }
 
     /// **Every stop on the reef line has a name, and they are the right names.**
     ///

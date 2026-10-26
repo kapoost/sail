@@ -295,8 +295,7 @@ fn set_the_weather(world: &mut App, scene: &Scene) {
 /// and `sound::update` hears it by differencing the controls, exactly as it does when a
 /// player holds the key down.
 fn set_to_work(world: &mut App, job: &Job) {
-    use crate::clutch::{Line, BANK};
-    let at = |line: Line| BANK.iter().position(|l| *l == line);
+    use crate::clutch::Line;
     // **The deck is working, and something has to say so.** `Hail` keeps two silences —
     // forty seconds on a leg, three and a half with a job on — and the one that decides
     // which is `crew::work`, which is not in this world: there is nobody aboard, the
@@ -311,20 +310,16 @@ fn set_to_work(world: &mut App, job: &Job) {
     }
     match job {
         Job::Furl(to) => {
-            if let Some(which) = at(Line::Furl) {
-                world
-                    .world_mut()
-                    .resource_mut::<crate::clutch::Bank>()
-                    .target[which] = Some(*to);
-            }
+            world
+                .world_mut()
+                .resource_mut::<crate::clutch::Bank>()
+                .target[Line::Furl.on_the_bank()] = Some(*to);
         }
         Job::Reef(to) => {
-            if let Some(which) = at(Line::Reef) {
-                world
-                    .world_mut()
-                    .resource_mut::<crate::clutch::Bank>()
-                    .target[which] = Some(*to);
-            }
+            world
+                .world_mut()
+                .resource_mut::<crate::clutch::Bank>()
+                .target[Line::Reef.on_the_bank()] = Some(*to);
         }
         Job::Clack(how_hard) => {
             world.world().resource::<SoundHandle>().0.clack(*how_hard);

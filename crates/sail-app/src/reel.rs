@@ -812,8 +812,8 @@ fn play(act: Act, sim: &mut Sim, stage: &mut Stage) {
         Act::Clock(rate) => stage.clock.rate = rate,
         Act::Headsail(which) => stage.orders.set(sim, which),
         Act::Reef(slab) => {
-            use crate::clutch::{Line, BANK};
-            let which = BANK.iter().position(|l| *l == Line::Reef).unwrap_or(3);
+            use crate::clutch::Line;
+            let which = Line::Reef.on_the_bank();
             if let Some(stop) = Line::Reef
                 .detents(&sim.controls)
                 .and_then(|stops| stops.get(slab))
@@ -930,16 +930,12 @@ fn play(act: Act, sim: &mut Sim, stage: &mut Stage) {
             brig.afloat = true;
         }
         Act::Furl(how_far) => {
-            use crate::clutch::{Line, BANK};
-            if let Some(which) = BANK.iter().position(|l| *l == Line::Furl) {
-                stage.bank.target[which] = Some(how_far.clamp(0.0, 1.0));
-            }
+            stage.bank.target[crate::clutch::Line::Furl.on_the_bank()] =
+                Some(how_far.clamp(0.0, 1.0));
         }
         Act::Staysail(up) => {
-            use crate::clutch::{Line, BANK};
-            if let Some(which) = BANK.iter().position(|l| *l == Line::Staysail) {
-                stage.bank.target[which] = Some(if up { 1.0 } else { 0.0 });
-            }
+            stage.bank.target[crate::clutch::Line::Staysail.on_the_bank()] =
+                Some(if up { 1.0 } else { 0.0 });
         }
         Act::Steer(twa) => {
             // Turning to starboard by δ swings the wind δ further aft on the port side,

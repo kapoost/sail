@@ -1203,6 +1203,75 @@ pub fn draw(
                                             {
                                                 sim.controls.preventer = !rigged;
                                             }
+                                            // **The trysail belongs here and nowhere
+                                            // else**, because the boom is what it is
+                                            // about: it is the sail you set when the
+                                            // spar this plate is named after has come
+                                            // off her, and the one line on the bank
+                                            // that cannot be used until it has.
+                                            //
+                                            // **One click does the whole manoeuvre.**
+                                            // Asked for from the deck in those words,
+                                            // and it is the same argument the headsail
+                                            // list won: the winch's view of this is
+                                            // *select the reef line, haul to handed,
+                                            // select the trysail halyard, haul* — and
+                                            // the person's view is *get the main off
+                                            // her and the trysail up*. Both lines are
+                                            // given their destination and run there at
+                                            // their own rates, which puts them in the
+                                            // right order for nothing: the reef line is
+                                            // nearly twice as fast as the halyard, so
+                                            // the main is down before the trysail is up
+                                            // whether or not anybody thought about it.
+                                            let main_off = sim.controls.reef
+                                                >= sail_core::boat::DROPPED;
+                                            let trysail_up = sim.controls.trysail > 0.5;
+                                            let working =
+                                                bank.working_the_trysail(&sim.controls);
+                                            let words = match (trysail_up, working) {
+                                                (true, true) => "handing it",
+                                                (false, true) => "bending it on",
+                                                (true, false) => "TRYSAIL SET",
+                                                (false, false) => "trysail",
+                                            };
+                                            if ui
+                                                .selectable_label(
+                                                    trysail_up,
+                                                    egui::RichText::new(words)
+                                                        .monospace()
+                                                        .size(10.0)
+                                                        .color(if trysail_up {
+                                                            egui::Color32::from_rgb(20, 20, 20)
+                                                        } else {
+                                                            paint::LABEL
+                                                        }),
+                                                )
+                                                .on_hover_text(if trysail_up {
+                                                    "hand the trysail"
+                                                } else if main_off {
+                                                    "bend the trysail on"
+                                                } else {
+                                                    "the main comes off her first — this does both"
+                                                })
+                                                .clicked()
+                                            {
+                                                crew.stand_down("the mainsail");
+                                                if trysail_up {
+                                                    bank.hand_the_trysail();
+                                                    info!("hands aft — the trysail comes in");
+                                                } else {
+                                                    bank.bend_on_the_trysail(&sim.controls);
+                                                    info!(
+                                                        "{}",
+                                                        if main_off {
+                                                            "hands aft — the trysail goes on"
+                                                        } else {
+                                                            "hands aft — the main comes off her and the trysail goes on"
+                                                        }
+                                                    );
+                                                }
+                                            }
                                             // **The wardrobe under the boom**, because
                                             // the two are the same conversation: what is
                                             // set forward, and what is stopping the spar
