@@ -1609,6 +1609,7 @@ impl Simulation {
             strain: self.strain_main.max(self.strain_head).max(self.strain_stay),
             bend_main,
             bend_jib,
+            trysail: trysail.unwrap_or_default(),
             depth,
             under_keel: depth - cfg.draft,
             tide: self.tide.height(st.time),

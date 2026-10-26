@@ -224,6 +224,8 @@ pub enum Sail {
     Headsail,
     /// The inner sail of the double head rig.
     Staysail,
+    /// Storm canvas aft, on the mast track with the boom stowed under it.
+    Trysail,
 }
 
 /// A ribbon on the sail. `along_luff` is its height up the sail, 0 at the foot.
@@ -299,6 +301,7 @@ pub fn setup(
     let main_mesh = meshes.add(empty_sail());
     let genoa_mesh = meshes.add(empty_sail());
     let staysail_mesh = meshes.add(empty_sail());
+    let trysail_mesh = meshes.add(empty_sail());
 
     commands
         .spawn((
@@ -664,6 +667,18 @@ pub fn setup(
                 MeshMaterial3d(sail_mat.clone()),
                 Transform::default(),
             ));
+            // Its own surface rather than the main's drawn small: it is a different
+            // triangle on a different tack fitting with no spar along its foot, and the
+            // one thing that must read from forty metres away is that the boom is empty.
+            b.spawn((
+                SailSurface {
+                    which: Sail::Trysail,
+                    mesh: trysail_mesh.clone(),
+                },
+                Mesh3d(trysail_mesh.clone()),
+                MeshMaterial3d(sail_mat.clone()),
+                Transform::default(),
+            ));
             b.spawn((
                 SailSurface {
                     which: Sail::Headsail,
@@ -997,6 +1012,14 @@ pub fn update_sails(
             Sail::Main if sim.controls.reef >= sail_core::boat::DROPPED => Visibility::Hidden,
             Sail::Headsail if sim.controls.furl > 0.985 => Visibility::Hidden,
             Sail::Staysail if sim.controls.staysail < 0.02 => Visibility::Hidden,
+            // Up only when it is up *and* doing something: hoisted over a bent-on
+            // mainsail it is still in its bag, and the model says so by giving it no
+            // area — so the cloth says so too rather than hanging there.
+            Sail::Trysail
+                if sim.controls.trysail < 0.02 || sim.controls.reef < sail_core::boat::DROPPED =>
+            {
+                Visibility::Hidden
+            }
             _ => Visibility::Inherited,
         };
         let (forces, geometry) = match surface.which {
@@ -1030,6 +1053,36 @@ pub fn update_sails(
                                 foot * lift.sin(),
                                 boom.cos() * foot * lift.cos(),
                             ),
+                    },
+                )
+            }
+            Sail::Trysail => {
+                // **Loose-footed, and that is the whole shape of it.** The tack is a
+                // strop just above the stowed boom, the head is a third of the way up
+                // the mast on the same track the main was on, and the clew is sheeted
+                // out and aft to the quarter — to a block on the rail, not to a spar.
+                // Nothing holds the foot down, so the sail is a narrow triangle hanging
+                // off the mast with its foot curving away, which is what you see when
+                // somebody has one up.
+                let set = sim.controls.trysail as f32;
+                let angle = side * cfg.trysail.profile.chord_angle(sim.controls.main_sheet) as f32;
+                // A hand above the boom: the sail has to clear the stowed main and its
+                // ties, and it is bent on with the boom lashed down.
+                let tack = Vec3::new(0.0, BOOM_HEIGHT + 0.45, MAST_FOOT_Z);
+                let head = main_head(TRYSAIL_HOIST);
+                // Aft and out, at the angle the sheet is holding. The foot comes from
+                // the area the physics is using rather than from a number that looked
+                // right — see `foot_for_area`, and the three sails that were wrong
+                // before it existed.
+                let toward = Vec3::new(angle.sin(), 0.0, angle.cos());
+                let foot = foot_for_area(cfg.trysail.area as f32, head - tack, toward, 1.1);
+                (
+                    t_.trysail,
+                    SailGeometry {
+                        tack,
+                        // Hoisted up its track as the halyard goes, like the staysail.
+                        head: tack.lerp(head, 0.15 + 0.85 * set),
+                        clew: tack + toward * foot + Vec3::Y * 0.35,
                     },
                 )
             }
@@ -1088,6 +1141,11 @@ pub fn update_sails(
                     Sail::Main => t_.twist as f32,
                     Sail::Headsail => t_.jib_twist as f32,
                     Sail::Staysail => t_.jib_twist as f32 * 0.4,
+                    // Barely any. A trysail is cut flat and sheeted to the deck with no
+                    // boom to lever its leech open, so there is nothing for the head to
+                    // twist away with — and a storm sail that spilled its head would be
+                    // doing the one thing it is there not to do.
+                    Sail::Trysail => t_.twist as f32 * 0.25,
                 };
             build_sail(
                 &mut mesh,
@@ -1586,6 +1644,14 @@ pub fn headsail_shape(
 /// right. It was measuring `MAST_HEAD - BOOM_HEIGHT` — the intention — while the mesh
 /// was built from a different number. An instrument that reads the constant instead of
 /// the drawing cannot see this class of fault at all, which is the one it exists for.
+/// How far up the mast the trysail's head goes, as a fraction of the main's hoist.
+///
+/// A third. The sail is twelve per cent of the main's area and it is a *narrow*
+/// triangle, so it is taller than its area suggests — but it stops well short of the
+/// spreaders, which is the point: everything a storm sail does is about keeping the
+/// load low.
+pub const TRYSAIL_HOIST: f32 = 0.34;
+
 pub fn main_head(reef_scale: f32) -> Vec3 {
     Vec3::new(
         0.0,

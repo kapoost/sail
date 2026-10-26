@@ -441,6 +441,9 @@ pub struct Telemetry {
 
     /// Lower section of the mainsail — the one whose chord angle is the boom's.
     pub main: SailForces,
+    /// Storm canvas aft, when it is up. Zero otherwise — and zero is a real answer
+    /// here, because the drawn cloth reads the luffing out of it.
+    pub trysail: SailForces,
     /// Upper section, eased by the twist in the leech.
     pub main_upper: SailForces,
     /// Twist between the two, radians.
