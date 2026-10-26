@@ -103,6 +103,10 @@ pub struct Pilotage {
     pub hail: Option<(String, f64)>,
     /// When the last one was called, so that she is not a parrot.
     hailed_at: f64,
+    /// When she last called up on sixteen, for the same reason — and `None` until she
+    /// has, because a job that begins at time zero would otherwise count the gap from
+    /// the start of the world and say nothing for the first three minutes.
+    called_at: Option<f64>,
     /// The water she is to be taken through, newest first leg first, and when it was
     /// last worked out. Empty when there is no job or no way in.
     pub route: Vec<DVec2>,
@@ -193,7 +197,11 @@ impl Pilotage {
         brig.heading = off.x.atan2(off.y);
         brig.speed = kn_to_ms(5.0);
         brig.set = [1.0, 1.0, 1.0];
-        self.said = Some("a brig standing in from seaward, wanting a pilot".into());
+        brig.name = crate::ship::ship_name((at.x.abs() as u64) << 20 ^ at.y.abs() as u64);
+        self.said = Some(format!(
+            "the brig {} standing in from seaward, wanting a pilot",
+            brig.name
+        ));
     }
 
     /// Whether the pilot boat is where a ship can follow it: ahead, and near enough to
@@ -292,6 +300,90 @@ impl Pilotage {
     }
 }
 
+/// How far a voice carries between two vessels under sail, metres.
+///
+/// **Half a cable, and the canvas takes the rest.** `signals.rs` is built on the fact
+/// that two ships cannot shout at each other — it is the whole reason a flag locker
+/// exists — and then her master was heard calling across four hundred metres of water
+/// about the tide. One of those two was wrong, and it was not the flags.
+///
+/// So she has a set, like everybody else afloat since about 1960. Inside this she is a
+/// voice; outside it she is a transmission, on the channel she asked for, heard if you
+/// are on it and in range and not if you are not.
+pub const HAILING: f64 = 120.0;
+
+/// How she is heard: over the rail, or over the air.
+///
+/// Built once a frame from what is already known — where she is, how far off we are, and
+/// her set — so that every line she says goes through one place and is subject to one
+/// rule.
+struct Voice<'a> {
+    radio: &'a mut crate::radio::Radio,
+    /// Where she is, for the range the signal has to cover.
+    at: DVec2,
+    /// And how far off we are, which decides whether it is a shout or a call.
+    range: f64,
+    now: f64,
+    name: String,
+}
+
+impl Voice<'_> {
+    /// Put it across. On her set always; onto the deck only if it got there.
+    ///
+    /// **A hail that was not heard is not on the screen.** That is the whole of the
+    /// change: her words used to appear whatever the range, which made the radio
+    /// decorative and the flag locker a museum piece. Now the sequence is the one a
+    /// pilot actually runs — she calls you up on sixteen, you go to her working channel,
+    /// and what she has to say about the water arrives there.
+    fn across(&mut self, job: &mut Pilotage, words: &str, answering: bool) {
+        let t = crate::radio::Transmission::saying(
+            &self.name,
+            crate::radio::WORKING,
+            words,
+            Some((self.at, crate::radio::BRIG_AERIAL)),
+            self.now,
+        );
+        let reached = self.range < HAILING || self.radio.hears(&t, self.range) > 0.0;
+        self.radio.broadcast(t);
+        if !reached {
+            return;
+        }
+        if answering {
+            job.answer_across(words, self.now);
+        } else {
+            job.call_across(words, self.now);
+        }
+    }
+
+    /// Her first call, on sixteen, which is where she says what channel to go to.
+    ///
+    /// Repeated while nobody has come to it, because a ship wanting a pilot keeps
+    /// calling — and because the one thing worse than a channel you have to find is a
+    /// channel you had one chance to hear.
+    fn calling_up(&mut self, job: &mut Pilotage) {
+        if job.called_at.is_some_and(|at| self.now - at < CALLING_EVERY) {
+            return;
+        }
+        job.called_at = Some(self.now);
+        self.radio.broadcast(crate::radio::Transmission::saying(
+            &self.name,
+            crate::radio::CALLING,
+            &format!(
+                "Pilot boat, pilot boat. This is the brig {}, \
+                 standing in from seaward and requiring a pilot. \
+                 Channel {}. Over.",
+                self.name,
+                crate::radio::WORKING
+            ),
+            Some((self.at, crate::radio::BRIG_AERIAL)),
+            self.now,
+        ));
+    }
+}
+
+/// How often she calls up on sixteen while nobody has answered, seconds.
+const CALLING_EVERY: f64 = 180.0;
+
 /// The job, frame by frame: her casks, her following, and the two ways it ends.
 /// Carry out what has been hoisted, if she has read it.
 ///
@@ -299,12 +391,17 @@ impl Pilotage {
 /// convenience invented for the game: stopped is stopped, held is held, and *you are
 /// standing into danger* turns her away from the shoal rather than stopping her, because
 /// a ship that stops in the wrong place is still in the wrong place.
-fn told_her(brig: &mut Brig, job: &mut Pilotage, answer: &mut crate::signals::Answer, sim: &Sim) {
+fn told_her(
+    brig: &mut Brig,
+    job: &mut Pilotage,
+    answer: &mut crate::signals::Answer,
+    sim: &Sim,
+    voice: &mut Voice<'_>,
+) {
     use crate::signals::Flag;
     let Some(flag) = answer.reading else {
         return;
     };
-    let now = sim.sim.state.time;
     match flag {
         // Words, not helm: she says what she is doing, which is the one question this
         // mission could not answer before.
@@ -318,7 +415,7 @@ fn told_her(brig: &mut Brig, job: &mut Pilotage, answer: &mut crate::signals::An
                     "we are standing in under our own navigation — get ahead of us"
                 };
                 answer.said = Some(words.to_string());
-                job.answer_across(words, now);
+                voice.across(job, words, true);
             }
         }
         // Everything off her and the way comes off: it takes a ship a while, which is
@@ -328,7 +425,7 @@ fn told_her(brig: &mut Brig, job: &mut Pilotage, answer: &mut crate::signals::An
             brig.bound_for = brig.at;
             if answer.said.is_none() {
                 answer.said = Some("taking the way off her".into());
-                job.answer_across("all aback — we are taking the way off her", now);
+                voice.across(job, "all aback — we are taking the way off her", true);
             }
         }
         // Hold: topsail to the mast and she stays where she is, and this is *not* losing
@@ -338,7 +435,7 @@ fn told_her(brig: &mut Brig, job: &mut Pilotage, answer: &mut crate::signals::An
             brig.bound_for = brig.at + DVec2::new(brig.heading.sin(), brig.heading.cos()) * 150.0;
             if answer.said.is_none() {
                 answer.said = Some("holding on, watching you".into());
-                job.answer_across("holding on — we are watching your signals", now);
+                voice.across(job, "holding on — we are watching your signals", true);
             }
         }
         // And on again.
@@ -346,7 +443,7 @@ fn told_her(brig: &mut Brig, job: &mut Pilotage, answer: &mut crate::signals::An
             brig.set = [1.0, 1.0, 1.0];
             if answer.said.is_none() {
                 answer.said = Some("making sail".into());
-                job.answer_across("making sail — we are coming on", now);
+                voice.across(job, "making sail — we are coming on", true);
             }
         }
         // Danger: she sheers away from the nearest shoal rather than from your boat, and
@@ -358,7 +455,7 @@ fn told_her(brig: &mut Brig, job: &mut Pilotage, answer: &mut crate::signals::An
             brig.bound_for = brig.at + away * 600.0;
             if answer.said.is_none() {
                 answer.said = Some("sheering off".into());
-                job.answer_across("sheering off — where is the water?", now);
+                voice.across(job, "sheering off — where is the water?", true);
             }
         }
     }
@@ -402,6 +499,7 @@ pub fn run(
     mut job: ResMut<Pilotage>,
     mut flotsam: ResMut<crate::barrels::Flotsam>,
     mut answer: ResMut<crate::signals::Answer>,
+    mut radio: ResMut<crate::radio::Radio>,
 ) {
     if !job.running || job.over.is_some() {
         return;
@@ -409,6 +507,19 @@ pub fn run(
     let dt = time.delta_secs_f64();
     let here = sim.sim.state.pos;
     job.brig_at = brig.at;
+    let mut voice = Voice {
+        at: brig.at,
+        range: (brig.at - here).length(),
+        now: sim.sim.state.time,
+        name: format!("brig {}", brig.name),
+        radio: &mut radio,
+    };
+    // **She calls up until somebody comes to her channel.** A ship standing in for a
+    // pilot is on sixteen asking for one; she stops when there is a pilot boat ahead of
+    // her, because then she has one.
+    if !job.leading && !job.led_once {
+        voice.calling_up(&mut job);
+    }
 
     // --- Her deck cargo, going over the side a cask at a time ----------------------
     if !job.leading {
@@ -434,19 +545,13 @@ pub fn run(
     job.leading = Pilotage::leading_her(&brig, here);
     if job.leading && !was_leading {
         job.said = Some("she has you in sight — she is following".into());
-        job.call_across(
-            "we have you ahead of us — lead on, pilot",
-            sim.sim.state.time,
-        );
+        voice.across(&mut job, "we have you ahead of us — lead on, pilot", false);
     }
     if job.leading {
         job.led_once = true;
     }
     if !job.leading && was_leading {
-        job.call_across(
-            "where are you, pilot — we have lost you",
-            sim.sim.state.time,
-        );
+        voice.across(&mut job, "where are you, pilot — we have lost you", false);
     }
     // **Before anybody has led her she stands on; afterwards she waits.**
     //
@@ -477,7 +582,7 @@ pub fn run(
     // `signals::Answer::reading` is what her officer has actually got out of the signal
     // book, and until the answering pendant is close up there is nothing here to act on.
     // That is the whole of why the pendant is worth watching.
-    told_her(&mut brig, &mut job, &mut answer, &sim);
+    told_her(&mut brig, &mut job, &mut answer, &sim, &mut voice);
 
     // **A question is not an order.** Only the three signals that say where she is to be
     // take the helm; K asks what she is doing and P tells her to carry on, and gating her
@@ -540,7 +645,7 @@ pub fn run(
             // run down".
             let closing = brig.speed - sim.sim.telemetry.sog;
             if let Some(words) = remark(under, ahead, twa_wanted, turn, gap, closing) {
-                job.call_across(words, now);
+                voice.across(&mut job, words, false);
             }
         }
 

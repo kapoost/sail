@@ -43,7 +43,7 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
      hours without anybody noticing, because nothing else depends on it. -->
 
 2. **The physics is testable without opening a window.** 180 tests in the core assert
-   against figures a sailor knows from the water — 510 across the workspace, run by CI
+   against figures a sailor knows from the water — 515 across the workspace, run by CI
    on every push. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
@@ -697,6 +697,24 @@ you plan a departure around. It is called on sixteen and read on channel six, wh
 the first thing a radio teaches: sixteen is where you are told *where to listen*, not
 where you listen. Leave the set on sixteen and you hear that there is a bulletin and miss
 it.
+
+**The ship you are leading is on it, and that is where her voice went.** The pilotage
+mission is built on the fact that two vessels cannot shout at each other — it is the
+whole reason the flag locker exists — and her master was being heard calling across four
+hundred metres of water about the tide. One of those two was wrong, and it was not the
+flags. So she calls up on sixteen the way a ship wanting a pilot does, says what channel
+to go to, and everything she has to say about the water arrives there. The flags still
+work out of earshot: she reads the hoist, answers with the pendant and obeys it. What she
+*says* needs a radio, a channel and a range, and a pilot boat left on sixteen hears her
+call up and nothing after it.
+
+**And the harbour talks to the water it can see.** Come inside two miles of a harbour and
+its port control calls on sixteen and reads traffic and tidal information on twelve: when
+its high water is, what the stream is doing and which way it sets, and what else is under
+way in the approach. All four of those are in the simulation — the tide has been under
+the keel since the spring and the only place it ever showed was the depth sounder. There
+is no ferry in this model, so there is no ferry on the air: what it counts as traffic is
+whoever else is actually sailing.
 
 **The log is a page of the book.** A VHF is the width of a VHF and a forecast is five
 lines of writing, so the console carries one line — the last thing said, marked *(weak)*

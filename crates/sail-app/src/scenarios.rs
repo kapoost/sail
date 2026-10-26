@@ -621,6 +621,13 @@ mod the_pilotage {
         app.init_resource::<Brig>();
         app.init_resource::<Pilotage>();
         app.init_resource::<crate::barrels::Flotsam>();
+        // Her set, and ours tuned to the channel she asked for: everything she says she
+        // says on the radio now, and a pilot boat still on sixteen hears her call up and
+        // nothing after it. See `mission::Voice`.
+        app.insert_resource(crate::radio::Radio {
+            channel: crate::radio::WORKING,
+            ..Default::default()
+        });
         app.init_resource::<crate::boathook::Boathook>();
         // Her half of the conversation. Nothing in these scenarios hoists anything, so
         // it stays empty — but `mission::run` reads it now, because what she has been
@@ -1119,6 +1126,13 @@ mod what_the_hoist_does {
         });
         app.insert_resource(crate::sky::Sky::at(12.0, 0.2));
         app.init_resource::<crate::barrels::Flotsam>();
+        // Her set, and ours tuned to the channel she asked for: everything she says she
+        // says on the radio now, and a pilot boat still on sixteen hears her call up and
+        // nothing after it. See `mission::Voice`.
+        app.insert_resource(crate::radio::Radio {
+            channel: crate::radio::WORKING,
+            ..Default::default()
+        });
         app.add_systems(Update, (signalling, crate::mission::run).chain());
         app
     }
@@ -1179,6 +1193,58 @@ mod what_the_hoist_does {
         assert!(
             app.world().resource::<Pilotage>().hail.is_some(),
             "nothing was called across the water"
+        );
+    }
+
+    /// **Her words come over the radio, because a voice does not cross four hundred
+    /// metres of water and two sets of canvas.**
+    ///
+    /// That fact is the whole reason `signals.rs` exists, and it was being contradicted
+    /// three lines further down by a master heard calling across about the tide. So the
+    /// flags still work out of earshot — she reads the hoist, answers with the pendant
+    /// and obeys — and what she *says* arrives on the channel she asked for, or not at
+    /// all. A pilot boat left on sixteen hears her call up and nothing after it.
+    #[test]
+    fn what_she_says_comes_over_the_air() {
+        let mut app = within_signal(Flag::Kilo);
+        app.world_mut().resource_mut::<crate::radio::Radio>().channel = crate::radio::CALLING;
+        at(&mut app, 8.0);
+        assert!(
+            app.world().resource::<Answer>().said.is_some(),
+            "she did not answer the hoist at all — the flags do not need a radio"
+        );
+        assert!(
+            app.world().resource::<Pilotage>().hail.is_none(),
+            "her words reached a set that was on another channel"
+        );
+        // And on hers they arrive.
+        app.world_mut().resource_mut::<crate::radio::Radio>().channel = crate::radio::WORKING;
+        app.world_mut().resource_mut::<Answer>().said = None;
+        at(&mut app, 12.0);
+        assert!(
+            app.world().resource::<Pilotage>().hail.is_some(),
+            "nothing came over the working channel"
+        );
+    }
+
+    /// **And she calls up on sixteen**, which is where a ship asks for a pilot and says
+    /// what channel to go to. Without that line nobody would ever find the channel, and
+    /// a working channel you have to guess is a mechanic with no way in.
+    #[test]
+    fn she_calls_for_a_pilot_on_sixteen() {
+        let mut app = within_signal(Flag::Kilo);
+        at(&mut app, 1.0);
+        let radio = app.world().resource::<crate::radio::Radio>();
+        let call = radio
+            .air
+            .iter()
+            .find(|t| t.channel == crate::radio::CALLING)
+            .expect("she never called up");
+        assert!(call.words.contains("pilot"), "{}", call.words);
+        assert!(
+            call.words.contains(&format!("{}", crate::radio::WORKING)),
+            "she did not say what channel to go to: {}",
+            call.words
         );
     }
 

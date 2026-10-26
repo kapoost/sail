@@ -47,7 +47,11 @@ pub fn plugin(app: &mut App) {
     use crate::stages::Deck;
     app.init_resource::<Radio>();
     app.init_resource::<Coastguard>();
-    app.add_systems(Update, (broadcast, listen).chain().in_set(Deck::Weather));
+    app.init_resource::<PortControl>();
+    app.add_systems(
+        Update,
+        (broadcast, harbour, listen).chain().in_set(Deck::Weather),
+    );
 }
 
 /// How far a transmission carries, metres, between two aerials at these heights.
@@ -69,8 +73,24 @@ pub const AERIAL: f64 = 16.0;
 /// hear you from forty miles and the yacht two miles behind the island cannot.
 pub const STATION_AERIAL: f64 = 180.0;
 
+/// A harbour office's aerial, on the roof above the fairway.
+///
+/// Forty metres rather than the coastguard's hundred and eighty: a port talks to the
+/// water it can see, and the difference shows — you hear the harbour when you are in its
+/// approach and the coastguard from half the sea away.
+pub const HARBOUR_AERIAL: f64 = 40.0;
+
+/// And a square-rigger's, at the main truck.
+pub const BRIG_AERIAL: f64 = 28.0;
+
 /// The calling and distress channel, which is watched and not worked.
 pub const CALLING: u8 = 16;
+
+/// Port operations, which is where a harbour works.
+pub const PORT: u8 = 12;
+
+/// Ship to ship — the one a pilot and the vessel he is leading go to.
+pub const WORKING: u8 = 72;
 
 /// The channels this set has. Sixteen, the two that harbours work, and a ship-to-ship.
 ///
@@ -664,5 +684,228 @@ mod what_the_station_says {
             "it took {:.1} seconds to read",
             bulletin.takes
         );
+    }
+}
+
+// -----------------------------------------------------------------------------------
+// The harbour, when you come into its water.
+// -----------------------------------------------------------------------------------
+
+/// How far off a harbour its port control takes an interest, metres.
+///
+/// Two miles. Inside that you are in the approach, committed to it, and in the water the
+/// office can see — which is the only water it has anything useful to say about.
+pub const APPROACH: f64 = 3_700.0;
+
+/// How often it repeats the traffic and tidal broadcast while you are in there, seconds.
+///
+/// Ten minutes. A port does repeat its traffic information on the working channel, and
+/// the repeat is also the forgiveness: the call on sixteen tells you where to listen,
+/// and if you were slow to change channel you get the next one rather than nothing.
+const REPEATS_EVERY: f64 = 600.0;
+
+/// The harbour that is currently taking an interest.
+#[derive(Resource, Default)]
+pub struct PortControl {
+    /// Which one, so that it calls when you come into its water and not every frame.
+    working: Option<usize>,
+    said_at: f64,
+}
+
+/// What the harbour has to say, which is only what it actually knows.
+///
+/// **The one rule the forecast is written under holds here too**: nothing is invented.
+/// There is no ferry in this model, so no ferry is reported. What a port office really
+/// does know is the state of its own tide, the stream through its own fairway, and what
+/// is moving in it — and all three of those are in the simulation and none of them had
+/// anywhere to be said out loud. The tide especially: it has been under the keel since
+/// the spring and the only place it showed was the depth sounder.
+pub fn traffic(sim: &Sim, name: &str, at: glam::DVec2, hour: f32, others: usize) -> String {
+    let tide = &sim.sim.tide;
+    let now = sim.sim.state.time;
+    // High water, in ship's time, which is the figure anybody plans an entry around.
+    let high = (hour as f64 + tide.until_high(now) / 3_600.0).rem_euclid(24.0);
+    let depth = sim
+        .sim
+        .land
+        .as_ref()
+        .map(|l| l.depth(at))
+        .unwrap_or(10.0)
+        .max(2.0);
+    let stream = tide.stream(now, depth);
+    let rate = sail_core::units::ms_to_kn(stream.length());
+    let mut out = format!(
+        "Traffic and tidal information, the {name} approach. \
+         High water {:02.0}{:02.0}, height {:.1} metres. ",
+        high.floor(),
+        (high.fract() * 60.0).floor(),
+        tide.range()
+    );
+    // A stream is named by where it sets *to*, which is the opposite convention to the
+    // wind and the one mistake everybody makes reading a tidal atlas for the first time.
+    if rate > 0.15 {
+        out.push_str(&format!(
+            "The stream is setting {} at {:.1} knots. ",
+            points_to(sail_core::units::deg(stream.x.atan2(stream.y))),
+            rate
+        ));
+    } else {
+        out.push_str("The stream is slack. ");
+    }
+    out.push_str(match others {
+        0 => "No reported traffic. Out.",
+        1 => "One vessel under way in the approach. Out.",
+        _ => "Several vessels under way in the approach. Out.",
+    });
+    out
+}
+
+/// Where a stream sets, in the eight points a harbour would use.
+fn points_to(degrees: f64) -> &'static str {
+    const POINTS: [&str; 8] = [
+        "north",
+        "northeast",
+        "east",
+        "southeast",
+        "south",
+        "southwest",
+        "west",
+        "northwest",
+    ];
+    POINTS[(((degrees + 22.5).rem_euclid(360.0)) / 45.0) as usize % 8]
+}
+
+/// The harbour, calling a vessel that has come into its approach.
+pub fn harbour(
+    sim: Res<Sim>,
+    sky: Res<crate::sky::Sky>,
+    course: Res<crate::course::Course>,
+    fleet: Res<crate::fleet::Fleet>,
+    mut port: ResMut<PortControl>,
+    mut radio: ResMut<Radio>,
+) {
+    let here = sim.sim.state.pos;
+    let now = sim.sim.state.time;
+    let near = course
+        .harbours
+        .iter()
+        .enumerate()
+        .map(|(i, h)| (i, (h.at - here).length()))
+        .filter(|(_, off)| *off < APPROACH)
+        .min_by(|a, b| a.1.total_cmp(&b.1));
+    let Some((which, _)) = near else {
+        // Out of its water: the next harbour you come into calls you again, and the one
+        // you have left stops talking.
+        port.working = None;
+        return;
+    };
+    let arriving = port.working != Some(which);
+    if !arriving && now - port.said_at < REPEATS_EVERY {
+        return;
+    }
+    port.working = Some(which);
+    port.said_at = now;
+    let place = &course.harbours[which];
+    let station = format!("{} Port Control", place.name);
+    // What is actually moving in there, which in this game is whoever else is sailing.
+    let others = fleet
+        .boats
+        .iter()
+        .filter(|b| {
+            let at = glam::DVec2::new(b.drawn.pos[0] as f64, b.drawn.pos[1] as f64);
+            (at - place.at).length() < APPROACH
+        })
+        .count();
+    if arriving {
+        radio.broadcast(Transmission::saying(
+            &station,
+            CALLING,
+            &format!(
+                "All ships, all ships. This is {station}. \
+                 Traffic and tidal information for the {} approach, listen channel {PORT}. Out.",
+                place.name
+            ),
+            Some((place.at, HARBOUR_AERIAL)),
+            now,
+        ));
+    }
+    radio.broadcast(
+        Transmission::saying(
+            &station,
+            PORT,
+            &traffic(&sim, &place.name, place.at, sky.hour, others),
+            Some((place.at, HARBOUR_AERIAL)),
+            // After the call on sixteen is finished, when there was one.
+            now + if arriving { 11.0 } else { 0.0 },
+        )
+        .for_the_book(),
+    );
+}
+
+#[cfg(test)]
+mod what_the_harbour_says {
+    use super::*;
+
+    fn a_world() -> Sim {
+        Sim::new(crate::weather::Weather::draw(42), 42)
+    }
+
+    /// **The tide is in it, and it is this world's tide.** The one number that has been
+    /// under the keel since the spring and had nowhere to be said: a port office knows
+    /// when its own high water is, and now so do you, in words, without opening a page.
+    #[test]
+    fn it_gives_the_tide_in_the_words_a_harbour_gives_it_in() {
+        let sim = a_world();
+        let said = traffic(&sim, "Nordholm", glam::DVec2::ZERO, 9.0, 0);
+        assert!(said.contains("High water"), "{said}");
+        assert!(said.contains("metres"), "{said}");
+        // The hour it names is the hour the model says, read back off the string.
+        let hhmm: String = said
+            .split("High water ")
+            .nth(1)
+            .and_then(|rest| rest.split(',').next())
+            .expect("a time")
+            .to_string();
+        let hours: f64 = hhmm[..2].parse::<f64>().expect("hours")
+            + hhmm[2..4].parse::<f64>().expect("minutes") / 60.0;
+        let want = (9.0 + sim.sim.tide.until_high(0.0) / 3_600.0).rem_euclid(24.0);
+        assert!(
+            (hours - want).abs() < 0.02 || (hours - want).abs() > 23.98,
+            "it said high water at {hhmm} and the tide says {want:.2}"
+        );
+    }
+
+    /// **A stream is named by where it sets to**, which is the opposite of the wind and
+    /// the first mistake anybody makes with a tidal atlas. And it is slack at the top and
+    /// the bottom of the tide, which the words have to be able to say.
+    #[test]
+    fn the_stream_is_named_the_way_a_stream_is_named() {
+        let mut sim = a_world();
+        // Mid-tide, where it runs hardest.
+        sim.sim.tide.put_at(0.0, 0.0);
+        let running = traffic(&sim, "Nordholm", glam::DVec2::ZERO, 9.0, 0);
+        assert!(running.contains("setting"), "{running}");
+        assert!(running.contains("knots"), "{running}");
+        // High water, where it is slack.
+        sim.sim.tide.put_at(sim.sim.tide.amplitude(), 0.0);
+        let slack = traffic(&sim, "Nordholm", glam::DVec2::ZERO, 9.0, 0);
+        assert!(slack.contains("slack"), "{slack}");
+        assert_eq!(points_to(0.0), "north");
+        assert_eq!(points_to(90.0), "east");
+        assert_eq!(points_to(200.0), "south");
+    }
+
+    /// **It reports the traffic there is and not the traffic a harbour usually has.**
+    /// The same rule the forecast is written under: there is no ferry in this model, so
+    /// there is no ferry on the air. What it counts is whoever else is actually sailing.
+    #[test]
+    fn it_does_not_invent_a_ferry() {
+        let sim = a_world();
+        let empty = traffic(&sim, "Nordholm", glam::DVec2::ZERO, 9.0, 0);
+        assert!(empty.contains("No reported traffic"), "{empty}");
+        let one = traffic(&sim, "Nordholm", glam::DVec2::ZERO, 9.0, 1);
+        assert!(one.contains("One vessel"), "{one}");
+        let crowd = traffic(&sim, "Nordholm", glam::DVec2::ZERO, 9.0, 4);
+        assert!(crowd.contains("Several vessels"), "{crowd}");
     }
 }

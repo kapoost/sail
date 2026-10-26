@@ -138,6 +138,13 @@ pub struct Brig {
     /// Where she is going. In her own right until a pilot is aboard; after that it is
     /// the pilot's problem.
     pub bound_for: DVec2,
+    /// What she is called, which she needs the moment she has a radio.
+    ///
+    /// **A vessel on the air identifies herself every time she speaks**, and that is not
+    /// politeness: on a shared channel a transmission without a name is a voice nobody
+    /// can answer. Drawn from where she was put, the way the islands are named, so that
+    /// the same brig on the same morning is the same ship.
+    pub name: String,
 }
 
 impl Default for Brig {
@@ -152,8 +159,26 @@ impl Default for Brig {
             set: [1.0, 1.0, 1.0],
             afloat: false,
             bound_for: DVec2::ZERO,
+            name: "Nordstjernen".to_string(),
         }
     }
+}
+
+/// A name for a square-rigger, assembled the way the places are.
+///
+/// Norse and merchant, because that is what a brig carrying casks into this archipelago
+/// would be. Deterministic in where she was put, so she keeps her name for the length of
+/// a job and gets a different one the next time one stands in from seaward.
+pub fn ship_name(seed: u64) -> String {
+    const HEAD: [&str; 12] = [
+        "Nord", "Hav", "Sjø", "Vest", "Stor", "Sol", "Vind", "Fram", "Stjerne", "Bjørn", "Morgen",
+        "Kvit",
+    ];
+    const TAIL: [&str; 6] = ["stjernen", "fruen", "bringen", "vaagen", "svalen", "gutten"];
+    let mut rng = sail_core::rng::Pcg32::new(seed ^ 0x5A_11_00);
+    let head = HEAD[(rng.next_u32() as usize) % HEAD.len()];
+    let tail = TAIL[(rng.next_u32() as usize) % TAIL.len()];
+    format!("{head}{tail}")
 }
 
 /// The height her sail plan works at, metres.
