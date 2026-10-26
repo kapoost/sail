@@ -360,6 +360,18 @@ pub fn wants(
         Line::Furl if changing => 1.0,
         Line::Furl if c.headsail.flying() => 0.0,
         Line::Furl => (c.reef * 0.8).clamp(0.0, 0.95),
+        // **The trysail goes up when the main has come off her, and not before.** The
+        // watch does not reach for it as a precaution: the sequence is three slabs,
+        // then the main off, then the trysail — and the middle step is the decision.
+        // Once the main is off she has nothing aft at all, and nothing aft in a gale is
+        // a boat lying across the sea, so by then it is not a choice.
+        Line::Trysail => {
+            if c.reef >= sail_core::boat::DROPPED {
+                1.0
+            } else {
+                0.0
+            }
+        }
         // **The staysail is the heavy-weather sail and the slot-filler**, and the two
         // conditions it goes up in are the same condition: a rig that has been shortened
         // down. Two slabs in the main, or it blowing hard enough that it is about to be,
@@ -698,6 +710,7 @@ pub fn work(
             Line::Staysail => "setting the staysail",
             Line::StaysailSheet => "on the staysail sheet",
             Line::Reef => "on the reef pennant",
+            Line::Trysail => "bending on the trysail",
         });
     }
 }

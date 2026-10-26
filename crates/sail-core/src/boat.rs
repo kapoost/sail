@@ -51,6 +51,11 @@ mod cloth {
     pub const GENOA: f64 = kn_to_ms(42.0);
     pub const MAIN: f64 = kn_to_ms(45.0);
     pub const STAYSAIL: f64 = kn_to_ms(60.0);
+    /// The same cloth as the staysail and for the same reason: a storm sail is the one
+    /// that is still there when everything else has gone away, so its number is set
+    /// above anything this boat can survive rather than at the top of what she will
+    /// meet. A trysail that blows out is a trysail that was never worth bending on.
+    pub const TRYSAIL: f64 = kn_to_ms(60.0);
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -221,6 +226,8 @@ pub struct BoatConfig {
     pub code_zero: RiggedSail,
     /// The running sail.
     pub gennaker: RiggedSail,
+    /// Storm canvas aft: a trysail, set on the mast track when the main is off her.
+    pub trysail: RiggedSail,
     /// The symmetric kite, flown from a pole.
     pub spinnaker: RiggedSail,
     /// The inner headsail of a double head rig.
@@ -290,6 +297,41 @@ pub mod packet {
 /// with stayed at 39 square metres while every commit said 55. One function, one set of
 /// ratios, and that cannot happen again.
 ///
+/// Storm canvas aft, measured against the mainsail it replaces.
+///
+/// **A trysail is not a fifth reef.** A deep-reefed main is still a mainsail: it is bent
+/// to a boom, the boom is a spar across the cockpit at head height, and in survival
+/// conditions it is the thing that kills people. A trysail is a separate sail — heavy
+/// cloth, loose-footed, set on its own track up the mast and sheeted to the quarters —
+/// and the whole point of it is that *there is no boom*. That is why it goes on when the
+/// main comes off and not before.
+///
+/// Twelve per cent of the main, which is what a storm trysail actually is: the ORC
+/// rule puts it at 17.5 per cent of `P × E` and a cruising one is smaller again. On this
+/// boat that is about four and a half square metres, and four and a half square metres
+/// of flat heavy cloth in fifty knots is a great deal of sail.
+///
+/// Its centre of effort is **low and forward of the main's**: the sail is a triangle
+/// whose foot is sheeted down to the quarters rather than out along a spar, so it sits
+/// in the bottom of the triangle the main occupied and carries nothing aloft.
+fn storm_trysail(main: &RiggedSail, main_luff: f64) -> RiggedSail {
+    let area = main.area * 0.12;
+    RiggedSail {
+        // Cut flat, like every storm sail: camber is drive and drive is the last thing
+        // wanted at this end of the wind range. `mainsail` is the right profile — it is
+        // a triangle on a mast — at a third of the luff.
+        profile: SailProfile::mainsail(area, main_luff * 0.34),
+        area,
+        // Low. The whole argument for the sail is heeling moment, and a lever is half
+        // of a moment: a third of the main's height with a tenth of its area is about a
+        // thirtieth of the heeling it had.
+        z_ce: main.z_ce * 0.38,
+        // Forward of the main's, because nothing is holding the clew aft.
+        x_ce: main.x_ce + 0.55,
+        limit_aws: cloth::TRYSAIL,
+    }
+}
+
 /// The ratios are to the genoa, because the genoa is the sail a rig is measured by.
 fn wardrobe(
     genoa: &RiggedSail,
@@ -380,6 +422,14 @@ impl BoatConfig {
             limit_aws: cloth::GENOA,
         };
         let (code_zero, gennaker, spinnaker, staysail) = wardrobe(&genoa, genoa_luff);
+        let main = RiggedSail {
+            profile: SailProfile::mainsail(main_area, main_luff),
+            area: main_area,
+            z_ce: 6.20,
+            x_ce: -0.30,
+            limit_aws: cloth::MAIN,
+        };
+        let trysail = storm_trysail(&main, main_luff);
 
         Self {
             name: "charter sloop 34",
@@ -439,13 +489,8 @@ impl BoatConfig {
             yaw_damping: 4200.0,
             heel_yaw_coefficient: 0.060,
 
-            main: RiggedSail {
-                profile: SailProfile::mainsail(main_area, main_luff),
-                area: main_area,
-                z_ce: 6.20,
-                x_ce: -0.30,
-                limit_aws: cloth::MAIN,
-            },
+            main,
+            trysail,
             genoa,
             code_zero,
             gennaker,
@@ -567,6 +612,17 @@ impl BoatConfig {
             limit_aws: cloth::GENOA,
         };
         let (code_zero, gennaker, spinnaker, staysail) = wardrobe(&genoa, genoa_luff);
+        let main = RiggedSail {
+            profile: SailProfile {
+                max_chord_angle: boom_against_shrouds,
+                ..SailProfile::mainsail(main_area, main_luff)
+            },
+            area: main_area,
+            z_ce: 6.60,
+            x_ce: -0.35,
+            limit_aws: cloth::MAIN,
+        };
+        let trysail = storm_trysail(&main, main_luff);
 
         Self {
             name: "archipelago packet 36",
@@ -650,16 +706,8 @@ impl BoatConfig {
             yaw_damping: 4000.0,
             heel_yaw_coefficient: 0.058,
 
-            main: RiggedSail {
-                profile: SailProfile {
-                    max_chord_angle: boom_against_shrouds,
-                    ..SailProfile::mainsail(main_area, main_luff)
-                },
-                area: main_area,
-                z_ce: 6.60,
-                x_ce: -0.35,
-                limit_aws: cloth::MAIN,
-            },
+            main,
+            trysail,
             genoa,
             code_zero,
             gennaker,
@@ -688,6 +736,18 @@ impl BoatConfig {
             self.main.area * (1.0 - r),
             self.main.z_ce * (1.0 - 0.55 * r),
         )
+    }
+
+    /// How much trysail is drawing, and where its effort is.
+    ///
+    /// Nought unless the main is off her — see `Controls::trysail`. The sail is small
+    /// enough and flat enough that it is not split for twist the way the main is: there
+    /// is no vang, no boom and barely any leech to spill.
+    pub fn trysail_drawing(&self, reef: f64, set: f64) -> (f64, f64) {
+        if reef < DROPPED {
+            return (0.0, self.trysail.z_ce);
+        }
+        (self.trysail.area * set.clamp(0.0, 1.0), self.trysail.z_ce)
     }
 
     /// The mainsail split in two for twist: (area, centre of effort height) for the
@@ -874,6 +934,14 @@ impl BoatConfig {
             limit_aws: cloth::GENOA,
         };
         let (code_zero, gennaker, spinnaker, staysail) = wardrobe(&genoa, genoa_luff);
+        let main = RiggedSail {
+            profile: SailProfile::mainsail(main_area, main_luff),
+            area: main_area,
+            z_ce: 8.60,
+            x_ce: -0.45,
+            limit_aws: cloth::MAIN,
+        };
+        let trysail = storm_trysail(&main, main_luff);
 
         Self {
             name: "performance cruiser 53",
@@ -936,13 +1004,8 @@ impl BoatConfig {
             effective_wave_slope: 0.65,
             wave_drag_fraction: 0.5,
 
-            main: RiggedSail {
-                profile: SailProfile::mainsail(main_area, main_luff),
-                area: main_area,
-                z_ce: 8.60,
-                x_ce: -0.45,
-                limit_aws: cloth::MAIN,
-            },
+            main,
+            trysail,
             genoa,
             code_zero,
             gennaker,

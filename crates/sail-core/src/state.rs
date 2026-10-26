@@ -215,6 +215,14 @@ pub struct Controls {
     pub headsail: Headsail,
     /// How much of the staysail is set: 0 handed, 1 drawing.
     pub staysail: f64,
+    /// And the trysail: 0 handed, 1 set.
+    ///
+    /// **It only draws with the main off her**, which is not a rule invented for the
+    /// game: the trysail goes on its own track up the mast and the mainsail is on that
+    /// track. You cannot have both, and the order — main down, trysail up — is the
+    /// manoeuvre. Set it with the main still bent on and the control moves and nothing
+    /// happens, which is also what would happen on deck.
+    pub trysail: f64,
     /// Its sheet, which is a tackle on the end of the club boom: 0 hauled flat, 1 eased.
     ///
     /// It does not change sides — that is what the boom is for — but it is still a line
@@ -248,6 +256,7 @@ impl Default for Controls {
             furl: 0.0,
             headsail: Headsail::Genoa,
             staysail: 0.0,
+            trysail: 0.0,
             staysail_sheet: 0.35,
             preventer: false,
         }

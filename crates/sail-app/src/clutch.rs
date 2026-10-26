@@ -41,9 +41,12 @@ pub enum Line {
     Furl,
     Staysail,
     StaysailSheet,
+    /// Storm canvas aft, and the last line on the bank because it is the last thing
+    /// anybody touches: it only does something with the main off her.
+    Trysail,
 }
 
-pub const BANK: [Line; 7] = [
+pub const BANK: [Line; 8] = [
     Line::Outhaul,
     Line::Vang,
     Line::GenoaCar,
@@ -51,6 +54,7 @@ pub const BANK: [Line; 7] = [
     Line::Furl,
     Line::Staysail,
     Line::StaysailSheet,
+    Line::Trysail,
 ];
 
 impl Line {
@@ -63,6 +67,12 @@ impl Line {
     pub fn rigged_for(self, c: &Controls) -> bool {
         match self {
             Line::GenoaCar => c.headsail == sail_core::state::Headsail::Genoa,
+            // The trysail goes up the mast on the track the mainsail is on, so with the
+            // main bent on there is nowhere for it to go. Said by the bank rather than
+            // hidden, because the halyard is there and a hand can pull it: it is a line
+            // that does nothing *yet*, which is a different thing from a line that is
+            // not rigged.
+            Line::Trysail => c.reef >= sail_core::boat::DROPPED,
             _ => true,
         }
     }
@@ -98,7 +108,7 @@ impl Line {
         const EITHER: [f64; 2] = [0.0, 1.0];
         match self {
             Line::Reef => Some(&SLABS),
-            Line::Staysail => Some(&EITHER),
+            Line::Staysail | Line::Trysail => Some(&EITHER),
             Line::Furl if c.headsail != sail_core::state::Headsail::Genoa => Some(&EITHER),
             Line::Furl => Some(&SLABS),
             _ => None,
@@ -185,6 +195,7 @@ impl Line {
             Line::Furl => "furler",
             Line::Staysail => "stays'l",
             Line::StaysailSheet => "st sheet",
+            Line::Trysail => "trysail",
         }
     }
 
@@ -204,6 +215,7 @@ impl Line {
             Line::Furl => "furling line",
             Line::Staysail => "staysail",
             Line::StaysailSheet => "stays'l sheet",
+            Line::Trysail => "trysail",
         }
     }
 
@@ -228,6 +240,7 @@ impl Line {
             Line::Furl => "rolls the headsail away",
             Line::Staysail => "sets the inner sail",
             Line::StaysailSheet => "brings the club boom in",
+            Line::Trysail => "sets it — only with the main off her",
         }
     }
 
@@ -242,6 +255,7 @@ impl Line {
             // Backwards, like the other sheets on the bank: hauling in is a smaller
             // number, because what the line does is shorten.
             Line::StaysailSheet => 1.0 - c.staysail_sheet,
+            Line::Trysail => c.trysail,
         }
     }
 
@@ -261,6 +275,7 @@ impl Line {
             Line::Furl => c.furl = v,
             Line::Staysail => c.staysail = v,
             Line::StaysailSheet => c.staysail_sheet = 1.0 - v,
+            Line::Trysail => c.trysail = v,
         }
     }
 
@@ -289,6 +304,13 @@ impl Line {
             // to be made before you need it rather than while you do.
             Line::Staysail => 0.11,
             Line::StaysailSheet => 0.26,
+            // Slower again, and it is the slowest line on the boat. Bending a trysail
+            // on is not hoisting a sail that is already hanked and ready: it comes out
+            // of its bag on a heaving foredeck, the slides go into the gate one at a
+            // time, and the sheets are led aft to the quarters. Twenty-odd seconds of
+            // it here, which is as much of that as a game should ask for and still
+            // enough that nobody does it as an afterthought.
+            Line::Trysail => 0.045,
         }
     }
 }

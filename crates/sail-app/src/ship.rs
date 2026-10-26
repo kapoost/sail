@@ -1093,31 +1093,50 @@ fn empty_cloth() -> Mesh {
 /// another boat is sailed — a course she is trying to make, a speed her rig will give
 /// her on that course, and the one hard rule that she cannot lie closer than
 /// [`CLOSEST`] to the wind and will bear away rather than stop.
-pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>) {
+pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>, mut placed: Local<bool>) {
     if !brig.afloat {
         return;
     }
-    // `SAIL_BRIG_SHOW=130` pins her that many metres off the port bow and holds her
-    // there, sailing our course. A drawing knob and nothing else: a ship that is being
-    // looked at has to stay where it can be seen, and the alternative is twelve seconds
-    // of sailing between every screenshot and the thing you wanted to look at.
+    // `SAIL_BRIG_SHOW=130` puts her that many metres off the bow **once**, and then
+    // lets go of her.
+    //
+    // **It used to hold her there, and that is the thing that was reported from the
+    // deck**: a brig that looked pinned to a bearing and slid unnaturally along the
+    // horizon. It was pinned to a bearing. Every frame she was placed at a fixed angle
+    // off our bow, so our own yawing swung her bodily across the sea — twenty metres
+    // sideways for every degree of our helm, at a range of a cable — which is a motion
+    // no vessel makes and the eye picks it out instantly even when it cannot say why.
+    //
+    // A still photograph could not see it and that is how it survived: the knob was
+    // written for screenshots, where holding her in frame is the whole point and one
+    // frame has no motion in it to be wrong. The moment anything moved — a trailer, a
+    // reel, a camera sweeping round — it was the first thing anybody noticed.
+    //
+    // So she is placed and handed a mark nine kilometres ahead, and after that she is
+    // sailed by the same code as any other brig. She stays in frame for a good while
+    // because she is going the same way we are, which is all the knob ever needed.
     if let Some(range) = crate::knob::var("SAIL_BRIG_SHOW")
         .ok()
         .and_then(|v| v.parse::<f64>().ok())
     {
-        let st = &sim.sim.state;
-        // Ten degrees off the bow, not thirty-eight: the chase camera's field is
-        // narrower than it looks and a ship pinned out on the beam sits outside every
-        // view in the game, which is how a knob for *looking* at her managed to be a
-        // knob that never showed her.
-        let off = st.heading - rad(10.0);
-        brig.at = st.pos + DVec2::new(off.sin(), off.cos()) * range;
-        brig.heading = st.heading;
-        brig.speed = kn_to_ms(5.0);
-        let wind = her_wind(&sim, brig.at);
-        let from = sail_core::wind::direction_of(wind);
-        brig.braced = brace_for(angle_off(brig.heading, from));
-        return;
+        if !*placed {
+            *placed = true;
+            let st = &sim.sim.state;
+            // Ten degrees off the bow, not thirty-eight: the chase camera's field is
+            // narrower than it looks and a ship out on the beam sits outside every
+            // view in the game, which is how a knob for *looking* at her managed to be
+            // a knob that never showed her.
+            let off = st.heading - rad(10.0);
+            let ahead = DVec2::new(st.heading.sin(), st.heading.cos());
+            brig.at = st.pos + DVec2::new(off.sin(), off.cos()) * range;
+            brig.heading = st.heading;
+            brig.speed = kn_to_ms(5.0);
+            brig.way = ahead * brig.speed;
+            brig.bound_for = brig.at + ahead * 9_000.0;
+            // Worth a line, like the platform's: "why can I not see her" and "why is
+            // she over there" are both answered by where she was put.
+            info!("brig: laid {range:.0} m off the bow, and sailing her own course now");
+        }
     }
     let dt = time.delta_secs_f64();
     let wind = her_wind(&sim, brig.at);
@@ -1224,12 +1243,33 @@ pub fn place(
     }
     let t = sim.sim.state.time;
     let height = sim.sim.water.height(brig.at, t) as f32;
-    let slope = sim.sim.water.slope(brig.at, t);
+    // **The slope a hull this size actually feels**, not the slope at the point she
+    // floats on taken at a third.
+    //
+    // A third of the raw gradient was a guess standing in for the real thing, and it is
+    // wrong in both directions at once: it gave her a third of a two-metre chop, which
+    // is a three-hundred-ton ship twitching to ripples she would not notice, and only a
+    // third of a long swell, which is the one sea she *should* lie along. Reported from
+    // the deck as too much motion; the fix is not less of it but the right amount of it.
+    //
+    // `felt_slope` is the function the boat's own physics uses and it knows the three
+    // things that stand between the water's gradient and a hull: the pressure gradient
+    // decays over her draft, a wave short against her length averages out along her,
+    // and the same again across her beam. Thirty-one metres of brig in a twenty-metre
+    // sea feels about a tenth of it; in a three-hundred-metre swell she feels nearly
+    // all of it, and lifts to it the way a ship does.
+    let hull = sail_core::water::Hull {
+        along: DVec2::new(brig.heading.sin(), brig.heading.cos()),
+        // Waterline rather than length on deck: she has overhangs at both ends.
+        length: LOA as f64 * 0.88,
+        beam: BEAM as f64,
+        draft: DRAFT as f64,
+    };
+    let slope = sim.sim.water.felt_slope(brig.at, t, hull);
     tr.translation = origin.to_bevy(brig.at, height);
-    // Her own attitude, and then the sea's: a long hull does not follow a short wave, so
-    // the slope under her is taken at a fraction of its value.
-    let sea = Quat::from_rotation_z(-slope.x as f32 * 0.35)
-        * Quat::from_rotation_x(-slope.y as f32 * 0.35);
+    // Her own attitude, and then the sea's. No fraction on it now: the averaging above
+    // *is* the attenuation, and a vessel lying to a long swell lies along it.
+    let sea = Quat::from_rotation_z(-slope.x as f32) * Quat::from_rotation_x(-slope.y as f32);
     tr.rotation = sea
         * Quat::from_rotation_y(-brig.heading as f32)
         * Quat::from_rotation_z(-brig.heel as f32);
@@ -1309,5 +1349,94 @@ pub fn work_her(
         if let Some(mut mesh) = meshes.get_mut(&mesh.0) {
             *mesh = cloth;
         }
+    }
+}
+
+#[cfg(test)]
+mod how_she_lies {
+    use super::*;
+    use sail_core::units::kn_to_ms;
+    use sail_core::water::{Swell, WaterSurface, WindSea};
+
+    /// Her hull, as the water model wants it.
+    fn hull(heading: f64) -> sail_core::water::Hull {
+        sail_core::water::Hull {
+            along: DVec2::new(heading.sin(), heading.cos()),
+            length: LOA as f64 * 0.88,
+            beam: BEAM as f64,
+            draft: DRAFT as f64,
+        }
+    }
+
+    /// The worst of the slope either reading gives over a couple of minutes, which is
+    /// what the eye reads as "how much she is moving".
+    fn worst(sea: &WindSea, felt: bool) -> f64 {
+        let at = DVec2::new(40.0, -17.0);
+        let mut most: f64 = 0.0;
+        for step in 0..1_200 {
+            let t = step as f64 * 0.1;
+            let s = if felt {
+                sea.felt_slope(at, t, hull(0.0))
+            } else {
+                sea.slope(at, t)
+            };
+            most = most.max(s.length());
+        }
+        most
+    }
+
+    /// **Thirty-one metres of ship does not twitch to a chop.**
+    ///
+    /// The drawn attitude used to be the raw gradient at the point she floats on, taken
+    /// at a third — a guess, and wrong in both directions. In a short wind sea a third
+    /// is far too much: the wave is shorter than she is, it lifts her bow and her stern
+    /// by the same amount at once, and the mean gradient under her is nearly nothing.
+    /// Reported from the deck as a ship moving too much.
+    #[test]
+    fn a_short_sea_hardly_moves_her() {
+        let mut chop = WindSea::new(kn_to_ms(18.0), 8_000.0, 0.0, 11);
+        chop.settle(kn_to_ms(18.0), 0.0);
+        let point = worst(&chop, false);
+        let felt = worst(&chop, true);
+        assert!(
+            felt < point * 0.35,
+            "she feels {:.1}% of a chop she should barely notice",
+            felt / point * 100.0
+        );
+    }
+
+    /// **And she lies along a long swell, which is the half the old guess also got
+    /// wrong.** A third of an ocean swell is a ship ploughing through a hill instead of
+    /// lifting over it. Hers is the one motion that should be large and slow.
+    ///
+    /// Measured against the swell's own geometry rather than against the slope at a
+    /// point, and that is not a convenience: even in two knots of wind the leftover
+    /// chop is steeper than four metres of swell four hundred metres long, so a ratio
+    /// taken against the point reading would be measuring the very wave she is supposed
+    /// to ignore. The number to beat is `a·k` — amplitude times wavenumber, the maximum
+    /// gradient a sinusoid has.
+    #[test]
+    fn a_long_swell_lifts_her_nearly_all_the_way() {
+        const HS: f64 = 4.0;
+        const TP: f64 = 16.0;
+        let mut ocean = WindSea::new(kn_to_ms(2.0), 2_000.0, 0.0, 5);
+        ocean.settle(kn_to_ms(2.0), 0.0);
+        ocean.set_swell(
+            Some(Swell {
+                hs: HS,
+                tp: TP,
+                run: 0.0,
+            }),
+            0.0,
+        );
+        // Deep-water dispersion: a sixteen-second wave is four hundred metres long.
+        let length = 9.81 * TP * TP / std::f64::consts::TAU;
+        let steepest = (HS / 2.0) * (std::f64::consts::TAU / length);
+        let felt = worst(&ocean, true);
+        assert!(
+            felt > steepest * 0.8,
+            "she took {:.0}% of a swell {length:.0} m long",
+            felt / steepest * 100.0
+        );
     }
 }

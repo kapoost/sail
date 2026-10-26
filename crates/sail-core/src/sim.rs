@@ -837,6 +837,44 @@ impl Simulation {
         let stay_drive = stay.map(|f| f.drive).unwrap_or(0.0);
         let stay_side = stay.map(|f| f.side).unwrap_or(0.0);
 
+        // **Storm canvas aft.** A triangle of heavy flat cloth on the mast track, which
+        // only exists while the main is off her — see `BoatConfig::trysail_drawing`.
+        //
+        // Trimmed off the main sheet, because that is the line it is on: the sheets go
+        // to the quarters and the winches are the main's. Sheeted hard, which is what
+        // a trysail is for — she is not being driven, she is being kept from lying
+        // across the sea, and a flogging storm sail is a storm sail coming apart.
+        let (try_area, try_z) = cfg.trysail_drawing(controls.reef, controls.trysail);
+        let trysail = if try_area > 1e-3 {
+            let (try_awa, try_aws) = apparent_wind(
+                &st,
+                wind_ref,
+                try_z * heel_cos,
+                velocity,
+                st.roll_rate * try_z * heel_cos,
+            );
+            Some(sail_forces(
+                &cfg.trysail.profile,
+                try_awa,
+                try_aws,
+                controls.main_sheet.clamp(0.0, 1.0),
+                try_area,
+                st.heel,
+                // **Nothing is blanketing it.** The argument is the fraction of its air
+                // somebody else has taken, and this sail is abaft the mast with the
+                // mainsail off her and whatever is forward rolled to a scrap. Passing
+                // one here — the number that means *fully* blanketed — was an hour of
+                // wondering why a sail with a perfectly good lift coefficient produced
+                // no force at all.
+                0.0,
+                crate::sail::CAMBER_REFERENCE,
+            ))
+        } else {
+            None
+        };
+        let try_drive = trysail.map(|f| f.drive).unwrap_or(0.0);
+        let try_side = trysail.map(|f| f.side).unwrap_or(0.0);
+
         // Where the load sits on each sail, which is not a constant: see
         // [`crate::sail::centre_of_pressure`].
         let main_cop = crate::sail::centre_of_pressure(main_camber, main.coeffs.stalled);
@@ -883,10 +921,12 @@ impl Simulation {
         let drive = (main.drive + main_upper.drive) * main_cost
             + (jib.drive + jib_upper.drive) * slot_cost
             + stay_drive
+            + try_drive
             + windage_drive;
         let sail_side = (main.side + main_upper.side) * main_cost
             + (jib.side + jib_upper.side) * slot_cost
             + stay_side
+            + try_side
             + windage_side;
 
         // --- Hull velocity direction in the body frame ----------------------------
@@ -1055,6 +1095,7 @@ impl Simulation {
         let mut mz = main_x * (main.side + main_upper.side)
             + jib_x * (jib.side + jib_upper.side) * slot_cost
             + cfg.staysail.x_ce * stay_side
+            + cfg.trysail.x_ce * try_side
             // The windage has a lever too. Small — about sixty newton-metres in twenty
             // knots against the sails' thousands — but under bare poles it is the only
             // yaw moment on her, and a force carried at the origin because nobody said
@@ -1149,7 +1190,8 @@ impl Simulation {
             + main_upper.side * (upper_z * heel_cos + cfg.z_clr)
             + jib.side * (jib_lower_z * heel_cos + cfg.z_clr)
             + jib_upper.side * (jib_upper_z * heel_cos + cfg.z_clr)
-            + stay_side * (cfg.staysail.z_ce * heel_cos + cfg.z_clr);
+            + stay_side * (cfg.staysail.z_ce * heel_cos + cfg.z_clr)
+            + try_side * (cfg.trysail.z_ce * heel_cos + cfg.z_clr);
         // The righting curve restores towards the local vertical, and in a wave the
         // local vertical is tilted. Evaluating GZ at the heel *relative to the wave
         // slope* is the whole of wave-induced rolling, to first order, and it keeps
