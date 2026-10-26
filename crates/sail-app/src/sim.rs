@@ -48,6 +48,30 @@ impl Sim {
         // climatological middle over the next hour and a half, rather than starting
         // wherever the draw happened to leave the process.
         wind.synoptic.start_cover(weather.cover);
+        // **And a front, about one day in three.** The day was drawn once and then
+        // wandered about what it had been drawn as, which is a good model of an
+        // afternoon and a poor one of a passage: four hours of it gives you a knot
+        // either way and twenty degrees of wander, and the glass is a readout of the
+        // wind rather than a thing that tells you something you cannot see yet.
+        //
+        // Off the world's own seed rather than the day's dice, so that two boats in one
+        // game cross the same front without a packet — the same argument as the
+        // islands. See `Synoptic::may_bring_a_front`.
+        wind.synoptic.may_bring_a_front(weather.seed);
+        if let Some(front) = wind.synoptic.front {
+            let hour = weather.start_hour + front.through_at / 3600.0;
+            info!(
+                "front: through about {:02.0}:{:02.0}, wind veering {:.0} to {:.0} kn, \
+                 {:.0} hPa in the trough",
+                hour.rem_euclid(24.0).floor(),
+                (hour.fract() * 60.0).abs(),
+                sail_core::units::deg(sail_core::units::wrap_pi(
+                    front.behind_direction - weather.wind_from
+                )),
+                sail_core::units::ms_to_kn(front.behind_speed),
+                front.trough,
+            );
+        }
         // `SAIL_SQUALL=120` for a squall every two minutes. The same kind of switch as
         // `SAIL_HEADSAIL`: you cannot look at a thing that happens every twenty-five
         // minutes often enough to get it right, and a knob beats sitting and waiting.

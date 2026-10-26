@@ -243,6 +243,12 @@ pub fn exchange(
                 if let Some(w) = sim.sim.wind.adjustable() {
                     w.synoptic.base_speed = world.tws as f64;
                     w.synoptic.base_direction = world.wind_from as f64;
+                    // And the weather's own clock, which the front is read against. The
+                    // front itself needs no packet — both machines draw the same one
+                    // from the same seed, like the islands — but a boat that joined an
+                    // hour in would otherwise sail into a veer an hour after everybody
+                    // else had it.
+                    w.synoptic.at_time(sky.t as f64);
                 }
                 // And the clock, which matters more than it looks.
                 //

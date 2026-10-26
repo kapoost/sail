@@ -191,6 +191,15 @@ pub struct Synoptic {
     /// which this crate decided once already by giving `Pcg32` only `Clone`.
     fog_seed: u64,
     fog_step: u64,
+    /// The front crossing today, if one is. Most days have none.
+    pub front: Option<Front>,
+    /// Seconds since the passage began, which is what the front is read against.
+    ///
+    /// Kept here rather than taken as an argument because every reader of this struct
+    /// asks it for a scalar — `speed()`, `cover()`, `barometer()` — and threading a
+    /// time through all of them to serve one optional feature is how a model acquires a
+    /// parameter nobody can explain.
+    since: f64,
 }
 
 /// How much of the wind's trend shows up in the cloud cover.
@@ -211,6 +220,75 @@ const COVER_FROM_WIND: f64 = 0.45;
 /// Wider than the cloud's, because fog is more nearly a yes-or-no than cover is: a coast
 /// either has it or it has not, and the days in between are the unusual ones.
 const FOG_SWING: f64 = 0.35;
+
+/// A front crossing: the day's weather becoming a different day's.
+///
+/// # Why this is a *time* and not a line on the water
+///
+/// A front is a boundary between two air masses, five hundred kilometres long and
+/// moving at twenty-five knots. This archipelago is five and a half kilometres across.
+/// Every boat in the game is through the transition within about seven minutes of every
+/// other, so a front modelled as a line in the water would be a line nobody can see
+/// both ends of, costing a dot product per sample to express a difference of minutes.
+///
+/// The honest simplification is the opposite of the squall's. A squall is modelled as a
+/// *thing in the water* because it is four hundred metres across and you can watch it
+/// coming; a front is modelled as a thing on the clock because at this scale that is
+/// what it is. What you see of a front is never its edge — it is the sequence over your
+/// own head.
+///
+/// # What a sailor gets out of it
+///
+/// All of it falls out of two air masses and a transition, with nothing written down
+/// separately:
+///
+/// * **The wind veers through it**, by twenty to seventy degrees, which is what the
+///   circulation round a northern low does — so the tack you are on matters hours
+///   before anything happens.
+/// * **The glass falls, bottoms out at the line and rises behind.** A front is a trough
+///   of low pressure travelling with the boundary, so the barometer stops being a
+///   readout of the wind and becomes the one instrument aboard that is ahead of the
+///   weather.
+/// * **It blows harder behind a cold one and clears.** The cover belongs to the air
+///   mass, so the sky changes *with* the wind rather than being correlated with it by a
+///   coefficient.
+#[derive(Clone, Copy, Debug)]
+pub struct Front {
+    /// Seconds from the start of the passage to the middle of the transition.
+    pub through_at: f64,
+    /// How long the change takes, seconds.
+    ///
+    /// A sharp cold front is twenty minutes of wind and done; a warm front is half a
+    /// day of thickening cloud and a slow back. The difference between the two is this
+    /// number and what is behind it, and nothing else.
+    pub takes: f64,
+    /// The air mass behind it.
+    pub behind_speed: f64,
+    pub behind_direction: f64,
+    pub behind_cover: f64,
+    /// How deep the pressure trough at the line is, hectopascals. Four to eight on an
+    /// ordinary front.
+    pub trough: f64,
+}
+
+impl Front {
+    /// How far through it the day is: 0 fully ahead, 1 fully behind.
+    ///
+    /// Smoothstepped rather than linear, because a front has no edge: it begins as a
+    /// thickening and ends as a clearance, and the steep part is in the middle.
+    pub fn through(&self, since: f64) -> f64 {
+        let half = self.takes.max(1.0) * 0.5;
+        crate::units::smoothstep(-half, half, since - self.through_at)
+    }
+
+    /// The trough, in hectopascals below the air masses' own, at this moment. A bell
+    /// centred on the line and as wide as the transition.
+    pub fn dip(&self, since: f64) -> f64 {
+        let half = self.takes.max(1.0) * 0.5;
+        let off = (since - self.through_at) / half;
+        self.trough * (-off * off).exp()
+    }
+}
 
 const SYNOPTIC_FLOOR: f64 = 0.55;
 const SYNOPTIC_CEILING: f64 = 1.75;
@@ -241,10 +319,13 @@ impl Synoptic {
             fog_trend: FOG_SWING * fog_rng.next_normal(),
             fog_seed,
             fog_step: 1,
+            front: None,
+            since: 0.0,
         }
     }
 
     fn step(&mut self, dt: f64, rng: &mut Pcg32) {
+        self.since += dt;
         ou_step(
             &mut self.speed_trend,
             self.speed_swing,
@@ -296,6 +377,84 @@ impl Synoptic {
         self.cover_trend = cover - self.cover_mean - COVER_FROM_WIND * self.speed_trend;
     }
 
+    /// Give the day a front to cross, from its own dice.
+    ///
+    /// **Its own seed, like the fog's, and for the same reason**: a number taken out of
+    /// the shared stream shifts every gust in every world that ever existed. That was
+    /// learned once already, by a test that noticed the watch changing sail a minute
+    /// later after fog was added.
+    ///
+    /// Most days have none. One in three is about right for a coast in the half of the
+    /// year anybody sails in — often enough that the glass is worth watching, rare
+    /// enough that a steady day is still a steady day.
+    pub fn may_bring_a_front(&mut self, seed: u64) {
+        let mut rng = Pcg32::new(seed ^ 0xF2_0A_71);
+        if rng.next_f64() > 0.34 {
+            return;
+        }
+        // **Which way it shifts is not a coin.** In the northern hemisphere a front
+        // veers the wind as it goes through, every time, because that is what the
+        // circulation round a low does — and the amount is twenty to seventy degrees. A
+        // model that backed half the time would be teaching the wrong lesson to the one
+        // person this is for.
+        let veer = crate::units::rad(20.0 + 50.0 * rng.next_f64());
+        // Two thirds of the fronts crossing a coast like this are cold: sharp, and clear
+        // behind. A warm one is slow and leaves it thick.
+        let cold = rng.next_f64() < 0.66;
+        self.front = Some(Front {
+            // Somewhere in the first few hours, so a passage of an hour or two has a
+            // real chance of being in it rather than a certainty of missing it.
+            through_at: 600.0 + 9_000.0 * rng.next_f64(),
+            takes: if cold {
+                900.0 + 1_500.0 * rng.next_f64()
+            } else {
+                7_000.0 + 9_000.0 * rng.next_f64()
+            },
+            behind_speed: self.base_speed
+                * if cold {
+                    1.25 + 0.5 * rng.next_f64()
+                } else {
+                    0.75
+                },
+            behind_direction: wrap_tau(self.base_direction + veer),
+            behind_cover: if cold {
+                0.15 + 0.25 * rng.next_f64()
+            } else {
+                0.80 + 0.19 * rng.next_f64()
+            },
+            trough: 4.0 + 4.0 * rng.next_f64(),
+        });
+    }
+
+    /// Put the weather's own clock where the passage is.
+    ///
+    /// **For a boat that joined late.** The front is read against seconds since the
+    /// passage began, and that number is accumulated a step at a time — so a client
+    /// that joins an hour in would start its front an hour behind the host's and sail
+    /// into a veer nobody else got. Everything else about the front needs no packet:
+    /// both machines draw the same one from the same seed, like the islands. This is
+    /// the one number that has to be told.
+    pub fn at_time(&mut self, t: f64) {
+        self.since = t;
+    }
+
+    /// Stop the trends, leaving the front free to do its work. For measuring one thing
+    /// at a time: the day's noise is a knot either way and enough to hide a front's
+    /// first hour.
+    pub fn hold_steady(&mut self) {
+        self.settled();
+    }
+
+    /// The glass and its tendency, and the hour's outlook — the trait's own, said here
+    /// so a panel or a test can ask the weather rather than the field.
+    pub fn glass(&self) -> (f64, f64) {
+        self.barometer()
+    }
+
+    pub fn expects(&self) -> (f64, f64) {
+        self.outlook()
+    }
+
     /// Put the fog the air is carrying where it is asked for, and let it wander after.
     ///
     /// **It sets what is there, not what you will see**, and the difference is the one
@@ -339,7 +498,7 @@ impl Synoptic {
     /// the cloud comes with the front that brings the breeze, so a building wind brings
     /// a thickening sky and a dying one lets it open up.
     pub fn cover(&self) -> f64 {
-        (self.cover_mean + self.cover_trend + COVER_FROM_WIND * self.speed_trend).clamp(0.0, 1.0)
+        (self.air_mass().2 + self.cover_trend + COVER_FROM_WIND * self.speed_trend).clamp(0.0, 1.0)
     }
 
     /// Take the weather from somewhere else rather than from the dice.
@@ -394,15 +553,42 @@ impl Synoptic {
         self.direction()
     }
 
-    fn speed(&self) -> f64 {
-        (self.base_speed * (1.0 + self.speed_trend)).clamp(
-            self.base_speed * SYNOPTIC_FLOOR,
-            self.base_speed * SYNOPTIC_CEILING,
+    /// **The base is the air mass she is in, which is not always the one she started
+    /// in.** With no front this is the day as drawn and nothing has changed; with one it
+    /// walks from the air mass ahead to the one behind as the front goes through, and
+    /// the trends wander about whatever it has reached.
+    ///
+    /// That is the whole mechanism. Everything a frontal passage does — the veer, the
+    /// building, the clearance — is this one lerp, read through functions that already
+    /// existed.
+    fn air_mass_at(&self, then: f64) -> (f64, f64, f64) {
+        let Some(front) = self.front else {
+            return (self.base_speed, self.base_direction, self.cover_mean);
+        };
+        let through = front.through(then);
+        (
+            self.base_speed + (front.behind_speed - self.base_speed) * through,
+            // The short way round, so a front that veers forty degrees does not back
+            // three hundred and twenty instead.
+            wrap_tau(
+                self.base_direction
+                    + crate::units::wrap_pi(front.behind_direction - self.base_direction) * through,
+            ),
+            self.cover_mean + (front.behind_cover - self.cover_mean) * through,
         )
     }
 
+    fn air_mass(&self) -> (f64, f64, f64) {
+        self.air_mass_at(self.since)
+    }
+
+    fn speed(&self) -> f64 {
+        let base = self.air_mass().0;
+        (base * (1.0 + self.speed_trend)).clamp(base * SYNOPTIC_FLOOR, base * SYNOPTIC_CEILING)
+    }
+
     fn direction(&self) -> f64 {
-        wrap_tau(self.base_direction + self.direction_trend)
+        wrap_tau(self.air_mass().1 + self.direction_trend)
     }
 
     /// Stop the weather where it is. Zeroing the swings is not enough on its own: the
@@ -431,25 +617,61 @@ impl Synoptic {
     /// round — building wind is falling glass, and getting that backwards would be a
     /// barometer that tells you to relax as the gale arrives.
     fn barometer(&self) -> (f64, f64) {
+        /// What a barometer's tendency *is*: how far the glass has moved in the last
+        /// three hours. Not a forecast — the forecast is the `outlook`, and this is the
+        /// reading it is taken off.
+        const TENDENCY_OVER: f64 = 3.0 * 3_600.0;
+        let now = self.pressure_at(0.0);
+        (now, now - self.pressure_at(-TENDENCY_OVER))
+    }
+
+    /// The glass this many seconds from now — forwards or back.
+    ///
+    /// **One formula and one tense**, which it was not. The tendency used to be the
+    /// hour's outlook multiplied by three, and that is an extrapolation: fine for a
+    /// trend relaxing to a mean, absurd for a front. Measured, a six-hectopascal trough
+    /// crossing in twenty minutes came out as *minus thirty-seven hectopascals in three
+    /// hours* — a reading no barometer has ever shown, and about four times the fastest
+    /// fall recorded outside a hurricane.
+    ///
+    /// Evaluating the same pressure at two times cannot do that: the answer is bounded
+    /// by what the pressure actually is. The trend's past is its expected past, which
+    /// for an Ornstein-Uhlenbeck process is the same exponential as its future, because
+    /// the process is time-reversible about its mean.
+    fn pressure_at(&self, when: f64) -> f64 {
         /// Hectopascals per knot of mean wind: a flat calm under a ridge at 1030, a
         /// fresh breeze at 1010, a gale at 985, a storm at 970.
         const PER_KNOT: f64 = 1.30;
         const CALM: f64 = 1030.0;
-        let mean = crate::units::ms_to_kn(self.speed());
-        let (building, _) = self.outlook();
-        (
-            CALM - PER_KNOT * mean,
-            -PER_KNOT * crate::units::ms_to_kn(building) * 3.0,
-        )
+        let then = self.since + when;
+        let base = self.air_mass_at(then).0;
+        let trend = self.speed_trend * (-when.abs() / self.speed_timescale).exp();
+        let mean = crate::units::ms_to_kn(base * (1.0 + trend));
+        let dip = self.front.map_or(0.0, |f| f.dip(then));
+        CALM - PER_KNOT * mean - dip
     }
 
     /// Expected change over the next hour. For `dX = −X/tau dt + noise` the mean path
     /// is `X exp(−t/tau)`, so this is exact rather than an estimate.
     fn outlook(&self) -> (f64, f64) {
         let decay = |tau: f64| 1.0 - (-3_600.0 / tau).exp();
-        (
+        let (speed, direction) = (
             -self.base_speed * self.speed_trend * decay(self.speed_timescale),
             -self.direction_trend * decay(self.direction_timescale),
+        );
+        // **Plus the front, which is the part worth forecasting.** The trends are noise
+        // relaxing to a mean and an hour of them is worth a knot either way; a front is
+        // the day becoming another day, and it is knowable an hour out because the thing
+        // has a time and a speed. Said as the same two numbers, so every reader of the
+        // outlook — the console, the fishing, the watch — gets the front without being
+        // told about fronts.
+        let Some(front) = self.front else {
+            return (speed, direction);
+        };
+        let moved = front.through(self.since + 3_600.0) - front.through(self.since);
+        (
+            speed + (front.behind_speed - self.base_speed) * moved,
+            direction + crate::units::wrap_pi(front.behind_direction - self.base_direction) * moved,
         )
     }
 }

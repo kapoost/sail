@@ -225,7 +225,7 @@ mathematics and prose, which is exactly where this project is strong — no new 
 | **Tides and tidal streams** | Pure maths over the existing archipelago; drift already exists as a vector | Planning: a tidal window, a stream in a sound, a passage that has to leave at the right hour | 1–2 weeks |
 | **Night** | The lighthouses already carry their flash characteristics (`Fl(2) 8s`), the sky model already has a sun | Pilotage by light alone — almost nobody does this, and it is the best screenshot in the game | 2 weeks |
 | **Fog and visibility** | Haze and visibility already exist; sound is synthesised | Blind pilotage: the sounder, the clock, a sound signal, dead reckoning that matters | 1 week |
-| **Weather that moves** | The weather is drawn per day; make it a front crossing | A veering, backing, building day — the thing that makes a passage a story | 1–2 weeks |
+| ~~**Weather that moves**~~ | *In.* A front is a time rather than a line — at five kilometres across, every boat is through it within seven minutes of every other — so two air masses and a transition give the veer, the building, the clearance and the trough with nothing written down separately | A veering, building day, and a barometer that is ahead of the weather instead of a readout of the wind | 1–2 weeks |
 | **Failures** | A parted sheet, a jammed furler, a leak, an engine that will not start | The reason to carry tools and to reef early | 1–2 weeks |
 | **Anchoring and mooring** | The anchorages are already generated and named | An end to a passage that is not a teleport, and an anchor watch at night | 1–2 weeks |
 | **A second boat** | `BoatConfig` is parametric, so the physics is numbers | A different feel — a heavier cruiser, a lighter dinghy | 1 week + a hull |
