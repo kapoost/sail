@@ -290,8 +290,20 @@ impl Pilotage {
         info!("brig: {words}");
     }
 
+    /// Whether she would say an unprompted thing now, or has only just said one.
+    ///
+    /// **The limiter has to be asked *before* she keys the microphone**, not after. Her
+    /// remarks are worked out every frame — the water under her, the corner coming up,
+    /// where the pilot boat is — and the gap between hails used to be enforced inside
+    /// the line that writes the caption, which was fine while a hail was a caption. The
+    /// moment it also put a transmission on the air, sixty copies of *we are coming up
+    /// on you* a second went into the queue and the channel never fell quiet again.
+    fn would_say(&self, now: f64) -> bool {
+        now - self.hailed_at >= BETWEEN_HAILS
+    }
+
     fn call_across(&mut self, words: &str, now: f64) {
-        if now - self.hailed_at < BETWEEN_HAILS {
+        if !self.would_say(now) {
             return;
         }
         self.hailed_at = now;
@@ -336,6 +348,12 @@ impl Voice<'_> {
     /// pilot actually runs — she calls you up on sixteen, you go to her working channel,
     /// and what she has to say about the water arrives there.
     fn across(&mut self, job: &mut Pilotage, words: &str, answering: bool) {
+        // An answer is a thing she was asked for and is never held back; a remark is one
+        // of hers, and she is not a parrot — on the air least of all, where a station
+        // that never stops talking is a station on top of everybody else.
+        if !answering && !job.would_say(self.now) {
+            return;
+        }
         let t = crate::radio::Transmission::saying(
             &self.name,
             crate::radio::WORKING,
@@ -345,13 +363,18 @@ impl Voice<'_> {
         );
         let reached = self.range < HAILING || self.radio.hears(&t, self.range) > 0.0;
         self.radio.broadcast(t);
-        if !reached {
-            return;
-        }
-        if answering {
-            job.answer_across(words, self.now);
+        if reached {
+            if answering {
+                job.answer_across(words, self.now);
+            } else {
+                job.call_across(words, self.now);
+            }
         } else {
-            job.call_across(words, self.now);
+            // **She said it whether or not anybody was on the channel**, and the clock
+            // that keeps her from repeating herself has to run on that and not on
+            // whether you heard it. Otherwise a pilot boat out of range has her keying
+            // the microphone sixty times a second to an empty sea.
+            job.hailed_at = self.now;
         }
     }
 

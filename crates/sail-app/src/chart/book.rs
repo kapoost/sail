@@ -731,7 +731,7 @@ fn the_air(t: &Table, radio: &crate::radio::Radio, page: egui::Rect) {
             ),
             false,
         ));
-        for line in across(&heard.words, 44) {
+        for line in crate::radio::across(&heard.words, 44) {
             rows.push((line, weak));
         }
     }
@@ -765,31 +765,6 @@ fn the_air(t: &Table, radio: &crate::radio::Radio, page: egui::Rect) {
     }
 }
 
-/// Break a transmission into lines of a width, on the words.
-///
-/// Indented by two, because a continuation line that starts in the time column is a line
-/// the eye reads as a new entry.
-fn across(words: &str, width: usize) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut line = String::from("  ");
-    for word in words.split_whitespace() {
-        if line.chars().count() + 1 + word.chars().count() > width && !line.trim().is_empty() {
-            out.push(std::mem::take(&mut line));
-            line.push_str("  ");
-        }
-        if line.trim().is_empty() {
-            line.push_str(word);
-        } else {
-            line.push(' ');
-            line.push_str(word);
-        }
-    }
-    if !line.trim().is_empty() {
-        out.push(line);
-    }
-    out
-}
-
 #[cfg(test)]
 mod the_radio_page {
     use super::*;
@@ -801,7 +776,7 @@ mod the_radio_page {
     fn it_breaks_on_the_words_and_keeps_all_of_them() {
         let said = "The archipelago: southwesterly 5 to 7, veering northwesterly and \
                     increasing later. showers. moderate.";
-        let lines = across(said, 44);
+        let lines = crate::radio::across(said, 44);
         assert!(lines.len() > 1, "a hundred characters fitted on one line");
         for line in &lines {
             assert!(
@@ -819,7 +794,7 @@ mod the_radio_page {
     /// A word longer than the line still goes on the page rather than vanishing.
     #[test]
     fn a_long_word_goes_on_a_line_of_its_own() {
-        let lines = across("a supercalifragilisticexpialidocious", 12);
+        let lines = crate::radio::across("a supercalifragilisticexpialidocious", 12);
         assert_eq!(lines.len(), 2);
         assert!(lines[1].contains("supercali"));
     }

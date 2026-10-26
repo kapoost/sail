@@ -304,10 +304,16 @@ pub fn listen(
         radio.air.retain(|t| now < t.began + 0.5);
         return;
     }
-    let Some(next) = radio.air.first().cloned() else {
+    // **The first one whose time has come**, which is not the same as the first one in
+    // the queue. A station that calls on sixteen and reads the bulletin on six twelve
+    // seconds later puts both on the air in the same frame; taking the queue in order
+    // regardless of the clock played the bulletin the instant the call was *not* heard —
+    // twelve seconds before the station said it, and holding the channel for the whole
+    // of that. A transmission begins when it begins.
+    let Some(which) = radio.air.iter().position(|t| t.began <= now) else {
         return;
     };
-    radio.air.remove(0);
+    let next = radio.air.remove(which);
     let off = next.at.map(|(at, _)| (at - here).length()).unwrap_or(0.0);
     let strength = radio.hears(&next, off);
     if strength <= 0.0 {
@@ -596,9 +602,14 @@ pub fn broadcast(
     radio.broadcast(Transmission::saying(
         &station.name,
         CALLING,
+        // **Short, because a call on sixteen is short.** Sixteen is a channel everybody
+        // in forty miles is listening to, and the procedure for a safety call is three
+        // words of attention, who you are, where to listen, out. The first version of
+        // this read like a letter, and it did not fit on the set's own display — which
+        // is the same complaint a coastguard would make about it.
         &format!(
             "All ships, all ships, all ships. This is {}. \
-             For a gale warning and the weather bulletin, listen channel {}. Out.",
+             Weather bulletin on channel {}. Out.",
             station.name, 6
         ),
         Some((at, STATION_AERIAL)),
@@ -709,7 +720,32 @@ const REPEATS_EVERY: f64 = 600.0;
 pub struct PortControl {
     /// Which one, so that it calls when you come into its water and not every frame.
     working: Option<usize>,
+    /// And which one it called last, kept after you leave — otherwise a boat working
+    /// along the edge of the approach crosses the line four times in a watch and gets
+    /// the all-ships call four times, which is a station nobody would leave on.
+    called: Option<usize>,
     said_at: f64,
+}
+
+impl PortControl {
+    /// Whether to say anything to a vessel in this harbour's water, and whether it is an
+    /// arrival worth calling all ships about.
+    ///
+    /// `None` is silence. `Some(true)` is the call on sixteen and then the information;
+    /// `Some(false)` is the information again on the working channel, which is what a
+    /// port repeats while you are in there.
+    fn coming_in(&mut self, which: usize, now: f64) -> Option<bool> {
+        let arriving = self.working != Some(which);
+        self.working = Some(which);
+        if now - self.said_at < REPEATS_EVERY && (!arriving || self.called == Some(which)) {
+            return None;
+        }
+        let announce =
+            arriving && (self.called != Some(which) || now - self.said_at > REPEATS_EVERY);
+        self.called = Some(which);
+        self.said_at = now;
+        Some(announce)
+    }
 }
 
 /// What the harbour has to say, which is only what it actually knows.
@@ -799,12 +835,12 @@ pub fn harbour(
         port.working = None;
         return;
     };
-    let arriving = port.working != Some(which);
-    if !arriving && now - port.said_at < REPEATS_EVERY {
+    // It calls you up when you come into a harbour's water, and reads the information
+    // again every so often while you are in it — but the call on sixteen is only for an
+    // arrival it has not already called.
+    let Some(announce) = port.coming_in(which, now) else {
         return;
-    }
-    port.working = Some(which);
-    port.said_at = now;
+    };
     let place = &course.harbours[which];
     let station = format!("{} Port Control", place.name);
     // What is actually moving in there, which in this game is whoever else is sailing.
@@ -816,31 +852,64 @@ pub fn harbour(
             (at - place.at).length() < APPROACH
         })
         .count();
-    if arriving {
+    if announce {
         radio.broadcast(Transmission::saying(
             &station,
             CALLING,
             &format!(
                 "All ships, all ships. This is {station}. \
-                 Traffic and tidal information for the {} approach, listen channel {PORT}. Out.",
-                place.name
+                 Traffic information on channel {PORT}. Out."
             ),
             Some((place.at, HARBOUR_AERIAL)),
             now,
         ));
     }
-    radio.broadcast(
-        Transmission::saying(
-            &station,
-            PORT,
-            &traffic(&sim, &place.name, place.at, sky.hour, others),
-            Some((place.at, HARBOUR_AERIAL)),
-            // After the call on sixteen is finished, when there was one.
-            now + if arriving { 11.0 } else { 0.0 },
-        )
-        .for_the_book(),
+    let said = Transmission::saying(
+        &station,
+        PORT,
+        &traffic(&sim, &place.name, place.at, sky.hour, others),
+        Some((place.at, HARBOUR_AERIAL)),
+        // After the call on sixteen is finished, when there was one.
+        now + if announce { 11.0 } else { 0.0 },
     );
+    // **The first one goes in the book and the repeats do not.** A navigator writes down
+    // that he had the harbour's information coming in; he does not write a line every
+    // ten minutes because the station reads it again, and a page of those would bury the
+    // bearings it is kept for.
+    radio.broadcast(if announce { said.for_the_book() } else { said });
 }
+
+/// Break a transmission into lines of a width, on the words.
+///
+/// **Here rather than on the page, because both places that show a transmission need
+/// it.** The console had a hard cut at thirty columns and a station with a long name ate
+/// all thirty of them: *1000 16 Sandholm Port Control* and not one word of what it
+/// actually said, which on a call whose entire purpose is to tell you *listen channel
+/// twelve* is a display that shows the envelope and throws away the letter.
+///
+/// Indented by two, because a continuation line that starts in the time column is a line
+/// the eye reads as a new entry.
+pub fn across(words: &str, width: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut line = String::from("  ");
+    for word in words.split_whitespace() {
+        if line.chars().count() + 1 + word.chars().count() > width && !line.trim().is_empty() {
+            out.push(std::mem::take(&mut line));
+            line.push_str("  ");
+        }
+        if line.trim().is_empty() {
+            line.push_str(word);
+        } else {
+            line.push(' ');
+            line.push_str(word);
+        }
+    }
+    if !line.trim().is_empty() {
+        out.push(line);
+    }
+    out
+}
+
 
 #[cfg(test)]
 mod what_the_harbour_says {
@@ -895,6 +964,44 @@ mod what_the_harbour_says {
         assert_eq!(points_to(200.0), "south");
     }
 
+    /// **It calls you up once, not once a tack.** The approach is a circle and a boat
+    /// working along the edge of it crosses the line four times in a watch; calling all
+    /// ships on sixteen each time is a station nobody would leave on. It reads the
+    /// information again every so often while you are in there, which is what a port
+    /// does, and it calls up again only after it has been quiet for a good while.
+    #[test]
+    fn it_does_not_call_all_ships_every_time_you_cross_the_line() {
+        let mut port = PortControl::default();
+        // In, at the start of the world.
+        assert_eq!(
+            port.coming_in(0, 0.0),
+            Some(true),
+            "it never called all ships at all"
+        );
+        // Out and straight back in: no second all-ships call.
+        port.working = None;
+        assert_eq!(
+            port.coming_in(0, 60.0),
+            None,
+            "it called all ships again a minute later"
+        );
+        // And after a long while away it does call up again, because by then you have
+        // been somewhere else.
+        port.working = None;
+        assert_eq!(
+            port.coming_in(0, REPEATS_EVERY * 2.0),
+            Some(true),
+            "it never called again after an hour away"
+        );
+        // And while you stay in there it goes on reading the information, without the
+        // all-ships call in front of it.
+        assert_eq!(
+            port.coming_in(0, REPEATS_EVERY * 4.0),
+            Some(false),
+            "it stopped reading the information to a vessel still in the approach"
+        );
+    }
+
     /// **It reports the traffic there is and not the traffic a harbour usually has.**
     /// The same rule the forecast is written under: there is no ferry in this model, so
     /// there is no ferry on the air. What it counts is whoever else is actually sailing.
@@ -907,5 +1014,120 @@ mod what_the_harbour_says {
         assert!(one.contains("One vessel"), "{one}");
         let crowd = traffic(&sim, "Nordholm", glam::DVec2::ZERO, 9.0, 4);
         assert!(crowd.contains("Several vessels"), "{crowd}");
+    }
+}
+
+#[cfg(test)]
+mod working_the_set {
+    use super::*;
+
+    /// A set in a world, with a book to write in.
+    fn aboard() -> App {
+        let mut app = App::new();
+        app.insert_resource(Sim::new(crate::weather::Weather::draw(42), 42));
+        app.insert_resource(crate::sky::Sky::at(12.0, 0.2));
+        app.init_resource::<crate::chart::DeckLog>();
+        app.init_resource::<Radio>();
+        app.add_systems(Update, listen);
+        app
+    }
+
+    fn at(app: &mut App, seconds: f64) {
+        app.world_mut().resource_mut::<Sim>().sim.state.time = seconds;
+        app.update();
+    }
+
+    /// **A transmission begins when it begins.**
+    ///
+    /// A station calls on sixteen and reads the bulletin on its working channel twelve
+    /// seconds later, and both go on the air in the same frame. Taking the queue in
+    /// order regardless of the clock played the second one the instant the first was not
+    /// heard — twelve seconds before the station said it, and holding the channel for
+    /// the whole of that. Found by reading, which is the only way this one shows: on
+    /// screen it looks like a radio working.
+    #[test]
+    fn nothing_is_heard_before_it_is_said() {
+        let mut app = aboard();
+        let here = app.world().resource::<Sim>().sim.state.pos;
+        {
+            let mut radio = app.world_mut().resource_mut::<Radio>();
+            // The call, on a channel this set is not on, so it is dropped the way a
+            // transmission out of earshot is.
+            radio.broadcast(Transmission::saying(
+                "Station",
+                PORT,
+                "listen channel 6",
+                Some((here, HARBOUR_AERIAL)),
+                0.0,
+            ));
+            // And the bulletin, twelve seconds behind it, on a channel it is on.
+            radio.broadcast(Transmission::saying(
+                "Station",
+                CALLING,
+                "the bulletin",
+                Some((here, HARBOUR_AERIAL)),
+                12.0,
+            ));
+        }
+        // Twice, because one frame can only put one thing in the speaker: the first
+        // update spends itself on the call that is not heard, and it is the one after
+        // it that used to play the bulletin early.
+        at(&mut app, 1.0);
+        at(&mut app, 1.1);
+        assert!(
+            app.world().resource::<Radio>().traffic.is_none(),
+            "the bulletin came out of the speaker eleven seconds before it was read"
+        );
+        at(&mut app, 12.5);
+        assert!(
+            app.world().resource::<Radio>().traffic.is_some(),
+            "and then it never came at all"
+        );
+    }
+
+    /// **What is worth writing is written, and the rest is not.** The set keeps
+    /// everything it heard; the deck log keeps what somebody decided to write.
+    #[test]
+    fn only_the_bulletin_goes_in_the_book() {
+        let mut app = aboard();
+        let here = app.world().resource::<Sim>().sim.state.pos;
+        {
+            let mut radio = app.world_mut().resource_mut::<Radio>();
+            radio.broadcast(Transmission::saying(
+                "Station",
+                CALLING,
+                "all ships",
+                Some((here, HARBOUR_AERIAL)),
+                0.0,
+            ));
+        }
+        at(&mut app, 1.0);
+        assert_eq!(app.world().resource::<Radio>().log.len(), 1);
+        assert!(
+            app.world().resource::<crate::chart::DeckLog>().lines.is_empty(),
+            "a securité was written up in the deck log"
+        );
+        // The clock is the bulkhead clock, not a stopwatch started at the dock.
+        assert_eq!(app.world().resource::<Radio>().log[0].hour, 12.0);
+        {
+            let mut radio = app.world_mut().resource_mut::<Radio>();
+            radio.traffic = None;
+            radio.broadcast(
+                Transmission::saying(
+                    "Station",
+                    CALLING,
+                    "weather bulletin",
+                    Some((here, HARBOUR_AERIAL)),
+                    20.0,
+                )
+                .for_the_book(),
+            );
+        }
+        at(&mut app, 21.0);
+        assert_eq!(
+            app.world().resource::<crate::chart::DeckLog>().lines.len(),
+            1,
+            "the bulletin was not written up"
+        );
     }
 }

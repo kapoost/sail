@@ -816,21 +816,39 @@ pub fn draw(
                     // or you wait until you are nearer. A log that printed a broken
                     // transmission as cleanly as a strong one would be throwing away
                     // the one thing the range model is for.
-                    let line = match (&radio.traffic, radio.log.last()) {
-                        (Some(t), _) => format!("{} {} — {}", t.channel, t.from, t.words),
-                        (None, Some(last)) => format!(
-                            "{:02.0}{:02.0} {} {}{} — {}",
-                            last.hour.floor(),
-                            (last.hour.fract() * 60.0).floor(),
-                            last.channel,
-                            last.from,
-                            if last.strength < 0.45 { " (weak)" } else { "" },
-                            last.words
+                    //
+                    // **And it says what was said, not only who said it.** It was one
+                    // line cut at thirty columns, and a station with a long name used
+                    // all thirty: *1000 16 Sandholm Port Control*, and not one word of
+                    // the message — on a call whose whole purpose is to say *listen
+                    // channel twelve*, a display that shows the envelope and throws
+                    // away the letter. So the station is the line, and the words go
+                    // under it, wrapped, for as many lines as a VHF's worth of panel
+                    // holds. The rest is on the radio page of the book.
+                    // **A fixed window, always the same height.** Five lines holds an
+                    // all-ships call or a shipping forecast whole, and the block is
+                    // allocated whether or not anything is on the air: a panel whose
+                    // buttons move down the screen every time somebody transmits is a
+                    // panel you cannot learn the shape of. Blank is a reading too.
+                    const COLUMNS: usize = 30;
+                    const LINES: usize = 5;
+                    let (head, words) = match (&radio.traffic, radio.log.last()) {
+                        (Some(t), _) => (format!("{} {}", t.channel, t.from), Some(&t.words)),
+                        (None, Some(last)) => (
+                            format!(
+                                "{:02.0}{:02.0} {} {}{}",
+                                last.hour.floor(),
+                                (last.hour.fract() * 60.0).floor(),
+                                last.channel,
+                                last.from,
+                                if last.strength < 0.45 { " (weak)" } else { "" }
+                            ),
+                            Some(&last.words),
                         ),
-                        (None, None) => "quiet".to_string(),
+                        (None, None) => ("quiet".to_string(), None),
                     };
                     ui.label(
-                        egui::RichText::new(fit(&line, 30))
+                        egui::RichText::new(fit(&head, COLUMNS))
                             .monospace()
                             .size(10.0)
                             // Lit while somebody is speaking, which is what the little
@@ -838,6 +856,25 @@ pub fn draw(
                             // across the cockpit.
                             .color(if busy { paint::LIVE } else { paint::LABEL }),
                     );
+                    let said = words
+                        .map(|w| crate::radio::across(w, COLUMNS))
+                        .unwrap_or_default();
+                    for row in 0..LINES {
+                        // The last line of a long one says where the rest of it is
+                        // rather than stopping in the middle of a sentence: the book
+                        // has every word, with the time against it.
+                        let line = if row + 1 == LINES && said.len() > LINES {
+                            "  … (radio log)".to_string()
+                        } else {
+                            said.get(row).cloned().unwrap_or_default()
+                        };
+                        ui.label(
+                            egui::RichText::new(fit(&line, COLUMNS))
+                                .monospace()
+                                .size(10.0)
+                                .color(paint::LABEL),
+                        );
+                    }
                 }
 
                 // **The three she is steered by**, in the size they deserve, in a

@@ -1248,6 +1248,31 @@ mod what_the_hoist_does {
         );
     }
 
+    /// **She is not a parrot on the air either.**
+    ///
+    /// Her remarks are worked out every frame — the water under her, the corner coming
+    /// up, where the pilot boat is — and the gap between them was enforced in the line
+    /// that writes the caption. That was right while a hail was a caption; the moment it
+    /// was also a transmission, sixty copies a second went into the queue and the
+    /// channel never fell quiet. It does not show on screen at all: the caption looks
+    /// exactly the same.
+    #[test]
+    fn she_does_not_key_the_microphone_every_frame() {
+        let mut app = within_signal(Flag::Kilo);
+        // Fifty frames of a second each: she may answer the hoist and remark on the
+        // water, and that is two or three transmissions, not fifty.
+        for frame in 0..50 {
+            at(&mut app, 1.0 + frame as f64);
+        }
+        let radio = app.world().resource::<crate::radio::Radio>();
+        let said = radio.log.len() + radio.air.len() + usize::from(radio.traffic.is_some());
+        assert!(
+            said < 12,
+            "she put {said} transmissions on the air in fifty seconds"
+        );
+        assert!(said > 0, "she said nothing at all over fifty seconds");
+    }
+
     /// A signal from out of sight is cloth nobody can read.
     #[test]
     fn she_cannot_obey_what_she_cannot_read() {
