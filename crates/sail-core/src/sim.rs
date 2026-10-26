@@ -99,6 +99,7 @@ pub struct Simulation {
     strain_main: f64,
     strain_head: f64,
     strain_stay: f64,
+    strain_try: f64,
     capsizing: f64,
     /// The state one substep back, kept so a frame landing between two substeps can be
     /// drawn where the boat actually is rather than where it last happened to be.
@@ -145,6 +146,7 @@ impl Simulation {
             strain_main: 0.0,
             strain_head: 0.0,
             strain_stay: 0.0,
+            strain_try: 0.0,
             capsizing: 0.0,
             prev_state: state,
             tide: crate::tide::Tide::none(),
@@ -1547,6 +1549,21 @@ impl Simulation {
                         0.0
                     },
                     crate::state::Blown::Staysail,
+                ),
+                // **And the trysail, whose cloth number was being set and never read.**
+                // Sixty knots is above anything she can survive, so this will not fire
+                // in weather anybody sails in — but `SAIL_WIND` goes to force twelve,
+                // which is sixty-four and more, and a sail with a stated limit that
+                // nothing checks is a field that looks wired and is not. Four of the
+                // five sails were.
+                (
+                    &mut self.strain_try,
+                    if try_area > 1e-3 {
+                        overload(lower_aws, cfg.trysail.limit_aws)
+                    } else {
+                        0.0
+                    },
+                    crate::state::Blown::Trysail,
                 ),
             ] {
                 if over > 0.0 {

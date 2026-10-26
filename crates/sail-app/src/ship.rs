@@ -1095,6 +1095,11 @@ fn empty_cloth() -> Mesh {
 /// [`CLOSEST`] to the wind and will bear away rather than stop.
 pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>, mut placed: Local<bool>) {
     if !brig.afloat {
+        // And the latch goes with her. Without this, taking the job up and starting it
+        // again leaves `placed` true for the life of the program, so the second brig is
+        // never put where she can be seen and the knob silently stops working — which
+        // is the worst way for a dev tool to fail, because you blame the scene.
+        *placed = false;
         return;
     }
     // `SAIL_BRIG_SHOW=130` puts her that many metres off the bow **once**, and then

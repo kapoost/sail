@@ -34,6 +34,8 @@ struct UnderIt {
     heel: f64,
     /// How far off the course she was given she ended up, degrees.
     off_course: f64,
+    /// Whether anything let go.
+    blown: bool,
 }
 
 fn sail_under(trysail: f64, reef: f64, twa: f64, knots: f64) -> UnderIt {
@@ -70,6 +72,10 @@ fn sail_under(trysail: f64, reef: f64, twa: f64, knots: f64) -> UnderIt {
         log: ms_to_kn(sim.telemetry.stw),
         heel: deg(sim.state.heel).abs(),
         off_course: deg(sail_core::units::wrap_pi(sim.state.heading - heading)).abs(),
+        blown: matches!(
+            sim.telemetry.mishap,
+            Some(sail_core::state::Mishap::BlownOut(_))
+        ),
     }
 }
 
@@ -156,4 +162,28 @@ fn it_does_nothing_until_the_main_is_off_her() {
         area,
         cfg.main.area
     );
+}
+
+/// **Its cloth number is real**, and it was not: the limit was set on the sail and
+/// nothing read it, while four of the five sails were wired into the strain model.
+///
+/// What the number means, measured: in eighty-five knots of true wind the apparent at
+/// the sail is *exactly* sixty, which is the limit — so an ordinary survival storm
+/// leaves it standing, by a margin of nothing at all. It takes a hundred and ten, which
+/// `SAIL_WIND` will give you and the sea never will, to carry it away. Which is the
+/// right shape for a storm sail: the number is there so that it cannot be relied on
+/// past the end of the world, not so that anybody meets it.
+#[test]
+fn the_trysail_has_a_cloth_limit_like_everything_else() {
+    let cfg = BoatConfig::archipelago_packet();
+    assert!(
+        cfg.trysail.limit_aws > cfg.main.limit_aws,
+        "storm cloth should outlast a cruising main"
+    );
+    // Force twelve, which the weather page will give you, carries away even this.
+    let hurricane = sail_under(1.0, 1.0, 90.0, 110.0);
+    assert!(hurricane.blown, "a hurricane left the trysail standing");
+    // And an ordinary gale does not.
+    let gale = sail_under(1.0, 1.0, 90.0, 42.0);
+    assert!(!gale.blown, "a force eight blew the storm canvas out");
 }

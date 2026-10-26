@@ -362,6 +362,7 @@ pub enum Blown {
     Main,
     Headsail(Headsail),
     Staysail,
+    Trysail,
 }
 
 impl Mishap {
@@ -375,6 +376,7 @@ impl Mishap {
             Mishap::BlownOut(Blown::Headsail(Headsail::Gennaker)) => "the gennaker blew out",
             Mishap::BlownOut(Blown::Headsail(Headsail::Spinnaker)) => "the spinnaker blew out",
             Mishap::BlownOut(Blown::Staysail) => "the staysail blew out",
+            Mishap::BlownOut(Blown::Trysail) => "the trysail blew out",
             Mishap::Capsized => "capsized",
         }
     }
