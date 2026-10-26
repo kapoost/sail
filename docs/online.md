@@ -47,10 +47,10 @@ Bye      { id }
 | where she is | `pos: [f32; 2]`, relative to the world origin — 5.5 km of archipelago in f32 is centimetre precision |
 | how she sits | `heading, heel, pitch, heave: f32` |
 | where she is going | `surge, sway, yaw_rate: f32` — so the receiver can dead-reckon between packets |
-| what is set | `reef, furl, staysail: f32`, `headsail: u8` |
+| what is set | `reef, furl, staysail, trysail: f32`, `headsail: u8` |
 | what the sails are doing | `main_sheet, jib_sheet, boom_angle: f32` |
 
-Sixteen f32 and two bytes: about seventy bytes a boat a snapshot. Eight boats at 15 Hz is
+Seventeen f32 and two bytes: about seventy bytes a boat a snapshot. Eight boats at 15 Hz is
 eight and a half kilobytes a second in each direction, which is nothing on any link any
 of us has. There is no compression, no delta encoding and no prioritisation in this plan
 on purpose — at this scale they would be work spent on a problem we do not have.

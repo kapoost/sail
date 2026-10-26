@@ -180,6 +180,16 @@ pub fn sync(
             cull_mode: None,
             ..default()
         });
+        // Storm canvas is orange on every boat, hers included — it is the one sail
+        // whose whole job is being seen, so it does not take the fleet's tint.
+        let storm_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.95, 0.38, 0.06),
+            base_color_texture: Some(images.add(crate::sail_texture::cloth())),
+            perceptual_roughness: 0.88,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        });
         let spar_mat = materials.add(StandardMaterial {
             base_color: Color::srgb(0.52, 0.38, 0.21),
             perceptual_roughness: 0.22,
@@ -230,11 +240,15 @@ pub fn sync(
                     MeshMaterial3d(spar_mat),
                     Transform::default(),
                 ));
-                for which in [Sail::Main, Sail::Headsail] {
+                for which in [Sail::Main, Sail::Headsail, Sail::Trysail] {
                     b.spawn((
                         GhostSail { id: boat.id, which },
                         Mesh3d(meshes.add(boat::empty_sail())),
-                        MeshMaterial3d(sail_mat.clone()),
+                        MeshMaterial3d(if which == Sail::Trysail {
+                            storm_mat.clone()
+                        } else {
+                            sail_mat.clone()
+                        }),
                         Transform::default(),
                         Visibility::default(),
                     ));
@@ -282,6 +296,11 @@ pub fn dress(
         *visible = match surface.which {
             Sail::Main if controls.reef >= sail_core::boat::DROPPED => Visibility::Hidden,
             Sail::Headsail if controls.furl > 0.985 => Visibility::Hidden,
+            Sail::Trysail
+                if controls.trysail < 0.02 || controls.reef < sail_core::boat::DROPPED =>
+            {
+                Visibility::Hidden
+            }
             _ => Visibility::Inherited,
         };
         let (awa, aws) = apparent(&sim, &boat.drawn);
@@ -301,10 +320,13 @@ pub fn dress(
         };
         let profile = match surface.which {
             Sail::Main => &cfg.main.profile,
+            Sail::Trysail => &cfg.trysail.profile,
             _ => &cfg.headsail(controls.headsail).profile,
         };
         let sheet = match surface.which {
-            Sail::Main => controls.main_sheet,
+            // Both of these are trimmed on the mainsheet winches, which is the line the
+            // wire carries for them.
+            Sail::Main | Sail::Trysail => controls.main_sheet,
             _ => controls.jib_sheet,
         };
         let chord = match surface.which {
@@ -334,6 +356,7 @@ pub fn dress(
                             * Vec3::new(0.0, 0.0, boat::main_foot(&cfg, &controls)),
                 }
             }
+            Sail::Trysail => boat::trysail_shape(&cfg, &controls, lee),
             _ => boat::headsail_shape(&cfg, &controls, lee, chord, 1.0 - luffing, chord),
         };
         if let Some(mut mesh) = meshes.get_mut(&mesh.0) {

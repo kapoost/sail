@@ -5192,7 +5192,7 @@ dependencies = [
 
 [[package]]
 name = "sail-net"
-version = "0.1.26"
+version = "0.1.27"
 dependencies = [
  "glam 0.34.1",
  "postcard",

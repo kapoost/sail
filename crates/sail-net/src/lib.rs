@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 /// Bumped whenever a message changes shape. Two versions that disagree refuse each other
 /// at the handshake rather than at the first malformed snapshot, because "my friend's
 /// boat is in the sky" is a much worse afternoon than "you are both on different builds".
-pub const PROTOCOL: u16 = 4;
+pub const PROTOCOL: u16 = 5;
 
 /// Whether an address is on the same network as us, for the things that only make
 /// sense there.
@@ -125,6 +125,13 @@ pub struct Drawn {
     pub furl: f32,
     pub staysail: f32,
     pub staysail_sheet: f32,
+    /// Storm canvas aft: 0 handed, 1 set.
+    ///
+    /// **The one sail you most want to see on somebody else's boat.** A bare mast used
+    /// to mean one thing — sailing under headsail alone — and with a trysail in the
+    /// wardrobe it means two, so the fleet has to be told which. Worth a protocol number
+    /// on its own: a gale is exactly when you look across at the other boat.
+    pub trysail: f32,
     pub genoa_car: f32,
     /// Which headsail is up: 0 genoa, 1 code zero, 2 gennaker, 3 spinnaker.
     pub headsail: u8,
@@ -156,6 +163,7 @@ impl Drawn {
             furl: c.furl as f32,
             staysail: c.staysail as f32,
             staysail_sheet: c.staysail_sheet as f32,
+            trysail: c.trysail as f32,
             genoa_car: c.genoa_car as f32,
             headsail: match c.headsail {
                 sail_core::state::Headsail::Genoa => 0,
@@ -192,6 +200,7 @@ impl Drawn {
             furl: self.furl as f64,
             staysail: self.staysail as f64,
             staysail_sheet: self.staysail_sheet as f64,
+            trysail: self.trysail as f64,
             genoa_car: self.genoa_car as f64,
             headsail: match self.headsail {
                 1 => sail_core::state::Headsail::Code0,
@@ -515,6 +524,7 @@ impl Sane for Drawn {
             self.furl,
             self.staysail,
             self.staysail_sheet,
+            self.trysail,
             self.genoa_car,
         ]) && self.pos[0].abs() < FAR
             && self.pos[1].abs() < FAR
@@ -607,6 +617,34 @@ impl Sane for ToClient {
 
 #[cfg(test)]
 mod tests {
+
+    /// **Storm canvas crosses the wire**, which it did not, and that is what the
+    /// protocol number went up for.
+    ///
+    /// A bare mast used to mean one thing on somebody else's boat — sailing under
+    /// headsail alone. With a trysail in the wardrobe it means two, and a gale is
+    /// exactly when you look across at the other boat to see what she is under.
+    #[test]
+    fn a_trysail_is_seen_from_the_other_boat() {
+        let mut controls = sail_core::state::Controls {
+            reef: 1.0,
+            trysail: 1.0,
+            ..Default::default()
+        };
+        controls.furl = 1.0;
+        let drawn = Drawn::of(
+            &sail_core::state::BoatState::at_rest(0.0),
+            &controls,
+            &sail_core::state::Telemetry::default(),
+        );
+        let there: Drawn = decode(&encode(&drawn)).expect("a sane snapshot");
+        assert_eq!(there.trysail, 1.0, "her trysail did not cross");
+        assert_eq!(
+            there.controls().trysail,
+            1.0,
+            "it crossed and was dropped on the way back into the controls"
+        );
+    }
     use super::*;
 
     #[test]
