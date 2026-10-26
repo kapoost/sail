@@ -49,6 +49,7 @@ mod orders;
 mod panel;
 mod preferences;
 mod race;
+mod radio;
 mod rain;
 mod reel;
 mod retro;
@@ -485,7 +486,11 @@ fn main() {
         glance::plugin,
         net::plugin,
         shot::plugin,
-    ));
+    ))
+    // Its own call: a plugin tuple goes to fifteen and the one above is full. Said here
+    // rather than by shuffling the list, because that grouping is a reading order and
+    // reordering it to make room would cost more than a line does.
+    .add_plugins(radio::plugin);
     // A picture of herself on a timer, when one was asked for: see `shot`.
     if let Some(shot) = shot::wanted() {
         app.insert_resource(shot)

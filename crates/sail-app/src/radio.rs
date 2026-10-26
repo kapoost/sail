@@ -1,0 +1,668 @@
+//! The VHF set: a channel, a watch on it, and whoever else is within the horizon.
+//!
+//! # Why a radio belongs in this game and not in a menu
+//!
+//! Everything else aboard is a thing you operate badly until you learn to operate it
+//! well, and a VHF is the purest example on the boat: it is *procedure*, nothing else.
+//! There is no skill in pressing the button. The skill is knowing which channel, in what
+//! order the names go, when to shut up and listen, and that "over" and "out" are not the
+//! same word. That is the same shape as reefing early and taking a bearing while you
+//! still can — a thing a person does right or does late.
+//!
+//! And it is the one instrument aboard that brings *other people* into a single-handed
+//! passage. The flags in `signals.rs` already do that for the brig, with a hoist, a
+//! delay while she reads it and an answer; the radio is the same protocol a hundred and
+//! fifty years later, and the module it joins already has a field called `said`.
+//!
+//! # Range is the horizon, which this game already computes
+//!
+//! A VHF is line of sight. Not approximately — *that is the whole of its range*: the
+//! aerial at the masthead sees the other aerial or it does not, and the sea curves away
+//! in between. So the range of a transmission is the same arithmetic as the range a
+//! lighthouse is raised at, with one number changed: radio waves bend a little more in
+//! the atmosphere than light does, so the constant is 2.5 rather than 2.08.
+//!
+//! What falls out of that is the thing a sailor knows and nobody tells you: **a coast
+//! station is enormously further than another yacht**. Her aerial is fifteen metres up
+//! and so is yours, which is ten miles between you; the station's is a hundred and
+//! eighty metres up on a hill, which is forty. You can hear the harbour and not the boat
+//! three miles the other side of the island — and that is not a rule written down here,
+//! it is two square roots.
+//!
+//! # No voice, on purpose
+//!
+//! What comes out of the speaker is the squelch breaking, the carrier, and the squelch
+//! closing. The words are read. That is what a radio with nobody speaking actually is,
+//! and it is a great deal more honest than a murmur pretending to be speech — see
+//! `music.rs` for the same argument about a recording that cannot know what the wind is
+//! doing. Transmitting is a menu of the phrases the procedure allows, which is not a
+//! simplification: VHF procedure *is* a closed grammar, and a menu of it is a syllabus.
+
+use bevy::prelude::*;
+
+use crate::sim::Sim;
+
+/// The set, and what is on it.
+pub fn plugin(app: &mut App) {
+    use crate::stages::Deck;
+    app.init_resource::<Radio>();
+    app.init_resource::<Coastguard>();
+    app.add_systems(Update, (broadcast, listen).chain().in_set(Deck::Weather));
+}
+
+/// How far a transmission carries, metres, between two aerials at these heights.
+///
+/// Two point five rather than the 2.08 of `Landmark::visible_from`: radio refracts a
+/// little more than light in the same air, which is why the radio horizon is about a
+/// fifth further than the visible one. The same two square roots otherwise.
+pub fn carries(ours: f64, theirs: f64) -> f64 {
+    const NM: f64 = 1_852.0;
+    2.5 * (ours.max(0.0).sqrt() + theirs.max(0.0).sqrt()) * NM
+}
+
+/// Where this boat's aerial is: the masthead, which is where it always is.
+pub const AERIAL: f64 = 16.0;
+
+/// And a coast station's, on a hill behind the harbour.
+///
+/// A hundred and eighty metres is an ordinary site for one. It is why the harbour can
+/// hear you from forty miles and the yacht two miles behind the island cannot.
+pub const STATION_AERIAL: f64 = 180.0;
+
+/// The calling and distress channel, which is watched and not worked.
+pub const CALLING: u8 = 16;
+
+/// The channels this set has. Sixteen, the two that harbours work, and a ship-to-ship.
+///
+/// A real set has fifty-odd and the difference matters to nobody: what a sailor uses is
+/// sixteen to call, a working channel to talk, and one between boats. A list of four is
+/// the syllabus rather than the catalogue.
+pub const CHANNELS: [u8; 4] = [16, 6, 12, 72];
+
+/// What each one is for, which is the half of it anybody actually has to learn.
+pub fn what_for(channel: u8) -> &'static str {
+    match channel {
+        16 => "calling and distress — watch it, do not work it",
+        6 => "ship to ship, safety",
+        12 => "port operations",
+        72 => "ship to ship",
+        _ => "",
+    }
+}
+
+/// Somebody saying something, on a channel, from somewhere.
+#[derive(Clone, Debug)]
+pub struct Transmission {
+    /// Who is speaking, as they identify themselves.
+    pub from: String,
+    pub channel: u8,
+    pub words: String,
+    /// Where the aerial is, and how high — so the range can be worked out rather than
+    /// assumed. `None` for our own set.
+    pub at: Option<(glam::DVec2, f64)>,
+    /// When it began and how long it takes to say.
+    pub began: f64,
+    pub takes: f64,
+    /// Whether it is worth writing in the book.
+    ///
+    /// **A navigator copies the forecast down and does not copy down the harbour saying
+    /// come alongside the fuel berth.** The set keeps everything it heard, because that
+    /// is what a set does; the deck log keeps what somebody decided to write, because
+    /// that is what a book is. Flagged by whoever puts it on the air rather than worked
+    /// out at the page, since the station knows what it is sending and the page does
+    /// not.
+    pub worth_writing: bool,
+}
+
+impl Transmission {
+    /// How long a line takes to say at the measured pace of radio procedure.
+    ///
+    /// **A hundred and forty words a minute**, which is slower than conversation and is
+    /// the pace anybody falls into on a radio because the other end is writing it down.
+    /// It matters because the channel is *occupied* while it is being said: two stations
+    /// transmitting at once is two stations heard by nobody, and that is the one rule of
+    /// a shared channel.
+    pub fn saying(
+        from: &str,
+        channel: u8,
+        words: &str,
+        at: Option<(glam::DVec2, f64)>,
+        now: f64,
+    ) -> Self {
+        let count = words.split_whitespace().count().max(1) as f64;
+        Self {
+            from: from.to_string(),
+            channel,
+            words: words.to_string(),
+            at,
+            began: now,
+            takes: 1.2 + count * 60.0 / 140.0,
+            worth_writing: false,
+        }
+    }
+
+    /// Mark it as one for the book.
+    pub fn for_the_book(mut self) -> Self {
+        self.worth_writing = true;
+        self
+    }
+
+    pub fn over_at(&self) -> f64 {
+        self.began + self.takes
+    }
+}
+
+/// One line in the log, as it was heard.
+#[derive(Clone, Debug)]
+pub struct Heard {
+    pub channel: u8,
+    pub from: String,
+    pub words: String,
+    /// How strong it was, 0 to 1 — a transmission at the edge of the horizon is broken
+    /// and a strong one is not.
+    pub strength: f32,
+    /// Ship's time when it was heard, in hours.
+    ///
+    /// **A radio log is a list of times**, which is the whole reason anybody keeps one:
+    /// a position report, a securité and a call you missed are only useful against the
+    /// clock — and the clock is the one on the bulkhead, not a stopwatch started at the
+    /// dock. It was seconds into the passage at first, and the console printed 0000
+    /// against a five-twenty broadcast.
+    pub hour: f32,
+}
+
+#[derive(Resource)]
+pub struct Radio {
+    pub on: bool,
+    /// The channel being worked. Sixteen is watched separately — see `dual`.
+    pub channel: u8,
+    /// **Dual watch**, which is the one feature of a VHF nobody explains and everybody
+    /// uses: the set listens to your working channel and flicks to sixteen between
+    /// words, so you can be talking to the harbour and still hear a distress call.
+    pub dual: bool,
+    /// Where the squelch is set, 0 wide open to 1 shut right down.
+    ///
+    /// Open it and you hear the hiss of an empty channel; shut it and you hear nothing
+    /// until something is strong enough to break it. Set too far shut and you will not
+    /// hear the weak station you are waiting for, which is the mistake everybody makes
+    /// once.
+    pub squelch: f32,
+    /// What is coming out of the speaker now.
+    pub traffic: Option<Transmission>,
+    /// And what we are saying, which stops us hearing anything else.
+    pub transmitting: Option<Transmission>,
+    /// The last few things heard, newest last.
+    pub log: Vec<Heard>,
+    /// Waiting to be put on the air by whoever generates it.
+    pub air: Vec<Transmission>,
+}
+
+impl Default for Radio {
+    fn default() -> Self {
+        Self {
+            // On, and on sixteen. A set that opens switched off is a set the player
+            // never learns exists, and a boat at sea with the radio off is a boat whose
+            // skipper has made a decision nobody asked them to make.
+            on: true,
+            channel: CALLING,
+            dual: true,
+            // Where a set is left: shut just far enough that an empty channel is quiet.
+            squelch: 0.45,
+            traffic: None,
+            transmitting: None,
+            log: Vec::new(),
+            air: Vec::new(),
+        }
+    }
+}
+
+/// The most the log keeps. A radio log is a page, not an archive.
+const KEEPS: usize = 24;
+
+impl Radio {
+    /// Put something on the air, from wherever it is being sent.
+    pub fn broadcast(&mut self, transmission: Transmission) {
+        self.air.push(transmission);
+    }
+
+    /// Whether this set would hear that, and how strongly.
+    ///
+    /// Nought if it is out of range, on another channel, or while we are transmitting —
+    /// a set cannot hear while its own carrier is up, which is why "over" exists.
+    pub fn hears(&self, t: &Transmission, from_here: f64) -> f32 {
+        if !self.on || self.transmitting.is_some() {
+            return 0.0;
+        }
+        if t.channel != self.channel && !(self.dual && t.channel == CALLING) {
+            return 0.0;
+        }
+        let Some((_, height)) = t.at else {
+            return 1.0;
+        };
+        let range = carries(AERIAL, height);
+        if from_here > range {
+            return 0.0;
+        }
+        // Strong until the last fifth of the range, then falling away: a VHF does not
+        // fade gently with distance the way an eye does, it works and then it breaks up.
+        let edge = (1.0 - (from_here / range).powf(6.0)).clamp(0.0, 1.0) as f32;
+        // **And then the squelch, which is the point of having one.** It is a gate on
+        // signal strength: shut it down and the hiss goes, and so does the weak station
+        // you were waiting for. Everybody makes that mistake once, and a squelch that
+        // did not gate anything would be a knob that only changed the hiss — which is
+        // the half of it that is decoration.
+        if edge < self.squelch * 0.9 {
+            return 0.0;
+        }
+        edge
+    }
+}
+
+/// Work the set: put what is on the air into the speaker, and remember it.
+pub fn listen(
+    sim: Res<Sim>,
+    sky: Res<crate::sky::Sky>,
+    mut log: ResMut<crate::chart::DeckLog>,
+    mut radio: ResMut<Radio>,
+) {
+    let now = sim.sim.state.time;
+    let here = sim.sim.state.pos;
+
+    // Our own transmission holds the channel until it is finished.
+    if radio
+        .transmitting
+        .as_ref()
+        .is_some_and(|t| now >= t.over_at())
+    {
+        radio.transmitting = None;
+    }
+    if radio.traffic.as_ref().is_some_and(|t| now >= t.over_at()) {
+        radio.traffic = None;
+    }
+    if radio.traffic.is_some() || radio.transmitting.is_some() {
+        // The channel is busy. Anything sent now is lost, which is what happens.
+        radio.air.retain(|t| now < t.began + 0.5);
+        return;
+    }
+    let Some(next) = radio.air.first().cloned() else {
+        return;
+    };
+    radio.air.remove(0);
+    let off = next.at.map(|(at, _)| (at - here).length()).unwrap_or(0.0);
+    let strength = radio.hears(&next, off);
+    if strength <= 0.0 {
+        return;
+    }
+    radio.log.push(Heard {
+        channel: next.channel,
+        from: next.from.clone(),
+        words: next.words.clone(),
+        strength,
+        hour: sky.hour,
+    });
+    if radio.log.len() > KEEPS {
+        radio.log.remove(0);
+    }
+    // And a line in the deck log for the ones worth a line, which is how a book records
+    // that you had the weather at the hour it went out.
+    if next.worth_writing {
+        log.write(
+            sky.hour,
+            crate::chart::Wrote::Heard {
+                channel: next.channel,
+                from: next.from.clone(),
+            },
+        );
+    }
+    radio.traffic = Some(next);
+}
+
+#[cfg(test)]
+mod the_set {
+    use super::*;
+
+    /// **A coast station is enormously further off than another yacht**, and the
+    /// difference is two square roots rather than a rule anybody wrote down.
+    #[test]
+    fn the_harbour_carries_further_than_the_boat_does() {
+        let boat = carries(AERIAL, AERIAL) / 1_852.0;
+        let station = carries(AERIAL, STATION_AERIAL) / 1_852.0;
+        assert!(
+            (18.0..24.0).contains(&boat),
+            "boat to boat came out at {boat:.0} miles"
+        );
+        assert!(
+            (40.0..50.0).contains(&station),
+            "the coast station came out at {station:.0} miles"
+        );
+    }
+
+    /// **A set cannot hear while it is transmitting**, which is the whole reason the
+    /// word "over" exists and the first thing anybody gets wrong.
+    #[test]
+    fn it_is_deaf_while_it_talks() {
+        let mut radio = Radio::default();
+        let call = Transmission::saying("Fuglhavn Radio", CALLING, "this is Fuglhavn", None, 0.0);
+        assert!(radio.hears(&call, 0.0) > 0.0);
+        radio.transmitting = Some(Transmission::saying("us", CALLING, "over", None, 0.0));
+        assert_eq!(radio.hears(&call, 0.0), 0.0, "it heard itself talking over");
+    }
+
+    /// **Dual watch is what makes sixteen a watch rather than a channel.** Working the
+    /// harbour and still hearing a distress call is the one thing it is for.
+    #[test]
+    fn dual_watch_hears_sixteen_while_working_another_channel() {
+        let mut radio = Radio {
+            channel: 12,
+            ..Default::default()
+        };
+        let distress = Transmission::saying("Vatney", CALLING, "mayday", None, 0.0);
+        assert!(
+            radio.hears(&distress, 0.0) > 0.0,
+            "dual watch heard nothing"
+        );
+        radio.dual = false;
+        assert_eq!(
+            radio.hears(&distress, 0.0),
+            0.0,
+            "it heard sixteen with the dual watch off"
+        );
+    }
+
+    /// And a station over the horizon is not heard at all — not faintly, not broken.
+    /// A VHF works and then it stops.
+    #[test]
+    fn over_the_horizon_is_silence() {
+        let radio = Radio::default();
+        let her = Transmission::saying(
+            "Tern",
+            CALLING,
+            "this is Tern",
+            Some((glam::DVec2::ZERO, AERIAL)),
+            0.0,
+        );
+        let range = carries(AERIAL, AERIAL);
+        assert!(radio.hears(&her, range * 0.5) > 0.9, "she was not strong");
+        assert!(
+            radio.hears(&her, range * 0.97) < 0.3,
+            "she was clear at the very edge"
+        );
+        assert_eq!(
+            radio.hears(&her, range * 1.01),
+            0.0,
+            "she was heard beyond it"
+        );
+    }
+
+    /// **Two stations at once is two stations heard by nobody.** The channel is
+    /// occupied while somebody is speaking, and that is the one rule of a shared one.
+    #[test]
+    fn a_busy_channel_loses_what_is_sent_into_it() {
+        let mut radio = Radio {
+            traffic: None,
+            ..Default::default()
+        };
+        radio.traffic = Some(Transmission::saying(
+            "Fuglhavn Radio",
+            CALLING,
+            "all ships all ships all ships",
+            None,
+            100.0,
+        ));
+        assert!(radio.log.is_empty());
+        assert!(
+            radio.traffic.as_ref().unwrap().over_at() > 102.0,
+            "five words took no time to say"
+        );
+    }
+}
+
+/// The forecast, in the words a shipping forecast uses.
+///
+/// **Generated out of this world's own weather, not played from a recording**, and the
+/// argument is `music.rs`'s word for word: a recording cannot know what the wind is
+/// doing. A canned forecast would be somebody else's weather read over yours, which is
+/// the one thing that would break a radio's reason for existing — you would learn
+/// within two passages that it never matches, and after that it is furniture.
+///
+/// What it is made of is already in the model and was not there a week ago: the mean
+/// wind and the cover come off the synoptic, the visibility off the fog, and the whole
+/// second half of it — *veering northwesterly 6 to gale 8 later* — off the front, which
+/// has a time and an air mass behind it. The forecast is a reading of the same numbers
+/// the barometer is a reading of.
+///
+/// The form is the real one and it is in a fixed order, because that is what makes a
+/// shipping forecast possible to copy down: wind, then weather, then visibility.
+pub fn forecast(sim: &Sim, sea_area: &str) -> String {
+    let wind = &sim.sim.wind;
+    let knots = sail_core::units::ms_to_kn(sim.sim.telemetry.tws);
+    let from = sail_core::units::deg(sim.sim.telemetry.twd).rem_euclid(360.0);
+    let (building, turning) = wind.outlook();
+    let cover = wind.cover();
+    let fog = wind.fog();
+
+    // A forecast gives a range rather than a number, because it is a forecast.
+    let force = crate::weather::force(knots);
+    let wind_words = format!(
+        "{} {} to {}",
+        compass(from),
+        force.saturating_sub(1).max(1),
+        (force + 1).min(12)
+    );
+    // And what it is going to do, which is the half worth having. Said as "later" when
+    // it is an hour or more off, which is the convention and is also the truth here:
+    // the outlook looks over an hour.
+    let shift = sail_core::units::deg(turning);
+    let then = match (sail_core::units::ms_to_kn(building), shift) {
+        (k, s) if s > 10.0 => Some(format!(
+            "veering {} {} later",
+            compass((from + s).rem_euclid(360.0)),
+            if k > 3.0 { "and increasing" } else { "" }
+        )),
+        (_, s) if s < -10.0 => Some(format!(
+            "backing {} later",
+            compass((from + s).rem_euclid(360.0))
+        )),
+        (k, _) if k > 3.0 => Some("increasing later".to_string()),
+        (k, _) if k < -3.0 => Some("decreasing later".to_string()),
+        _ => None,
+    };
+    let weather = match (fog, cover) {
+        (f, _) if f > 0.45 => "fog patches",
+        (_, c) if c > 0.80 => "rain at times",
+        (_, c) if c > 0.55 => "showers",
+        (_, c) if c > 0.25 => "fair",
+        _ => "fair",
+    };
+    // Through the sky's own function, with the sun left out of it: a forecast is for
+    // the day rather than for this minute, and the low-sun term is a dusk effect.
+    let visibility = match crate::sky::how_far(cover as f32, 0.0, fog as f32) {
+        v if v < 1_000.0 => "very poor",
+        v if v < 3_700.0 => "poor",
+        v if v < 9_260.0 => "moderate",
+        _ => "good",
+    };
+    let mut out = format!("{sea_area}: {wind_words}");
+    if let Some(then) = then {
+        out.push_str(", ");
+        out.push_str(then.trim());
+    }
+    out.push_str(&format!(". {weather}. {visibility}."));
+    out
+}
+
+/// A bearing in the words a forecast uses, which are eight and never sixteen.
+///
+/// Nobody has ever said "west-northwesterly 6" on the radio. The coarseness is the
+/// point: a forecast covers a sea area the size of a county and a sixteenth of the
+/// compass is a precision it does not have.
+fn compass(degrees: f64) -> &'static str {
+    const POINTS: [&str; 8] = [
+        "northerly",
+        "northeasterly",
+        "easterly",
+        "southeasterly",
+        "southerly",
+        "southwesterly",
+        "westerly",
+        "northwesterly",
+    ];
+    POINTS[(((degrees + 22.5).rem_euclid(360.0)) / 45.0) as usize % 8]
+}
+
+/// When the coast station reads the forecast, in hours.
+///
+/// **Fixed times, and that is the content.** A forecast you can ask for at any moment is
+/// a weather page with a different font; a forecast at 0520 and 1720 is a thing you plan
+/// a departure around — you either heard it or you are sailing on what you heard eight
+/// hours ago. Every shipping forecast in the world works this way and it is not an
+/// accident of broadcasting: a schedule is what makes the information worth writing
+/// down.
+pub const BROADCASTS: [f32; 4] = [5.33, 11.33, 17.33, 23.33];
+
+/// The station that reads it, and how it is announced.
+///
+/// Called on sixteen and read on a working channel, which is the procedure and is also
+/// the first thing a radio teaches: sixteen is where you are told *where to listen*, not
+/// where you listen.
+#[derive(Resource)]
+pub struct Coastguard {
+    /// Which broadcast was last put out, so one goes out once.
+    said: Option<usize>,
+    /// The station's name, taken from the harbour the course starts at.
+    pub name: String,
+}
+
+impl Default for Coastguard {
+    fn default() -> Self {
+        Self {
+            said: None,
+            name: "Coastguard".to_string(),
+        }
+    }
+}
+
+/// Put the forecast on the air when its hour comes round.
+pub fn broadcast(
+    sim: Res<Sim>,
+    sky: Res<crate::sky::Sky>,
+    course: Res<crate::course::Course>,
+    mut station: ResMut<Coastguard>,
+    mut radio: ResMut<Radio>,
+) {
+    // Which slot the clock is in, if any: a broadcast goes out in the two minutes after
+    // its hour, because a station reads it at the time and not at the instant.
+    let hour = sky.hour;
+    let Some(slot) = BROADCASTS
+        .iter()
+        .position(|at| hour >= *at && hour < at + 0.034)
+    else {
+        return;
+    };
+    if station.said == Some(slot) {
+        return;
+    }
+    station.said = Some(slot);
+    if station.name == "Coastguard" {
+        if let Some(harbour) = course.harbours.first() {
+            station.name = format!("{} Coastguard", harbour.name);
+        }
+    }
+    let now = sim.sim.state.time;
+    let here = sim.sim.state.pos;
+    // The station is ashore and high up; the call goes out from the harbour it is named
+    // after, so whether you hear it depends on where you are — see `carries`.
+    let at = course.harbours.first().map(|h| h.at).unwrap_or(here);
+    radio.broadcast(Transmission::saying(
+        &station.name,
+        CALLING,
+        &format!(
+            "All ships, all ships, all ships. This is {}. \
+             For a gale warning and the weather bulletin, listen channel {}. Out.",
+            station.name, 6
+        ),
+        Some((at, STATION_AERIAL)),
+        now,
+    ));
+    radio.broadcast(Transmission::saying(
+        &station.name,
+        6,
+        &format!("Weather bulletin. {}", forecast(&sim, "The archipelago")),
+        Some((at, STATION_AERIAL)),
+        // Read on the working channel after the call on sixteen is finished.
+        now + 12.0,
+    )
+    .for_the_book());
+}
+
+#[cfg(test)]
+mod what_the_station_says {
+    use super::*;
+
+    /// **The forecast is in the order a shipping forecast is in**, because that order is
+    /// what makes one possible to copy down: wind, then weather, then visibility. A
+    /// sailor reaching for a pencil knows what is coming next.
+    #[test]
+    fn it_reads_in_the_order_a_forecast_reads() {
+        let said = "Archipelago: southwesterly 5 to 7, veering northwesterly and increasing later. showers. moderate.";
+        let wind = said.find("southwesterly").expect("a wind");
+        let weather = said.find("showers").expect("the weather");
+        let visibility = said.find("moderate").expect("the visibility");
+        assert!(wind < weather && weather < visibility);
+    }
+
+    /// **Eight points and never sixteen.** Nobody has ever said "west-northwesterly 6"
+    /// on the radio: a forecast covers a sea area the size of a county and a sixteenth
+    /// of the compass is a precision it does not have.
+    #[test]
+    fn the_compass_is_the_forecasters_compass() {
+        assert_eq!(compass(0.0), "northerly");
+        assert_eq!(compass(44.0), "northeasterly");
+        // Two hundred is still southerly: the boundary is at 202 and a half, which is
+        // the kind of thing a test is for.
+        assert_eq!(compass(200.0), "southerly");
+        assert_eq!(compass(210.0), "southwesterly");
+        assert_eq!(compass(359.0), "northerly");
+        for bearing in 0..360 {
+            let said = compass(bearing as f64);
+            assert!(
+                said.ends_with("erly"),
+                "{bearing} degrees came out as {said}"
+            );
+        }
+    }
+
+    /// **Four a day at fixed times**, which is the content rather than the schedule. A
+    /// forecast you can ask for at any moment is a weather page with a different font.
+    #[test]
+    fn it_goes_out_four_times_a_day_at_stated_hours() {
+        assert_eq!(BROADCASTS.len(), 4);
+        for pair in BROADCASTS.windows(2) {
+            assert!(pair[1] > pair[0], "the schedule runs backwards");
+            assert!(
+                pair[1] - pair[0] > 3.0,
+                "two broadcasts {:.1} hours apart",
+                pair[1] - pair[0]
+            );
+        }
+    }
+
+    /// And it takes a while to read, because somebody is reading it. A bulletin that
+    /// arrives instantly is a notification.
+    #[test]
+    fn a_bulletin_takes_time_to_read() {
+        let bulletin = Transmission::saying(
+            "Fuglhavn Coastguard",
+            6,
+            "Weather bulletin. The archipelago: southwesterly 5 to 7, veering \
+             northwesterly and increasing later. showers. moderate.",
+            None,
+            0.0,
+        );
+        assert!(
+            (5.0..25.0).contains(&bulletin.takes),
+            "it took {:.1} seconds to read",
+            bulletin.takes
+        );
+    }
+}

@@ -742,6 +742,104 @@ pub fn draw(
                 let (building, turning) = sim.sim.wind.outlook();
                 readout(ui, "OUTLOOK", &fit(&outlook_words(building, turning), 16));
 
+                // **The set, under the weather it reports.** It belongs here rather than
+                // beside the winch: what comes out of it is weather, the window it is in
+                // is the one that answers *what is the day doing*, and the forecast it
+                // reads at 0520 is the thing you plan a departure around.
+                //
+                // Three lines and a row of buttons, which is all a VHF has: the channel,
+                // whether the dual watch is on, where the squelch is, and the last thing
+                // said. A real set has fifty channels and a menu; what a sailor uses is
+                // this.
+                {
+                    let radio = &mut in_hand.radio;
+                    let busy = radio.traffic.is_some();
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 3.0;
+                        plate(ui, "VHF");
+                        for channel in crate::radio::CHANNELS {
+                            let on = radio.channel == channel;
+                            let label = egui::RichText::new(format!("{channel}"))
+                                .monospace()
+                                .size(10.0)
+                                .color(if on {
+                                    egui::Color32::BLACK
+                                } else {
+                                    paint::LABEL
+                                });
+                            let button = egui::Button::new(label).fill(if on {
+                                paint::LIVE
+                            } else {
+                                egui::Color32::from_gray(26)
+                            });
+                            if ui
+                                .add(button)
+                                .on_hover_text(crate::radio::what_for(channel))
+                                .clicked()
+                            {
+                                radio.channel = channel;
+                            }
+                        }
+                        // Brass when it is on, like every other live thing on this
+                        // console. `selectable_label` paints egui's own blue, which is
+                        // the one colour in the program that is not out of the case.
+                        let dual = radio.dual;
+                        let lamp = egui::Button::new(
+                            egui::RichText::new("DW")
+                                .monospace()
+                                .size(10.0)
+                                .color(if dual {
+                                    egui::Color32::BLACK
+                                } else {
+                                    paint::LABEL
+                                }),
+                        )
+                        .fill(if dual {
+                            paint::LIVE
+                        } else {
+                            egui::Color32::from_gray(26)
+                        });
+                        if ui
+                            .add(lamp)
+                            .on_hover_text(
+                                "dual watch: listens to sixteen between words, whatever \
+                                 channel you are working",
+                            )
+                            .clicked()
+                        {
+                            radio.dual = !dual;
+                        }
+                    });
+                    // What is on it: the station and what it is saying, or the hiss.
+                    // **A weak one is said to be weak**, because on a real set you can
+                    // hear that it is and act on it: you ask the station to say again,
+                    // or you wait until you are nearer. A log that printed a broken
+                    // transmission as cleanly as a strong one would be throwing away
+                    // the one thing the range model is for.
+                    let line = match (&radio.traffic, radio.log.last()) {
+                        (Some(t), _) => format!("{} {} — {}", t.channel, t.from, t.words),
+                        (None, Some(last)) => format!(
+                            "{:02.0}{:02.0} {} {}{} — {}",
+                            last.hour.floor(),
+                            (last.hour.fract() * 60.0).floor(),
+                            last.channel,
+                            last.from,
+                            if last.strength < 0.45 { " (weak)" } else { "" },
+                            last.words
+                        ),
+                        (None, None) => "quiet".to_string(),
+                    };
+                    ui.label(
+                        egui::RichText::new(fit(&line, 30))
+                            .monospace()
+                            .size(10.0)
+                            // Lit while somebody is speaking, which is what the little
+                            // lamp on a real set does and is the one thing you see from
+                            // across the cockpit.
+                            .color(if busy { paint::LIVE } else { paint::LABEL }),
+                    );
+                }
+
                 // **The three she is steered by**, in the size they deserve, in a
                 // fixed order, in a fixed place. Everything under them is a thing you
                 // look up; these are things you glance at a hundred times an hour.
@@ -2522,6 +2620,10 @@ pub struct InHand<'w> {
     /// parameters and this panel wanted a seventeenth. The card needs to know who else
     /// is in on this leg; see `net.finished`.
     pub net: Res<'w, crate::net::Net>,
+    /// Nor is the radio, and it is here for the same reason — the panel is at sixteen
+    /// parameters and the set made seventeen. It is a thing in somebody's hand in every
+    /// sense that matters: you reach up and turn it.
+    pub radio: ResMut<'w, crate::radio::Radio>,
 }
 
 /// A narrow lamp for a thing you pick up: three of them fit the window they live in.

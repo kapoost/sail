@@ -1139,9 +1139,19 @@ pub fn glow_colour(sky: &Sky) -> Color {
 }
 
 pub fn visibility(sky: &Sky) -> f32 {
+    how_far(sky.cover, sky.low_sun(), sky.fog)
+}
+
+/// The same, asked with the three numbers rather than with a sky.
+///
+/// **Because a forecast does not have a sky**, it has a cover and a fog — and the
+/// radio's forecast must call this one rather than carry its own idea of what an
+/// overcast does to the visibility. One thing described twice in two places is the
+/// fault this file has been caught by more than once.
+pub fn how_far(cover: f32, low_sun: f32, fog: f32) -> f32 {
     let clear = 12_000.0;
     let thick = 1_400.0;
-    let shut = sky.cover.powf(0.75) * 0.72 + sky.low_sun() * 0.25;
+    let shut = cover.powf(0.75) * 0.72 + low_sun * 0.25;
     let haze = clear + (thick - clear) * shut.clamp(0.0, 1.0);
     // **And fog, which is a different thing and wins.**
     //
@@ -1156,7 +1166,7 @@ pub fn visibility(sky: &Sky) -> f32 {
     // game unplayable, and real fog thick enough to lose your own bow is rare enough
     // that it is not worth being able to ask for.
     let blind = 60.0_f32;
-    haze * (blind / haze).powf(sky.fog.clamp(0.0, 1.0))
+    haze * (blind / haze).powf(fog.clamp(0.0, 1.0))
 }
 
 /// How far anything at all can be made out, taking the weather and the curve of the

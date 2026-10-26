@@ -892,6 +892,7 @@ pub fn draw(
     job: Res<crate::mission::Pilotage>,
     race: Res<crate::race::Race>,
     home: Res<crate::anchorage::Home>,
+    radio: Res<crate::radio::Radio>,
 ) -> Result {
     if !chart.open {
         return Ok(());
@@ -1213,7 +1214,7 @@ pub fn draw(
         egui::Area::new("deck log".into())
             .anchor(egui::Align2::RIGHT_CENTER, egui::vec2(-16.0, 0.0))
             .show(ctx, |ui| {
-                match the_book(ui, &log, &nav, (chart.page, chart.showing)) {
+                match the_book(ui, &log, &radio, &nav, (chart.page, chart.showing)) {
                     Some(Turned::Line(line)) => laid = Some(line),
                     Some(Turned::To(which)) => turn_to = Some(which),
                     None => {}

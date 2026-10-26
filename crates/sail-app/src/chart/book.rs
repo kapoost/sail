@@ -60,6 +60,14 @@ pub enum Wrote {
     /// type standing between the navigator and the coast; here they are a column he can
     /// read down. Clicking one lays the chart over the water it was written about.
     Entered(crate::chart::Entry),
+    /// Something copied off the radio.
+    ///
+    /// **A navigator writes down that he copied the forecast; the words themselves go on
+    /// the radio page.** One line against the time is what the deck log is for — it is
+    /// the record that at 0520 you had the weather, which is the thing anybody reading
+    /// the book afterwards wants to know. Four lines of *southwesterly 5 to 7, veering*
+    /// in the middle of the bearings would bury them, and the set keeps that anyway.
+    Heard { channel: u8, from: String },
 }
 
 /// The book itself.
@@ -133,6 +141,7 @@ fn reads(wrote: &Wrote) -> String {
             format!("altered to {:03.0}", course.to_degrees().rem_euclid(360.0))
         }
         Wrote::Entered(_) => "written up".to_string(),
+        Wrote::Heard { channel, from } => format!("copied {from}, ch {channel}"),
     }
 }
 
@@ -170,6 +179,13 @@ pub enum Page {
     Log,
     /// One entry, in its rubrics.
     Entries,
+    /// What the set has heard, in the words it said them in.
+    ///
+    /// **A radio log is its own book** and always has been: a station, a time, and what
+    /// was said, kept whether or not anybody acted on it. It is here rather than on the
+    /// console because the console has the width of a VHF and a forecast is five lines
+    /// of writing — and because this is the table you are sitting at when you copy one.
+    Radio,
 }
 
 /// What was pressed on the book.
@@ -198,6 +214,7 @@ pub(crate) enum Turned {
 pub(crate) fn the_book(
     ui: &mut egui::Ui,
     log: &DeckLog,
+    radio: &crate::radio::Radio,
     nav: &crate::navigation::Navigation,
     showing: (Page, Option<usize>),
 ) -> Option<Turned> {
@@ -223,9 +240,13 @@ pub(crate) fn the_book(
     let mut turned = None;
     // The tabs, which are the only two things on this page that are not writing.
     let mut x = page.left() + 6.0;
-    for (which, name) in [(Page::Log, "DECK LOG"), (Page::Entries, "ENTRY")] {
+    for (which, name) in [
+        (Page::Log, "DECK LOG"),
+        (Page::Entries, "ENTRY"),
+        (Page::Radio, "RADIO"),
+    ] {
         let tab =
-            egui::Rect::from_min_size(egui::pos2(x, page.top() + 5.0), egui::vec2(78.0, 17.0));
+            egui::Rect::from_min_size(egui::pos2(x, page.top() + 5.0), egui::vec2(94.0, 17.0));
         let on = which == open;
         t.p.rect_filled(tab, 2.0, if on { ink::MARK } else { ink::PAPER });
         t.p.rect_stroke(
@@ -247,7 +268,7 @@ pub(crate) fn the_book(
         {
             turned = Some(Turned::To(which));
         }
-        x += 84.0;
+        x += 98.0;
     }
     match open {
         Page::Log => {
@@ -304,6 +325,7 @@ pub(crate) fn the_book(
             }
         }
         Page::Entries => the_rubrics(t, log, page, chosen),
+        Page::Radio => the_air(t, radio, page),
     }
     turned
 }
@@ -655,5 +677,150 @@ mod the_page {
         // And one press puts it back, rather than two.
         lay_it_on_the_chart(&mut log, &mut nav, &mut laid_at, 0);
         assert_eq!(nav.sights.len(), 1, "one press, one line");
+    }
+}
+
+/// The set's log, which is the one page in this book nobody writes.
+///
+/// **It fills itself, and that is the difference between it and every other page here.**
+/// A bearing is in the book because a navigator shot it; a securité is in the book
+/// because it came over the air whether or not anybody was listening, and the use of it
+/// is exactly that: you come below at four in the morning, turn to this page, and find
+/// out what you slept through.
+///
+/// Weak ones are marked, because the range model is only worth having if what it does is
+/// visible. A station at the edge of the horizon is *(weak)* here and a strong one is
+/// not, and the difference between them is forty miles of sea and a hill behind the
+/// harbour.
+fn the_air(t: &Table, radio: &crate::radio::Radio, page: egui::Rect) {
+    let state = if radio.on {
+        format!(
+            "ch {}{}   squelch {:.0}%",
+            radio.channel,
+            // Sixteen plus sixteen is not a dual watch, it is one channel written twice.
+            if radio.dual && radio.channel != crate::radio::CALLING {
+                " + 16"
+            } else {
+                ""
+            },
+            radio.squelch * 100.0
+        )
+    } else {
+        "set off".to_string()
+    };
+    t.p.text(
+        page.left_top() + egui::vec2(8.0, 26.0),
+        egui::Align2::LEFT_TOP,
+        state,
+        egui::FontId::monospace(9.0),
+        ink::BOAT,
+    );
+    // Every line the page will hold, oldest first — a call and the words under it, the
+    // way a copied forecast actually looks on paper.
+    let mut rows: Vec<(String, bool)> = Vec::new();
+    for heard in &radio.log {
+        let weak = heard.strength < 0.45;
+        rows.push((
+            format!(
+                "{:02.0}{:02.0}  {}  {}{}",
+                heard.hour.floor(),
+                (heard.hour.fract() * 60.0).floor(),
+                heard.channel,
+                heard.from,
+                if weak { " (weak)" } else { "" }
+            ),
+            false,
+        ));
+        for line in across(&heard.words, 44) {
+            rows.push((line, weak));
+        }
+    }
+    // The bottom of the page is the live end of it: a radio log is read from the last
+    // thing said upwards, which is why the newest stays on the page and the oldest goes.
+    let fits = ((page.bottom() - 12.0 - (page.top() + 42.0)) / 13.0) as usize;
+    let from = rows.len().saturating_sub(fits);
+    for (i, (row, weak)) in rows[from..].iter().enumerate() {
+        t.p.text(
+            egui::pos2(page.left() + 12.0, page.top() + 42.0 + i as f32 * 13.0),
+            egui::Align2::LEFT_TOP,
+            row,
+            egui::FontId::monospace(10.0),
+            // The words in pencil, the station in ink — and a broken one faint, because
+            // that is how much of it you got.
+            if *weak {
+                ink::PENCIL.gamma_multiply(0.55)
+            } else {
+                ink::PENCIL
+            },
+        );
+    }
+    if radio.log.is_empty() {
+        t.p.text(
+            page.left_top() + egui::vec2(8.0, 48.0),
+            egui::Align2::LEFT_TOP,
+            "nothing heard.\n\nthe forecast goes out at\n0520, 1120, 1720 and 2320.",
+            egui::FontId::monospace(9.0),
+            ink::COAST,
+        );
+    }
+}
+
+/// Break a transmission into lines of a width, on the words.
+///
+/// Indented by two, because a continuation line that starts in the time column is a line
+/// the eye reads as a new entry.
+fn across(words: &str, width: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut line = String::from("  ");
+    for word in words.split_whitespace() {
+        if line.chars().count() + 1 + word.chars().count() > width && !line.trim().is_empty() {
+            out.push(std::mem::take(&mut line));
+            line.push_str("  ");
+        }
+        if line.trim().is_empty() {
+            line.push_str(word);
+        } else {
+            line.push(' ');
+            line.push_str(word);
+        }
+    }
+    if !line.trim().is_empty() {
+        out.push(line);
+    }
+    out
+}
+
+#[cfg(test)]
+mod the_radio_page {
+    use super::*;
+
+    /// **A forecast goes down the page in lines of a width**, on the words, and nothing
+    /// is lost between them. A wrap that dropped the last word of each line would be a
+    /// log that lied quietly, which is the worst kind.
+    #[test]
+    fn it_breaks_on_the_words_and_keeps_all_of_them() {
+        let said = "The archipelago: southwesterly 5 to 7, veering northwesterly and \
+                    increasing later. showers. moderate.";
+        let lines = across(said, 44);
+        assert!(lines.len() > 1, "a hundred characters fitted on one line");
+        for line in &lines {
+            assert!(
+                line.chars().count() <= 44,
+                "a line came out {} wide: {line}",
+                line.chars().count()
+            );
+            assert!(line.starts_with("  "), "a line was not indented: {line}");
+        }
+        let back: Vec<&str> = lines.iter().flat_map(|l| l.split_whitespace()).collect();
+        let was: Vec<&str> = said.split_whitespace().collect();
+        assert_eq!(back, was, "the wrap lost a word");
+    }
+
+    /// A word longer than the line still goes on the page rather than vanishing.
+    #[test]
+    fn a_long_word_goes_on_a_line_of_its_own() {
+        let lines = across("a supercalifragilisticexpialidocious", 12);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[1].contains("supercali"));
     }
 }

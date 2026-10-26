@@ -43,7 +43,7 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
      hours without anybody noticing, because nothing else depends on it. -->
 
 2. **The physics is testable without opening a window.** 180 tests in the core assert
-   against figures a sailor knows from the water — 499 across the workspace, run by CI
+   against figures a sailor knows from the water — 510 across the workspace, run by CI
    on every push. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
@@ -661,6 +661,51 @@ Nothing about a head-up display can be asserted in a test — it is read by eye 
 not read at all — so the next best thing is to make looking cheap. That loop is how the
 panel above got rebuilt, and it paid for itself in the first hour by finding a clinometer
 drawing a green line across the whole console.
+
+## The radio
+
+A VHF, on the console under the weather, because what comes out of it *is* weather.
+
+**Sixteen is watched and not worked.** The set has four channels — sixteen to call, six
+and twelve for the coast station and the harbour, seventy-two between boats — and a dual
+watch, which is the one feature of a real VHF nobody explains and everybody uses: it
+listens to your working channel and flicks to sixteen between words, so you can be
+talking to the harbour and still hear a distress call. The squelch is where a set is
+left, shut just far enough that an empty channel is quiet, and a station too weak to
+break it is a station you do not hear.
+
+**Range is worked out rather than assumed.** `2.5 × (√h₁ + √h₂)` nautical miles, the
+radio horizon, which is further than the optical one because the atmosphere bends the
+signal down — the whole reason a radio reaches past the sea's curve at all. Our aerial is
+at the masthead at sixteen metres; a coast station sits on a hill at a hundred and eighty.
+That asymmetry is why the harbour hears you from forty miles and the yacht two miles
+behind the island does not, and it is the same model the horizon and the fog are drawn
+from rather than a table of ranges.
+
+**The forecast is generated out of this world's weather, not played from a recording.**
+A canned one would be somebody else's weather read over yours, and you would learn within
+two passages that it never matches — after that it is furniture. The wind and its outlook
+come off the synoptic, the second half of it (*veering northwesterly and increasing
+later*) off the front, which has a time and an air mass behind it, and the visibility off
+the fog, through the sky's own function with the sun left out of it. The form is the real
+one and the order is fixed — wind, then weather, then visibility — because that order is
+what makes a shipping forecast possible to copy down.
+
+**At 0520, 1120, 1720 and 2320, and that is the content.** A forecast you can ask for at
+any moment is a weather page in a different font; a forecast at a fixed hour is a thing
+you plan a departure around. It is called on sixteen and read on channel six, which is
+the first thing a radio teaches: sixteen is where you are told *where to listen*, not
+where you listen. Leave the set on sixteen and you hear that there is a bulletin and miss
+it.
+
+**The log is a page of the book.** A VHF is the width of a VHF and a forecast is five
+lines of writing, so the console carries one line — the last thing said, marked *(weak)*
+if it came in broken — and the third tab of the log book carries the set's own log: time,
+channel, station, and the words underneath, kept whether or not anybody was listening.
+You come below at four in the morning, turn to that page, and find out what you slept
+through. What the *deck* log gets is one line against the hour — `copied Nordholm
+Coastguard, ch 6` — because a navigator writes down that he had the weather, not the
+whole of it, and the bearings on that page are what it is for.
 
 ## Sailing 101
 
