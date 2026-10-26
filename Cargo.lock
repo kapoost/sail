@@ -5161,7 +5161,7 @@ dependencies = [
 
 [[package]]
 name = "sail-app"
-version = "0.1.28"
+version = "0.1.29"
 dependencies = [
  "bevy",
  "bevy_egui",
