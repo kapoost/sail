@@ -50,7 +50,9 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<PortControl>();
     app.add_systems(
         Update,
-        (broadcast, harbour, listen).chain().in_set(Deck::Weather),
+        (broadcast, harbour, listen, speaker)
+            .chain()
+            .in_set(Deck::Weather),
     );
 }
 
@@ -209,6 +211,9 @@ pub struct Radio {
     pub squelch: f32,
     /// What is coming out of the speaker now.
     pub traffic: Option<Transmission>,
+    /// And how strongly it is coming in, 0 to 1 — which is audible as well as printed:
+    /// a station at the edge of the horizon has noise under it.
+    pub signal: f32,
     /// And what we are saying, which stops us hearing anything else.
     pub transmitting: Option<Transmission>,
     /// The last few things heard, newest last.
@@ -227,8 +232,9 @@ impl Default for Radio {
             channel: CALLING,
             dual: true,
             // Where a set is left: shut just far enough that an empty channel is quiet.
-            squelch: 0.45,
+            squelch: QUIET,
             traffic: None,
+            signal: 0.0,
             transmitting: None,
             log: Vec::new(),
             air: Vec::new(),
@@ -340,8 +346,59 @@ pub fn listen(
             },
         );
     }
+    radio.signal = strength;
     radio.traffic = Some(next);
 }
+
+/// What the set sounds like, which until now was nothing at all.
+///
+/// **A radio you cannot hear is a prop.** Everything about it was text — the words on
+/// the console, the words in the book — and the one thing a VHF does in a cockpit is
+/// break the quiet so that you look up. Three sounds, and none of them is a voice:
+///
+/// * **The open channel.** Turn the squelch down and you get the hiss, which is the
+///   whole of what the knob is for and which the documentation already promised.
+/// * **Somebody on it.** Noise through a speech band, shaped into syllables: you hear
+///   that the channel is occupied, and you read what was said. Deliberately not
+///   intelligible — there is no voice in this game, and a synthesised one would be
+///   worse than none.
+/// * **The break.** The click and the burst of noise when a carrier drops, which is the
+///   one radio sound everybody can imitate and the one that says *that was the end of
+///   it*.
+pub fn speaker(
+    radio: Res<Radio>,
+    sound: Res<crate::sound::SoundHandle>,
+    mut was: Local<bool>,
+) {
+    let on_air = radio.traffic.is_some();
+    // The carrier arriving and the carrier going. Both click; the one at the end has the
+    // tail on it, because that is the one where the squelch opens onto an empty channel.
+    if on_air != *was {
+        sound.0.radio_break(if on_air { 0.5 } else { 0.85 });
+        *was = on_air;
+    }
+    if !radio.on {
+        sound.0.set_radio(0.0, 0.0);
+        return;
+    }
+    match &radio.traffic {
+        // A strong station is clean and a weak one is half noise, which is the range
+        // model arriving at the ear instead of only at the page.
+        Some(_) => sound
+            .0
+            .set_radio(0.35 + 0.65 * radio.signal, (1.0 - radio.signal) * 0.5),
+        // And an empty channel is the hiss, as far down as the squelch has shut it.
+        // Left where a set is left it is silent, which is why nobody notices the knob
+        // until they turn it.
+        None => sound.0.set_radio(0.0, (QUIET - radio.squelch).max(0.0) * 1.4),
+    }
+}
+
+/// Where the squelch has the hiss just gone.
+///
+/// The default sits exactly here, which is where a set is left: shut far enough that an
+/// empty channel is quiet, and one notch from hearing everything that is out there.
+pub const QUIET: f32 = 0.45;
 
 #[cfg(test)]
 mod the_set {

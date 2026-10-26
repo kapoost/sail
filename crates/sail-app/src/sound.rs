@@ -93,6 +93,9 @@ impl Default for SeaParams {
             sea_level: AtomicU32::default(),
             boat_level: AtomicU32::default(),
             crew_level: AtomicU32::default(),
+            radio_voice: AtomicU32::default(),
+            radio_noise: AtomicU32::default(),
+            radio_break: AtomicU32::default(),
         };
         store(&p.master, 1.0);
         store(&p.music_level, 0.45);
@@ -135,6 +138,22 @@ pub struct SeaParams {
     /// used for anything, which is what you want from the first thirty files somebody
     /// records and not what you want from the three hundredth.
     groups: [(usize, usize); Call::KINDS],
+    /// What is coming out of the VHF, 0 to 1 — somebody speaking, band-limited to the
+    /// three kilohertz a radio has and not intelligible, because there is no voice in
+    /// this game and a synthesised one would be worse than none.
+    ///
+    /// **A set that makes no sound at all is a prop.** The whole of the radio was text:
+    /// the words appeared on the console and the log, and the one thing a VHF actually
+    /// does in a cockpit — break the quiet, so that you look up — did not happen. You
+    /// cannot hear what is said, and that is the right amount: what you hear is *that*
+    /// somebody is on the channel, and you read what they said.
+    radio_voice: AtomicU32,
+    /// And the hiss: an open squelch between transmissions, or the noise under a weak
+    /// one. The doc on `Radio::squelch` promised a sound that did not exist.
+    radio_noise: AtomicU32,
+    /// A carrier opening or dropping: the click, and the burst of noise behind it that
+    /// every VHF in the world makes when somebody lets go of the button.
+    radio_break: AtomicU32,
     water_level: AtomicU32,
     water_cutoff: AtomicU32,
     /// A wave arriving: how hard she was hit, 0 to 1, taken rather than read.
@@ -399,6 +418,18 @@ impl SeaParams {
     /// to use it.
     pub fn set_crew(&self, level: f32) {
         store(&self.crew_level, level.clamp(0.0, 1.0));
+    }
+
+    /// What the set is doing: somebody speaking, and how much hiss is under or around
+    /// it.
+    pub fn set_radio(&self, voice: f32, noise: f32) {
+        store(&self.radio_voice, voice.clamp(0.0, 1.0));
+        store(&self.radio_noise, noise.clamp(0.0, 1.0));
+    }
+
+    /// A carrier up or down. One shot, taken by the stream.
+    pub fn radio_break(&self, hard: f32) {
+        store(&self.radio_break, hard.clamp(0.0, 1.0));
     }
 
     pub fn set_muted(&self, muted: bool) {
@@ -761,6 +792,17 @@ pub struct SeaStream {
     bell_wait: f32,
     bell_amp: [f32; 5],
     bell_phase: [f32; 5],
+    /// The set: the two ends of its band, where it is in a syllable, how loud this
+    /// syllable is, and the tail of the last carrier break.
+    radio_lp: OnePole,
+    radio_lp2: OnePole,
+    radio_lp3: OnePole,
+    radio_hp: OnePole,
+    hiss_lp: OnePole,
+    hiss_hp: OnePole,
+    speech_phase: f32,
+    speech_amp: f32,
+    break_env: f32,
 }
 
 /// Per-sample slew on every parameter.
@@ -781,6 +823,8 @@ struct Smoothed {
     flog: f32,
     rain: f32,
     gear: f32,
+    radio_voice: f32,
+    radio_noise: f32,
     mute: f32,
 }
 
@@ -838,6 +882,15 @@ impl SeaStream {
             rig_gate: 1.0,
             flog_phase: 0.0,
             flog_env: 0.0,
+            radio_lp: OnePole::default(),
+            radio_lp2: OnePole::default(),
+            radio_lp3: OnePole::default(),
+            radio_hp: OnePole::default(),
+            hiss_lp: OnePole::default(),
+            hiss_hp: OnePole::default(),
+            speech_phase: 0.0,
+            speech_amp: 0.0,
+            break_env: 0.0,
         }
     }
 
@@ -882,6 +935,9 @@ impl Iterator for SeaStream {
             t_sea,
             t_boat,
             t_crew,
+            t_radio,
+            t_hiss,
+            carrier,
         ) = {
             let p = &self.params;
             (
@@ -909,6 +965,10 @@ impl Iterator for SeaStream {
                 load(&p.sea_level),
                 load(&p.boat_level),
                 load(&p.crew_level),
+                load(&p.radio_voice),
+                load(&p.radio_noise),
+                // Taken, not read: swapping zero in is what makes a one-shot fire once.
+                f32::from_bits(p.radio_break.swap(0, Ordering::Relaxed)),
             )
         };
 
@@ -932,6 +992,11 @@ impl Iterator for SeaStream {
         Smoothed::towards(&mut self.smooth.flog, t_flog, SLEW);
         Smoothed::towards(&mut self.smooth.rain, t_rain, SLEW);
         Smoothed::towards(&mut self.smooth.gear, t_gear, SLEW);
+        // **Faster than the weather and slower than a click.** A carrier opens in a
+        // few milliseconds on a real set; what must not happen is a step, which at this
+        // level in the speech band is a tick on every transmission.
+        Smoothed::towards(&mut self.smooth.radio_voice, t_radio, 0.004);
+        Smoothed::towards(&mut self.smooth.radio_noise, t_hiss, 0.004);
         Smoothed::towards(&mut self.smooth.mute, t_mute, 0.0004);
 
         let dt = 1.0 / SAMPLE_RATE as f32;
@@ -1068,6 +1133,70 @@ impl Iterator for SeaStream {
         // The pawls were at 0.5 against flogging canvas at 0.9, which had a winch being
         // ground in quieter than a sail shaking two boat-lengths forward.
         let gear = (tooth * 1.15 + rasp * 0.62) * self.smooth.gear + clack_out;
+
+        // --- The set -----------------------------------------------------------------
+        //
+        // **Three hundred to three thousand hertz, which is what a radio is.** That band
+        // is not a stylistic choice: a VHF channel is 25 kHz wide and the audio in it is
+        // filtered to speech, which is why every radio in the world sounds like a radio.
+        // Noise through that band, shaped into syllables, is *somebody talking* — and it
+        // is deliberately not intelligible, because there is no voice in this game and a
+        // synthesised one would be worse than none. What you hear is that the channel is
+        // occupied; what was said is on the console and in the book.
+        //
+        // The syllable rate is about four a second, which is the measured rate of
+        // ordinary speech and the one number that makes filtered noise stop sounding
+        // like a kettle. Each one gets its own loudness, because a flat train of them is
+        // a buzzer.
+        // A band, which is a pair of one-poles with the low end taken *away* rather than
+        // run through: `OnePole::run` is a lowpass, and chaining two of them is a lower
+        // lowpass. The first version of this did exactly that and the set came out as a
+        // three-hundred-hertz rumble twenty-seven times quieter than its own hiss, which
+        // the ear would have caught in a second and the test caught first.
+        // **Three poles, because one is not a band.** A single one-pole at 2.6 kHz is
+        // six decibels an octave and leaves most of the top end in: the first version
+        // measured a spectral centroid of 3.9 kHz, which is not a radio, it is a hiss
+        // with syllables on it. Three of them at two kilohertz is eighteen decibels an
+        // octave and lands the centroid where speech through a small loudspeaker lands.
+        let n6 = self.noise();
+        let mut low_edge = self.radio_lp.run(n6, 2_000.0);
+        low_edge = self.radio_lp2.run(low_edge, 2_000.0);
+        low_edge = self.radio_lp3.run(low_edge, 2_000.0);
+        let voiced = (low_edge - self.radio_hp.run(low_edge, 300.0)) * 3.6;
+        self.speech_phase += 4.2 * dt;
+        if self.speech_phase >= 1.0 {
+            self.speech_phase -= 1.0;
+            // A quarter of them are a gap: speech has pauses in it, and a continuous
+            // mumble is the thing that reads as a machine.
+            let draw = self.noise();
+            self.speech_amp = if draw < -0.5 { 0.0 } else { 0.45 + 0.55 * draw.abs() };
+        }
+        // Within the syllable, up and down — no clicks at either end.
+        let shape = fast_sin(self.speech_phase * 0.5);
+        let talk = voiced * self.speech_amp * shape * self.smooth.radio_voice * 1.1;
+
+        // The hiss: the open channel between transmissions, and the noise under a weak
+        // station. Brighter than the sea and thinner than rain, which is what the
+        // between-stations sound of a VHF is.
+        let n7 = self.noise();
+        let top = self.hiss_lp.run(n7, 4_200.0);
+        let hiss = (top - self.hiss_hp.run(top, 700.0)) * self.smooth.radio_noise;
+
+        // And the break: the click of a carrier arriving or going, with the burst of
+        // noise behind it that every set makes when somebody lets go of the button. It
+        // is the one radio sound everybody can imitate, and it is the one that tells you
+        // *that was the end of it* without a word being said.
+        if carrier > 0.0 {
+            self.break_env = carrier;
+        }
+        self.break_env *= 0.9982;
+        let tail = (self.noise() * 0.8 + voiced * 0.2) * self.break_env * self.break_env * 1.4;
+
+        // **Speech over the noise, not under it.** Measured: at a wide-open squelch the
+        // hiss was twice the loudness of a station talking, which is a set with the gain
+        // wound the wrong way round — a real one has an AGC and the voice is the loud
+        // thing. Two to one the other way now, with the hiss still plainly there.
+        let radio = (talk + hiss * 0.45 + tail) * RADIO;
 
         // --- The pilot's alarm ------------------------------------------------------
         //
@@ -1281,7 +1410,13 @@ impl Iterator for SeaStream {
         // four decibels off the reel, and the reel's scream is the one sound in this
         // game that must not be level with anything. The answer stays what it was: the
         // band gets out of the way rather than the reel getting louder.
-        let duck = 1.0 / (1.0 + 7.0 * (self.smooth.gear - 1.0).max(0.0));
+        // **And the band gets out of the way of the radio, for the same reason.** The set
+        // is speech in the middle of the band's own register, and music over a
+        // transmission is the one thing that turns a radio into noise — it is why every
+        // cockpit speaker in the world is wired to mute the stereo. Not as deep as the
+        // reel's duck: a forecast is not a fish taking line.
+        let duck = 1.0 / (1.0 + 7.0 * (self.smooth.gear - 1.0).max(0.0))
+            / (1.0 + 2.2 * self.smooth.radio_voice);
         // A call from the deck. Started on a new generation, and a call already running
         // is cut off by the next one — because two people shouting over each other is
         // what actually happens and is also the only sane thing to do with one play head.
@@ -1302,7 +1437,11 @@ impl Iterator for SeaStream {
         }
 
         let mix = ((wind + water + thump + rain) * t_sea
-            + (rig + flog + gear + bell) * t_boat
+            // **The set rides with the boat and not with the crew.** It is a machine
+            // bolted to the bulkhead, like the winch and the bell; the crew fader is for
+            // the one sound in the game that is a person on this deck, and the radio is
+            // a person on somebody else's.
+            + (rig + flog + gear + bell + radio) * t_boat
             // **Its own fader, and not the gear's.** It rode with the rigging and the
             // winches, which is defensible — a voice on deck is a thing aboard — and
             // wrong the moment anybody reached for the control: turning the clatter
@@ -1618,6 +1757,14 @@ pub fn plugin(app: &mut App) {
 /// whether it carries. That is the entire reason the voice is mixed in here rather than
 /// played beside the mix.
 const SHOUT: f32 = 0.9;
+
+/// And how loud the set is.
+///
+/// **A VHF in a cockpit is not quiet.** It is a small loudspeaker a foot from your ear
+/// turned up far enough to be heard over the wind, because the one thing it must not do
+/// is be missed. Lower than a call from the deck: that is somebody beside you and this
+/// is somebody fifteen miles away, through three kilohertz of bandwidth.
+const RADIO: f32 = 0.55;
 
 /// What a call is for.
 ///
@@ -2759,3 +2906,198 @@ mod what_was_recorded {
         assert_eq!(at_our_rate(same.clone(), SAMPLE_RATE), same);
     }
 }
+
+#[cfg(test)]
+mod what_the_set_sounds_like {
+    use super::*;
+
+    fn loudness(set: impl Fn(&SeaParams), seconds: f32) -> f32 {
+        let p = Arc::new(SeaParams::default());
+        p.set_master(1.0);
+        p.set_boat(1.0);
+        set(&p);
+        let mut stream = SeaStream::new(p.clone());
+        let n = (SAMPLE_RATE as f32 * seconds) as usize;
+        let mut sum = 0.0f64;
+        for _ in 0..n {
+            let out = stream.next().unwrap_or(0.0);
+            sum += (out * out) as f64;
+        }
+        (sum / n as f64).sqrt() as f32
+    }
+
+    /// **A set left where a set is left is silent, and the knob is what breaks that.**
+    ///
+    /// The squelch was a documented sound with no sound and no control: the field gated
+    /// a weak station and nothing else. Open it and the channel hisses, which is how
+    /// anybody has ever set one — and the default is exactly at the edge of it.
+    #[test]
+    fn an_open_squelch_hisses_and_a_shut_one_does_not() {
+        let quiet = loudness(|p| p.set_radio(0.0, 0.0), 0.4);
+        let open = loudness(|p| p.set_radio(0.0, 0.6), 0.4);
+        assert!(quiet < 0.002, "an empty channel was not quiet: {quiet:.4}");
+        assert!(
+            open > quiet * 10.0,
+            "opening the squelch changed nothing: {quiet:.4} to {open:.4}"
+        );
+    }
+
+    /// **And somebody on the channel is louder than the hiss.** The point of the sound
+    /// is that it makes you look up; a transmission you have to listen for is a
+    /// transmission you miss while you are watching the sails.
+    ///
+    /// Measured over two seconds rather than half of one, because speech has gaps in it
+    /// and the first syllable of a transmission can be one: somebody keys the button
+    /// before they start talking, which is what the pause at the front of a real call
+    /// is. Half a second of it was measuring the pause.
+    #[test]
+    fn a_station_on_it_is_louder_than_an_empty_channel() {
+        let open = loudness(|p| p.set_radio(0.0, 0.6), 2.0);
+        let talking = loudness(|p| p.set_radio(1.0, 0.0), 2.0);
+        assert!(
+            talking > open * 1.5,
+            "somebody speaking was quieter than the hiss: {talking:.4} against {open:.4}"
+        );
+        // And it is speech-shaped rather than a level: syllables, with gaps in them.
+        let p = Arc::new(SeaParams::default());
+        p.set_master(1.0);
+        p.set_boat(1.0);
+        p.set_radio(1.0, 0.0);
+        let mut stream = SeaStream::new(p);
+        let mut loudest = 0.0f32;
+        let mut quietest = f32::MAX;
+        // Quarter-second windows: long enough to hold a syllable, short enough that one
+        // of them lands in a gap.
+        for _ in 0..8 {
+            let mut sum = 0.0f64;
+            let n = SAMPLE_RATE as usize / 4;
+            for _ in 0..n {
+                let out = stream.next().unwrap_or(0.0);
+                sum += (out * out) as f64;
+            }
+            let rms = (sum / n as f64).sqrt() as f32;
+            loudest = loudest.max(rms);
+            quietest = quietest.min(rms);
+        }
+        assert!(
+            loudest > quietest * 1.4,
+            "it came out as a flat tone rather than speech: {quietest:.4} to {loudest:.4}"
+        );
+    }
+
+    /// **The break is a one-shot and it dies.** A carrier that kept hissing after it
+    /// dropped would be a set with a fault in it.
+    #[test]
+    fn the_carrier_break_fires_once_and_fades() {
+        let p = Arc::new(SeaParams::default());
+        p.set_master(1.0);
+        p.set_boat(1.0);
+        p.radio_break(1.0);
+        let mut stream = SeaStream::new(p.clone());
+        let window = |stream: &mut SeaStream, n: usize| {
+            let mut sum = 0.0f64;
+            for _ in 0..n {
+                let out = stream.next().unwrap_or(0.0);
+                sum += (out * out) as f64;
+            }
+            (sum / n as f64).sqrt() as f32
+        };
+        let tenth = SAMPLE_RATE as usize / 10;
+        let first = window(&mut stream, tenth);
+        let later = window(&mut stream, tenth * 8);
+        assert!(first > 0.01, "the break made no sound: {first:.4}");
+        assert!(
+            later < first / 8.0,
+            "it was still going a second later: {first:.4} then {later:.4}"
+        );
+        // And it is taken, not read: nothing fires it twice.
+        let again = window(&mut stream, tenth);
+        assert!(again < first / 20.0, "the break fired a second time");
+    }
+}
+
+
+#[cfg(test)]
+mod where_the_set_sits {
+    use super::*;
+
+    /// How loud the set is against the sea it has to be heard over, at the defaults.
+    ///
+    /// **The one number that decides whether a radio is a feature.** A transmission you
+    /// have to listen for is one you miss while you are watching the sails, and a
+    /// transmission that drowns the sea is a game that shouts at you. Measured in the
+    /// state the game spends its time in — a fresh breeze, five and a half knots — and
+    /// against the same faders a player starts with.
+    #[test]
+    fn a_station_carries_over_a_fresh_breeze_without_drowning_it() {
+        let world = |radio: bool| -> f32 {
+            let p = Arc::new(SeaParams::default());
+            p.set_master(crate::settings::Settings::default().volume);
+            p.set_sea(crate::settings::Settings::default().sea);
+            p.set_boat(crate::settings::Settings::default().boat);
+            store(&p.wind_level, (18.0f32 / 20.0).powf(1.5));
+            store(&p.wind_cutoff, 320.0 + 95.0 * 18.0);
+            store(&p.water_level, (5.5f32 / 7.0).powf(1.4));
+            store(&p.water_cutoff, 260.0 + 150.0 * 5.5);
+            if radio {
+                p.set_radio(1.0, 0.0);
+            }
+            let mut stream = SeaStream::new(p);
+            let n = SAMPLE_RATE as usize * 2;
+            let mut sum = 0.0f64;
+            for _ in 0..n {
+                let out = stream.next().unwrap_or(0.0);
+                sum += (out * out) as f64;
+            }
+            (sum / n as f64).sqrt() as f32
+        };
+        let sea = world(false);
+        let both = world(true);
+        let lift = 20.0 * (both / sea).log10();
+        println!("sea {sea:.4}, with the set {both:.4} — {lift:.1} dB");
+        assert!(
+            lift > 1.0,
+            "a station on the radio lifted the mix by {lift:.1} dB — nobody would look up"
+        );
+        assert!(
+            lift < 12.0,
+            "the radio put {lift:.1} dB over the sea, which is a game shouting at you"
+        );
+    }
+
+    /// **And the band gets out of the way.** Music over a transmission is the one thing
+    /// that turns a radio into noise, which is why every cockpit speaker in the world is
+    /// wired to mute the stereo when the set opens.
+    #[test]
+    fn the_music_ducks_under_a_transmission() {
+        let band = |radio: bool| -> f32 {
+            let p = Arc::new(SeaParams::default());
+            p.set_master(1.0);
+            p.set_music(1.0);
+            p.set_boat(0.0);
+            p.set_sea(0.0);
+            if radio {
+                p.set_radio(1.0, 0.0);
+            }
+            let mut stream = SeaStream::new(p.clone());
+            // A note under way, so there is something to duck.
+            let mut sum = 0.0f64;
+            let n = SAMPLE_RATE as usize;
+            for i in 0..n {
+                if i % (SAMPLE_RATE as usize / 4) == 0 {
+                    p.strike(440.0, 0.8);
+                }
+                let out = stream.next().unwrap_or(0.0);
+                sum += (out * out) as f64;
+            }
+            (sum / n as f64).sqrt() as f32
+        };
+        let quiet = band(false);
+        let over = band(true);
+        assert!(
+            quiet > 0.0 && over < quiet,
+            "the band played straight through a transmission: {quiet:.4} to {over:.4}"
+        );
+    }
+}
+

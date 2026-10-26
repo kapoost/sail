@@ -43,7 +43,7 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
      hours without anybody noticing, because nothing else depends on it. -->
 
 2. **The physics is testable without opening a window.** 180 tests in the core assert
-   against figures a sailor knows from the water — 519 across the workspace, run by CI
+   against figures a sailor knows from the water — 524 across the workspace, run by CI
    on every push. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
@@ -715,6 +715,22 @@ way in the approach. All four of those are in the simulation — the tide has be
 the keel since the spring and the only place it ever showed was the depth sounder. There
 is no ferry in this model, so there is no ferry on the air: what it counts as traffic is
 whoever else is actually sailing.
+
+**And you can hear it, which was the whole of what was missing.** The first version of
+all this was text: the words appeared on the console and in the book, and the one thing a
+VHF does in a cockpit — break the quiet so that you look up — did not happen. Three
+sounds, none of them a voice. The open channel hisses when you turn the squelch down,
+which is what the knob is for and what its own documentation had been promising to
+nobody. Somebody on the channel is noise through a speech band shaped into syllables at
+the four a second of ordinary speech: you hear *that* the channel is occupied and you
+read what was said, which is the right amount when there is no voice in the game and a
+synthesised one would be worse than none. And the carrier clicks when it opens and breaks
+into noise when it drops, which is the one radio sound everybody can imitate and the one
+that says *that was the end of it*. A weak station has noise under it, so the range model
+arrives at the ear and not only at the page — and the band ducks under a transmission,
+because music over a radio call is why every cockpit speaker in the world is wired to
+mute the stereo. Measured at six and a half decibels over a fresh breeze at the default
+faders: enough to look up, not enough to shout.
 
 **The log is a page of the book.** A VHF is the width of a VHF and a forecast is five
 lines of writing, so the console carries one line — the last thing said, marked *(weak)*

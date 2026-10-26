@@ -810,6 +810,33 @@ pub fn draw(
                             radio.dual = !dual;
                         }
                     });
+                    // **And the squelch, which now does something you can hear.** It was
+                    // a field with a documented sound and no control and no sound: the
+                    // set gates a weak station on it, and that was the whole of it. Turn
+                    // it down and the channel hisses, which is how anybody has ever set
+                    // one — open it until you hear the noise, then back until it goes.
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        plate(ui, "SQ");
+                        let mut squelch = radio.squelch;
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut squelch, 0.0..=1.0)
+                                    .show_value(false)
+                                    .handle_shape(egui::style::HandleShape::Rect {
+                                        aspect_ratio: 0.45,
+                                    }),
+                            )
+                            .on_hover_text(
+                                "squelch: open it until the channel hisses, then shut it \
+                                 until it stops. Too far and you lose the weak station \
+                                 you were waiting for",
+                            )
+                            .changed()
+                        {
+                            radio.squelch = squelch;
+                        }
+                    });
                     // What is on it: the station and what it is saying, or the hiss.
                     // **A weak one is said to be weak**, because on a real set you can
                     // hear that it is and act on it: you ask the station to say again,
