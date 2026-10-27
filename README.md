@@ -43,7 +43,7 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
      hours without anybody noticing, because nothing else depends on it. -->
 
 2. **The physics is testable without opening a window.** 180 tests in the core assert
-   against figures a sailor knows from the water — 548 across the workspace, run by CI
+   against figures a sailor knows from the water — 563 across the workspace, run by CI
    on every push. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
@@ -662,6 +662,46 @@ Nothing about a head-up display can be asserted in a test — it is read by eye 
 not read at all — so the next best thing is to make looking cheap. That loop is how the
 panel above got rebuilt, and it paid for itself in the first hour by finding a clinometer
 drawing a green line across the whole console.
+
+## Anchoring
+
+**The end of a passage was a circle on the chart you sat inside until a number went up.**
+What is in the model now is a pull at the stemhead, and everything a boat at anchor does
+comes out of it rather than being written down.
+
+**Three numbers.** *Scope* — the chain out over the water under her — is most of whether
+she holds: what makes an anchor bite is the pull arriving along the bottom, and what
+keeps it along the bottom is the weight of chain lying there. Under two and a half to one
+she is parked rather than anchored; five to one is the almanac's figure and is where the
+curve flattens, and `V` veers exactly that on the water she is in. *The ground* is a fact
+about the place, drawn from the position — so the same bay has the same bottom next week
+and learning it is what local knowledge is. Sand holds twenty times the anchor's weight,
+mud nine, weed four. *The pull* is the windage and the stream the simulation is already
+working out.
+
+**What falls out of that, measured through the hull rather than asserted:** she lies head
+to the wind, because a force a hull-length forward of the centre of gravity is a yaw
+moment and the moment swings her head round — put her beam on to eighteen knots with the
+anchor down and she rounds up to it by herself. She rides to the tide when the tide is
+the stronger, which is the thing that catches out everybody who has only anchored in a
+lake. An anchor *sets by being dragged*: let go in sand and load her with forty knots and
+she walks seven metres while the fluke digs itself down, and then stops. In weed she
+skates over the top and is still walking five minutes later, a cable downwind of where
+she went to sleep. And dragging is a plough rather than a release — the chain never goes
+slack, which is why it is noticed by a bearing changing rather than by anything happening
+on deck.
+
+**The chart keeps the watch.** The anchor is drawn where it lies, with the ground and the
+depth beside it, and the circle she can swing in round it: inside the circle is lying to
+it and outside it is dragging, which is a thing you can see without reading a number. The
+console carries the scope, the ground and how far the anchor has walked; past fifteen
+metres the alarm goes off.
+
+**The windlass lifts chain, not a boat.** Press `V` again and it comes in at a windlass's
+pace — and while the cable is bar taut nothing comes in at all and the foredeck says so,
+because getting your anchor back means sailing up to it and taking in the slack as it
+comes. `SAIL_ANCHORED=1` opens lying to it in the nearest anchorage, which is how this
+gets photographed.
 
 ## The radio
 

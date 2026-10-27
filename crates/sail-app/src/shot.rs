@@ -220,6 +220,7 @@ fn key_named(name: &str) -> Option<KeyCode> {
         "s" => KeyCode::KeyS,
         "t" => KeyCode::KeyT,
         "u" => KeyCode::KeyU,
+        "v" => KeyCode::KeyV,
         "w" => KeyCode::KeyW,
         "x" => KeyCode::KeyX,
         "z" => KeyCode::KeyZ,

@@ -1435,6 +1435,66 @@ pub(crate) fn where_she_can_go(
     );
 }
 
+/// The anchor, and the water she can swing over.
+///
+/// **An anchor watch is a bearing and a circle.** The one question at two in the morning
+/// is whether she is still where she was put, and the shape that answers it is the
+/// circle she can swing in: the anchor at the middle, the chain as a radius, and her own
+/// position somewhere on it. Inside the circle is lying to it; outside the circle is
+/// dragging, and you do not need a number to see which.
+pub(crate) fn where_she_lies(t: &Table, down: &sail_core::anchor::Down, knows: bool) {
+    const INK: egui::Color32 = egui::Color32::from_rgb(58, 92, 132);
+    let at = t.to_screen(down.at);
+    // The swinging circle: what is left of the chain once the depth is taken out of it,
+    // which is the furthest from the anchor she can get.
+    let depth = (down.depth + 1.4).max(0.5);
+    let reach = (down.out * down.out - depth * depth).max(0.0).sqrt();
+    if reach > 1.0 {
+        t.p.circle_stroke(
+            at,
+            (reach * t.scale as f64) as f32,
+            egui::Stroke::new(1.0, INK.gamma_multiply(0.7)),
+        );
+    }
+    // The anchor itself: a shank, a stock and two flukes, which is the symbol every
+    // chart in the world uses for one.
+    let arm = 5.0;
+    t.p.line_segment(
+        [at + egui::vec2(0.0, -arm), at + egui::vec2(0.0, arm)],
+        egui::Stroke::new(1.6, INK),
+    );
+    t.p.line_segment(
+        [
+            at + egui::vec2(-arm * 0.7, -arm * 0.5),
+            at + egui::vec2(arm * 0.7, -arm * 0.5),
+        ],
+        egui::Stroke::new(1.4, INK),
+    );
+    for side in [-1.0, 1.0] {
+        t.p.line_segment(
+            [
+                at + egui::vec2(0.0, arm),
+                at + egui::vec2(side * arm * 0.8, arm * 0.4),
+            ],
+            egui::Stroke::new(1.4, INK),
+        );
+    }
+    // What is under her and what she is lying in, written where the anchor is —
+    // because the ground is a fact about the place and this is the place.
+    //
+    // Only when the chart may say where she is: an anchor drawn on the paper is a fix,
+    // and a boat that does not know where she is has not earned one.
+    if knows {
+        t.p.text(
+            at + egui::vec2(8.0, 2.0),
+            egui::Align2::LEFT_TOP,
+            format!("{} {:.0} m", down.ground.charted(), down.depth),
+            egui::FontId::monospace(9.0),
+            INK,
+        );
+    }
+}
+
 #[cfg(test)]
 mod what_the_paper_says_about_her {
     /// **The shading and the ship agree, because they are the same number.**

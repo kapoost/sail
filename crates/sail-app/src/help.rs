@@ -44,7 +44,7 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, mut help: ResMut<Help>) {
 /// Grouped the way a person needs them rather than the way the code is laid out: what
 /// your hands do first, then the sails, then what you are looking at. A list in
 /// alphabetical order of key would be easier to write and useless to read.
-const KEYS: [(&str, &[(&str, &str)]); 6] = [
+const KEYS: [(&str, &[(&str, &str)]); 7] = [
     (
         "AT THE HELM",
         &[
@@ -177,6 +177,26 @@ const KEYS: [(&str, &[(&str, &str)]); 6] = [
         ],
     ),
     (
+        "STOPPING FOR THE NIGHT",
+        &[
+            (
+                "V",
+                "let go, and veer five to one on the water under her — press it again \
+                 to weigh",
+            ),
+            (
+                " ",
+                "the chart draws the anchor and the circle she can swing in: inside it \
+                 is lying to it, outside it is dragging",
+            ),
+            (
+                " ",
+                "the windlass lifts chain, not a boat — if the cable is bar taut, sail \
+                 up to it and take in the slack as it comes",
+            ),
+        ],
+    ),
+    (
         "IF SOMEBODY GOES IN",
         &[
             (
@@ -249,7 +269,7 @@ const SECOND_COLUMN: usize = 3;
 /// help does not mention is a feature nobody will find; a key the help promises and
 /// nothing reads is a lie, and both have happened here.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const DOCUMENTED: [KeyCode; 54] = [
+pub const DOCUMENTED: [KeyCode; 55] = [
     // At the helm.
     KeyCode::ArrowLeft,
     KeyCode::ArrowRight,
@@ -297,6 +317,8 @@ pub const DOCUMENTED: [KeyCode; 54] = [
     KeyCode::Escape,
     // The hand bearing compass.
     KeyCode::KeyN,
+    // The foredeck.
+    KeyCode::KeyV,
     // The lifebuoy, which is the one key on this boat that is an emergency.
     KeyCode::Enter,
     // And the help itself, which the list cannot very well leave out.

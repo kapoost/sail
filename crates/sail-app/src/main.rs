@@ -29,6 +29,7 @@ mod fittings;
 mod fleet;
 mod frame;
 mod glance;
+mod ground_tackle;
 mod hail;
 mod help;
 mod horizon;
@@ -490,7 +491,9 @@ fn main() {
     // Its own call: a plugin tuple goes to fifteen and the one above is full. Said here
     // rather than by shuffling the list, because that grouping is a reading order and
     // reordering it to make room would cost more than a line does.
-    .add_plugins(radio::plugin);
+    .add_plugins(radio::plugin)
+    // And the foredeck, for the same reason.
+    .add_plugins(ground_tackle::plugin);
     // A picture of herself on a timer, when one was asked for: see `shot`.
     if let Some(shot) = shot::wanted() {
         app.insert_resource(shot)

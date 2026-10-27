@@ -834,6 +834,27 @@ pub fn draw(
                             radio.dual = !dual;
                         }
                     });
+                    // **The foredeck, under the weather and over the radio.**
+                    //
+                    // Ground tackle is weather in the sense that matters here: it is the
+                    // answer to *can we stop here tonight*, which is a question about
+                    // the wind, the water under her and what is on the bottom. Shown
+                    // only when the anchor is down, because a plate that says NOTHING
+                    // all day is a plate nobody reads — the key is in the help and the
+                    // line appears when there is something to say.
+                    if let Some(reading) = crate::ground_tackle::reading(&sim) {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            plate(ui, "CABLE");
+                            ui.label(
+                                egui::RichText::new(reading)
+                                    .monospace()
+                                    .size(letter::UNIT)
+                                    .color(paint::FACE),
+                            );
+                        });
+                    }
+
                     // **And the squelch, which now does something you can hear.** It was
                     // a field with a documented sound and no control and no sound: the
                     // set gates a weak station on it, and that was the whole of it. Turn

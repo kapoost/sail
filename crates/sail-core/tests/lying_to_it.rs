@@ -16,7 +16,7 @@
 //! * **And she drags when the ground will not hold her**, slowly, downwind, which is a
 //!   plough rather than a release.
 
-use sail_core::anchor::{Anchor, Down, Ground, Tackle};
+use sail_core::anchor::{Anchor, Down, Ground};
 use sail_core::boat::BoatConfig;
 use sail_core::sim::{Simulation, SUBSTEP};
 use sail_core::state::{BoatState, Controls};

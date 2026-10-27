@@ -1092,6 +1092,12 @@ pub fn draw(
 
             // The pilot's water first, under everything else: it is advice, and advice
             // does not go on top of the plot.
+            // **Where the anchor lies, and the water she can swing over.** Drawn before
+            // the pilotage so that a brig's wedge goes over it rather than under: the
+            // anchor is where she *is*, and the ship is what is happening.
+            if let sail_core::anchor::Anchor::Down(down) = &sim.sim.anchor {
+                where_she_lies(&table, down, knows);
+            }
             if job.running && job.over.is_none() {
                 the_way_in(&table, &job.route, job.let_go_at);
                 // **And the water she can actually be taken into**, which is the one
