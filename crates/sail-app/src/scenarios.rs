@@ -701,6 +701,43 @@ mod the_pilotage {
         assert!(wears <= 1, "she wore round {wears} times chasing one mark");
     }
 
+    /// **A ship sailing away from you is not about to run you down.**
+    ///
+    /// The closing rate was *her speed through the water minus ours over the ground*,
+    /// which says she is gaining whenever she is faster — true of a ship astern on the
+    /// same course and false of one crossing or opening. It mattered little while it
+    /// only chose a hail; it matters now that it takes sail off her, because a brig
+    /// drawing away from the pilot boat was spilling her courses to avoid running him
+    /// down.
+    #[test]
+    fn she_only_shortens_for_a_boat_she_is_actually_closing_on() {
+        let mut app = with_a_brig();
+        let here = standing_in(&mut app, 220.0);
+        // Pointed the other way and going fast: a cable and a half apart, and opening.
+        {
+            let mut brig = app.world_mut().resource_mut::<Brig>();
+            brig.heading = rad(180.0);
+            brig.way = glam::DVec2::new(0.0, -kn_to_ms(7.0));
+            brig.speed = kn_to_ms(7.0);
+            brig.at = here - glam::DVec2::new(0.0, 220.0);
+        }
+        app.update();
+        let opening = app.world().resource::<Brig>().set;
+        // And now the same gap with her bearing down on us.
+        {
+            let mut brig = app.world_mut().resource_mut::<Brig>();
+            brig.way = glam::DVec2::new(0.0, kn_to_ms(7.0));
+            brig.at = here - glam::DVec2::new(0.0, 220.0);
+        }
+        app.update();
+        let closing = app.world().resource::<Brig>().set;
+        assert!(
+            closing.iter().sum::<f32>() < opening.iter().sum::<f32>(),
+            "she carried {closing:?} closing and {opening:?} opening — the same canvas \
+             whichever way she was going"
+        );
+    }
+
     /// And her track is kept, because *is she following me* is a question about where
     /// she has been rather than where she is.
     #[test]
@@ -1413,5 +1450,76 @@ mod a_question_is_not_an_order {
                 flag.letter()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod the_tide_under_her {
+    use super::*;
+    use crate::mission::Pilotage;
+    use crate::ship::Brig;
+    use sail_core::units::kn_to_ms;
+
+    /// **The tide takes her too.**
+    ///
+    /// She was the one vessel in the archipelago it did not touch: her position was her
+    /// own way through the water and nothing else, while the boat leading her was being
+    /// set by the stream like everything that floats. In a pilotage that is the
+    /// difference between the channel and the bank — and two vessels in the same sound
+    /// disagreeing about which way the water is going is worse than neither of them
+    /// having a tide at all.
+    #[test]
+    fn the_stream_sets_her_as_it_sets_everything_else() {
+        let mut app = at_sea();
+        app.init_resource::<Brig>();
+        app.init_resource::<Pilotage>();
+        app.init_resource::<crate::barrels::Flotsam>();
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(250),
+        ));
+        app.add_systems(Update, crate::ship::sail_her);
+        // A known stream, and no way of her own at all: whatever ground she makes is
+        // the water under her.
+        {
+            let mut sim = app.world_mut().resource_mut::<Sim>();
+            sim.sim.tide = sail_core::tide::Tide::of(7, 3);
+            sim.sim.state.time = 3_600.0;
+        }
+        let (stream, started) = {
+            let sim = app.world().resource::<Sim>();
+            let at = sim.sim.state.pos + glam::DVec2::new(900.0, 0.0);
+            let stream = sim.sim.tide.stream(sim.sim.state.time, 30.0);
+            (stream, at)
+        };
+        assert!(
+            stream.length() > kn_to_ms(0.3),
+            "the test's own tide is slack: {:.2} kn",
+            sail_core::units::ms_to_kn(stream.length())
+        );
+        {
+            let mut brig = app.world_mut().resource_mut::<Brig>();
+            brig.afloat = true;
+            brig.at = started;
+            brig.bound_for = started;
+            brig.set = [0.0, 0.0, 0.0];
+            brig.speed = 0.0;
+            brig.way = glam::DVec2::ZERO;
+        }
+        // Ten minutes of nothing but tide.
+        for _ in 0..(10 * 60 * 4) {
+            app.update();
+        }
+        let moved = app.world().resource::<Brig>().at - started;
+        let expected = stream * 600.0;
+        assert!(
+            moved.length() > expected.length() * 0.5,
+            "the stream ran {:.0} m past her and took her {:.0}",
+            expected.length(),
+            moved.length()
+        );
+        assert!(
+            moved.normalize().dot(stream.normalize()) > 0.9,
+            "she was set across the stream rather than down it"
+        );
     }
 }

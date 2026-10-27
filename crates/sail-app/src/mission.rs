@@ -103,8 +103,10 @@ pub struct Pilotage {
     pub hail: Option<(String, f64)>,
     /// When the last one was called, so that she is not a parrot.
     hailed_at: f64,
-    /// What she had set last frame, so that a change in it is a thing she can mention.
-    canvas: [f32; 3],
+    /// What she had set last frame, so that a change in it is a thing she can mention —
+    /// and `None` before she has set anything, because *nothing* and *not yet known* are
+    /// different states and only one of them is worth a hail.
+    canvas: Option<[f32; 3]>,
     /// When she last called up on sixteen, for the same reason — and `None` until she
     /// has, because a job that begins at time zero would otherwise count the gap from
     /// the start of the world and say nothing for the first three minutes.
@@ -243,6 +245,28 @@ pub use crate::ship::FULL_AND_BY as WILL_NOT_LIE;
 /// down.
 const TOO_FAR: f64 = 900.0;
 const TOO_NEAR: f64 = 110.0;
+
+/// How fast the gap between her bow and the boat ahead is shutting, m/s.
+///
+/// **Two speeds subtracted is not a closing rate.** It was `her speed through the water
+/// minus our speed over the ground`, which says she is gaining on us whenever she is
+/// going faster — true of a ship astern on the same course and false of one crossing,
+/// and it was being compared against a tide neither of them is in the same part of. It
+/// matters more than it did now that the answer takes sail off her: a brig sailing away
+/// from the pilot boat at six knots was spilling her courses to avoid running him down.
+///
+/// The honest number is the relative velocity projected onto the line between them,
+/// which is what a radar calls range rate and what the eye on the stern rail is reading.
+fn closing_on(sim: &Sim, brig: &Brig, here: DVec2) -> f64 {
+    let between = here - brig.at;
+    let range = between.length();
+    if range < 1.0 {
+        return 0.0;
+    }
+    let cog = sim.sim.telemetry.cog;
+    let ours = DVec2::new(cog.sin(), cog.cos()) * sim.sim.telemetry.sog;
+    (brig.way - ours).dot(between / range)
+}
 
 /// What her master has to say about how he is being led, if anything.
 ///
@@ -605,7 +629,7 @@ pub fn run(
     // How badly she wants to slow: nothing while the gap is comfortable, everything she
     // can spare by the time she is a cable off and still closing.
     let gap = (here - brig.at).length();
-    let closing = brig.speed - sim.sim.telemetry.sog;
+    let closing = closing_on(&sim, &brig, here);
     let hurry = if closing > 0.0 {
         ((TOO_NEAR * 2.4 - gap) / (TOO_NEAR * 1.4)).clamp(0.0, 1.0)
     } else {
@@ -635,9 +659,12 @@ pub fn run(
     // canvas changes by a step, through the same limiter as everything else she says.
     {
         let step = |x: f32| (x * 3.0).round() as i32;
-        let before = job.canvas.map(step);
+        // `None` until she has set anything at all: the field began as three noughts,
+        // which reads as *she had nothing set a moment ago* and had her announcing that
+        // she was setting her topgallants on the first frame of every job.
+        let before = job.canvas.map(|had| had.map(step));
         let now = brig.set.map(step);
-        if before != now {
+        if let Some(before) = before.filter(|had| *had != now) {
             let words = match (before[2] > now[2], before[0] > now[0], now != [0, 0, 0]) {
                 (true, _, true) => Some("taking in the topgallants"),
                 (_, true, true) => Some("the courses are coming up"),
@@ -648,7 +675,7 @@ pub fn run(
                 voice.across(&mut job, words, false);
             }
         }
-        job.canvas = brig.set;
+        job.canvas = Some(brig.set);
     }
 
     // --- And what she has been told, which outranks all of it ----------------------
@@ -718,7 +745,7 @@ pub fn run(
             let gap = (here - brig.at).length();
             // Whether that gap is closing, which is what turns "near" into "about to be
             // run down".
-            let closing = brig.speed - sim.sim.telemetry.sog;
+            let closing = closing_on(&sim, &brig, here);
             if let Some(words) = remark(under, ahead, twa_wanted, turn, gap, closing) {
                 voice.across(&mut job, words, false);
             }

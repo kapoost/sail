@@ -63,7 +63,12 @@ impl Default for Kept {
             sea: settings.sea,
             boat: settings.boat,
             crew: settings.crew,
-            ui: settings.ui,
+            // **Not `settings.ui`**, which reads `SAIL_UI` — and a dial must not leak
+            // into the file. With no settings file yet, the default *is* what gets
+            // written, so taking it from a resource the environment has already answered
+            // would turn one run at 130% into every evening afterwards at 130%. The
+            // same trap `dialled` exists for, one layer further down.
+            ui: 1.0,
             cockpit: false,
             ink: false,
             pixels: Retro::default_step(),
@@ -358,6 +363,20 @@ mod what_is_remembered {
             kept
         };
         assert_eq!(back, a_file());
+    }
+
+    /// **A dial must not leak into the file**, and the newest one could: the console's
+    /// size is read from `SAIL_UI` into `Settings::default`, and the defaults for the
+    /// *file* were built from that same `Settings::default`. With no settings file yet —
+    /// which is every first run — one evening at `SAIL_UI=1.3` would have been written
+    /// down as the preference and kept for ever.
+    #[test]
+    fn the_size_dial_does_not_become_a_preference() {
+        assert_eq!(
+            Kept::default().ui,
+            1.0,
+            "the file's default size came from somewhere other than one"
+        );
     }
 
     /// **Sharp is an answer, not a missing line.** Written as a word so that a file with

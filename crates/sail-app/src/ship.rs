@@ -100,6 +100,17 @@ const YARDS: [(f32, f32); 3] = [
     (29.5, 0.38),
 ];
 
+/// The water under her, for the stream — the shallows run it faster, which is what
+/// `Tide::stream` wants told.
+fn under_her(sim: &Sim, at: DVec2) -> f64 {
+    sim.sim
+        .land
+        .as_ref()
+        .map(|land| land.depth(at))
+        .unwrap_or(30.0)
+        .max(2.0)
+}
+
 /// How deep each sail is, head to foot, metres. The course is the deepest and the
 /// topgallant the shallowest, which is why a square rigger tapers twice: the yards get
 /// shorter going up and so does the cloth under them.
@@ -147,7 +158,12 @@ pub struct Brig {
     /// head for ever, which on the chart is a track that fidgets and is exactly what was
     /// reported from the deck. So the course is laid against a wind relaxed over half a
     /// minute, and the fidget goes with it.
-    pub steering_from: f64,
+    ///
+    /// `None` until she has been handed one. It was a float with nought meaning *not
+    /// started yet*, and nought is also a perfectly good wind — due north — so a ship in
+    /// a northerly re-took the gust every frame and the fidget this field exists to stop
+    /// came back.
+    pub steering_from: Option<f64>,
     /// Which tack she fell off onto when the mark was inside her limit, or nought.
     ///
     /// Kept, because the choice has to have memory in it: with the mark dead to windward
@@ -177,7 +193,7 @@ impl Default for Brig {
             set: [1.0, 1.0, 1.0],
             afloat: false,
             bound_for: DVec2::ZERO,
-            steering_from: 0.0,
+            steering_from: None,
             tack: 0.0,
             astern: Vec::new(),
             name: "Nordstjernen".to_string(),
@@ -1230,7 +1246,7 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>, mut plac
         // Her track goes with her too, or the next ship in is drawn trailing the last
         // one's passage behind her.
         brig.astern.clear();
-        brig.steering_from = 0.0;
+        brig.steering_from = None;
         brig.tack = 0.0;
         return;
     }
@@ -1283,12 +1299,10 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>, mut plac
     // **The wind she steers by, which is not the wind she is in.** See
     // `Brig::steering_from`: the yards and the heel answer the gust, the course does
     // not, and a ship that re-aimed herself at every puff draws a track that saws.
-    if brig.steering_from == 0.0 {
-        brig.steering_from = from;
-    }
+    let was = brig.steering_from.unwrap_or(from);
     let settle = 1.0 - (-dt / STEERS_BY).exp();
-    brig.steering_from = wrap_tau(brig.steering_from + wrap_pi(from - brig.steering_from) * settle);
-    let held = brig.steering_from;
+    let held = wrap_tau(was + wrap_pi(from - was) * settle);
+    brig.steering_from = Some(held);
 
     // The course she wants, and the course she can actually steer: a square-rigger
     // headed inside her own limit does not pinch, she falls off on to it.
@@ -1377,7 +1391,20 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>, mut plac
     // that turns a kink into a curve.
     let was = brig.way;
     brig.way = was + (want - was) * (1.0 - (-dt / 10.0).exp());
-    let run = brig.way * dt;
+    // **And the tide takes her, like everything else afloat.** She was the one vessel in
+    // the archipelago it did not touch: her position was her own way through the water
+    // and nothing else, so a stream that set the pilot boat half a cable down a sound
+    // left the ship he was leading exactly where she was pointed. In a pilotage that is
+    // the whole difference between the channel and the bank — and the two vessels
+    // disagreeing about it is worse than neither of them having a tide at all.
+    //
+    // Over the ground rather than through the water, which is also why her track astern
+    // is taken here: it is where she *was*, not where she steered.
+    let stream = sim
+        .sim
+        .tide
+        .stream(sim.sim.state.time, under_her(&sim, brig.at));
+    let run = (brig.way + stream) * dt;
     brig.at += run;
 
     // **And where she has been**, because the one question a pilot asks about the ship
