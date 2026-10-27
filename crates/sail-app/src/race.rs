@@ -167,12 +167,45 @@ impl Race {
     /// The line is laid across the wind a little to leeward of where she is, so that the
     /// five minutes are spent somewhere she has to sail *back* from — which is what the
     /// five minutes are for.
-    pub fn lay_out(&mut self, at: DVec2, wind_from: f64, now: f64) {
+    pub fn lay_out(
+        &mut self,
+        at: DVec2,
+        wind_from: f64,
+        now: f64,
+        land: Option<&sail_core::land::Archipelago>,
+    ) {
+        let (line, marks) = Self::course_off(at, wind_from, land);
+        self.line = line;
+        self.marks = marks;
+        self.at = 0;
+        self.stage = Stage::Before(COUNTDOWN);
+        self.gun_at = now + COUNTDOWN;
+        self.crossed_at = None;
+        self.say("five minutes — the line is to leeward of you", now);
+    }
+
+    /// Where the line and the marks go, which is the half of it that has to look at the
+    /// land.
+    ///
+    /// **A course was laid off her position and the wind and nothing else**, so a race
+    /// started half a mile off a headland put the windward mark on the headland. Reported
+    /// from the deck as *regaty nie na lądzie*, and it was worse than it sounds: a mark
+    /// ashore is not a hard race, it is a race that cannot be sailed at all, and the only
+    /// thing the player can do about it is give up and start another one.
+    ///
+    /// The axis cannot move — a windward-leeward course has the first mark dead upwind
+    /// and that *is* the race — so what moves is everything else. The whole course slides
+    /// across the wind, by a cable at a time either way, and then the windward leg
+    /// shortens: a short race in clear water is a race, and a long one over an island is
+    /// not. The first layout that fits is taken, which keeps the common case — open water
+    /// — exactly where it was.
+    fn course_off(
+        at: DVec2,
+        wind_from: f64,
+        land: Option<&sail_core::land::Archipelago>,
+    ) -> ((DVec2, DVec2), Vec<DVec2>) {
         let to_windward = DVec2::new(wind_from.sin(), wind_from.cos());
         let across = DVec2::new(to_windward.y, -to_windward.x);
-        // The middle of the line, two cables to leeward of her: far enough that she has
-        // to think about getting back to it.
-        let middle = at - to_windward * 320.0;
         // **The line is never quite square**, and that is the point of having two ends.
         // Ten degrees is what a committee boat's anchor and a bit of wind shift give you
         // on any club line, and it is enough to make one end worth a boat length.
@@ -181,18 +214,62 @@ impl Race {
             across.x * skew.cos() - across.y * skew.sin(),
             across.x * skew.sin() + across.y * skew.cos(),
         );
-        self.line = (
-            middle - lie * LINE_LONG * 0.5,
-            middle + lie * LINE_LONG * 0.5,
-        );
-        // Windward mark dead upwind of the line's middle, leeward mark on the line.
-        let windward = middle + to_windward * WINDWARD;
-        self.marks = vec![windward, middle, windward, middle];
-        self.at = 0;
-        self.stage = Stage::Before(COUNTDOWN);
-        self.gun_at = now + COUNTDOWN;
-        self.crossed_at = None;
-        self.say("five minutes — the line is to leeward of you", now);
+        let laid = |slide: f64, leg: f64| -> ((DVec2, DVec2), Vec<DVec2>) {
+            // The middle of the line, two cables to leeward of her: far enough that she
+            // has to think about getting back to it.
+            let middle = at - to_windward * 320.0 + across * slide;
+            let line = (
+                middle - lie * LINE_LONG * 0.5,
+                middle + lie * LINE_LONG * 0.5,
+            );
+            // Windward mark dead upwind of the line's middle, leeward mark on the line.
+            let windward = middle + to_windward * leg;
+            (line, vec![windward, middle, windward, middle])
+        };
+        let fits = |line: &(DVec2, DVec2), marks: &[DVec2]| -> bool {
+            use crate::islands::{leg_open, open, ENOUGH};
+            if !open(land, line.0, ENOUGH) || !open(land, line.1, ENOUGH) {
+                return false;
+            }
+            // Both legs, both ways, and the run from her to the line — because the five
+            // minutes before the gun are sailed too.
+            leg_open(land, line.0, line.1, ENOUGH)
+                && marks
+                    .windows(2)
+                    .all(|pair| leg_open(land, pair[0], pair[1], ENOUGH))
+                && leg_open(land, at, marks[1], ENOUGH)
+        };
+        for leg in [WINDWARD, WINDWARD * 0.75, WINDWARD * 0.5] {
+            // Straight first, then a cable either way, then two: the smallest change to
+            // the course that was asked for.
+            for slide in [0.0, 185.0, -185.0, 370.0, -370.0, 555.0, -555.0] {
+                let (line, marks) = laid(slide, leg);
+                if fits(&line, &marks) {
+                    return (line, marks);
+                }
+            }
+        }
+        // Nowhere round here will take one. The shortest course, straight to leeward,
+        // which is the layout with the least water in it — and the race officer's
+        // problem rather than the sailor's: `race::run` is what decides whether to start
+        // at all, and it has `can_be_laid` to ask with.
+        laid(0.0, WINDWARD * 0.5)
+    }
+
+    /// Whether a course can be laid here at all, for whoever is deciding to start one.
+    pub fn can_be_laid(
+        at: DVec2,
+        wind_from: f64,
+        land: Option<&sail_core::land::Archipelago>,
+    ) -> bool {
+        use crate::islands::{leg_open, open, ENOUGH};
+        let (line, marks) = Self::course_off(at, wind_from, land);
+        open(land, line.0, ENOUGH)
+            && open(land, line.1, ENOUGH)
+            && marks.iter().all(|mark| open(land, *mark, ENOUGH))
+            && marks
+                .windows(2)
+                .all(|pair| leg_open(land, pair[0], pair[1], ENOUGH))
     }
 
     fn say(&mut self, words: &str, now: f64) {
@@ -234,7 +311,19 @@ pub fn run(sim: Res<Sim>, mut race: ResMut<Race>, mut first: Local<bool>) {
     if std::mem::take(&mut race.wants_start) {
         let wind = sim.sim.wind.sample(sim.sim.state.pos, now);
         let from = sail_core::wind::direction_of(wind);
-        race.lay_out(sim.sim.state.pos, from, now);
+        // **A course that will not fit is a race officer's answer, not a sailor's
+        // problem.** Everywhere with a mile of clear water to windward takes one — and
+        // in the handful of places that do not, saying so is the only honest thing: the
+        // alternative is a start gun five minutes before a mark on a beach, which the
+        // player can do nothing about except give it up.
+        if !Race::can_be_laid(sim.sim.state.pos, from, sim.sim.land.as_deref()) {
+            race.say(
+                "no room for a course here — stand out from the land and ask again",
+                now,
+            );
+            return;
+        }
+        race.lay_out(sim.sim.state.pos, from, now, sim.sim.land.as_deref());
         if let Some(left) = race.shorten_to.take() {
             race.gun_at = now + left;
             race.stage = Stage::Before(left);
@@ -376,7 +465,7 @@ mod the_line {
     #[test]
     fn the_course_is_about_twenty_minutes() {
         let mut race = Race::default();
-        race.lay_out(DVec2::ZERO, rad(0.0), 0.0);
+        race.lay_out(DVec2::ZERO, rad(0.0), 0.0, None);
         let legs: f64 = race
             .marks
             .windows(2)
@@ -399,7 +488,7 @@ mod the_line {
     fn the_line_is_laid_to_leeward_of_her() {
         let mut race = Race::default();
         let wind = rad(0.0);
-        race.lay_out(DVec2::ZERO, wind, 0.0);
+        race.lay_out(DVec2::ZERO, wind, 0.0, None);
         let middle = race.line.0.lerp(race.line.1, 0.5);
         assert!(
             across(race.line, DVec2::ZERO, wind) > 100.0,
@@ -885,4 +974,94 @@ fn how_far_round(race: &Race, at: DVec2, mark: usize, finished: bool) -> f64 {
         .map(|m| -(at - *m).length())
         .unwrap_or(0.0);
     mark as f64 * 10_000.0 + leg
+}
+
+#[cfg(test)]
+mod not_on_the_land {
+    use super::*;
+    use crate::islands::{leg_open, open, ENOUGH};
+
+    /// **A race laid anywhere in the archipelago is a race that can be sailed.**
+    ///
+    /// The course used to come off her position and the wind and nothing else, so a
+    /// start half a mile off a headland put the windward mark on the headland — and a
+    /// mark ashore is not a hard race, it is a race nobody can sail. Two hundred starts,
+    /// from water all over four different worlds: every mark afloat, every leg clear.
+    #[test]
+    fn every_mark_is_in_water_and_every_leg_is_clear() {
+        let mut laid = 0;
+        let mut refused = 0;
+        for seed in 0..4u64 {
+            let land = crate::islands::generate(seed);
+            // Start lines all over the group, in whatever water happens to be there —
+            // including close in, which is where this went wrong.
+            for i in 0..50 {
+                let bearing = i as f64 / 50.0 * std::f64::consts::TAU;
+                let out = 1_200.0 + (i % 7) as f64 * 700.0;
+                let at = DVec2::new(bearing.sin(), bearing.cos()) * out;
+                if !open(Some(&land), at, ENOUGH) {
+                    continue;
+                }
+                let wind = rad((i * 37 % 360) as f64);
+                if !Race::can_be_laid(at, wind, Some(&land)) {
+                    refused += 1;
+                    continue;
+                }
+                laid += 1;
+                let mut race = Race::default();
+                race.lay_out(at, wind, 0.0, Some(&land));
+                for (which, mark) in race.marks.iter().enumerate() {
+                    assert!(
+                        open(Some(&land), *mark, ENOUGH),
+                        "seed {seed}, start {i}: mark {which} is in {:.1} m of water",
+                        land.depth(*mark)
+                    );
+                }
+                for end in [race.line.0, race.line.1] {
+                    assert!(
+                        open(Some(&land), end, ENOUGH),
+                        "seed {seed}, start {i}: an end of the line is ashore"
+                    );
+                }
+                for pair in race.marks.windows(2) {
+                    assert!(
+                        leg_open(Some(&land), pair[0], pair[1], ENOUGH),
+                        "seed {seed}, start {i}: a leg goes over the land"
+                    );
+                }
+            }
+        }
+        // And most places take one, or the mission is unplayable for a different reason.
+        // **And nearly everywhere takes one**, which is the half of this that is about
+        // the player rather than about the land. Refusing to lay a course is honest and
+        // it is still a mission that did not happen: with one fixed layout, twenty-two
+        // of a hundred and seventy-five starts round four archipelagos had nowhere to
+        // put a mark. Sliding the course across the wind and shortening the beat when it
+        // has to takes that to one.
+        assert!(
+            refused * 20 < laid,
+            "{refused} of {} starts could not be laid at all",
+            laid + refused
+        );
+    }
+
+    /// **In open water nothing moves.** The common case is a course laid off her
+    /// position, and a rule that shifted it about when there was no reason to would be a
+    /// rule that made every race subtly different for no visible cause.
+    #[test]
+    fn open_water_lays_the_course_it_always_did() {
+        let mut with_land = Race::default();
+        with_land.lay_out(DVec2::ZERO, rad(0.0), 0.0, None);
+        // The windward mark is dead upwind of the line's middle, the full leg away.
+        let middle = (with_land.line.0 + with_land.line.1) * 0.5;
+        let up = with_land.marks[0] - middle;
+        assert!(
+            (up.length() - WINDWARD).abs() < 1.0,
+            "the leg was shortened"
+        );
+        assert!(
+            up.normalize().dot(DVec2::new(0.0, 1.0)) > 0.999,
+            "the course was slid off the wind's axis"
+        );
+    }
 }

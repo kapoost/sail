@@ -806,7 +806,14 @@ fn play(act: Act, sim: &mut Sim, stage: &mut Stage) {
             // Fine on the port bow, where the drawing knob puts it — see `anchorage`.
             let st = &sim.sim.state;
             let heading = st.heading - 0.6;
-            stage.berth.at = Some(st.pos + glam::DVec2::new(heading.sin(), heading.cos()) * 70.0);
+            let wanted = st.pos + glam::DVec2::new(heading.sin(), heading.cos()) * 70.0;
+            // In water, like everything else this places: a raft moored on a beach is a
+            // shot nobody can use. Four metres rather than six — it is a raft, and the
+            // anchorages it belongs in are five and a half.
+            stage.berth.at = Some(
+                crate::islands::nearest_open(sim.sim.land.as_deref(), wanted, 4.0, 400.0)
+                    .unwrap_or(wanted),
+            );
             stage.berth.harbour = "alongside".into();
         }
         Act::Clock(rate) => stage.clock.rate = rate,

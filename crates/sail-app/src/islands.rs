@@ -281,3 +281,148 @@ pub fn generate(seed: u64) -> Archipelago {
     // archipelago to be able to name a harbour to everybody. See `Archipelago::of_seed`.
     Archipelago::of_seed(seed)
 }
+
+// ---------------------------------------------------------------------------------------
+// Where a thing may be put.
+// ---------------------------------------------------------------------------------------
+
+/// The least water a scenario will put anything in, metres.
+///
+/// **Six, which is the number the casks already used.** A boat drawing two can float in
+/// three and cannot *sail* in three: she wants room for the swell, for the error in her
+/// own position, and for the fact that nobody racing a boat is looking at the sounder.
+/// Six is where this archipelago's bank stops being a bank, and using the same figure
+/// everywhere means a mark, a cask and a ship are all put in water of the same kind.
+pub const ENOUGH: f64 = 6.0;
+
+/// Whether this is water something can be put in.
+///
+/// With no land in the world — `SAIL_LAND=0` — everything is open sea and the answer is
+/// always yes, which is the right answer and not a special case.
+pub fn open(land: Option<&Archipelago>, at: glam::DVec2, want: f64) -> bool {
+    land.is_none_or(|land| land.depth(at) >= want)
+}
+
+/// Whether a whole leg of water is clear, end to end.
+///
+/// **A course is the water between the marks, not the marks.** Two buoys in deep water
+/// with an island between them is a race nobody can sail, and it is exactly what laying
+/// a course off a position without looking produces. Sampled every forty metres, which
+/// is under half the width of the narrowest thing this coast makes.
+pub fn leg_open(land: Option<&Archipelago>, from: glam::DVec2, to: glam::DVec2, want: f64) -> bool {
+    let along = to - from;
+    let len = along.length();
+    if len < 1.0 {
+        return open(land, from, want);
+    }
+    let steps = (len / 40.0).ceil() as usize;
+    (0..=steps).all(|i| open(land, from + along * (i as f64 / steps as f64), want))
+}
+
+/// The nearest water of a given depth to a place, searched outwards.
+///
+/// Returns `None` when there is none within reach, because the honest answer to *where
+/// shall I put this* is sometimes *not here* — and a caller that is handed a position
+/// anyway will put a ship on a rock with it.
+pub fn nearest_open(
+    land: Option<&Archipelago>,
+    at: glam::DVec2,
+    want: f64,
+    within: f64,
+) -> Option<glam::DVec2> {
+    if open(land, at, want) {
+        return Some(at);
+    }
+    // Rings outwards: close first, so what comes back is the smallest change to what was
+    // asked for rather than the first thing a scan happens to hit.
+    let mut radius = 40.0;
+    while radius <= within {
+        // Enough bearings that the step round the ring is about the step out from it.
+        let round = ((std::f64::consts::TAU * radius / 40.0) as usize).clamp(8, 64);
+        let mut best: Option<(f64, glam::DVec2)> = None;
+        for i in 0..round {
+            let bearing = i as f64 / round as f64 * std::f64::consts::TAU;
+            let out = at + glam::DVec2::new(bearing.sin(), bearing.cos()) * radius;
+            if open(land, out, want) {
+                let deep = land.map(|l| l.depth(out)).unwrap_or(want);
+                if best.is_none_or(|(was, _)| deep > was) {
+                    best = Some((deep, out));
+                }
+            }
+        }
+        if let Some((_, found)) = best {
+            return Some(found);
+        }
+        radius += 40.0;
+    }
+    None
+}
+
+#[cfg(test)]
+mod where_a_thing_may_be_put {
+    use super::*;
+
+    /// **The sea with no land in it is all water**, which is the answer `SAIL_LAND=0`
+    /// has to get or every scenario in the game refuses to lay itself out.
+    #[test]
+    fn an_empty_sea_is_open_everywhere() {
+        assert!(open(None, glam::DVec2::new(5.0, -900.0), ENOUGH));
+        assert!(leg_open(
+            None,
+            glam::DVec2::ZERO,
+            glam::DVec2::new(3_000.0, 0.0),
+            ENOUGH
+        ));
+        assert_eq!(
+            nearest_open(None, glam::DVec2::ZERO, ENOUGH, 500.0),
+            Some(glam::DVec2::ZERO)
+        );
+    }
+
+    /// **A leg is the water between the marks.** Two ends in deep water with an island
+    /// in the middle is the course this exists to refuse.
+    #[test]
+    fn a_leg_through_an_island_is_not_open() {
+        let land = generate(11);
+        // A harbour is a bay on an island, so the island is a few hundred metres the
+        // other side of it — and a leg straight through from one side to the other
+        // crosses the middle of it. Taken from the harbours rather than from the
+        // islands, which the core keeps to itself.
+        let harbour = land.harbours().into_iter().next().expect("a harbour");
+        let middle = harbour.at
+            + glam::DVec2::new(harbour.exposed_to.sin(), harbour.exposed_to.cos()) * -400.0;
+        let out = 1_400.0;
+        let from = middle - glam::DVec2::new(out, 0.0);
+        let to = middle + glam::DVec2::new(out, 0.0);
+        assert!(
+            !leg_open(Some(&land), from, to, ENOUGH),
+            "a leg straight over an island was called open water"
+        );
+        // And the two ends of it are in the open sea, which is the whole point: looking
+        // at the marks is not looking at the course.
+        assert!(open(Some(&land), from, ENOUGH) && open(Some(&land), to, ENOUGH));
+    }
+
+    /// **And when a place will not do, the search says where will** — the smallest move
+    /// that works, rather than the first thing a scan hits.
+    #[test]
+    fn it_finds_the_water_nearest_the_place_that_was_asked_for() {
+        let land = generate(11);
+        let harbour = land.harbours().into_iter().next().expect("a harbour");
+        let ashore = harbour.at
+            + glam::DVec2::new(harbour.exposed_to.sin(), harbour.exposed_to.cos()) * -400.0;
+        assert!(
+            !open(Some(&land), ashore, ENOUGH),
+            "the test stood in the sea"
+        );
+        let found =
+            nearest_open(Some(&land), ashore, ENOUGH, 4_000.0).expect("there is water round it");
+        assert!(open(Some(&land), found, ENOUGH));
+        // Not miles away: the nearest water to a place ashore is just off the beach.
+        assert!(
+            (found - ashore).length() < 1_500.0,
+            "it went {:.0} m to find water",
+            (found - ashore).length()
+        );
+    }
+}

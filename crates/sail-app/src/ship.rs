@@ -1281,7 +1281,19 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>, mut plac
             // a knob that never showed her.
             let off = st.heading - rad(10.0);
             let ahead = DVec2::new(st.heading.sin(), st.heading.cos());
-            brig.at = st.pos + DVec2::new(off.sin(), off.cos()) * range;
+            let wanted = st.pos + DVec2::new(off.sin(), off.cos()) * range;
+            // **In water she could be in.** The knob puts her a given range off the bow
+            // and the bow may be pointing at an island — a three-hundred-ton ship drawn
+            // standing on a headland is the sort of picture that ends up in a trailer.
+            // Nudged to the nearest water that will float her, which is a few hundred
+            // metres at most and leaves the knob doing what it says.
+            brig.at = crate::islands::nearest_open(
+                sim.sim.land.as_deref(),
+                wanted,
+                crate::islands::ENOUGH,
+                800.0,
+            )
+            .unwrap_or(wanted);
             brig.heading = st.heading;
             brig.speed = kn_to_ms(5.0);
             brig.way = ahead * brig.speed;
