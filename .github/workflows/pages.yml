@@ -44,7 +44,8 @@ jobs:
   # directory for `wasm32-unknown-unknown` — is not mixed up with a job whose other
   # half is Python and a PDF.
   web:
-    runs-on: ubuntu-latest
+    # Pinned rather than `ubuntu-latest`, for the reason written out in `check.yml`.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -99,7 +100,7 @@ jobs:
 
   build:
     needs: web
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -172,7 +173,7 @@ jobs:
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

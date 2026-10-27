@@ -25,7 +25,15 @@ concurrency:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    # **Pinned, not `ubuntu-latest`.** The label moves to Ubuntu 26 in October 2026 and
+    # the runner images have been announcing it in every run. A build machine that
+    # changes underneath a project on a date nobody chose is the one variable worth
+    # spending a line on: the C libraries Bevy links against, the mesa version the
+    # shaders are compiled by and the glibc the server is built for all come out of this
+    # image, and a green build that turns red on a Tuesday morning with nothing in the
+    # diff is the most expensive kind. Moved deliberately, when there is a reason and an
+    # afternoon to read the output.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

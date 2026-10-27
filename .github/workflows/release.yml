@@ -83,7 +83,8 @@ jobs:
   #
   # No Bevy in this tree, so the whole job is a couple of minutes.
   linux:
-    runs-on: ubuntu-latest
+    # Pinned rather than `ubuntu-latest`, for the reason written out in `check.yml`.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -117,7 +118,7 @@ jobs:
   publish:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [macos, windows, linux]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       # **Uploaded and downloaded by the same generation.** The artifact actions are a
