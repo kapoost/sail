@@ -82,6 +82,10 @@ pub struct Cable {
     /// the hull could touch things — come up to it under half a knot and the lines go
     /// on; press the foredeck's key and they come off.
     pub fast_to: Option<DVec2>,
+    /// Pressed on the plate this frame — the same decision as the key, from the other
+    /// hand. The panel sets it and `the_key` reads it, so that one piece of code decides
+    /// what *let go* means and the console is only a button.
+    pub pressed: bool,
     /// Whether she has to get clear before the lines may go on again.
     ///
     /// **Because casting off and making fast are the same geometry.** She is alongside
@@ -188,7 +192,9 @@ pub fn brought_up(mut sim: ResMut<Sim>, course: Res<crate::course::Course>, mut 
 /// One key, because it is one decision — *are we stopping here* — and the two halves of
 /// it can never be wanted at the same time.
 pub fn the_key(keys: Res<ButtonInput<KeyCode>>, sim: Res<Sim>, mut cable: ResMut<Cable>) {
-    if !keys.just_pressed(KeyCode::KeyV) {
+    let asked = keys.just_pressed(KeyCode::KeyV) || cable.pressed;
+    cable.pressed = false;
+    if !asked {
         return;
     }
     let now = sim.sim.state.time;

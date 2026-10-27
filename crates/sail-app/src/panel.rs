@@ -842,17 +842,95 @@ pub fn draw(
                     // only when the anchor is down, because a plate that says NOTHING
                     // all day is a plate nobody reads — the key is in the help and the
                     // line appears when there is something to say.
-                    if let Some(reading) = crate::ground_tackle::reading(&sim, &in_hand.cable) {
+                    // **The whole of the foredeck, and it is three buttons.**
+                    //
+                    // It was a key and a readout, which is the same mistake the boom
+                    // plate was built to fix: a control nobody can see is a control
+                    // nobody finds. `V` still does the first of the three, because the
+                    // hand at the helm wants one key for *are we stopping here* — and
+                    // the plate is where you choose how much chain, which is the only
+                    // decision anchoring really has in it.
+                    {
+                        let cable = &mut in_hand.cable;
+                        let down = matches!(
+                            sim.sim.anchor,
+                            sail_core::anchor::Anchor::Down(_)
+                        );
+                        let fast = cable.fast_to.is_some();
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.spacing_mut().item_spacing.x = 3.0;
                             plate(ui, "CABLE");
+                            let (word, hint) = if fast {
+                                ("CAST OFF", "let the lines go")
+                            } else if down {
+                                ("WEIGH", "haul it in — the windlass will not pull the boat")
+                            } else {
+                                ("LET GO", "and veer five to one on the water under her")
+                            };
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(word)
+                                            .monospace()
+                                            .size(letter::UNIT)
+                                            .color(if down || fast {
+                                                paint::INK
+                                            } else {
+                                                paint::FACE
+                                            }),
+                                    )
+                                    .fill(if down || fast { paint::LIVE } else { paint::TRACK })
+                                    .min_size(egui::vec2(62.0, 20.0)),
+                                )
+                                .on_hover_text(hint)
+                                .clicked()
+                            {
+                                cable.pressed = true;
+                            }
+                            // **How much chain, which is the decision.** Ten metres a
+                            // press, because chain is marked every ten and that is the
+                            // unit anybody veers in.
+                            if let sail_core::anchor::Anchor::Down(at) = sim.sim.anchor {
+                                let out = cable.want.unwrap_or(at.out);
+                                for (word, step, hint) in [
+                                    ("−10", -10.0, "take ten metres back"),
+                                    ("+10", 10.0, "veer another ten"),
+                                ] {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new(word)
+                                                    .monospace()
+                                                    .size(letter::UNIT)
+                                                    .color(paint::LABEL),
+                                            )
+                                            .fill(egui::Color32::from_gray(26))
+                                            .min_size(egui::vec2(34.0, 20.0)),
+                                        )
+                                        .on_hover_text(hint)
+                                        .clicked()
+                                    {
+                                        cable.want = Some(
+                                            (out + step).clamp(0.0, sim.sim.tackle.chain),
+                                        );
+                                    }
+                                }
+                            }
+                        });
+                        // And what she is lying to, which is only worth a line when
+                        // there is something on the bottom or a rope ashore.
+                        if let Some(reading) = crate::ground_tackle::reading(&sim, cable) {
                             ui.label(
-                                egui::RichText::new(reading)
+                                egui::RichText::new(format!("  {reading}"))
                                     .monospace()
                                     .size(letter::UNIT)
-                                    .color(paint::FACE),
+                                    .color(if cable.stalled || reading.contains("dragging") {
+                                        paint::BAD
+                                    } else {
+                                        paint::FACE
+                                    }),
                             );
-                        });
+                        }
                     }
 
                     // **And the squelch, which now does something you can hear.** It was
@@ -2805,7 +2883,7 @@ pub struct InHand<'w> {
     pub brig: Res<'w, crate::ship::Brig>,
     pub job: Res<'w, crate::mission::Pilotage>,
     /// And the foredeck, which has a line on the console under the weather.
-    pub cable: Res<'w, crate::ground_tackle::Cable>,
+    pub cable: ResMut<'w, crate::ground_tackle::Cable>,
 }
 
 /// A narrow lamp for a thing you pick up: three of them fit the window they live in.
