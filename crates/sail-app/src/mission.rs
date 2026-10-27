@@ -384,7 +384,10 @@ impl Voice<'_> {
     /// calling — and because the one thing worse than a channel you have to find is a
     /// channel you had one chance to hear.
     fn calling_up(&mut self, job: &mut Pilotage) {
-        if job.called_at.is_some_and(|at| self.now - at < CALLING_EVERY) {
+        if job
+            .called_at
+            .is_some_and(|at| self.now - at < CALLING_EVERY)
+        {
             return;
         }
         job.called_at = Some(self.now);

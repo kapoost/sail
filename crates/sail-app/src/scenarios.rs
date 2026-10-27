@@ -1207,7 +1207,9 @@ mod what_the_hoist_does {
     #[test]
     fn what_she_says_comes_over_the_air() {
         let mut app = within_signal(Flag::Kilo);
-        app.world_mut().resource_mut::<crate::radio::Radio>().channel = crate::radio::CALLING;
+        app.world_mut()
+            .resource_mut::<crate::radio::Radio>()
+            .channel = crate::radio::CALLING;
         at(&mut app, 8.0);
         assert!(
             app.world().resource::<Answer>().said.is_some(),
@@ -1218,7 +1220,9 @@ mod what_the_hoist_does {
             "her words reached a set that was on another channel"
         );
         // And on hers they arrive.
-        app.world_mut().resource_mut::<crate::radio::Radio>().channel = crate::radio::WORKING;
+        app.world_mut()
+            .resource_mut::<crate::radio::Radio>()
+            .channel = crate::radio::WORKING;
         app.world_mut().resource_mut::<Answer>().said = None;
         at(&mut app, 12.0);
         assert!(

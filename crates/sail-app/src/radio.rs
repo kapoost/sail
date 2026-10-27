@@ -401,11 +401,7 @@ pub fn listen(
 /// * **The break.** The click and the burst of noise when a carrier drops, which is the
 ///   one radio sound everybody can imitate and the one that says *that was the end of
 ///   it*.
-pub fn speaker(
-    radio: Res<Radio>,
-    sound: Res<crate::sound::SoundHandle>,
-    mut was: Local<bool>,
-) {
+pub fn speaker(radio: Res<Radio>, sound: Res<crate::sound::SoundHandle>, mut was: Local<bool>) {
     // Your own carrier counts: the set clicks when you key it and clicks when you let
     // go, and it is silent in between — a radio does not play your voice back at you,
     // and the silence while you talk is itself the thing that teaches *over*.
@@ -433,7 +429,9 @@ pub fn speaker(
         // And an empty channel is the hiss, as far down as the squelch has shut it.
         // Left where a set is left it is silent, which is why nobody notices the knob
         // until they turn it.
-        None => sound.0.set_radio(0.0, (QUIET - radio.squelch).max(0.0) * 1.4),
+        None => sound
+            .0
+            .set_radio(0.0, (QUIET - radio.squelch).max(0.0) * 1.4),
     }
 }
 
@@ -715,15 +713,17 @@ pub fn broadcast(
         Some((at, STATION_AERIAL)),
         now,
     ));
-    radio.broadcast(Transmission::saying(
-        &station.name,
-        6,
-        &format!("Weather bulletin. {}", forecast(&sim, "The archipelago")),
-        Some((at, STATION_AERIAL)),
-        // Read on the working channel after the call on sixteen is finished.
-        now + 12.0,
-    )
-    .for_the_book());
+    radio.broadcast(
+        Transmission::saying(
+            &station.name,
+            6,
+            &format!("Weather bulletin. {}", forecast(&sim, "The archipelago")),
+            Some((at, STATION_AERIAL)),
+            // Read on the working channel after the call on sixteen is finished.
+            now + 12.0,
+        )
+        .for_the_book(),
+    );
 }
 
 #[cfg(test)]
@@ -1010,7 +1010,6 @@ pub fn across(words: &str, width: usize) -> Vec<String> {
     out
 }
 
-
 #[cfg(test)]
 mod what_the_harbour_says {
     use super::*;
@@ -1204,7 +1203,10 @@ mod working_the_set {
         at(&mut app, 1.0);
         assert_eq!(app.world().resource::<Radio>().log.len(), 1);
         assert!(
-            app.world().resource::<crate::chart::DeckLog>().lines.is_empty(),
+            app.world()
+                .resource::<crate::chart::DeckLog>()
+                .lines
+                .is_empty(),
             "a securité was written up in the deck log"
         );
         // The clock is the bulkhead clock, not a stopwatch started at the dock.
@@ -1574,7 +1576,10 @@ mod keying_the_mike {
         app.world_mut().resource_mut::<Radio>().asked = Some(Say::Check);
         at(&mut app, 1.0);
         let radio = app.world().resource::<Radio>();
-        let mine = radio.transmitting.as_ref().expect("the mike was never keyed");
+        let mine = radio
+            .transmitting
+            .as_ref()
+            .expect("the mike was never keyed");
         assert!(mine.words.contains("Radio check"), "{}", mine.words);
         assert!(mine.words.contains("over"), "{}", mine.words);
         assert_eq!(mine.channel, PORT);
@@ -1681,7 +1686,10 @@ mod keying_the_mike {
         app.world_mut().resource_mut::<Radio>().asked = Some(Say::Port);
         at(&mut app, 2.0);
         let radio = app.world().resource::<Radio>();
-        assert!(radio.transmitting.as_ref().is_some_and(|t| t.over_at() == over));
+        assert!(radio
+            .transmitting
+            .as_ref()
+            .is_some_and(|t| t.over_at() == over));
         assert!(radio.asked.is_none());
     }
 

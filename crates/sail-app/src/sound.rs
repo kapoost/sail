@@ -1169,7 +1169,11 @@ impl Iterator for SeaStream {
             // A quarter of them are a gap: speech has pauses in it, and a continuous
             // mumble is the thing that reads as a machine.
             let draw = self.noise();
-            self.speech_amp = if draw < -0.5 { 0.0 } else { 0.45 + 0.55 * draw.abs() };
+            self.speech_amp = if draw < -0.5 {
+                0.0
+            } else {
+                0.45 + 0.55 * draw.abs()
+            };
         }
         // Within the syllable, up and down — no clicks at either end.
         let shape = fast_sin(self.speech_phase * 0.5);
@@ -1415,7 +1419,8 @@ impl Iterator for SeaStream {
         // transmission is the one thing that turns a radio into noise — it is why every
         // cockpit speaker in the world is wired to mute the stereo. Not as deep as the
         // reel's duck: a forecast is not a fish taking line.
-        let duck = 1.0 / (1.0 + 7.0 * (self.smooth.gear - 1.0).max(0.0))
+        let duck = 1.0
+            / (1.0 + 7.0 * (self.smooth.gear - 1.0).max(0.0))
             / (1.0 + 2.2 * self.smooth.radio_voice);
         // A call from the deck. Started on a new generation, and a call already running
         // is cut off by the next one — because two people shouting over each other is
@@ -3016,7 +3021,6 @@ mod what_the_set_sounds_like {
     }
 }
 
-
 #[cfg(test)]
 mod where_the_set_sits {
     use super::*;
@@ -3100,4 +3104,3 @@ mod where_the_set_sits {
         );
     }
 }
-
