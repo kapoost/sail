@@ -18,7 +18,7 @@ jobs:
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -48,7 +48,7 @@ jobs:
       - run: cargo build --profile dist -p sail-net --bin sail-server --target aarch64-apple-darwin
       - run: cargo build --profile dist -p sail-net --bin sail-server --target x86_64-apple-darwin
       - run: bash dist/make-app.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: dist/out/Sail-macos.zip
@@ -56,7 +56,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --profile dist -p sail-app
@@ -68,7 +68,7 @@ jobs:
         shell: cmd
       - run: copy target\dist\sail-server.exe out\sail-server.exe
         shell: cmd
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: |
@@ -85,7 +85,7 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
@@ -102,7 +102,7 @@ jobs:
           cp target/x86_64-unknown-linux-musl/release/sail-server out/sail-server
           cp target/aarch64-unknown-linux-musl/release/sail-server out/sail-server-arm64
           ls -l out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: |
@@ -119,12 +119,18 @@ jobs:
     needs: [macos, windows, linux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      # **Uploaded and downloaded by the same generation.** The artifact actions are a
+      # matched pair — the store they talk to changed under them at v4 and again since —
+      # so these two move together with the three `upload-artifact` steps above or the
+      # release ends with no files on it. Downloading *everything* keeps the per-name
+      # folders the `files:` list below is written against; the v5 break was to single
+      # downloads by id, which this is not.
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - run: ls -R artifacts
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/macos/Sail-macos.zip

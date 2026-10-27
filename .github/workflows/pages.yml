@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -68,7 +68,7 @@ jobs:
         run: |
           want=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[^0-9.]/, "", $0); print; exit}' Cargo.lock)
           echo "WASM_BINDGEN_VERSION=$want" >> "$GITHUB_ENV"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/wasm-bindgen
           key: wasm-bindgen-${{ env.WASM_BINDGEN_VERSION }}
@@ -91,7 +91,7 @@ jobs:
           echo "wasm: ${size} MB"
           [ "$size" -gt 10 ] || { echo "that is not the whole game"; exit 1; }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web
           path: dist/out/web
@@ -101,14 +101,14 @@ jobs:
     needs: web
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: web
           path: dist/out/web
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -164,7 +164,9 @@ jobs:
           grep -q 'href="../play/"' _site/pl/index.html
           echo "play: $(du -m _site/play/sail-app_bg.wasm | cut -f1) MB of wasm"
 
-      - uses: actions/upload-pages-artifact@v3
+      # The other matched pair: the Pages upload and the deploy that consumes it. Moved
+      # together for the same reason as the artifact actions in `release.yml`.
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
@@ -176,4 +178,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
