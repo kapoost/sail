@@ -746,6 +746,27 @@ pub fn draw(
                         readout(ui, "STREAM", &format!("{rate:.1} kn {set:03.0}"));
                     }
                 }
+                // **The repeaters, and only with the chart on the table.** Taking the
+                // case down took her head and her speed off the screen with it, and
+                // those are the two numbers a man plotting a dead reckoning cannot do
+                // without — which is exactly why a chart table has repeaters over it. On
+                // deck they would be a second copy of the glass, so they are not there.
+                if in_hand.chart.spread {
+                    readout_pair(
+                        ui,
+                        (
+                            "HDG",
+                            &format!(
+                                "{:03.0}",
+                                sim.sim.state.heading.to_degrees().rem_euclid(360.0)
+                            ),
+                        ),
+                        (
+                            "LOG",
+                            &format!("{:.1}", sail_core::units::ms_to_kn(sim.sim.telemetry.stw)),
+                        ),
+                    );
+                }
                 let (glass, tendency) = sim.sim.wind.barometer();
                 readout(
                     ui,
@@ -1344,10 +1365,23 @@ pub fn draw(
     // the hand rests. Asked for from the deck, and it is the arrangement of a real
     // binnacle pedestal: the card at eye height on top of the pillar and the gear you
     // work at the bottom of it.
+    //
+    // **And it is not drawn with the chart on the table.** The book lies down the
+    // right-hand side of the spread chart and the case lives in the same corner, so the
+    // two of them were on top of each other: the log book over the compass, reported
+    // from the deck with a photograph of it. Hiding the case is the right way round
+    // rather than moving the book — with the chart spread you are at the table and not
+    // at the helm, which is already why the glasses and the hand bearing compass are put
+    // down. The weather block on the left stays, because the sounding and the glass are
+    // exactly what a navigator wants while he is plotting.
+    let spread = in_hand.chart.spread;
     egui::Area::new("corner".into())
         .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-10.0, -10.0))
-        .interactable(true)
+        .interactable(!spread)
         .show(ctx, |ui| {
+            if spread {
+                return;
+            }
             ui.vertical(|ui| {
                 frame.show(ui, |ui| {
                     ui.horizontal_top(|ui| {
@@ -1824,8 +1858,13 @@ pub fn draw(
     // wants the room.
     egui::Area::new("rack".into())
         .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -10.0))
-        .interactable(true)
+        .interactable(!spread)
         .show(ctx, |ui| {
+            // Down with the case, and for the same reason: the chart on the table is a
+            // place, and the winch is not in it.
+            if spread {
+                return;
+            }
             ui.horizontal_top(|ui| {
                 if tab_edge(ui, console.rack) {
                     console.rack = !console.rack;
@@ -2884,6 +2923,9 @@ pub struct InHand<'w> {
     pub job: Res<'w, crate::mission::Pilotage>,
     /// And the foredeck, which has a line on the console under the weather.
     pub cable: ResMut<'w, crate::ground_tackle::Cable>,
+    /// Whether the chart is spread on the table, which decides whether half of this
+    /// console is drawn at all — see the corner.
+    pub chart: Res<'w, crate::chart::Chart>,
 }
 
 /// A narrow lamp for a thing you pick up: three of them fit the window they live in.

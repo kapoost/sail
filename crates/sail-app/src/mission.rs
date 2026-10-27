@@ -103,6 +103,10 @@ pub struct Pilotage {
     pub hail: Option<(String, f64)>,
     /// When the last one was called, so that she is not a parrot.
     hailed_at: f64,
+    /// The last thing she said and when she started saying it, so that *again* and
+    /// *something else* are different questions.
+    said_lately: Option<String>,
+    repeated_at: f64,
     /// What she had set last frame, so that a change in it is a thing she can mention —
     /// and `None` before she has set anything, because *nothing* and *not yet known* are
     /// different states and only one of them is worth a hail.
@@ -151,6 +155,19 @@ pub struct Pilotage {
 /// How long a hail stands on screen, and the least time between two of them, seconds.
 const HAIL_STANDS: f64 = 9.0;
 const BETWEEN_HAILS: f64 = 11.0;
+
+/// And how long before she will say **the same thing** again, seconds.
+///
+/// **A gap between hails is not a gap between repetitions.** Eleven seconds is right for
+/// *a new thing to say*; said of one sentence it is a man on a bridge telling you the
+/// same fact five times a minute, which is what the radio log showed — *we cannot lie
+/// that close* three times inside ninety seconds. Reported from the deck with a picture
+/// of it.
+///
+/// Two minutes, and the thing that makes it honest is that the condition is usually
+/// still true: she is still being led where she cannot go. A seaman says it, waits to
+/// see whether anything changes, and says it again — he does not chant.
+const BETWEEN_REPEATS: f64 = 120.0;
 
 /// How a piece of pilotage ended.
 #[derive(Clone, Debug, PartialEq)]
@@ -321,6 +338,14 @@ pub fn remark(
 }
 
 impl Pilotage {
+    /// Remember what she said, for the two clocks above.
+    fn remember(&mut self, words: &str, now: f64) {
+        if self.said_lately.as_deref() != Some(words) {
+            self.said_lately = Some(words.to_string());
+        }
+        self.repeated_at = now;
+    }
+
     /// Put a hail on the deck, if she has not just said something else.
     /// The same, but it is an answer and answers are never suppressed.
     ///
@@ -330,12 +355,17 @@ impl Pilotage {
     /// because somebody mentioned the tide nine seconds ago" is the behaviour that makes
     /// a player stop trusting the channel.
     fn answer_across(&mut self, words: &str, now: f64) {
+        self.remember(words, now);
         self.hailed_at = now;
         self.hail = Some((words.to_string(), now + HAIL_STANDS));
         info!("brig: {words}");
     }
 
-    /// Whether she would say an unprompted thing now, or has only just said one.
+    /// Whether she would say *this* unprompted thing now.
+    ///
+    /// Two clocks rather than one: a different remark waits the gap between hails, and
+    /// the same remark waits until repeating it is worth hearing. See
+    /// `BETWEEN_REPEATS`.
     ///
     /// **The limiter has to be asked *before* she keys the microphone**, not after. Her
     /// remarks are worked out every frame — the water under her, the corner coming up,
@@ -343,14 +373,18 @@ impl Pilotage {
     /// the line that writes the caption, which was fine while a hail was a caption. The
     /// moment it also put a transmission on the air, sixty copies of *we are coming up
     /// on you* a second went into the queue and the channel never fell quiet again.
-    fn would_say(&self, now: f64) -> bool {
+    fn would_say(&self, words: &str, now: f64) -> bool {
+        if self.said_lately.as_deref() == Some(words) {
+            return now - self.repeated_at >= BETWEEN_REPEATS;
+        }
         now - self.hailed_at >= BETWEEN_HAILS
     }
 
     fn call_across(&mut self, words: &str, now: f64) {
-        if !self.would_say(now) {
+        if !self.would_say(words, now) {
             return;
         }
+        self.remember(words, now);
         self.hailed_at = now;
         self.hail = Some((words.to_string(), now + HAIL_STANDS));
         info!("brig: {words}");
@@ -396,7 +430,7 @@ impl Voice<'_> {
         // An answer is a thing she was asked for and is never held back; a remark is one
         // of hers, and she is not a parrot — on the air least of all, where a station
         // that never stops talking is a station on top of everybody else.
-        if !answering && !job.would_say(self.now) {
+        if !answering && !job.would_say(words, self.now) {
             return;
         }
         let t = crate::radio::Transmission::saying(
@@ -415,10 +449,11 @@ impl Voice<'_> {
                 job.call_across(words, self.now);
             }
         } else {
-            // **She said it whether or not anybody was on the channel**, and the clock
-            // that keeps her from repeating herself has to run on that and not on
+            // **She said it whether or not anybody was on the channel**, and the clocks
+            // that keep her from repeating herself have to run on that and not on
             // whether you heard it. Otherwise a pilot boat out of range has her keying
             // the microphone sixty times a second to an empty sea.
+            job.remember(words, self.now);
             job.hailed_at = self.now;
         }
     }
@@ -1000,6 +1035,38 @@ mod what_her_master_says {
         );
         job.call_across("third", 100.0 + BETWEEN_HAILS + 1.0);
         assert_eq!(job.hail.as_ref().map(|(w, _)| w.as_str()), Some("third"));
+    }
+
+    /// **And she does not chant.** The gap between hails is a gap before *a new thing to
+    /// say*; said of one sentence it is a man on a bridge telling you the same fact five
+    /// times a minute, which is what the radio log showed — *we cannot lie that close*
+    /// three times inside ninety seconds, reported from the deck with a picture of it.
+    ///
+    /// The condition is usually still true while she is silent, which is what makes the
+    /// silence honest: she says it, waits to see whether anything changes, and says it
+    /// again.
+    #[test]
+    fn she_does_not_say_the_same_thing_five_times_a_minute() {
+        let mut job = Pilotage::default();
+        let same = "we cannot lie that close — she will not go there";
+        job.call_across(same, 100.0);
+        job.hail = None;
+        // Twice the gap between hails, which used to be enough to hear it again.
+        job.call_across(same, 100.0 + BETWEEN_HAILS * 2.0);
+        assert!(
+            job.hail.is_none(),
+            "she said the same thing twice in a breath"
+        );
+        // A *different* thing is not a repetition and goes through the short gap.
+        job.call_across(
+            "shoaling ahead — we draw four metres, pilot",
+            100.0 + BETWEEN_HAILS * 2.0,
+        );
+        assert!(job.hail.is_some(), "she could not say anything new");
+        job.hail = None;
+        // And after long enough, saying it again is worth hearing.
+        job.call_across(same, 100.0 + BETWEEN_REPEATS + 1.0);
+        assert_eq!(job.hail.as_ref().map(|(w, _)| w.as_str()), Some(same));
     }
 }
 
