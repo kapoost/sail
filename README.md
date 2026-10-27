@@ -43,7 +43,7 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
      hours without anybody noticing, because nothing else depends on it. -->
 
 2. **The physics is testable without opening a window.** 180 tests in the core assert
-   against figures a sailor knows from the water — 524 across the workspace, run by CI
+   against figures a sailor knows from the water — 531 across the workspace, run by CI
    on every push. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
@@ -237,6 +237,7 @@ SAIL_COVER=0.95 SAIL_SQUALL=25 sail                # overcast, with a squall eve
 SAIL_TONEMAP=neutral sail                          # a different tone curve
 SAIL_LESSON=1 sail                                 # SAILING 101, from the first frame
 SAIL_CREW=1 SAIL_PILOT=1 sail                      # the watch aboard and the pilot steering
+SAIL_BRIG=600 SAIL_SAY=brig sail                   # a ship wanting a pilot, and the call answered
 ```
 
 In a browser the same dials are the query string: `?wind=32&sea=built&hour=14`.
@@ -715,6 +716,24 @@ way in the approach. All four of those are in the simulation — the tide has be
 the keel since the spring and the only place it ever showed was the depth sounder. There
 is no ferry in this model, so there is no ferry on the air: what it counts as traffic is
 whoever else is actually sailing.
+
+**And you can say something back.** There is no voice in this game and the answer to
+that is not a text box: it is the four things a sailor says on a VHF, each in the form
+the book gives it, offered when there is somebody to say them to. A radio check, a call
+to the harbour you are standing into, a request for the bulletin you slept through, and
+an answer to the ship that has been calling for a pilot. You pick the call; the words
+that go out are the right words, which is how anybody learns them, and the whole phrase
+is on the hover because the words *are* the content.
+
+They go out on the channel in the window and not on the one they belong on — call the
+harbour while the set is on seventy-two and nobody answers, which is the entire reason
+channels are taught. Who hears you is the same two square roots as everything else: a
+station behind the horizon is silence, and a radio check is answered with a readability
+report, *loud and clear* or *readable but with difficulty*, which is the one place in the
+game where the range model is spoken out loud. Ask for the forecast and you are sent to
+channel six, because sixteen is where you are told where to listen — a set left on
+sixteen hears the instruction and misses the bulletin. And the set is deaf while its own
+carrier is up, for as long as the words take to say, which is why *over* exists.
 
 **And you can hear it, which was the whole of what was missing.** The first version of
 all this was text: the words appeared on the console and in the book, and the one thing a

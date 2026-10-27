@@ -50,7 +50,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<PortControl>();
     app.add_systems(
         Update,
-        (broadcast, harbour, listen, speaker)
+        (identify, transmit, broadcast, harbour, listen, speaker)
             .chain()
             .in_set(Deck::Weather),
     );
@@ -220,6 +220,19 @@ pub struct Radio {
     pub log: Vec<Heard>,
     /// Waiting to be put on the air by whoever generates it.
     pub air: Vec<Transmission>,
+    /// What we are called on the air.
+    ///
+    /// **A vessel identifies herself every time she speaks**, and a transmission without
+    /// a name is a voice nobody can answer. While there is a ship to be taken in we are
+    /// *the pilot boat*, which is what the brig calls us and what the harbour would; the
+    /// rest of the time it is the name the player sails under, and a yacht with no name
+    /// entered is a yacht.
+    pub call_sign: String,
+    /// A call the hand has asked for, waiting for the set to put it out.
+    ///
+    /// Set by the panel and acted on by `transmit`, so that what goes on the air and who
+    /// answers it is decided in one place and can be measured without a window.
+    pub asked: Option<Say>,
 }
 
 impl Default for Radio {
@@ -238,6 +251,8 @@ impl Default for Radio {
             transmitting: None,
             log: Vec::new(),
             air: Vec::new(),
+            call_sign: "yacht".to_string(),
+            asked: None,
         }
     }
 }
@@ -290,9 +305,30 @@ pub fn listen(
     sky: Res<crate::sky::Sky>,
     mut log: ResMut<crate::chart::DeckLog>,
     mut radio: ResMut<Radio>,
+    mut ours: Local<Option<f64>>,
 ) {
     let now = sim.sim.state.time;
     let here = sim.sim.state.pos;
+
+    // **Both sides of it go in the log**, which is what a radio log is: a station, a
+    // time, and what was said — and half of what was said is yours. A page that recorded
+    // only what came in would be a page that cannot show you made the call at all.
+    if let Some(mine) = radio.transmitting.as_ref() {
+        if *ours != Some(mine.began) {
+            *ours = Some(mine.began);
+            let line = Heard {
+                channel: mine.channel,
+                from: format!("{} (us)", mine.from),
+                words: mine.words.clone(),
+                strength: 1.0,
+                hour: sky.hour,
+            };
+            radio.log.push(line);
+            if radio.log.len() > KEEPS {
+                radio.log.remove(0);
+            }
+        }
+    }
 
     // Our own transmission holds the channel until it is finished.
     if radio
@@ -370,7 +406,10 @@ pub fn speaker(
     sound: Res<crate::sound::SoundHandle>,
     mut was: Local<bool>,
 ) {
-    let on_air = radio.traffic.is_some();
+    // Your own carrier counts: the set clicks when you key it and clicks when you let
+    // go, and it is silent in between — a radio does not play your voice back at you,
+    // and the silence while you talk is itself the thing that teaches *over*.
+    let on_air = radio.traffic.is_some() || radio.transmitting.is_some();
     // The carrier arriving and the carrier going. Both click; the one at the end has the
     // tail on it, because that is the one where the squelch opens onto an empty channel.
     if on_air != *was {
@@ -378,6 +417,10 @@ pub fn speaker(
         *was = on_air;
     }
     if !radio.on {
+        sound.0.set_radio(0.0, 0.0);
+        return;
+    }
+    if radio.transmitting.is_some() {
         sound.0.set_radio(0.0, 0.0);
         return;
     }
@@ -1186,5 +1229,508 @@ mod working_the_set {
             1,
             "the bulletin was not written up"
         );
+    }
+}
+
+// -----------------------------------------------------------------------------------
+// And the other half of a radio, which is the half that makes it a radio.
+// -----------------------------------------------------------------------------------
+
+/// What can be said, which is a closed list on purpose.
+///
+/// **Procedure is a grammar, not a sentence.** There is no voice in this game, and the
+/// answer to that is not a text box: it is the four or five things a sailor actually
+/// says on a VHF, each in the form the book gives it, offered when there is somebody to
+/// say them to. You pick the call; the words that go out are the right words, every
+/// time, which is how anybody learns them.
+///
+/// A longer list would be a worse one. What is here is the whole of ordinary traffic:
+/// find out whether you are getting out at all, call the harbour you are standing into,
+/// ask for the forecast you slept through, and answer the ship that has been calling you.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Say {
+    /// *Radio check* — the first call anybody makes, and the one that tells you whether
+    /// the set works at all.
+    Check,
+    /// The harbour you are standing into.
+    Port,
+    /// The coastguard, for the bulletin you were asleep for.
+    Forecast,
+    /// The ship that has been calling for a pilot.
+    Brig,
+}
+
+/// One call, made up for the station it is going to.
+pub struct OnOffer {
+    pub say: Say,
+    /// Two or three letters for the panel, which has the width of a VHF.
+    pub tag: &'static str,
+    /// Who it goes to, as they are called on the air.
+    pub to: String,
+    /// What would be said, in the words the book gives.
+    pub words: String,
+    /// The channel the station works, which is not necessarily the one you are on — and
+    /// calling on the wrong one is answered by nobody, which is the lesson.
+    pub channel: u8,
+    /// Where their aerial is, so it can be worked out whether they heard you.
+    pub at: glam::DVec2,
+    pub height: f64,
+}
+
+/// What there is to say just now.
+pub fn on_offer(
+    radio: &Radio,
+    sim: &Sim,
+    course: &crate::course::Course,
+    station: &Coastguard,
+    brig: &crate::ship::Brig,
+    job: &crate::mission::Pilotage,
+) -> Vec<OnOffer> {
+    let here = sim.sim.state.pos;
+    let ours = &radio.call_sign;
+    let mut out = Vec::new();
+    // The nearest harbour, which is who you call about a berth and who you ask for a
+    // radio check — a port office is the station a small boat talks to.
+    let near = course
+        .harbours
+        .iter()
+        .min_by(|a, b| (a.at - here).length().total_cmp(&(b.at - here).length()));
+    if let Some(place) = near {
+        let to = format!("{} Port Control", place.name);
+        out.push(OnOffer {
+            say: Say::Check,
+            tag: "CHK",
+            words: format!("{to}, {to}, this is {ours}. Radio check, over."),
+            to: to.clone(),
+            channel: PORT,
+            at: place.at,
+            height: HARBOUR_AERIAL,
+        });
+        out.push(OnOffer {
+            say: Say::Port,
+            tag: "PORT",
+            words: format!("{to}, this is {ours}, over."),
+            to,
+            channel: PORT,
+            at: place.at,
+            height: HARBOUR_AERIAL,
+        });
+    }
+    // The coastguard, who is further off and higher up, and whose forecast is a thing
+    // you can ask for rather than only wait for.
+    if let Some(first) = course.harbours.first() {
+        out.push(OnOffer {
+            say: Say::Forecast,
+            tag: "WX",
+            words: format!(
+                "{}, this is {ours}. Request the latest forecast, over.",
+                station.name
+            ),
+            to: station.name.clone(),
+            channel: CALLING,
+            at: first.at,
+            height: STATION_AERIAL,
+        });
+    }
+    // And the ship, while there is one.
+    if brig.afloat && job.running && job.over.is_none() {
+        let to = format!("brig {}", brig.name);
+        out.push(OnOffer {
+            say: Say::Brig,
+            tag: "BRIG",
+            words: format!("{to}, this is {ours}. Channel {WORKING}, over."),
+            to,
+            channel: WORKING,
+            at: brig.at,
+            height: BRIG_AERIAL,
+        });
+    }
+    out
+}
+
+/// How readable you were, in the words a station uses.
+///
+/// **One to five, and the words are the words.** *Loud and clear* is a readability
+/// report and not a pleasantry: the scale is in every radio licence syllabus, and a set
+/// that answered every check the same way would be teaching that range does not exist.
+pub fn readability(strength: f32) -> &'static str {
+    match strength {
+        s if s > 0.85 => "loud and clear",
+        s if s > 0.6 => "readable",
+        s if s > 0.35 => "readable but with difficulty",
+        _ => "readable now and then",
+    }
+}
+
+/// What we are called on the air, kept in step with what we are doing.
+///
+/// A boat leading a ship in is *the pilot boat* — it is what the brig calls and what a
+/// harbour would call her — and the rest of the time she is whatever name the player
+/// sails under. Neither of those is a thing the set can know on its own.
+pub fn identify(
+    job: Res<crate::mission::Pilotage>,
+    net: Res<crate::net::Net>,
+    mut radio: ResMut<Radio>,
+) {
+    let want = if job.running && job.over.is_none() {
+        "pilot boat"
+    } else if net.name.trim().is_empty() {
+        "yacht"
+    } else {
+        net.name.trim()
+    };
+    if radio.call_sign != want {
+        radio.call_sign = want.to_string();
+    }
+}
+
+/// Key the microphone, and hear what comes back.
+///
+/// **A transmission occupies you as well as the channel.** The set is deaf while its own
+/// carrier is up — that is why *over* exists — and a call takes as long to say as it
+/// takes to say, so a boat that keys the mike as a securité comes through misses the
+/// securité. All of that was already modelled and nothing could key the mike.
+///
+/// Who answers is the range model and the channel, with nothing else in it. A station
+/// hears you if it is inside the horizon the two aerials make, and it answers on the
+/// channel you called on, because that is where you are listening. Call the harbour on
+/// seventy-two and nobody answers, and the silence is the lesson.
+#[allow(clippy::too_many_arguments)]
+pub fn transmit(
+    sim: Res<Sim>,
+    sky: Res<crate::sky::Sky>,
+    course: Res<crate::course::Course>,
+    station: Res<Coastguard>,
+    brig: Res<crate::ship::Brig>,
+    job: Res<crate::mission::Pilotage>,
+    mut radio: ResMut<Radio>,
+    mut once: Local<bool>,
+) {
+    // `SAIL_SAY=check` makes the call at the start of the run, the way `SAIL_HOIST`
+    // bends a flag on: a call that has to be clicked cannot be photographed, filmed or
+    // reproduced in a bug report, and all three of those are how this gets looked at.
+    if !*once {
+        *once = true;
+        radio.asked = match crate::knob::var("SAIL_SAY").as_deref() {
+            Ok("check") => Some(Say::Check),
+            Ok("port") => Some(Say::Port),
+            Ok("wx") | Ok("forecast") => Some(Say::Forecast),
+            Ok("brig") => Some(Say::Brig),
+            _ => radio.asked,
+        };
+    }
+    let Some(asked) = radio.asked else {
+        return;
+    };
+    // One at a time, and the button does not queue: a hand that presses twice has
+    // pressed twice on a microphone that is already keyed, which does nothing at all.
+    if radio.transmitting.is_some() || !radio.on {
+        radio.asked = None;
+        return;
+    }
+    let now = sim.sim.state.time;
+    let here = sim.sim.state.pos;
+    let Some(call) = on_offer(&radio, &sim, &course, &station, &brig, &job)
+        .into_iter()
+        .find(|c| c.say == asked)
+    else {
+        radio.asked = None;
+        return;
+    };
+    radio.asked = None;
+    // **On the channel you are on, not the one it should go on.** The set has one
+    // transmitter and it is tuned to the channel in the window; calling a harbour while
+    // the set is on seventy-two puts your words out on seventy-two, where the harbour is
+    // not listening. Nobody answers, and that is the whole of why channels are taught.
+    let on = radio.channel;
+    let mine = Transmission::saying(&radio.call_sign, on, &call.words, None, now);
+    let over = mine.over_at();
+    radio.transmitting = Some(mine);
+
+    // Whether they heard you: their horizon, and whether they are on this channel at
+    // all. A coast station watches sixteen and works its own channel; it is not sitting
+    // on seventy-two.
+    let off = (call.at - here).length();
+    let theirs = carries(AERIAL, call.height);
+    let listening = on == call.channel || on == CALLING;
+    if !listening || off > theirs {
+        return;
+    }
+    // How well, which is the same curve the set hears on — so a station at the edge of
+    // the horizon reports you as badly as you hear it.
+    let strength = (1.0 - (off / theirs).powf(6.0)).clamp(0.0, 1.0) as f32;
+    let ours = radio.call_sign.clone();
+    // Two seconds for somebody to pick up the handset, which is about how long it takes.
+    let answers_at = over + 2.0;
+    match asked {
+        Say::Check => radio.broadcast(Transmission::saying(
+            &call.to,
+            on,
+            &format!(
+                "{ours}, this is {}. You are {}. Out.",
+                call.to,
+                readability(strength)
+            ),
+            Some((call.at, call.height)),
+            answers_at,
+        )),
+        Say::Port => radio.broadcast(
+            Transmission::saying(
+                &call.to,
+                on,
+                &format!(
+                    "{ours}, this is {}. {}",
+                    call.to,
+                    traffic(
+                        &sim,
+                        &call.to.replace(" Port Control", ""),
+                        call.at,
+                        // The harbour's own clock, which is the one on the bulkhead.
+                        sky.hour,
+                        0,
+                    )
+                ),
+                Some((call.at, call.height)),
+                answers_at,
+            )
+            .for_the_book(),
+        ),
+        // The procedure, and it is the procedure for a reason: sixteen is where you are
+        // told where to listen. Ask on sixteen and you are sent to six, which is where
+        // the bulletin is read — the same place the scheduled one goes out.
+        Say::Forecast => {
+            radio.broadcast(Transmission::saying(
+                &call.to,
+                on,
+                &format!("{ours}, this is {}. Stand by channel 6. Out.", call.to),
+                Some((call.at, call.height)),
+                answers_at,
+            ));
+            radio.broadcast(
+                Transmission::saying(
+                    &call.to,
+                    6,
+                    &format!("Weather bulletin. {}", forecast(&sim, "The archipelago")),
+                    Some((call.at, call.height)),
+                    answers_at + 8.0,
+                )
+                .for_the_book(),
+            );
+        }
+        Say::Brig => radio.broadcast(Transmission::saying(
+            &call.to,
+            on,
+            &format!(
+                "{ours}, {}. We are standing in from seaward and we want a pilot. \
+                 Get ahead of us and we will follow you. Over.",
+                call.to
+            ),
+            Some((call.at, call.height)),
+            answers_at,
+        )),
+    }
+}
+
+#[cfg(test)]
+mod keying_the_mike {
+    use super::*;
+
+    /// A world with a harbour in it, a set, and the systems that work it.
+    fn aboard() -> App {
+        let mut app = App::new();
+        app.insert_resource(Sim::new(crate::weather::Weather::draw(42), 42));
+        app.insert_resource(crate::sky::Sky::at(12.0, 0.2));
+        app.init_resource::<crate::chart::DeckLog>();
+        app.init_resource::<Radio>();
+        app.init_resource::<Coastguard>();
+        app.init_resource::<crate::ship::Brig>();
+        app.init_resource::<crate::mission::Pilotage>();
+        // A harbour a mile off: well inside a harbour's horizon and well outside a
+        // shout.
+        let here = app.world().resource::<Sim>().sim.state.pos;
+        let mut course = crate::course::Course::default();
+        course.harbours = vec![sail_core::land::Harbour {
+            at: here + glam::DVec2::new(0.0, 1_852.0),
+            name: "Sandholm".to_string(),
+            exposed_to: 0.0,
+        }];
+        app.insert_resource(course);
+        app.add_systems(Update, (transmit, listen).chain());
+        app
+    }
+
+    fn at(app: &mut App, seconds: f64) {
+        app.world_mut().resource_mut::<Sim>().sim.state.time = seconds;
+        app.update();
+    }
+
+    /// **The call goes out in the words the book gives**, which is the whole of what the
+    /// closed list is for: there is no voice in this game, so what it teaches is the
+    /// form — who you are calling, who you are, and *over*.
+    #[test]
+    fn a_radio_check_is_made_in_the_right_words() {
+        let mut app = aboard();
+        app.world_mut().resource_mut::<Radio>().channel = PORT;
+        app.world_mut().resource_mut::<Radio>().asked = Some(Say::Check);
+        at(&mut app, 1.0);
+        let radio = app.world().resource::<Radio>();
+        let mine = radio.transmitting.as_ref().expect("the mike was never keyed");
+        assert!(mine.words.contains("Radio check"), "{}", mine.words);
+        assert!(mine.words.contains("over"), "{}", mine.words);
+        assert_eq!(mine.channel, PORT);
+        // And it is in the log, because a radio log is both sides of a conversation.
+        assert!(
+            radio.log.iter().any(|h| h.from.contains("(us)")),
+            "the call we made is not in our own log"
+        );
+    }
+
+    /// **And the station answers with a readability report**, which is the one thing a
+    /// radio check is for and the one place the range model is spoken out loud.
+    #[test]
+    fn the_station_says_how_well_it_heard_you() {
+        let mut app = aboard();
+        app.world_mut().resource_mut::<Radio>().channel = PORT;
+        app.world_mut().resource_mut::<Radio>().asked = Some(Say::Check);
+        at(&mut app, 1.0);
+        // Long enough for the call to be over and the answer to come back.
+        for t in 2..40 {
+            at(&mut app, t as f64);
+        }
+        let radio = app.world().resource::<Radio>();
+        let back = radio
+            .log
+            .iter()
+            .find(|h| h.from.contains("Port Control"))
+            .expect("the harbour never answered");
+        assert!(
+            back.words.contains("loud and clear") || back.words.contains("readable"),
+            "it answered {:?}, which is not a readability report",
+            back.words
+        );
+    }
+
+    /// **Call on the wrong channel and nobody answers.** That is the entire reason
+    /// channels are taught, and it is one line of model: the words go out on the channel
+    /// in the window, and the harbour is not sitting on seventy-two.
+    #[test]
+    fn the_wrong_channel_is_answered_by_nobody() {
+        let mut app = aboard();
+        app.world_mut().resource_mut::<Radio>().channel = WORKING;
+        app.world_mut().resource_mut::<Radio>().asked = Some(Say::Port);
+        at(&mut app, 1.0);
+        for t in 2..40 {
+            at(&mut app, t as f64);
+        }
+        let radio = app.world().resource::<Radio>();
+        assert!(
+            radio.transmitting.is_none(),
+            "the set was still transmitting a minute later"
+        );
+        assert!(
+            !radio.log.iter().any(|h| h.from.contains("Port Control")),
+            "the harbour answered a call made on a channel it does not watch"
+        );
+    }
+
+    /// **And out of range is the same silence.** A harbour forty miles behind the
+    /// horizon hears nothing, whatever channel you are on.
+    #[test]
+    fn a_station_over_the_horizon_hears_nothing() {
+        let mut app = aboard();
+        {
+            let here = app.world().resource::<Sim>().sim.state.pos;
+            let mut course = app.world_mut().resource_mut::<crate::course::Course>();
+            // Three hundred miles off: past any horizon two aerials can make.
+            course.harbours[0].at = here + glam::DVec2::new(0.0, 555_000.0);
+        }
+        app.world_mut().resource_mut::<Radio>().channel = PORT;
+        app.world_mut().resource_mut::<Radio>().asked = Some(Say::Check);
+        at(&mut app, 1.0);
+        for t in 2..40 {
+            at(&mut app, t as f64);
+        }
+        assert!(
+            !app.world()
+                .resource::<Radio>()
+                .log
+                .iter()
+                .any(|h| h.from.contains("Port Control")),
+            "a station over the horizon answered"
+        );
+    }
+
+    /// **The set is deaf while its own carrier is up**, which is why *over* exists — and
+    /// a call takes as long to say as it takes to say.
+    #[test]
+    fn a_call_occupies_the_set_while_it_is_being_made() {
+        let mut app = aboard();
+        app.world_mut().resource_mut::<Radio>().channel = PORT;
+        app.world_mut().resource_mut::<Radio>().asked = Some(Say::Check);
+        at(&mut app, 1.0);
+        let over = app
+            .world()
+            .resource::<Radio>()
+            .transmitting
+            .as_ref()
+            .expect("keyed")
+            .over_at();
+        assert!(over > 4.0, "a dozen words took {:.1} s to say", over - 1.0);
+        // A second press while the mike is keyed does nothing at all, which is what a
+        // microphone that is already keyed does.
+        app.world_mut().resource_mut::<Radio>().asked = Some(Say::Port);
+        at(&mut app, 2.0);
+        let radio = app.world().resource::<Radio>();
+        assert!(radio.transmitting.as_ref().is_some_and(|t| t.over_at() == over));
+        assert!(radio.asked.is_none());
+    }
+
+    /// **Asking for the forecast is the procedure, and the procedure is the lesson.**
+    /// Sixteen is where you are told where to listen: you are sent to six, and the
+    /// bulletin is read there — the same place the scheduled one goes out, which is the
+    /// point. A station that read it back at you on sixteen would be teaching that the
+    /// calling channel is a conversation.
+    #[test]
+    fn the_forecast_can_be_asked_for_and_comes_back_on_the_working_channel() {
+        let mut app = aboard();
+        app.world_mut().resource_mut::<Radio>().channel = CALLING;
+        app.world_mut().resource_mut::<Radio>().asked = Some(Say::Forecast);
+        at(&mut app, 1.0);
+        // Half-second steps, and we do what a sailor does when told where to listen: go
+        // there. A set left on sixteen hears the instruction and misses the bulletin,
+        // which is the lesson and is also what the model does — the words are popped off
+        // the air and dropped, and there is no trace of them to test against.
+        let mut went = false;
+        for t in 0..160 {
+            at(&mut app, 1.5 + t as f64 * 0.5);
+            let mut radio = app.world_mut().resource_mut::<Radio>();
+            if !went
+                && radio
+                    .log
+                    .iter()
+                    .any(|h| h.channel == CALLING && h.words.contains("channel 6"))
+            {
+                went = true;
+                radio.channel = 6;
+            }
+        }
+        assert!(went, "it never sent us to a working channel");
+        let radio = app.world().resource::<Radio>();
+        assert!(
+            radio
+                .log
+                .iter()
+                .any(|h| h.channel == 6 && h.words.contains("Weather bulletin")),
+            "nothing was read on six: {:?}",
+            radio.log.iter().map(|h| &h.words).collect::<Vec<_>>()
+        );
+    }
+
+    /// The readability scale is the scale, and it moves with the signal.
+    #[test]
+    fn readability_is_a_scale_and_not_a_pleasantry() {
+        assert_eq!(readability(1.0), "loud and clear");
+        assert_ne!(readability(0.5), readability(1.0));
+        assert_ne!(readability(0.1), readability(0.5));
     }
 }

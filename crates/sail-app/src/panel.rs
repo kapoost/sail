@@ -752,8 +752,19 @@ pub fn draw(
                 // said. A real set has fifty channels and a menu; what a sailor uses is
                 // this.
                 {
+                    // What there is to say just now, worked out before the set is
+                    // borrowed: a call needs the whole world around it and the set only
+                    // needs to be told which one was pressed.
+                    let calls = crate::radio::on_offer(
+                        &in_hand.radio,
+                        &sim,
+                        &course,
+                        &in_hand.station,
+                        &in_hand.brig,
+                        &in_hand.job,
+                    );
                     let radio = &mut in_hand.radio;
-                    let busy = radio.traffic.is_some();
+                    let busy = radio.traffic.is_some() || radio.transmitting.is_some();
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 3.0;
                         plate(ui, "VHF");
@@ -837,6 +848,48 @@ pub fn draw(
                             radio.squelch = squelch;
                         }
                     });
+                    // **And the microphone, which is the other half of a radio.**
+                    //
+                    // There is no voice in this game, and the answer to that is not a
+                    // text box: it is the four things a sailor says on a VHF, each in
+                    // the form the book gives it, offered when there is somebody to say
+                    // them to. The hand picks the call and the right words go out —
+                    // which is how anybody learns them. The whole phrase is on the
+                    // hover, because the words *are* the content.
+                    //
+                    // They go out on the channel in the window and not on the one they
+                    // belong on. Call the harbour while the set is on seventy-two and
+                    // nobody answers, which is the entire reason channels are taught.
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 3.0;
+                        plate(ui, "SAY");
+                        for call in &calls {
+                            // Lit when the station would hear you from where the set is
+                            // tuned, which is its own channel *or* sixteen — calling a
+                            // harbour on sixteen is correct procedure and the lamp has
+                            // to agree with the model rather than with the channel the
+                            // station works.
+                            let lit = radio.channel == call.channel
+                                || radio.channel == crate::radio::CALLING;
+                            let button = egui::Button::new(
+                                egui::RichText::new(call.tag)
+                                    .monospace()
+                                    .size(10.0)
+                                    .color(if lit { paint::LIVE } else { paint::LABEL }),
+                            )
+                            .fill(egui::Color32::from_gray(26));
+                            if ui
+                                .add_enabled(radio.transmitting.is_none(), button)
+                                .on_hover_text(format!(
+                                    "{}\n\non channel {} — the set is on {}",
+                                    call.words, call.channel, radio.channel
+                                ))
+                                .clicked()
+                            {
+                                radio.asked = Some(call.say);
+                            }
+                        }
+                    });
                     // What is on it: the station and what it is saying, or the hiss.
                     // **A weak one is said to be weak**, because on a real set you can
                     // hear that it is and act on it: you ask the station to say again,
@@ -873,6 +926,13 @@ pub fn draw(
                             Some(&last.words),
                         ),
                         (None, None) => ("quiet".to_string(), None),
+                    };
+                    // And while your own carrier is up, that is what the set says —
+                    // because that is what it is doing, and because it is deaf for as
+                    // long as it lasts.
+                    let (head, words) = match &radio.transmitting {
+                        Some(t) => (format!("{} transmitting", t.channel), Some(&t.words)),
+                        None => (head, words),
                     };
                     ui.label(
                         egui::RichText::new(fit(&head, COLUMNS))
@@ -2688,6 +2748,11 @@ pub struct InHand<'w> {
     /// parameters and the set made seventeen. It is a thing in somebody's hand in every
     /// sense that matters: you reach up and turn it.
     pub radio: ResMut<'w, crate::radio::Radio>,
+    /// And the three things the set needs to know to offer a call: who the coast station
+    /// is, whether there is a ship out there, and whether she is ours to take in.
+    pub station: Res<'w, crate::radio::Coastguard>,
+    pub brig: Res<'w, crate::ship::Brig>,
+    pub job: Res<'w, crate::mission::Pilotage>,
 }
 
 /// A narrow lamp for a thing you pick up: three of them fit the window they live in.
