@@ -852,10 +852,7 @@ pub fn draw(
                     // decision anchoring really has in it.
                     {
                         let cable = &mut in_hand.cable;
-                        let down = matches!(
-                            sim.sim.anchor,
-                            sail_core::anchor::Anchor::Down(_)
-                        );
+                        let down = matches!(sim.sim.anchor, sail_core::anchor::Anchor::Down(_));
                         let fast = cable.fast_to.is_some();
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 3.0;
@@ -879,7 +876,11 @@ pub fn draw(
                                                 paint::FACE
                                             }),
                                     )
-                                    .fill(if down || fast { paint::LIVE } else { paint::TRACK })
+                                    .fill(if down || fast {
+                                        paint::LIVE
+                                    } else {
+                                        paint::TRACK
+                                    })
                                     .min_size(egui::vec2(62.0, 20.0)),
                                 )
                                 .on_hover_text(hint)
@@ -910,9 +911,8 @@ pub fn draw(
                                         .on_hover_text(hint)
                                         .clicked()
                                     {
-                                        cable.want = Some(
-                                            (out + step).clamp(0.0, sim.sim.tackle.chain),
-                                        );
+                                        cable.want =
+                                            Some((out + step).clamp(0.0, sim.sim.tackle.chain));
                                     }
                                 }
                             }
