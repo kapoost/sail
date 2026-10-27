@@ -43,7 +43,7 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
      hours without anybody noticing, because nothing else depends on it. -->
 
 2. **The physics is testable without opening a window.** 180 tests in the core assert
-   against figures a sailor knows from the water — 574 across the workspace, run by CI
+   against figures a sailor knows from the water — 581 across the workspace, run by CI
    on every push. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
@@ -1217,6 +1217,18 @@ and nothing else — which is exactly why the split is worth maintaining even wh
 feels like extra structure.
 
 ## Sailing together
+
+**Nothing is laid out on the land.** A scenario that puts a mark, a ship or a raft ashore
+is not a hard scenario, it is one nobody can sail — and the only thing a player can do
+about it is give it up and ask for another. So there is one place that answers *may this
+go here*: six metres of water for anything a boat has to reach, and a leg is the water
+*between* two marks rather than the two marks, because two buoys in deep water with an
+island between them is the course this exists to refuse. A windward-leeward race cannot
+move its axis — the first mark is dead upwind and that is the race — so what moves is
+everything else: the course slides across the wind a cable at a time and then the beat
+shortens. Measured over four archipelagos and a hundred and seventy-five starts: one of
+them has nowhere to put a course, against twenty-two before, and that one is told so
+instead of being given a start gun five minutes before a mark on a beach.
 
 Two to eight friends in one archipelago. Every boat is computed by the person sailing
 her and the server is a relay, a clock and a lobby — anything else would put a round trip
