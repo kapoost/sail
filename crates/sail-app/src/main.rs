@@ -17,6 +17,7 @@ mod camera;
 mod chart;
 mod clouds;
 mod clutch;
+mod contact;
 mod course;
 mod creel;
 mod crew;
@@ -493,7 +494,9 @@ fn main() {
     // reordering it to make room would cost more than a line does.
     .add_plugins(radio::plugin)
     // And the foredeck, for the same reason.
-    .add_plugins(ground_tackle::plugin);
+    .add_plugins(ground_tackle::plugin)
+    // And what she can hit that is not the bottom.
+    .add_plugins(contact::plugin);
     // A picture of herself on a timer, when one was asked for: see `shot`.
     if let Some(shot) = shot::wanted() {
         app.insert_resource(shot)

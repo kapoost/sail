@@ -842,7 +842,7 @@ pub fn draw(
                     // only when the anchor is down, because a plate that says NOTHING
                     // all day is a plate nobody reads — the key is in the help and the
                     // line appears when there is something to say.
-                    if let Some(reading) = crate::ground_tackle::reading(&sim) {
+                    if let Some(reading) = crate::ground_tackle::reading(&sim, &in_hand.cable) {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
                             plate(ui, "CABLE");
@@ -2804,6 +2804,8 @@ pub struct InHand<'w> {
     pub station: Res<'w, crate::radio::Coastguard>,
     pub brig: Res<'w, crate::ship::Brig>,
     pub job: Res<'w, crate::mission::Pilotage>,
+    /// And the foredeck, which has a line on the console under the weather.
+    pub cable: Res<'w, crate::ground_tackle::Cable>,
 }
 
 /// A narrow lamp for a thing you pick up: three of them fit the window they live in.

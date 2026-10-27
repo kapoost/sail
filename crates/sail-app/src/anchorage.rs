@@ -76,6 +76,13 @@ const A_CASK_TAKES: f64 = 3.0;
 /// seconds behind.
 const WRITE_EVERY: f32 = 4.0;
 
+/// How big the raft is, across, metres.
+///
+/// Nine metres of deck with a hut on it. Named because the hull now has to know: a thing
+/// you can moor to is a thing you can hit, and `contact.rs` wants the number the mesh is
+/// built from rather than one typed twice.
+pub const RAFT: f32 = 9.0;
+
 /// What is on the platform.
 ///
 /// Counts rather than a list of objects, because that is what a store *is* — the fish you
@@ -493,7 +500,7 @@ pub fn build(
             perceptual_roughness: 0.9,
             ..default()
         });
-        let deck = meshes.add(Cuboid::new(9.0, 0.5, 6.0));
+        let deck = meshes.add(Cuboid::new(RAFT, 0.5, RAFT * 0.67));
         let float = meshes.add(Cylinder::new(0.8, 8.4));
         let hut = meshes.add(Cuboid::new(2.8, 2.1, 2.4));
         let roof = meshes.add(Cuboid::new(3.2, 0.18, 2.8));

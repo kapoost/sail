@@ -17,6 +17,7 @@
 //!   of how far it has walked.
 
 use bevy::prelude::*;
+use glam::DVec2;
 use sail_core::anchor::{Anchor, Down, Ground, GOOD_SCOPE};
 
 use crate::sim::Sim;
@@ -54,6 +55,13 @@ const SHALLOW_ENOUGH: f64 = 2.5;
 /// walking, which is zero while she is holding — so it can be tight.
 const ALARM_AT: f64 = 15.0;
 
+/// How slowly she has to arrive for the lines to go on, m/s.
+///
+/// **Half a knot, which is a walking pace and is what coming alongside is.** Faster than
+/// this and the lines are not made fast, they are a thing somebody is holding while the
+/// boat decides where to go — and `contact.rs` has already told you it was a touch.
+const ALONGSIDE: f64 = 0.26;
+
 /// The hand on the cable.
 #[derive(Resource, Default)]
 pub struct Cable {
@@ -66,6 +74,21 @@ pub struct Cable {
     alarmed: bool,
     /// What the deck has just been told, and until when.
     pub said: Option<(String, f64)>,
+    /// Where she is made fast, if she is — the offset from the thing she is lying to, so
+    /// that a platform which is itself moored can be followed rather than snapped to.
+    ///
+    /// **Mooring is the other way a passage ends**, and in this world there is one thing
+    /// to lie alongside: the platform. Everything needed for it was already here once
+    /// the hull could touch things — come up to it under half a knot and the lines go
+    /// on; press the foredeck's key and they come off.
+    pub fast_to: Option<DVec2>,
+    /// Whether she has to get clear before the lines may go on again.
+    ///
+    /// **Because casting off and making fast are the same geometry.** She is alongside
+    /// and slow at the moment the lines come off, which is exactly the state that puts
+    /// them on — so without this the key let go of the shore and took hold of it again
+    /// in the same frame, and nothing on deck changed.
+    shoved_off: bool,
 }
 
 impl Cable {
@@ -80,7 +103,9 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<Cable>();
     app.add_systems(
         Update,
-        (brought_up, the_key, work).chain().in_set(Deck::Weather),
+        (brought_up, the_key, work, make_fast)
+            .chain()
+            .in_set(Deck::Weather),
     );
     app.add_systems(bevy_egui::EguiPrimaryContextPass, draw.in_set(Paint::Over));
 }
@@ -93,9 +118,12 @@ pub fn plugin(app: &mut App) {
 pub fn draw(
     mut contexts: bevy_egui::EguiContexts,
     cable: Res<Cable>,
+    struck: Res<crate::contact::Struck>,
     chart: Res<crate::chart::Chart>,
 ) -> Result {
-    let Some((said, _)) = &cable.said else {
+    // The foredeck and the fenders share a line, because they are the same voice: what
+    // just happened at the bow. A contact is the louder of the two and wins the line.
+    let Some((said, _)) = struck.said.as_ref().or(cable.said.as_ref()) else {
         return Ok(());
     };
     if chart.spread {
@@ -144,7 +172,7 @@ pub fn brought_up(mut sim: ResMut<Sim>, course: Res<crate::course::Course>, mut 
     sim.sim.anchor = Anchor::Down(Down {
         at: harbour,
         depth,
-        out: (depth * GOOD_SCOPE).min(sim.sim.tackle.chain),
+        out: ((depth + sail_core::anchor::BOW_ROLLER) * GOOD_SCOPE).min(sim.sim.tackle.chain),
         dug: Ground::at(harbour).sets_in(),
         ground: Ground::at(harbour),
         dragged: 0.0,
@@ -164,6 +192,14 @@ pub fn the_key(keys: Res<ButtonInput<KeyCode>>, sim: Res<Sim>, mut cable: ResMut
         return;
     }
     let now = sim.sim.state.time;
+    // Alongside, the foredeck's key is the one that lets go of the shore — because that
+    // is what the hand at the bow is holding, and because letting an anchor go while
+    // made fast to a pontoon is not a thing anybody does.
+    if cable.fast_to.take().is_some() {
+        cable.shoved_off = true;
+        cable.say("lines off", now);
+        return;
+    }
     match sim.sim.anchor {
         Anchor::Stowed => {
             let depth = sim.sim.telemetry.depth;
@@ -179,7 +215,10 @@ pub fn the_key(keys: Res<ButtonInput<KeyCode>>, sim: Res<Sim>, mut cable: ResMut
             }
             // Five to one on the water under her, or all of it if she is in water deep
             // enough that five to one is more chain than there is.
-            let want = (depth * GOOD_SCOPE).min(sim.sim.tackle.chain);
+            // Over the water *and the roller*, which is where the chain starts: five
+            // times the sounding is four to one by the time it is measured.
+            let want =
+                ((depth + sail_core::anchor::BOW_ROLLER) * GOOD_SCOPE).min(sim.sim.tackle.chain);
             cable.want = Some(want);
             cable.say(format!("let go — veering {want:.0} m"), now);
         }
@@ -286,12 +325,62 @@ pub fn work(
     };
 }
 
+/// Lying alongside: the lines go on when she arrives slowly enough, and hold her there.
+///
+/// **Held rather than welded.** The platform is itself moored and lies to the weather, so
+/// what is kept is the offset between the two of them: she follows it, which is what two
+/// hulls on four lines do, instead of being snapped to a point on the chart.
+pub fn make_fast(
+    mut sim: ResMut<Sim>,
+    berth: Res<crate::anchorage::Berth>,
+    mut cable: ResMut<Cable>,
+) {
+    let Some(platform) = berth.at else {
+        cable.fast_to = None;
+        return;
+    };
+    let now = sim.sim.state.time;
+    let here = sim.sim.state.pos;
+    if let Some(offset) = cable.fast_to {
+        // Made fast: she lies where the lines put her, with no way on. The sea still
+        // moves her about — that is the fenders' problem and `contact.rs` has it — but
+        // she goes nowhere.
+        sim.sim.state.pos = platform + offset;
+        sim.sim.state.surge *= 0.1;
+        sim.sim.state.sway *= 0.1;
+        sim.sim.state.yaw_rate *= 0.3;
+        return;
+    }
+    // Not fast yet: near enough to pass a line, and slow enough that it is a line and
+    // not a snub.
+    let off = here - platform;
+    let reach = sim.sim.config.form.lwl * 0.42 + crate::anchorage::RAFT as f64 * 0.75;
+    if off.length() > reach {
+        // Clear of it: whatever happened last time is over, and a line may be passed
+        // the next time she comes up to it.
+        cable.shoved_off = false;
+        return;
+    }
+    if cable.shoved_off || sim.sim.state.velocity_world().length() > ALONGSIDE {
+        return;
+    }
+    if !matches!(sim.sim.anchor, Anchor::Stowed) {
+        return;
+    }
+    cable.fast_to = Some(off);
+    cable.say("made fast alongside", now);
+    info!("moored: alongside the platform");
+}
+
 /// What to tell the deck about the ground tackle, in one line.
 ///
 /// **Scope first, because scope is the decision.** Then the ground, because it is what
 /// the scope has to be enough for, and then whether she is walking — which is the only
 /// one of the three that is news.
-pub fn reading(sim: &Sim) -> Option<String> {
+pub fn reading(sim: &Sim, cable: &Cable) -> Option<String> {
+    if cable.fast_to.is_some() {
+        return Some("made fast alongside".to_string());
+    }
     let Anchor::Down(down) = &sim.sim.anchor else {
         return None;
     };
@@ -494,5 +583,101 @@ mod the_foredeck {
             .as_ref()
             .is_some_and(|(said, _)| said.contains("dragging")));
         let _ = ms_to_kn(1.0);
+    }
+}
+
+#[cfg(test)]
+mod lying_alongside {
+    use super::*;
+    use sail_core::units::kn_to_ms;
+
+    fn at_the_platform(knots: f64) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(Sim::new(crate::weather::Weather::draw(42), 42));
+        app.insert_resource(crate::sound::SoundHandle(std::sync::Arc::new(
+            crate::sound::SeaParams::default(),
+        )));
+        app.init_resource::<Cable>();
+        app.init_resource::<crate::anchorage::Berth>();
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+        app.add_systems(Update, (the_key, work, make_fast).chain());
+        let here = app.world().resource::<Sim>().sim.state.pos;
+        {
+            let mut berth = app.world_mut().resource_mut::<crate::anchorage::Berth>();
+            berth.at = Some(here + glam::DVec2::new(8.0, 0.0));
+        }
+        {
+            let mut sim = app.world_mut().resource_mut::<Sim>();
+            sim.sim.state.surge = kn_to_ms(knots);
+        }
+        app
+    }
+
+    /// **Coming alongside is arriving slowly**, and the lines go on by themselves when
+    /// you do — because passing a line is what the crew is for and *how fast you arrive*
+    /// is the only part of it the person steering decides.
+    #[test]
+    fn she_is_made_fast_when_she_arrives_slowly() {
+        let mut app = at_the_platform(0.3);
+        app.update();
+        assert!(
+            app.world().resource::<Cable>().fast_to.is_some(),
+            "she lay alongside at a third of a knot and nobody took a line"
+        );
+    }
+
+    /// **And three knots is not coming alongside.** `contact.rs` has already called that
+    /// one a collision; the lines stay on the pontoon.
+    #[test]
+    fn arriving_hard_is_not_mooring() {
+        let mut app = at_the_platform(3.0);
+        app.update();
+        assert!(app.world().resource::<Cable>().fast_to.is_none());
+    }
+
+    /// **The foredeck's key lets go of the shore first.** A hand at the bow holding a
+    /// mooring line is not going to let an anchor go with the other one.
+    #[test]
+    fn the_key_casts_off_before_it_anchors() {
+        let mut app = at_the_platform(0.2);
+        app.update();
+        assert!(app.world().resource::<Cable>().fast_to.is_some());
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.press(KeyCode::KeyV);
+        }
+        app.update();
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release(KeyCode::KeyV);
+            keys.clear();
+        }
+        let cable = app.world().resource::<Cable>();
+        assert!(cable.fast_to.is_none(), "she stayed fast");
+        assert!(matches!(
+            app.world().resource::<Sim>().sim.anchor,
+            Anchor::Stowed
+        ));
+    }
+
+    /// **She follows the platform rather than a point on the chart.** The raft is itself
+    /// moored and lies to the weather; two hulls on four lines move together.
+    #[test]
+    fn made_fast_she_moves_with_what_she_is_tied_to() {
+        let mut app = at_the_platform(0.2);
+        app.update();
+        let was = app.world().resource::<Sim>().sim.state.pos;
+        {
+            let mut berth = app.world_mut().resource_mut::<crate::anchorage::Berth>();
+            berth.at = berth.at.map(|at| at + glam::DVec2::new(3.0, 4.0));
+        }
+        app.update();
+        let now = app.world().resource::<Sim>().sim.state.pos;
+        assert!(
+            ((now - was) - glam::DVec2::new(3.0, 4.0)).length() < 0.01,
+            "the platform moved five metres and she moved {:.1}",
+            (now - was).length()
+        );
     }
 }

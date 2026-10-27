@@ -43,7 +43,7 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
      hours without anybody noticing, because nothing else depends on it. -->
 
 2. **The physics is testable without opening a window.** 180 tests in the core assert
-   against figures a sailor knows from the water — 563 across the workspace, run by CI
+   against figures a sailor knows from the water — 571 across the workspace, run by CI
    on every push. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
@@ -702,6 +702,29 @@ pace — and while the cable is bar taut nothing comes in at all and the foredec
 because getting your anchor back means sailing up to it and taking in the slack as it
 comes. `SAIL_ANCHORED=1` opens lying to it in the nearest anchorage, which is how this
 gets photographed.
+
+### Mooring, and hitting things
+
+**The only solid thing in this game was the bottom.** Running aground has been in the
+model since the islands were; everything else afloat was a drawing you sailed through —
+the platform you built, the brig you are leading, the boats other people are sailing.
+
+The simple kind of collision, deliberately: a hull is a circle of its own length, every
+other floating thing is a circle of its own, and a contact is two circles overlapping.
+That is wrong in the way a circle is wrong about a boat and right about the only two
+questions anybody asks of it — *did I touch it* and *how hard*. A touch takes the way
+that was going into the thing off her and keeps the way along it, which is what fending
+off is and why an angled approach works and a square one does not; she is pushed clear by
+exactly the overlap, so two hulls cannot be inside each other; and the report tells a
+touch from a collision, because under a knot and a half is how a boat comes alongside and
+three knots into a pontoon is a hole.
+
+**Which is also what makes mooring possible**: come up to the platform under half a knot
+and the lines go on by themselves, because passing a line is what the crew is for and
+*how fast you arrive* is the part the person steering decides. Made fast, she follows the
+platform rather than a point on the chart — the raft is itself moored and lies to the
+weather, and two hulls on four lines move together. The foredeck's key casts off, and the
+lines will not go back on until she is clear of it.
 
 ## The radio
 

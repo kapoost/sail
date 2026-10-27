@@ -225,7 +225,12 @@ impl Down {
 }
 
 /// How high the bow roller is above the water, metres.
-const BOW_ROLLER: f64 = 1.4;
+///
+/// **Public because the foredeck has to veer against it.** The chain starts at the
+/// roller and not at the surface, so the scope a crew gets is the chain over the depth
+/// *plus this* — and a foredeck that veered five times the sounding was handing out four
+/// to one and calling it five, which the console then printed.
+pub const BOW_ROLLER: f64 = 1.4;
 
 /// The pull the chain puts on her, and what that pull does to the anchor.
 ///
