@@ -120,6 +120,16 @@ pub struct Simulation {
     /// The land, if there is any. Shared, because the presentation layer draws the
     /// same islands the physics runs aground on.
     pub land: Option<std::sync::Arc<crate::land::Archipelago>>,
+    /// The ground tackle and whether it is down.
+    ///
+    /// **Here, in the physics, because the chain is a force on the boat** — not a state
+    /// the presentation layer puts her into. Everything about lying to an anchor falls
+    /// out of a pull at the bow: she lies head to the resultant of wind and stream
+    /// because that is where the pull balances, she sheers about because her rudder and
+    /// her windage are still working, and a gust that overcomes the ground walks her
+    /// down the anchorage at a knot.
+    pub anchor: crate::anchor::Anchor,
+    pub tackle: crate::anchor::Tackle,
     /// Whether the slope history above is real yet.
     ///
     /// It has to be asked. Differencing against an unset zero on the very first
@@ -151,6 +161,8 @@ impl Simulation {
             prev_state: state,
             tide: crate::tide::Tide::none(),
             land: None,
+            anchor: crate::anchor::Anchor::Stowed,
+            tackle: crate::anchor::Tackle::default(),
             prev_slope_along: 0.0,
             prev_slope_athwart: 0.0,
             slopes_primed: false,
@@ -1079,9 +1091,29 @@ impl Simulation {
         let resistance =
             r_friction + r_residuary + r_heel + r_waves + lp.drag + lp_induced + rud.drag;
 
+        // --- The chain ------------------------------------------------------------
+        //
+        // **At the bow, which is the whole of why a boat lies to her anchor.** A pull
+        // applied at the centre of gravity would hold her position and let her lie any
+        // way she pleased; applied a hull-length forward of it, it is also a yaw moment,
+        // and the moment is what swings her head round to the pull and keeps her there.
+        // Everything else a boat at anchor does — sheering about, lying across a stream
+        // that is fighting the wind, taking up with a jerk — comes out of that one lever
+        // and needs nothing written down for it.
+        let anchor_force = if let crate::anchor::Anchor::Down(down) = &mut self.anchor {
+            let bow = st.pos + DVec2::new(st.heading.sin(), st.heading.cos()) * cfg.form.lwl * 0.5;
+            crate::anchor::step(down, self.tackle, bow, st.velocity_world(), dt)
+        } else {
+            DVec2::ZERO
+        };
+        let (chain_fx, chain_fy) = {
+            let body = st.to_body(anchor_force);
+            (body.x, body.y)
+        };
+
         // --- Body-frame forces ----------------------------------------------------
-        let fx = drive + hull_fx + lp_fx + rud_fx;
-        let fy = sail_side + hull_fy + lp_fy + rud_fy;
+        let fx = drive + hull_fx + lp_fx + rud_fx + chain_fx;
+        let fy = sail_side + hull_fy + lp_fy + rud_fy + chain_fy;
 
         // --- Yaw moment -----------------------------------------------------------
         // Rig side force acting at its fore-and-aft centre of effort. The lead of the
@@ -1102,7 +1134,9 @@ impl Simulation {
             // knots against the sails' thousands — but under bare poles it is the only
             // yaw moment on her, and a force carried at the origin because nobody said
             // where it acted is an accident rather than a model.
-            + cfg.windage_x * windage_side;
+            + cfg.windage_x * windage_side
+            // And the chain, at the stemhead.
+            + cfg.form.lwl * 0.5 * chain_fy;
         // Heel swings the centre of effort out to leeward, so the driving force now
         // acts on a lever arm and luffs the boat up. This is weather helm.
         // Two things put a sail's centre of effort out to leeward, and the second one

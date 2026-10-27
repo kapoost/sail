@@ -34,6 +34,7 @@
 //! puts the boat in irons, where it has no steerage and goes nowhere — correct physics,
 //! and a trap worth knowing about before you wonder why your boat will not sail.
 
+pub mod anchor;
 pub mod autopilot;
 pub mod boat;
 pub mod fix;
