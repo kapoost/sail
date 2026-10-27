@@ -65,13 +65,31 @@ what coastal sailing is.
   passage. She draws four metres where you draw two, she will not lie closer than
   sixty-five degrees to the wind, and she follows the water you cross. You talk to her
   with signal flags out of the International Code, and she answers with the answering
-  pendant.
+  pendant — and on the radio, because a voice does not cross four hundred metres of water
+  and two sets of canvas.
 * **Fishing** — a rod, a drag you can set, and fish that fight.
 * **Salvage** — a deck cargo went over the side in the last gale and the casks are still
   coming ashore.
 * **A platform of your own**, moored in an anchorage, where everything you land is piled
   where you can see it from the water, and where a chandler will build you a derrick, a
   drying rack or a lamp for what you have collected.
+
+**Weather that has a day in it.** The glass falls and then the wind veers and builds and
+the sky clears behind it, because a front is crossing and not because a number moved.
+Fog comes down in a calm and takes the coast with it — the headland you were going to
+shoot a bearing on cannot be named until it lifts. The tide rises over a bar that was
+not passable at dawn and runs through the sounds as *water*, so she crabs and the log
+still reads her speed through it. And night is night: the lights flash their own real
+characters, and picking your way in by them is the best hour in the game.
+
+**A VHF that is worth switching on.** Sixteen is watched and not worked; the range is the
+radio horizon of the two aerials, so the coast station reaches you from forty miles and
+the yacht behind the island does not. The forecast is read at fixed hours and generated
+out of this world's own weather rather than played from a recording — you either heard it
+or you are sailing on what you heard eight hours ago. The harbour you are standing into
+reads its tide and its traffic at you on channel twelve, and you can call back: a radio
+check, the harbour, the forecast you slept through, each in the words the book gives
+them.
 
 **Navigation you can actually do.** Hand bearing compass, three-bearing fixes with a
 cocked hat, dead reckoning, a chart you draw on with dividers and a parallel rule, a
@@ -93,31 +111,36 @@ why the world is the same world next week and the weather never is.
 
 > The hard half of this game is finished and the comfortable half is not. The simulation —
 > the rig, the hull, the sea, the coast — is built and tested against figures a sailor
-> knows from the water, and there are four hundred and seventeen automated tests that say
+> knows from the water, and there are five hundred and thirty-one automated tests that say
 > so on every change. What it needs now is the work that only comes from other people sailing
 > it: which jobs are worth doing twice, what is missing from the chart table, where a
 > passage stops being interesting. That is not a thing anybody can decide alone in a room.
 
 **Approximately how long will this game be in Early Access?**
 
-> Six to twelve months. The list is written down and public — tides, night, fog, weather
-> that moves through a passage, gear that breaks — and the game leaves Early Access when
-> that list is done rather than when a date arrives.
+> Six to twelve months. The list is written down and public — gear that fails, anchoring
+> and mooring, a second boat, a career that ties the jobs together — and the game leaves
+> Early Access when that list is done rather than when a date arrives.
 
 **How is the full version planned to differ from the Early Access version?**
 
-> Tidal streams and a tidal window to plan a passage around. Fog, and blind pilotage by
-> sounder and clock. Weather that
-> veers and builds through an afternoon instead of standing still. Gear that fails — a
-> parted sheet, a jammed furler, a leak. Anchoring and mooring as the end of a passage.
-> A second boat with a different feel. And a career that ties the jobs together.
+> Gear that fails — a parted sheet, a jammed furler, a leak — which is the reason to carry
+> tools and to reef early. Anchoring and mooring, so that arriving somewhere is a piece of
+> seamanship rather than the end of a line on a chart. A second boat with a different feel.
+> And a career that ties the jobs together: cargoes, money, repairs, a name in each
+> harbour.
 
 **What is the current state of the Early Access version?**
 
 > Playable and complete as far as it goes. You can sail, navigate, make deliveries, pilot
 > a square-rigger in, fish, collect salvage, build on your platform, sail through a night
-> and pick your way in by the lights' own characters, and sail with other people. There is a fifteen-step lesson aboard for anybody who has never sailed. What is
-> missing is listed above, not hidden.
+> and pick your way in by the lights' own characters, and sail with other people. The water
+> has a tide in it that rises over a bar and runs through a sound; fog comes down and takes
+> the coast with it; a front crosses during an afternoon and the barometer sees it coming.
+> There is a VHF on the bulkhead that reads a forecast made out of that same weather at
+> fixed hours, and that the harbour and the ship you are leading both talk on. There is a
+> fifteen-step lesson aboard for anybody who has never sailed. What is missing is listed
+> above, not hidden.
 
 **Will the game be priced differently during and after Early Access?**
 

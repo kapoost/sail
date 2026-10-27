@@ -4,16 +4,21 @@ A plan for putting this game in a shop, and for the content that goes with it. I
 written the same way `docs/online.md` was: the shape first, the detail that is missing
 from it second, and an honest list of what only the owner can decide.
 
-**The one-line version:** the model is finished enough to sell and the *game around it*
-is not — a short list of things stands between here and a shop window, none of them
-content, and they should be built before a single new feature is.
+**The one-line version, as it stands now:** the short list of things that stood between
+here and a shop window has been built — the window resizes, the anchorage persists, there
+are twelve achievements and a depot script. **What blocks the shop window is no longer
+code.** It is an App ID, three depot IDs and an account with build permission, and every
+line of the upload path is written and untestable until those exist. The content has gone
+on growing meanwhile, which is the right thing to do with the waiting and the wrong thing
+to mistake for progress towards a launch.
 
-**Decided, 20 October:** no Early Access — one 1.0 release. Price later. Windows, macOS
-and Linux, the Mac unsigned at first and signed before it is sold. No time compression:
-the game is aimed at sailing together in small worlds, where a passage is an evening and
-not a crossing, and a clock that runs faster for one boat than another is not a thing a
-shared sea can have. Demo as recommended — Sailing 101 and one delivery. **Done since:**
-the window resizes and goes full screen.
+**Decided, 21 October, and it is a reversal of the day before:** **Early Access**, with
+multiplayer in it from the first day. Price later. Windows, macOS and Linux, the Mac
+unsigned at first and signed before it is sold. No time compression: the game is aimed at
+sailing together in small worlds, where a passage is an evening and not a crossing, and a
+clock that runs faster for one boat than another is not a thing a shared sea can have.
+Demo as recommended — Sailing 101 and one delivery. **Done since:** the window resizes and
+goes full screen.
 
 ---
 
@@ -23,7 +28,7 @@ Facts, not impressions:
 
 | | |
 |---|---|
-| Model | 4 degrees of freedom at 200 Hz, 367 tests across the workspace |
+| Model | 4 degrees of freedom at 200 Hz, 531 tests across the workspace |
 | Platforms built in CI | macOS universal, Windows; Linux builds the **server** only |
 | Artefact size | `Sail.exe` 97 MB, `Sail-macos.zip` 69 MB — one file each, assets inside |
 | Controller | Already wired: sticks on the helm, triggers on the sheets, buttons on the rest (`input.rs`) |
@@ -202,16 +207,33 @@ tempting and would turn a cruising game into a racing game by accident.
 
 ## Price and shape
 
-**Decided: no Early Access — one 1.0 release, price set nearer the date.**
+**Decided: Early Access, with multiplayer in it from the first day. Price set nearer the
+date.**
 
-The case for Early Access was that the simulation is the finished half and the content is
-the growing one, which reads well on a store page. The case against it won: a game sold as
+It was decided the other way on 20 October and reversed the next day, and the reversal is
+the honest one. The case against Early Access is real and was not wrong: a game sold as
 unfinished is reviewed as unfinished, the launch visibility is spent once either way, and
-a one-person project does not need the second round of store-page work that leaving Early
-Access costs. It ships when the list below says it is a game.
+a one-person project pays for the store-page work twice. What beats it is what this game
+most needs, which is **other people sailing it**. The simulation is the finished half and
+the content is the growing one; a 1.0 held back until the content list is complete is a
+year of nobody on the water, in a game whose own argument is that there should be two
+boats in the sound. Early Access is the only shape that puts the relay to work before the
+campaign exists.
 
-What that changes downstream: the content list is no longer "wave one before launch, wave
-two after" — it is the scope of the release, and the date is whatever that scope takes.
+What that buys downstream, and what it costs:
+
+* **The content list goes back to two waves.** Wave one is the scope of the Early Access
+  release; wave two is the promise on the store page, and 1.0 is the day that promise has
+  been kept. The milestones below are written that way.
+* **The store page has to say what is missing**, in our own words rather than Valve's
+  boilerplate: how long it is expected to stay in Early Access, what is in it today, and
+  what the full version adds. That text is part of M2 and not an afterthought — it is the
+  page a buyer judges the honesty of the project by.
+* **Multiplayer is in from day one**, through the existing relay, because the whole reason
+  for not waiting is people sailing together. Steam Networking comes after.
+* **And the second round of store work is real.** Leaving Early Access is a relaunch:
+  new capsules, a new trailer cut, a date announced again. Budget it rather than
+  discovering it.
 
 ---
 
@@ -226,6 +248,7 @@ mathematics and prose, which is exactly where this project is strong — no new 
 | **Night** | The lighthouses already carry their flash characteristics (`Fl(2) 8s`), the sky model already has a sun | Pilotage by light alone — almost nobody does this, and it is the best screenshot in the game | 2 weeks |
 | **Fog and visibility** | Haze and visibility already exist; sound is synthesised | Blind pilotage: the sounder, the clock, a sound signal, dead reckoning that matters | 1 week |
 | ~~**Weather that moves**~~ | *In.* A front is a time rather than a line — at five kilometres across, every boat is through it within seven minutes of every other — so two air masses and a transition give the veer, the building, the clearance and the trough with nothing written down separately | A veering, building day, and a barometer that is ahead of the weather instead of a readout of the wind | 1–2 weeks |
+| ~~**The radio**~~ | *In.* The range is two square roots of two aerial heights, the forecast is a reading of the synoptic the barometer already reads, and the stations it talks to — the coastguard, the harbour, the ship you are leading — were all in the model already with nothing to say | A fixed hour you plan a departure around, a channel you have to be on, and a ship whose master can tell you what she will not do | 1 week |
 | **Failures** | A parted sheet, a jammed furler, a leak, an engine that will not start | The reason to carry tools and to reef early | 1–2 weeks |
 | **Anchoring and mooring** | The anchorages are already generated and named | An end to a passage that is not a teleport, and an anchor watch at night | 1–2 weeks |
 | **A second boat** | `BoatConfig` is parametric, so the physics is numbers | A different feel — a heavier cruiser, a lighter dinghy | 1 week + a hull |
@@ -298,7 +321,7 @@ branch stays closed; push to a `beta` branch first and promote by hand.
 | **Bevy upgrade mid-project** | A quarterly breaking release; this tree pins `=0.20.0` on purpose | Freeze the engine for the whole Early Access run. Upgrade between content waves, never during one |
 | **Deck verification rounds** | Valve fails builds for small things — text size, default controller layout, launcher dialogs | Do the checklist before submitting, not after |
 | **CI time** | The Windows job compiles Bevy in about an hour cold | Keep the cache warm, tag deliberately |
-| **Scope creep** | The content list above is longer than one Early Access | Freeze the EA scope at the first three rows and ship |
+| **Scope creep** | The content list above is longer than one Early Access, and five of its rows have landed since it was written — a wave two that keeps shrinking is a thin promise on the store page | Freeze the EA scope on the day the store page is written: what is in goes in, the rest is named as wave two in the page's own words, and nothing moves across afterwards |
 | **One person** | Every row in this plan is the same pair of hands | The order in the milestones is chosen so that stopping after any of them still leaves something shippable |
 
 ---
@@ -316,9 +339,11 @@ platform at the anchorage keeps the sea, the berth and the store across launches
 when there is something worth filling the store for*, which is the next piece of work
 rather than this one.
 
-**M2 — The shop skeleton.** Depots, CI upload, cloud saves, ten achievements, store page
-live, wishlists open, demo app built from the same binary. *Ends when a stranger can
-wishlist it and play the demo.*
+**M2 — The shop skeleton.** Depots, CI upload, cloud saves, ~~twelve achievements~~,
+store page live — with the Early Access text written in our own words: how long it is
+expected to stay there, what is in it today, what the full version adds — wishlists open,
+demo app built from the same binary. *Ends when a stranger can wishlist it and play the
+demo.* **Everything left in it is blocked on the partner account**, which is M0.
 
 **M3 — Content wave one.** ~~Tides~~ and ~~fog~~ both in; ~~night~~ landed early, with
 the lights flashing their own characters.
@@ -337,14 +362,26 @@ day, which is what makes tidal planning a thing rather than a constant.
 
 *Ends when a night entry into a strange harbour in poor visibility is a thing you can do
 and want to tell somebody about.* What is left for that: the harbour approach itself —
-the lights are there, the fog is there, the water is there, and nobody has yet sailed
-one in anger to find out what is missing.
+the lights are there, the fog is there, the water is there, port control now reads the
+tide and the traffic at you on channel twelve, and **nobody has yet sailed one in anger
+to find out what is missing**. That is a sea trial rather than a feature, it costs an
+evening, and it is the cheapest item on this whole document: everything a first approach
+turns up is something a buyer would have turned up instead.
 
 **M4 — Early Access launch.** Trailer, capsules, price, date announced four to six weeks
 ahead. *Ends on the day it is for sale.*
 
-**M5 — Content wave two → 1.0.** Weather that moves, failures, anchoring, a second boat,
-the campaign. *Ends when the Early Access promise on the store page has been kept.*
+**M5 — Content wave two → 1.0.** ~~Weather that moves~~ and ~~the radio~~ are in ahead of
+the launch they were listed after — a front that the glass sees coming, and a VHF that
+reads a forecast made out of this world's own weather, talks to the ship you are leading
+and to the harbour you are standing into. What is left is failures, anchoring, a second
+boat and the campaign. *Ends when the Early Access promise on the store page has been
+kept.*
+
+**Which raises the question M4 has to answer: where is the line drawn?** Everything that
+lands before the store page goes up is wave one by default, and a wave two that keeps
+shrinking is a store page whose promise is thin. The line is drawn when the page is
+written, not before — but it is drawn, and the four above are what it is drawn around.
 
 ---
 
@@ -356,10 +393,11 @@ Each with the recommendation, so the question is yes or no rather than open:
    question left under it has a deadline rather than a decision: IP Box has to be set up
    from the start of the tax year, so ask the accountant before January rather than before
    launch.
-2. ~~Early Access or a single 1.0~~ — **decided, then reversed: Early Access**, with
-   multiplayer in it from the first day. The reversal is the honest one: the thing this
-   game most needs is other people sailing it, and a 1.0 held back until the content list
-   is finished is a year of nobody sailing it.
+2. ~~Early Access or a single 1.0~~ — **decided: Early Access**, with multiplayer in it
+   from the first day. Decided the other way on 20 October and reversed the next day,
+   which is the honest way round: the thing this game most needs is other people sailing
+   it, and a 1.0 held back until the content list is finished is a year of nobody sailing
+   it. See *Price and shape* for what that buys and what it costs.
 3. **Price** — open, and deliberately late: it depends on how much of the content list is
    in the release.
 4. ~~Platforms at launch~~ — **decided: Windows, macOS and Linux.**
