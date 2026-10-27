@@ -107,6 +107,19 @@ pub struct Pilotage {
     /// and `None` before she has set anything, because *nothing* and *not yet known* are
     /// different states and only one of them is worth a hail.
     canvas: Option<[f32; 3]>,
+    /// A course she has been ordered to steer, radians from north.
+    ///
+    /// **The one order this locker could not give.** Every flag in it was *stop*, *wait*
+    /// or *answer me*; none of them was *this way*, so the only way to tell a ship where
+    /// to go was to go there yourself and hope she followed. E and I are the two signals
+    /// a vessel conning another one actually flies — *I am altering my course to
+    /// starboard*, *to port* — and on the radio it is a course in three figures. Both
+    /// end here, because a course is a course however it arrived.
+    ///
+    /// Held until she is told to carry on, or until the water says otherwise: an order
+    /// does not outrank the bottom, and *you are running into danger* takes the helm
+    /// back off it.
+    pub ordered: Option<f64>,
     /// When she last called up on sixteen, for the same reason — and `None` until she
     /// has, because a job that begins at time zero would otherwise count the gap from
     /// the start of the world and say nothing for the first three minutes.
@@ -439,6 +452,14 @@ impl Voice<'_> {
     }
 }
 
+/// How far one hoist of E or I puts her helm over, radians.
+///
+/// **Thirty degrees, and two hoists is how you get sixty.** A brig takes minutes to come
+/// round and a pilot conning one gives her a turn at a time; an order that swung her
+/// ninety degrees would be an order she was still carrying out a quarter of an hour
+/// later, with the pilot boat somewhere else entirely.
+const ORDER_TURNS: f64 = rad(30.0);
+
 /// How often she calls up on sixteen while nobody has answered, seconds.
 const CALLING_EVERY: f64 = 180.0;
 
@@ -496,9 +517,35 @@ fn told_her(
                 voice.across(job, "holding on — we are watching your signals", true);
             }
         }
+        // **Come round, and steady there.** The flag says what the pilot boat is doing
+        // and the ship does the same thing a moment later, which is how a vessel is
+        // conned from another one. Thirty degrees a hoist: a brig wears round in
+        // minutes, so an order that turned her ninety would be an order she spent a
+        // quarter of an hour on — and two hoists is how you get ninety if you want it.
+        Flag::Echo | Flag::India => {
+            if answer.said.is_none() {
+                let side = if matches!(flag, Flag::Echo) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let course = wrap_pi(brig.heading + side * ORDER_TURNS);
+                job.ordered = Some(course);
+                let words = if side > 0.0 {
+                    "coming round to starboard"
+                } else {
+                    "coming round to port"
+                };
+                answer.said = Some(words.to_string());
+                voice.across(job, words, true);
+            }
+        }
         // And on again.
         Flag::Papa => {
             brig.set = [1.0, 1.0, 1.0];
+            // Carrying on is the end of an order to steer: she goes back to following
+            // the water you are taking her through.
+            job.ordered = None;
             if answer.said.is_none() {
                 answer.said = Some("making sail".into());
                 voice.across(job, "making sail — we are coming on", true);
@@ -508,6 +555,9 @@ fn told_her(
         // keeps her way on while she does it. A ship that stops on a lee shore is a ship
         // that goes onto it.
         Flag::Uniform => {
+            // Danger outranks a course she was given, because the bottom outranks
+            // everybody.
+            job.ordered = None;
             let away = sheer_off(sim, brig.at, brig.heading);
             brig.set = [0.6, 1.0, 0.0];
             brig.bound_for = brig.at + away * 600.0;
@@ -692,7 +742,14 @@ pub fn run(
     let told = answer
         .reading
         .is_some_and(crate::signals::Flag::takes_the_helm);
-    if job.leading && !told {
+    // **An ordered course outranks the wake and nothing else.** She steers it until she
+    // is told to carry on, which is what *steady there* means — and `sail_her` still
+    // refuses to lie inside her own limit, so an order into the wind is answered by her
+    // falling off and her master saying so, rather than by a ship sailing where no
+    // square-rigger can.
+    if let Some(course) = job.ordered.filter(|_| !matches!(answer.reading, Some(f) if f == crate::signals::Flag::Lima || f == crate::signals::Flag::Xray)) {
+        brig.bound_for = brig.at + DVec2::new(course.sin(), course.cos()) * 3_000.0;
+    } else if job.leading && !told {
         // **A track, not a tow-rope.** She steers at where the pilot boat *was*, not at
         // where it is: a ship two cables astern aiming at the boat herself cuts every
         // corner you just went round, which on this coast is the corner you went round

@@ -1406,6 +1406,68 @@ mod what_the_hoist_does {
         assert!(said > 0, "she said nothing at all over fifty seconds");
     }
 
+    /// **E and I are an order about where she goes**, which is the one thing the locker
+    /// could not say: every other flag in it is *stop*, *wait* or *answer me*, so the
+    /// only way to tell a ship where to go was to go there yourself and hope.
+    ///
+    /// Thirty degrees a hoist, held afterwards — *come round to starboard, and steady
+    /// there* — because a brig takes minutes to come round and a pilot conning one gives
+    /// her a turn at a time.
+    #[test]
+    fn e_and_i_put_her_helm_over() {
+        for (flag, side) in [(Flag::Echo, 1.0), (Flag::India, -1.0)] {
+            let mut app = within_signal(flag);
+            let was = app.world().resource::<Brig>().heading;
+            at(&mut app, 8.0);
+            let ordered = app
+                .world()
+                .resource::<Pilotage>()
+                .ordered
+                .expect("she was given no course");
+            let turn = sail_core::units::deg(sail_core::units::wrap_pi(ordered - was));
+            assert!(
+                (turn.abs() - 30.0).abs() < 1.0 && turn.signum() == side,
+                "{} ordered a turn of {turn:.0} degrees",
+                flag.letter()
+            );
+            // And she goes there: her mark is on the ordered course rather than on the
+            // pilot boat's wake.
+            for t in 9..60 {
+                at(&mut app, t as f64);
+            }
+            let brig = app.world().resource::<Brig>();
+            let bearing = (brig.bound_for - brig.at).to_angle();
+            let want = glam::DVec2::new(ordered.sin(), ordered.cos()).to_angle();
+            assert!(
+                sail_core::units::wrap_pi(bearing - want).abs() < sail_core::units::rad(5.0),
+                "{} left her steering for somewhere else",
+                flag.letter()
+            );
+        }
+    }
+
+    /// **And carrying on ends it.** P is *make sail and follow*, which is the opposite of
+    /// a course order and has to cancel one — otherwise a ship given a heading once is a
+    /// ship that never follows anybody again.
+    #[test]
+    fn carrying_on_cancels_a_course_she_was_given() {
+        let mut app = within_signal(Flag::Echo);
+        at(&mut app, 8.0);
+        assert!(app.world().resource::<Pilotage>().ordered.is_some());
+        {
+            let mut hoist = app.world_mut().resource_mut::<Hoist>();
+            hoist.flying = Some(Flag::Papa);
+            hoist.since = 9.0;
+        }
+        for t in 10..20 {
+            at(&mut app, t as f64);
+        }
+        assert!(
+            app.world().resource::<Pilotage>().ordered.is_none(),
+            "she was still steering an old order after being told to carry on"
+        );
+    }
+
     /// A signal from out of sight is cloth nobody can read.
     #[test]
     fn she_cannot_obey_what_she_cannot_read() {

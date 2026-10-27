@@ -60,15 +60,28 @@ pub enum Flag {
     Papa,
     /// U — *You are running into danger.*
     Uniform,
+    /// E — *I am altering my course to starboard.*
+    ///
+    /// **The order to steer, in cloth.** A pilot leading a ship does not tell her a
+    /// compass course with a flag — he tells her what *he* is about to do, and she does
+    /// the same thing a moment later. That is the whole of how a vessel is conned from
+    /// another one, it is two of the forty single-letter signals, and it was the one
+    /// thing this locker could not say: every flag in it was *stop*, *wait* or *answer
+    /// me*, and none of them was *this way*.
+    Echo,
+    /// I — *I am altering my course to port.*
+    India,
 }
 
 impl Flag {
-    pub const ALL: [Flag; 5] = [
+    pub const ALL: [Flag; 7] = [
         Flag::Kilo,
         Flag::Lima,
         Flag::Xray,
         Flag::Papa,
         Flag::Uniform,
+        Flag::Echo,
+        Flag::India,
     ];
 
     /// The key it is bent on to.
@@ -85,6 +98,8 @@ impl Flag {
             Flag::Xray => KeyCode::Digit5,
             Flag::Papa => KeyCode::Digit6,
             Flag::Uniform => KeyCode::Digit7,
+            Flag::Echo => KeyCode::Digit8,
+            Flag::India => KeyCode::Digit9,
         }
     }
 
@@ -96,6 +111,8 @@ impl Flag {
             Flag::Xray => "5",
             Flag::Papa => "6",
             Flag::Uniform => "7",
+            Flag::Echo => "8",
+            Flag::India => "9",
         }
     }
 
@@ -107,6 +124,8 @@ impl Flag {
             Flag::Xray => "X",
             Flag::Papa => "P",
             Flag::Uniform => "U",
+            Flag::Echo => "E",
+            Flag::India => "I",
         }
     }
 
@@ -119,6 +138,8 @@ impl Flag {
             Flag::Xray => "stop what you are doing and watch for my signals",
             Flag::Papa => "about to proceed — the Blue Peter",
             Flag::Uniform => "you are running into danger",
+            Flag::Echo => "I am altering my course to starboard",
+            Flag::India => "I am altering my course to port",
         }
     }
 
@@ -130,6 +151,8 @@ impl Flag {
             Flag::Xray => "hold where you are and wait for me",
             Flag::Papa => "carry on — make sail and follow",
             Flag::Uniform => "sheer off, there is no water that way",
+            Flag::Echo => "come round to starboard, and steady there",
+            Flag::India => "come round to port, and steady there",
         }
     }
 
@@ -177,6 +200,12 @@ impl Flag {
                 (0.0, 0.5, 0.5, 0.5, red),
                 (0.5, 0.5, 0.5, 0.5, white),
             ],
+            // E: blue over red, in two horizontal halves.
+            Flag::Echo => vec![(0.0, 0.0, 1.0, 0.5, blue), (0.0, 0.5, 1.0, 0.5, red)],
+            // I: yellow with a black disc in the middle. A disc, not a square — it is
+            // the one round device in the single-letter flags and it is how I is told
+            // from everything else at a distance.
+            Flag::India => vec![(0.0, 0.0, 1.0, 1.0, yellow), (0.3, 0.26, 0.4, 0.48, black)],
         }
     }
 
@@ -190,7 +219,10 @@ impl Flag {
     /// that take the helm, and they take it because each of them is an order about where
     /// she is to be.
     pub fn takes_the_helm(self) -> bool {
-        matches!(self, Flag::Lima | Flag::Xray | Flag::Uniform)
+        matches!(
+            self,
+            Flag::Lima | Flag::Xray | Flag::Uniform | Flag::Echo | Flag::India
+        )
     }
 }
 
@@ -628,13 +660,19 @@ mod what_a_ship_can_read {
     /// **A question is not an order.** K and P leave the helm where it was; the three
     /// that say where she is to be take it.
     #[test]
-    fn only_three_of_them_take_the_helm() {
+    fn the_questions_do_not_take_the_helm() {
         assert!(!Flag::Kilo.takes_the_helm(), "asking her stopped her");
         assert!(
             !Flag::Papa.takes_the_helm(),
             "telling her to carry on stopped her"
         );
-        for flag in [Flag::Lima, Flag::Xray, Flag::Uniform] {
+        for flag in [
+            Flag::Lima,
+            Flag::Xray,
+            Flag::Uniform,
+            Flag::Echo,
+            Flag::India,
+        ] {
             assert!(flag.takes_the_helm(), "{} did nothing", flag.letter());
         }
     }
@@ -652,18 +690,23 @@ mod what_a_ship_can_read {
         );
     }
 
-    /// Every flag in the set says what the code says, and asks for something different.
+    /// Every flag in the set says what the code says, asks for something different, and
+    /// is a flag rather than a hole with cloth round it.
+    ///
+    /// **The coverage check used to be a sum and it had a guess in it.** It added up the
+    /// areas of the pieces it believed were the ground, which worked for the five flags
+    /// that happened to be built as *ground then device* and said that E — two
+    /// horizontal halves, which is the whole flag and no device at all — covered none of
+    /// itself. A flag is covered or it is not, so it is rasterised: every cell of a
+    /// sixteen by sixteen grid has to be inside some piece.
     #[test]
-    fn the_set_is_five_distinct_signals() {
+    fn the_set_is_seven_distinct_signals() {
         let mut letters: Vec<&str> = Flag::ALL.iter().map(|f| f.letter()).collect();
         letters.sort_unstable();
         letters.dedup();
         assert_eq!(letters.len(), Flag::ALL.len(), "two flags share a letter");
         for flag in Flag::ALL {
             assert!(!flag.means().is_empty() && !flag.asks().is_empty());
-            // Every piece is inside the flag, and between them they cover it: the first
-            // rectangle of each is the ground, and a ground with a hole in it is a flag
-            // you can see the shroud through.
             let cloth = flag.cloth();
             assert!(!cloth.is_empty(), "{} is bare rope", flag.letter());
             for (across, down, wide, tall, _) in &cloth {
@@ -676,17 +719,44 @@ mod what_a_ship_can_read {
                     flag.letter()
                 );
             }
-            let ground: f32 = cloth
-                .iter()
-                .take_while(|(_, down, _, tall, _)| *down == 0.0 && *tall == 1.0 || cloth.len() > 2)
-                .map(|(_, _, wide, tall, _)| wide * tall)
-                .sum();
+            const GRID: usize = 16;
+            for row in 0..GRID {
+                for col in 0..GRID {
+                    let x = (col as f32 + 0.5) / GRID as f32;
+                    let y = (row as f32 + 0.5) / GRID as f32;
+                    let covered = cloth.iter().any(|(across, down, wide, tall, _)| {
+                        x >= *across && x <= across + wide && y >= *down && y <= down + tall
+                    });
+                    assert!(
+                        covered,
+                        "{} has a hole in it at {x:.2}, {y:.2} — you could see the shroud \
+                         through it",
+                        flag.letter()
+                    );
+                }
+            }
+        }
+    }
+
+    /// **E and I are the two that say where to go**, which is the thing the locker could
+    /// not say at all: every other flag in it is *stop*, *wait* or *answer me*. They take
+    /// the helm, because an alteration of course is an order about where she is to be.
+    #[test]
+    fn the_two_that_order_a_course_take_the_helm() {
+        for flag in [Flag::Echo, Flag::India] {
             assert!(
-                ground >= 0.999,
-                "{} covers {:.2} of its own area",
-                flag.letter(),
-                ground
+                flag.takes_the_helm(),
+                "{} is an order and does not take the helm",
+                flag.letter()
+            );
+            assert!(
+                flag.asks().contains("round"),
+                "{} does not say which way",
+                flag.letter()
             );
         }
+        // And the two of them are opposite hands.
+        assert!(Flag::Echo.means().contains("starboard"));
+        assert!(Flag::India.means().contains("port"));
     }
 }

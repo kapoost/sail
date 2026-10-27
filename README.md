@@ -43,7 +43,7 @@ Keeping the first two apart is the load-bearing structural decision. Two reasons
      hours without anybody noticing, because nothing else depends on it. -->
 
 2. **The physics is testable without opening a window.** 180 tests in the core assert
-   against figures a sailor knows from the water — 571 across the workspace, run by CI
+   against figures a sailor knows from the water — 574 across the workspace, run by CI
    on every push. When one
    fails, the physics is lying, and you find out in a second instead of after twenty
    minutes of sailing.
@@ -937,6 +937,29 @@ the yard as it is clewed up, and lies flat against the mast when the wind comes 
 front of it — aback, which is how a square-rigger is stopped.
 
 `Esc`, then **MISSIONS**, which also has the man-overboard drill.
+
+### Telling her where to go
+
+**Every flag in the locker was *stop*, *wait* or *answer me*.** None of them was *this
+way*, so the only way to tell a ship where to go was to go there yourself and hope she
+followed — which is most of pilotage, and not all of it.
+
+E and I are the two signals a vessel conning another one actually flies: *I am altering
+my course to starboard*, *to port*. The pilot boat says what **it** is about to do and the
+ship does the same thing a moment later, which is how a vessel has been conned from
+another one since before anybody had a radio. Thirty degrees a hoist, held until you tell
+her to carry on — a brig wears round in minutes, so an order that swung her ninety would
+be an order she was still obeying a quarter of an hour later.
+
+**And on the radio it is a course in three figures.** *Brig Vestsvalen, steer one three
+five* — said one digit at a time, because *fifty* and *fifteen* are the same word over a
+noisy channel and a ship steering fifty when you said fifteen is on the rocks. She reads
+it back, which is the procedure and the only way you know she has the one you meant.
+
+Both end at the same helm, and both are checked by the same wedge: the course she was
+given is drawn on the chart from her bow, so *have I just told a square-rigger to sail
+into the wind* is a question you answer by looking. If it is inside her limit she falls
+off onto the closest she can lie and her master says so.
 
 ## The pilot
 

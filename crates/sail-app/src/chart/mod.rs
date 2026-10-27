@@ -1112,6 +1112,7 @@ pub fn draw(
                         brig.heading,
                         sail_core::wind::direction_of(wind),
                         &brig.astern,
+                        job.ordered,
                     );
                 }
             }

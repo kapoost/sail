@@ -199,6 +199,8 @@ fn key_named(name: &str) -> Option<KeyCode> {
         "5" => KeyCode::Digit5,
         "6" => KeyCode::Digit6,
         "7" => KeyCode::Digit7,
+        "8" => KeyCode::Digit8,
+        "9" => KeyCode::Digit9,
         "a" => KeyCode::KeyA,
         "b" => KeyCode::KeyB,
         "c" => KeyCode::KeyC,

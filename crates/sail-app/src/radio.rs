@@ -1260,6 +1260,15 @@ pub enum Say {
     Forecast,
     /// The ship that has been calling for a pilot.
     Brig,
+    /// And the course for her to steer, which is the one order a flag cannot give
+    /// precisely.
+    ///
+    /// **Three figures, because that is how a course is said and how it is read back.**
+    /// E and I tell her *come round to starboard* and she gives you thirty degrees of it;
+    /// the radio tells her *steer one three five* and she steers one three five. Both are
+    /// real, both are in the model, and the difference between them is the difference
+    /// between cloth and a voice.
+    Steer,
 }
 
 /// One call, made up for the station it is going to.
@@ -1341,6 +1350,19 @@ pub fn on_offer(
             say: Say::Brig,
             tag: "BRIG",
             words: format!("{to}, this is {ours}. Channel {WORKING}, over."),
+            to: to.clone(),
+            channel: WORKING,
+            at: brig.at,
+            height: BRIG_AERIAL,
+        });
+        // The course we are steering, handed to her in three figures. Ours rather than
+        // one typed in a box: a pilot conning a ship gives her the water he is on, and
+        // the whole mechanic of this job is that you are the one who knows the channel.
+        let course = sail_core::units::deg(sim.sim.state.heading).rem_euclid(360.0);
+        out.push(OnOffer {
+            say: Say::Steer,
+            tag: "STEER",
+            words: format!("{to}, this is {ours}. Steer {}. Over.", in_figures(course)),
             to,
             channel: WORKING,
             at: brig.at,
@@ -1348,6 +1370,25 @@ pub fn on_offer(
         });
     }
     out
+}
+
+/// A course in the figures a radio says them in.
+///
+/// **One three five, not a hundred and thirty-five.** A course on the air is three
+/// digits said one at a time, because *fifty* and *fifteen* are the same word over a
+/// noisy channel and a ship steering fifty when you said fifteen is on the rocks. The
+/// syllabus makes a point of it and so does this.
+pub fn in_figures(degrees: f64) -> String {
+    const SAID: [&str; 10] = [
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    ];
+    let whole = degrees.round().rem_euclid(360.0) as usize;
+    format!(
+        "{} {} {}",
+        SAID[whole / 100 % 10],
+        SAID[whole / 10 % 10],
+        SAID[whole % 10]
+    )
 }
 
 /// How readable you were, in the words a station uses.
@@ -1404,7 +1445,7 @@ pub fn transmit(
     course: Res<crate::course::Course>,
     station: Res<Coastguard>,
     brig: Res<crate::ship::Brig>,
-    job: Res<crate::mission::Pilotage>,
+    mut job: ResMut<crate::mission::Pilotage>,
     mut radio: ResMut<Radio>,
     mut once: Local<bool>,
 ) {
@@ -1518,6 +1559,21 @@ pub fn transmit(
                 )
                 .for_the_book(),
             );
+        }
+        // She reads it back, which is the procedure and is also the only way you know
+        // she got the one you meant.
+        Say::Steer => {
+            // She has it: the course goes on her helm, the same field a flag writes to.
+            // A course is a course however it arrived.
+            job.ordered = Some(sim.sim.state.heading);
+            let course = sail_core::units::deg(sim.sim.state.heading).rem_euclid(360.0);
+            radio.broadcast(Transmission::saying(
+                &call.to,
+                on,
+                &format!("{ours}, {}. Steering {}. Out.", call.to, in_figures(course)),
+                Some((call.at, call.height)),
+                answers_at,
+            ));
         }
         Say::Brig => radio.broadcast(Transmission::saying(
             &call.to,
@@ -1730,6 +1786,61 @@ mod keying_the_mike {
                 .iter()
                 .any(|h| h.channel == 6 && h.words.contains("Weather bulletin")),
             "nothing was read on six: {:?}",
+            radio.log.iter().map(|h| &h.words).collect::<Vec<_>>()
+        );
+    }
+
+    /// **A course on the air is three figures, said one at a time.** *Fifty* and
+    /// *fifteen* are the same word over a noisy channel, and a ship steering fifty when
+    /// you said fifteen is on the rocks — which is why the syllabus makes a point of it
+    /// and why this does.
+    #[test]
+    fn a_course_is_given_in_figures() {
+        assert_eq!(in_figures(135.0), "one three five");
+        assert_eq!(in_figures(0.0), "zero zero zero");
+        assert_eq!(in_figures(7.0), "zero zero seven");
+        assert_eq!(in_figures(359.6), "zero zero zero");
+        assert_eq!(in_figures(-5.0), "three five five");
+    }
+
+    /// **And the course she is given is the course she steers.** The flag gives her a
+    /// turn; the radio gives her a heading, and both end up on the same helm.
+    #[test]
+    fn steering_an_ordered_course_comes_off_the_radio() {
+        let mut app = aboard();
+        {
+            let here = app.world().resource::<Sim>().sim.state.pos;
+            let mut brig = app.world_mut().resource_mut::<crate::ship::Brig>();
+            brig.afloat = true;
+            brig.at = here + glam::DVec2::new(0.0, 300.0);
+            let mut job = app.world_mut().resource_mut::<crate::mission::Pilotage>();
+            job.running = true;
+        }
+        app.world_mut().resource_mut::<Radio>().channel = WORKING;
+        app.world_mut().resource_mut::<Radio>().asked = Some(Say::Steer);
+        at(&mut app, 1.0);
+        let heading = app.world().resource::<Sim>().sim.state.heading;
+        let ordered = app
+            .world()
+            .resource::<crate::mission::Pilotage>()
+            .ordered
+            .expect("she was given no course");
+        assert!(
+            sail_core::units::wrap_pi(ordered - heading).abs() < 1e-6,
+            "she was told to steer somewhere other than our own course"
+        );
+        // And she reads it back, which is the procedure and the only way you know she
+        // has the course you meant.
+        for t in 2..40 {
+            at(&mut app, t as f64);
+        }
+        let radio = app.world().resource::<Radio>();
+        assert!(
+            radio
+                .log
+                .iter()
+                .any(|h| h.words.contains("Steering") && !h.from.contains("(us)")),
+            "she never read the course back: {:?}",
             radio.log.iter().map(|h| &h.words).collect::<Vec<_>>()
         );
     }

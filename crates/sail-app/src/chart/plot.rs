@@ -1360,6 +1360,7 @@ pub(crate) fn where_she_can_go(
     heading: f64,
     from: f64,
     astern: &[glam::DVec2],
+    ordered: Option<f64>,
 ) {
     use std::f64::consts::TAU;
     // The limit, with the margin her master starts complaining inside — taken from the
@@ -1370,6 +1371,9 @@ pub(crate) fn where_she_can_go(
     const REACH: f64 = 900.0;
     const CLOSED: egui::Color32 = egui::Color32::from_rgba_premultiplied(104, 26, 26, 68);
     const EDGE: egui::Color32 = egui::Color32::from_rgb(150, 58, 48);
+    /// The ink an order is written in: the chart's own green for a track somebody chose,
+    /// which is what a course given to a ship is.
+    const ORDER: egui::Color32 = egui::Color32::from_rgb(40, 132, 96);
 
     let her = t.to_screen(at);
     // **Where she has been**, which is the question a pilot is really asking when he
@@ -1403,6 +1407,36 @@ pub(crate) fn where_she_can_go(
         let end = t.to_screen(at + glam::DVec2::new(course.sin(), course.cos()) * REACH);
         t.p.line_segment([her, end], egui::Stroke::new(1.4, EDGE));
     }
+    // **The course she was given**, drawn from her bow out to the same distance as the
+    // wedge — so the one question an order raises is answered by looking at it: is it
+    // outside the shading, or have you just told a square-rigger to sail into the wind?
+    if let Some(course) = ordered {
+        let end = t.to_screen(at + glam::DVec2::new(course.sin(), course.cos()) * REACH);
+        let along = end - her;
+        let len = along.length();
+        if len > 1.0 {
+            let step = along / len;
+            // Dashed, because it is an instruction rather than a track: the same ink a
+            // chart uses for a recommended course and for the same reason.
+            let mut run = 0.0;
+            while run < len {
+                let to = (run + 7.0).min(len);
+                t.p.line_segment(
+                    [her + step * run, her + step * to],
+                    egui::Stroke::new(1.6, ORDER),
+                );
+                run = to + 5.0;
+            }
+            t.p.text(
+                end,
+                egui::Align2::CENTER_CENTER,
+                format!("{:03.0}", course.to_degrees().rem_euclid(360.0)),
+                egui::FontId::monospace(9.0),
+                ORDER,
+            );
+        }
+    }
+
     // Her own hull: a wedge pointing where she is pointing, so the shading is attached
     // to a ship and not floating on the water.
     let nose = |ahead: f64, across: f64| {

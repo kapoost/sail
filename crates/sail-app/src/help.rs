@@ -269,7 +269,7 @@ const SECOND_COLUMN: usize = 3;
 /// help does not mention is a feature nobody will find; a key the help promises and
 /// nothing reads is a lie, and both have happened here.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const DOCUMENTED: [KeyCode; 55] = [
+pub const DOCUMENTED: [KeyCode; 57] = [
     // At the helm.
     KeyCode::ArrowLeft,
     KeyCode::ArrowRight,
@@ -337,6 +337,8 @@ pub const DOCUMENTED: [KeyCode; 55] = [
     KeyCode::Digit5,
     KeyCode::Digit6,
     KeyCode::Digit7,
+    KeyCode::Digit8,
+    KeyCode::Digit9,
 ];
 
 /// The mark in the corner, and the page behind it.
