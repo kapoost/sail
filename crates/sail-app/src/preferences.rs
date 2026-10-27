@@ -38,6 +38,8 @@ pub struct Kept {
     pub sea: f32,
     pub boat: f32,
     pub crew: f32,
+    /// How big the instruments are drawn, as a multiplier on what the window asks for.
+    pub ui: f32,
     /// Where you are sitting: at the helm, or astern of her.
     pub cockpit: bool,
     /// The drawn sea rather than the lit one.
@@ -61,6 +63,7 @@ impl Default for Kept {
             sea: settings.sea,
             boat: settings.boat,
             crew: settings.crew,
+            ui: settings.ui,
             cockpit: false,
             ink: false,
             pixels: Retro::default_step(),
@@ -90,6 +93,10 @@ impl Kept {
                 // it, and the default stands — which is why this did not want a new
                 // format number.
                 "crew" => kept.crew = value.trim().parse().unwrap_or(kept.crew),
+                // Same as the watch's fader: a file written before the console could be
+                // resized has no line for this and the default stands, which is why it
+                // did not want a new format number either.
+                "ui" => kept.ui = value.trim().parse().unwrap_or(kept.ui),
                 "cockpit" => kept.cockpit = yes(value),
                 "ink" => kept.ink = yes(value),
                 "counter" => kept.counter = yes(value),
@@ -113,12 +120,14 @@ impl Kept {
         let flag = |on: bool| if on { "1" } else { "0" };
         format!(
             "sail settings {FORMAT}\nvolume {:.3}\nmusic {:.3}\nsea {:.3}\nboat {:.3}\n\
-             crew {:.3}\ncockpit {}\nink {}\npixels {}\ncounter {}\nfull {}\nhud {}\n",
+             crew {:.3}\nui {:.3}\ncockpit {}\nink {}\npixels {}\ncounter {}\nfull {}\n\
+             hud {}\n",
             self.volume,
             self.music,
             self.sea,
             self.boat,
             self.crew,
+            self.ui,
             flag(self.cockpit),
             flag(self.ink),
             match self.pixels {
@@ -158,6 +167,14 @@ pub fn apply(
     settings.music = kept.music;
     settings.sea = kept.sea;
     settings.boat = kept.boat;
+    // **The watch's fader was written and never read back.** It has been in the file
+    // since the day it was added and nothing put it on the resource, so every launch
+    // began at the default and the setting quietly did nothing between sessions. Found
+    // while adding the line below it, which is the one this paragraph is really about.
+    settings.crew = kept.crew;
+    if !asked("SAIL_UI") {
+        settings.ui = kept.ui;
+    }
     *picture.view = if kept.cockpit {
         View::Cockpit
     } else {
@@ -189,12 +206,13 @@ pub fn apply(
 /// evening afterwards, and the player never asked for that. So a field the environment
 /// answered keeps whatever the file already said about it — the dial wins over the file
 /// *while the program is running* and the file is left exactly as it was found.
-fn dialled() -> [bool; 4] {
+fn dialled() -> [bool; 5] {
     [
         crate::knob::var("SAIL_INK").is_ok(),
         crate::knob::var("SAIL_PIXELS").is_ok(),
         crate::knob::var("SAIL_FPS").is_ok(),
         crate::knob::var("SAIL_FULL").is_ok(),
+        crate::knob::var("SAIL_UI").is_ok(),
     ]
 }
 
@@ -234,13 +252,14 @@ pub fn remember(
 
 /// What the resources say, with the dialled fields left as the file has them.
 fn as_set(settings: &Settings, picture: &Picture, kept: &Kept) -> Kept {
-    let [ink_asked, pixels_asked, counter_asked, full_asked] = dialled();
+    let [ink_asked, pixels_asked, counter_asked, full_asked, ui_asked] = dialled();
     Kept {
         volume: settings.volume,
         music: settings.music,
         sea: settings.sea,
         boat: settings.boat,
         crew: settings.crew,
+        ui: if ui_asked { kept.ui } else { settings.ui },
         cockpit: *picture.view == View::Cockpit,
         ink: if ink_asked { kept.ink } else { picture.ink.0 },
         pixels: if pixels_asked {
@@ -294,6 +313,7 @@ mod what_is_remembered {
             sea: 0.9,
             boat: 0.75,
             crew: 0.33,
+            ui: 1.15,
             cockpit: true,
             ink: true,
             pixels: Some(0),
@@ -320,6 +340,7 @@ mod what_is_remembered {
                     "sea" => kept.sea = value.trim().parse().unwrap(),
                     "boat" => kept.boat = value.trim().parse().unwrap(),
                     "crew" => kept.crew = value.trim().parse().unwrap(),
+                    "ui" => kept.ui = value.trim().parse().unwrap(),
                     "cockpit" => kept.cockpit = yes(value),
                     "ink" => kept.ink = yes(value),
                     "counter" => kept.counter = yes(value),

@@ -171,13 +171,13 @@ mod what_the_window_is_told {
     /// drawn above the size at which the figures stop being figures.
     #[test]
     fn the_smallest_window_can_still_be_read() {
-        let scale = crate::retro::console_scale(NARROWEST, 1.0);
+        let scale = crate::retro::console_scale(NARROWEST, SHORTEST, 1.0, 1.0);
         assert!(
             scale >= 0.5,
             "the console comes out at {scale:.2} in the smallest window we allow"
         );
         // And the one screen this number was picked against.
-        let deck = crate::retro::console_scale(1280.0, 1.0);
+        let deck = crate::retro::console_scale(1280.0, 800.0, 1.0, 1.0);
         assert!(
             deck >= 0.5,
             "a Steam Deck gets the console at {deck:.2}, which is below legible"

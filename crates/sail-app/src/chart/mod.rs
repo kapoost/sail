@@ -893,6 +893,7 @@ pub fn draw(
     race: Res<crate::race::Race>,
     home: Res<crate::anchorage::Home>,
     radio: Res<crate::radio::Radio>,
+    brig: Res<crate::ship::Brig>,
 ) -> Result {
     if !chart.open {
         return Ok(());
@@ -1093,6 +1094,20 @@ pub fn draw(
             // does not go on top of the plot.
             if job.running && job.over.is_none() {
                 the_way_in(&table, &job.route, job.let_go_at);
+                // **And the water she can actually be taken into**, which is the one
+                // thing a pilot has to know about the ship he is leading and the one
+                // thing the chart did not say. Her wind, at her position, at her rig's
+                // height — see `where_she_can_go`.
+                if brig.afloat {
+                    let wind = crate::ship::her_wind(&sim, brig.at);
+                    where_she_can_go(
+                        &table,
+                        brig.at,
+                        brig.heading,
+                        sail_core::wind::direction_of(wind),
+                        &brig.astern,
+                    );
+                }
             }
             // And the race course, which is the same kind of thing: not where she has
             // been, but where she is supposed to go.

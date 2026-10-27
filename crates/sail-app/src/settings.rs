@@ -77,6 +77,14 @@ pub struct Settings {
     /// And the watch, which is the one sound aboard that is a person — see
     /// `sound::SeaParams::set_crew` for why that is worth a fader of its own.
     pub crew: f32,
+    /// How big the instruments are drawn, as a multiplier on what the window asks for.
+    ///
+    /// **One is the size the window says**, and the window says it from its own size —
+    /// see `retro::console_scale`. This is the hand on top of that: eyes differ, screens
+    /// are at different distances, and a console that is right at arm's length on a
+    /// laptop is small on a television across a room. It is a multiplier rather than a
+    /// size so that it keeps meaning the same thing when the window changes.
+    pub ui: f32,
     /// Whether the weather has been touched. Until it is, the panel shows the day as
     /// drawn and says so; after it, it stops pretending the forecast still applies.
     pub weather_touched: bool,
@@ -97,6 +105,12 @@ impl Default for Settings {
             // the gear and the music come up over it where they can be made out.
             volume: 0.70,
             music: 1.00,
+            // `SAIL_UI=1.3` for a run, the way every other dial works — and the way a
+            // screenshot of the console at somebody else's size gets taken.
+            ui: crate::knob::var("SAIL_UI")
+                .ok()
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(1.0),
             // **Both of them down again, against the band.** Four decibels off the gear
             // and three off the sea, which is a step you hear rather than one you have
             // to be told about — and the music is left where it was, so what changes is
@@ -398,6 +412,42 @@ pub fn draw(
                                     {
                                         **screen = which;
                                     }
+                                }
+                            });
+                            // **How big the instruments are drawn.**
+                            //
+                            // The window decides the size and this is the hand on top of
+                            // it — see `retro::console_scale`. It exists because the one
+                            // thing a layout cannot know is how far away the person is
+                            // sitting and what their eyes are like, and because the deck
+                            // asked for it in those words: *the fonts are too small*.
+                            //
+                            // Shown as a percentage, which is the only unit anybody has
+                            // ever wanted for this.
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("size")
+                                        .color(egui::Color32::from_rgb(150, 150, 130))
+                                        .monospace()
+                                        .size(11.0),
+                                );
+                                let mut ui_scale = settings.ui;
+                                if ui
+                                    .add(
+                                        egui::Slider::new(
+                                            &mut ui_scale,
+                                            crate::retro::ASKED_RANGE,
+                                        )
+                                        .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                                        .text("instruments"),
+                                    )
+                                    .on_hover_text(
+                                        "how big the console is drawn. The size the window \
+                                         asks for is 100%",
+                                    )
+                                    .changed()
+                                {
+                                    settings.ui = ui_scale;
                                 }
                             });
                             if ui.selectable_label(hud.0, "the diagnostic panel").clicked() {

@@ -640,6 +640,89 @@ mod the_pilotage {
         app
     }
 
+    /// **She holds a course, and the chart does not have to watch her fidget.**
+    ///
+    /// Reported from the deck: her trace on the chart wanders. Two causes and both were
+    /// in her steering. She laid her course against the wind of the *instant*, gusts and
+    /// all, so every puff moved her head a degree or two; and with a mark near enough to
+    /// dead to windward, the better tack to fall off onto changed sign frame to frame,
+    /// so she sawed across the wind instead of standing on.
+    ///
+    /// What is measured is the thing the eye sees: the total swing of her head over a
+    /// quarter of an hour against the net change in it. A ship standing on scores near
+    /// one; a ship sawing scores many times that.
+    #[test]
+    fn she_holds_her_course_instead_of_chasing_the_gusts() {
+        let mut app = with_a_brig();
+        let here = standing_in(&mut app, 300.0);
+        {
+            // A mark dead to windward of her, which is the case that made her saw: she
+            // cannot lie it, so she must pick a tack and stand on.
+            let wind = app.world().resource::<Sim>().sim.telemetry.twd;
+            let mut brig = app.world_mut().resource_mut::<Brig>();
+            brig.bound_for = here + glam::DVec2::new(wind.sin(), wind.cos()) * 4_000.0;
+            brig.heading = wind + rad(65.0);
+        }
+        // Fifteen minutes at a quarter-second a frame. Her own mark, not the pilot
+        // boat's, so this measures her steering and nothing else.
+        let mut headings = Vec::new();
+        for _ in 0..(15 * 60 * 4) {
+            {
+                let here = app.world().resource::<Sim>().sim.state.pos;
+                let wind = app.world().resource::<Sim>().sim.telemetry.twd;
+                let mut brig = app.world_mut().resource_mut::<Brig>();
+                brig.bound_for = here + glam::DVec2::new(wind.sin(), wind.cos()) * 4_000.0;
+            }
+            app.update();
+            headings.push(app.world().resource::<Brig>().heading);
+        }
+        // The first three minutes are her choosing a tack and coming round onto it,
+        // which is a ship doing her job and not a ship fidgeting. What is measured is
+        // the quarter of an hour after she has settled.
+        let settled = &headings[3 * 60 * 4..];
+        let swing: f64 = settled
+            .windows(2)
+            .map(|pair| sail_core::units::wrap_pi(pair[1] - pair[0]).abs())
+            .sum();
+        let net = sail_core::units::wrap_pi(settled[settled.len() - 1] - settled[0]).abs();
+        assert!(
+            swing.to_degrees() < 25.0,
+            "settled on one tack she still swung {:.0} degrees, making {:.0} of it good",
+            swing.to_degrees(),
+            net.to_degrees()
+        );
+        // And she keeps the tack she chose: one sign for her wind angle the whole way.
+        let wind = app.world().resource::<Sim>().sim.telemetry.twd;
+        let sides: Vec<f64> = settled
+            .iter()
+            .map(|h| crate::ship::angle_off(*h, wind).signum())
+            .collect();
+        let wears = sides.windows(2).filter(|p| p[0] != p[1]).count();
+        assert!(wears <= 1, "she wore round {wears} times chasing one mark");
+    }
+
+    /// And her track is kept, because *is she following me* is a question about where
+    /// she has been rather than where she is.
+    #[test]
+    fn she_leaves_a_track_on_the_chart() {
+        let mut app = with_a_brig();
+        standing_in(&mut app, 300.0);
+        for _ in 0..(5 * 60 * 4) {
+            app.update();
+        }
+        let brig = app.world().resource::<Brig>();
+        let run: f64 = brig.astern.windows(2).map(|p| (p[1] - p[0]).length()).sum();
+        assert!(
+            brig.astern.len() > 3,
+            "five minutes of sailing left {} marks astern, over {run:.0} m of ground",
+            brig.astern.len()
+        );
+        // Oldest first, and spaced: a track is a line, not a cloud.
+        for pair in brig.astern.windows(2) {
+            assert!((pair[1] - pair[0]).length() > 40.0);
+        }
+    }
+
     /// Put her a cable and a half astern of the boat, heading the same way.
     fn standing_in(app: &mut App, astern: f64) -> glam::DVec2 {
         let here = app.world().resource::<Sim>().sim.state.pos;
@@ -703,7 +786,16 @@ mod the_pilotage {
                 (brig.bound_for - harbour).length() < 1.0,
                 "she stopped before anybody had caught her"
             );
-            assert_eq!(brig.set, [1.0, 1.0, 1.0], "and she had all sail set");
+            // **Sailing, not hove to** — which is what this line was for, and it used
+            // to say *all sail set*. She carries what the wind allows now, so in a
+            // breeze that has her topgallants half in, all three full is the wrong
+            // thing to assert: what matters is that her topsail is drawing and there is
+            // canvas on her. See `ship::she_carries`.
+            assert!(
+                brig.set[1] > 0.9 && brig.set.iter().sum::<f32>() > 1.4,
+                "she was under {:?}, which is not a ship standing on",
+                brig.set
+            );
         }
         // Now get ahead of her, and then drop back again.
         let here = app.world().resource::<Sim>().sim.state.pos;

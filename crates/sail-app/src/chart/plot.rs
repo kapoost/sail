@@ -1336,3 +1336,143 @@ pub(crate) fn the_course(t: &Table, race: &crate::race::Race) {
         t.note(at + egui::vec2(4.0, -10.0), rival.name, INK);
     }
 }
+
+/// The water the brig can be taken into, drawn where she is.
+///
+/// **Asked for from the deck in the one sentence that matters: *what are her limits?***
+/// She was circling and would not sail, and everything needed to understand why was in
+/// the model and nowhere on the paper — her wind is not your wind, her limit is not your
+/// limit, and the one hail she had for it, *we cannot lie that close*, says what is
+/// wrong without saying where she *can* go.
+///
+/// So: a wedge she cannot be led into, and the two courses that bound it. Sixty-five
+/// degrees either side of the wind at **her** position — sampled at her rig's height,
+/// which in a shear is a knot or two more than you have on deck — with the six degrees
+/// of margin her master complains inside, because a limit you are exactly on is a limit
+/// you are about to be inside.
+///
+/// Drawn from her bow out to half a mile, which is the water a pilot is choosing in. The
+/// rule to sail by is the one every square-rig pilot book states: **lay her a course
+/// outside the wedge, and if the mark is inside it, give her two legs instead of one.**
+pub(crate) fn where_she_can_go(
+    t: &Table,
+    at: glam::DVec2,
+    heading: f64,
+    from: f64,
+    astern: &[glam::DVec2],
+) {
+    use std::f64::consts::TAU;
+    // The limit, with the margin her master starts complaining inside — taken from the
+    // model rather than restated here, so the shading and the hail cannot disagree.
+    let shut = crate::mission::WILL_NOT_LIE;
+    /// How far out it is worth drawing, metres. Half a mile: further than she can be led
+    /// in one leg and about what fits on a glance chart.
+    const REACH: f64 = 900.0;
+    const CLOSED: egui::Color32 = egui::Color32::from_rgba_premultiplied(104, 26, 26, 68);
+    const EDGE: egui::Color32 = egui::Color32::from_rgb(150, 58, 48);
+
+    let her = t.to_screen(at);
+    // **Where she has been**, which is the question a pilot is really asking when he
+    // looks astern: not *where is she* but *is she following me*. A line of her own,
+    // thinner and darker than the recommended track, so that her water and the water you
+    // chose for her can be told apart at a glance — and when the two disagree, that is
+    // the picture of what went wrong.
+    for pair in astern.windows(2) {
+        t.p.line_segment(
+            [t.to_screen(pair[0]), t.to_screen(pair[1])],
+            egui::Stroke::new(1.2, EDGE.gamma_multiply(0.65)),
+        );
+    }
+    // The wedge, as a fan of triangles — the painter has no pie slice, and a fan is what
+    // one is anyway.
+    let steps = 18;
+    for i in 0..steps {
+        let a = from - shut + 2.0 * shut * (i as f64 / steps as f64);
+        let b = from - shut + 2.0 * shut * ((i + 1) as f64 / steps as f64);
+        let p = |angle: f64| t.to_screen(at + glam::DVec2::new(angle.sin(), angle.cos()) * REACH);
+        t.p.add(egui::Shape::convex_polygon(
+            vec![her, p(a), p(b)],
+            CLOSED,
+            egui::Stroke::NONE,
+        ));
+    }
+    // And the two edges, which are the courses she *can* lie — the thing a pilot reads
+    // off this rather than the shading.
+    for side in [-1.0, 1.0] {
+        let course = from + side * shut;
+        let end = t.to_screen(at + glam::DVec2::new(course.sin(), course.cos()) * REACH);
+        t.p.line_segment([her, end], egui::Stroke::new(1.4, EDGE));
+    }
+    // Her own hull: a wedge pointing where she is pointing, so the shading is attached
+    // to a ship and not floating on the water.
+    let nose = |ahead: f64, across: f64| {
+        let along = glam::DVec2::new(heading.sin(), heading.cos());
+        let side = glam::DVec2::new(along.y, -along.x);
+        t.to_screen(at + along * ahead + side * across)
+    };
+    t.p.add(egui::Shape::convex_polygon(
+        vec![nose(70.0, 0.0), nose(-40.0, 26.0), nose(-40.0, -26.0)],
+        EDGE,
+        egui::Stroke::NONE,
+    ));
+    // Where the wind is on this bit of water, written once at the point of the wedge:
+    // her wind is not yours, and that is the half of it nobody guesses.
+    //
+    // Painted rather than noted: `Table::note` is the explain layer and is off unless
+    // somebody turns it on, and this is not a remark about how the chart works — it is
+    // the limit of the ship you are leading.
+    let out = from + TAU / 2.0;
+    let label = t.to_screen(at + glam::DVec2::new(out.sin(), out.cos()) * (REACH * 0.5));
+    t.p.text(
+        label,
+        egui::Align2::CENTER_CENTER,
+        format!(
+            "she will not lie inside {:.0}° of the wind",
+            shut.to_degrees()
+        ),
+        egui::FontId::monospace(9.0),
+        EDGE,
+    );
+}
+
+#[cfg(test)]
+mod what_the_paper_says_about_her {
+    /// **The shading and the ship agree, because they are the same number.**
+    ///
+    /// The whole use of the wedge is that water inside it is water her master will
+    /// refuse; a chart that shaded sixty-five degrees while he complained at seventy-one
+    /// would be a chart that gets you a refusal from water it called clear, which is
+    /// worse than no chart at all.
+    #[test]
+    fn the_wedge_is_the_angle_her_master_refuses() {
+        use crate::mission::{remark, WILL_NOT_LIE};
+        use sail_core::units::rad;
+        let deep = 40.0;
+        // A hair inside it, and he says so.
+        let inside = remark(deep, deep, WILL_NOT_LIE - rad(1.0), 0.0, 400.0, 0.0);
+        assert!(
+            inside.is_some_and(|said| said.contains("cannot lie")),
+            "he accepted a course inside the wedge: {inside:?}"
+        );
+        // And a hair outside it, and he does not.
+        assert_eq!(
+            remark(deep, deep, WILL_NOT_LIE + rad(1.0), 0.0, 400.0, 0.0),
+            None
+        );
+        // Both tacks, because a wedge has two sides and a sign error here would shade
+        // the water she can sail and clear the water she cannot.
+        let other = remark(deep, deep, -(WILL_NOT_LIE - rad(1.0)), 0.0, 400.0, 0.0);
+        assert!(other.is_some_and(|said| said.contains("cannot lie")));
+    }
+
+    /// And it is wider than the rig's own limit, which is the margin a seaman keeps.
+    #[test]
+    fn it_is_the_seamans_limit_and_not_the_rigs() {
+        let margin = crate::mission::WILL_NOT_LIE - crate::ship::CLOSEST;
+        assert!(
+            margin > 0.0 && margin < sail_core::units::rad(15.0),
+            "the seaman's margin came out at {:.0} degrees",
+            margin.to_degrees()
+        );
+    }
+}

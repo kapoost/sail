@@ -138,6 +138,24 @@ pub struct Brig {
     /// Where she is going. In her own right until a pilot is aboard; after that it is
     /// the pilot's problem.
     pub bound_for: DVec2,
+    /// The wind she *steers* by, as a direction it blows from.
+    ///
+    /// **Not the wind she sails in.** Her speed, her yards and her heel come off the
+    /// gust she is in this second, which is right; her course must not. A master holds
+    /// a course through a gust and lets the quartermaster meet the sea — a ship that
+    /// re-aimed herself at every puff would wander a degree or two either side of her
+    /// head for ever, which on the chart is a track that fidgets and is exactly what was
+    /// reported from the deck. So the course is laid against a wind relaxed over half a
+    /// minute, and the fidget goes with it.
+    pub steering_from: f64,
+    /// Which tack she fell off onto when the mark was inside her limit, or nought.
+    ///
+    /// Kept, because the choice has to have memory in it: with the mark dead to windward
+    /// the two tacks are a hair apart in value and the sign flips frame to frame, which
+    /// is a ship that cannot make up her mind and a chart trace that saws.
+    pub tack: f64,
+    /// Where she has been, newest last — for the chart, which is where a pilot reads it.
+    pub astern: Vec<DVec2>,
     /// What she is called, which she needs the moment she has a radio.
     ///
     /// **A vessel on the air identifies herself every time she speaks**, and that is not
@@ -159,6 +177,9 @@ impl Default for Brig {
             set: [1.0, 1.0, 1.0],
             afloat: false,
             bound_for: DVec2::ZERO,
+            steering_from: 0.0,
+            tack: 0.0,
+            astern: Vec::new(),
             name: "Nordstjernen".to_string(),
         }
     }
@@ -217,6 +238,31 @@ pub fn course_for(from: f64, angle: f64) -> f64 {
     wrap_tau(from + angle)
 }
 
+/// How long the wind she steers by takes to catch up with the wind she is in, seconds.
+///
+/// Half a minute. Long enough that a gust is a thing that happens to the sails and not
+/// to the course, short enough that a real shift — a front going through, the land
+/// bending the breeze round a headland — is on her head within a leg.
+const STEERS_BY: f64 = 30.0;
+
+/// And how far past the wind the mark has to come before she will wear round onto the
+/// other tack, radians.
+///
+/// Twenty-five degrees. Wearing a brig round is ten minutes of work for every hand
+/// aboard; nobody does it because a mark drifted two degrees across her bow.
+const WEARS_AT: f64 = rad(25.0);
+
+/// And the course a seaman actually holds when the mark is inside that: **full and by**,
+/// a touch free of the limit rather than exactly on it.
+///
+/// **Nobody sails a square-rigger on her stops.** The last few degrees before the limit
+/// are where the yards are against the shrouds, the weather leeches lift and she has
+/// nothing in hand for a header — so a ship told to lay the best she can lies a few
+/// degrees free and keeps her way on. Six of them, which is also the margin her master
+/// starts complaining inside, and the angle the chart shades to: one number, three uses,
+/// and they cannot disagree about where she may be taken.
+pub const FULL_AND_BY: f64 = CLOSEST + rad(6.0);
+
 /// The closest she will lie to the true wind, radians.
 ///
 /// **Sixty-five degrees, and it is the whole character of the rig.** A square sail cannot
@@ -225,6 +271,44 @@ pub fn course_for(from: f64, angle: f64) -> f64 {
 /// why she needs sea room, why a lee shore kills her, why she wears rather than tacks —
 /// comes out of this one number.
 pub const CLOSEST: f64 = rad(65.0);
+
+/// What she has set, for the wind she is in and how much she wants to slow down.
+///
+/// **A ship that carries the same canvas in a gale as in a drifter is a model of a
+/// photograph.** Reported from the deck as not being able to see her work her sails,
+/// and that is exactly what it was: her three square sails were full whenever she was
+/// sailing and furled only when a flag told her otherwise, so the one vessel in the game
+/// with a crew on deck never did anything with them.
+///
+/// The order canvas comes off a brig is fixed and it is the order it goes back on:
+///
+/// * **Topgallants first.** The highest sail is the first in and the last out — it is
+///   the one with the most leverage on her, the one in the strongest wind, and the one
+///   two hands can take in. Gone by about twenty-seven knots, which is a stiff force six.
+/// * **Then the courses are hauled up.** The big lower sails come off her around force
+///   eight. She does not lose much for it: a brig under topsails in forty knots is
+///   making most of what she made under everything in thirty.
+/// * **And the topsails are reefed and reefed again**, down to the close-reefed topsail
+///   that is her storm canvas and the last thing standing.
+///
+/// `hurry` is the other reason to take sail off her: a ship with no brakes closing on
+/// the boat ahead of her takes in the courses and the topgallants, which is the only
+/// brake she has. One is everything she can spare; nought is carry on.
+pub fn she_carries(tws: f64, hurry: f64) -> [f32; 3] {
+    // Full below the first number, gone by the second, and in between the crew is on
+    // the yard.
+    let shortening = |kn: f64, full: f64, handed: f64| -> f32 {
+        (((handed - kn) / (handed - full)).clamp(0.0, 1.0)) as f32
+    };
+    let kn = ms_to_kn(tws);
+    let slow = hurry.clamp(0.0, 1.0) as f32;
+    let topgallant = shortening(kn, 20.0, 27.0) * (1.0 - slow);
+    let course = shortening(kn, 30.0, 40.0) * (1.0 - slow);
+    // The topsail is reefed rather than handed: close-reefed is a third of it and it is
+    // the sail she lies to when there is nothing else left.
+    let topsail = 0.34 + 0.66 * shortening(kn, 33.0, 48.0);
+    [course, topsail, topgallant]
+}
 
 /// How fast she goes at a given true wind angle and strength, m/s.
 ///
@@ -240,9 +324,17 @@ pub fn through_the_water(twa: f64, tws: f64) -> f64 {
     }
     // Shape: rises from the closest she can lie, best about a hundred and twenty, and
     // falls away again dead before the wind.
+    //
+    // **And it does not start at nothing**, which it did — and that one zero is the
+    // whole of a fault reported from the deck as *she circles and will not sail*. A
+    // ship led inside her limit falls off onto the closest she can lie; the polar said
+    // a ship at the closest she can lie makes no way at all; so she lay there, lost
+    // steerage, wandered off the course she had just chosen, and did it again. Close
+    // hauled is not a stop: it is her worst point of sailing and she still goes, at
+    // something under half what the same wind gives her on a broad reach.
     let reach = ((off - CLOSEST) / (rad(120.0) - CLOSEST)).min(1.0);
     let past = ((off - rad(120.0)).max(0.0) / rad(60.0)).min(1.0);
-    let shape = reach.powf(0.65) * (1.0 - 0.22 * past * past);
+    let shape = (0.42 + 0.58 * reach.powf(0.65)) * (1.0 - 0.22 * past * past);
     // Eight knots in a stiff breeze is a fast day for a loaded brig; she is a carrier,
     // not a clipper, and her hull speed is the wall at the top of it.
     let wind = (ms_to_kn(tws) / 18.0).min(1.6);
@@ -861,8 +953,18 @@ fn square_sail(half_head: f32, half_foot: f32, drop: f32, set: f32, aback: bool)
         let x = (u * 2.0 - 1.0) * half;
         // The head of a square sail is bent to the jackstay along the top of the yard,
         // so it is a straight line; everything below it is free.
-        let bag = (std::f32::consts::PI * v.powf(0.85)).sin()
-            * (std::f32::consts::PI * u).sin().powf(0.6);
+        // **The one that took every square sail in the game off her yards.**
+        //
+        // `sin(pi)` is not nought in floating point, it is minus eight hundredths of a
+        // millionth — and a negative number raised to a fractional power is NaN. The
+        // last column of every sail was therefore NaN, the mesh's bounding box was NaN
+        // with it, and a bounding box that cannot be compared with the view frustum is a
+        // mesh the renderer skips. Not a sail drawn wrongly: no sail drawn at all, on
+        // both masts, at every tier, since the day this line was written. Reported from
+        // the deck as not being able to see her work her sails, which is exactly what it
+        // looked like.
+        let across = (std::f32::consts::PI * u).sin().max(0.0);
+        let bag = (std::f32::consts::PI * v.powf(0.85)).sin() * across.powf(0.6);
         // And the foot scallops between the clews, because the only things holding it
         // are at the corners.
         let scallop = (1.0 - (u * 2.0 - 1.0).abs().powf(2.0)) * 0.1 * hang * set;
@@ -1125,6 +1227,11 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>, mut plac
         // never put where she can be seen and the knob silently stops working — which
         // is the worst way for a dev tool to fail, because you blame the scene.
         *placed = false;
+        // Her track goes with her too, or the next ship in is drawn trailing the last
+        // one's passage behind her.
+        brig.astern.clear();
+        brig.steering_from = 0.0;
+        brig.tack = 0.0;
         return;
     }
     // `SAIL_BRIG_SHOW=130` puts her that many metres off the bow **once**, and then
@@ -1173,18 +1280,34 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>, mut plac
     let from = sail_core::wind::direction_of(wind);
     let tws = wind.length();
 
+    // **The wind she steers by, which is not the wind she is in.** See
+    // `Brig::steering_from`: the yards and the heel answer the gust, the course does
+    // not, and a ship that re-aimed herself at every puff draws a track that saws.
+    if brig.steering_from == 0.0 {
+        brig.steering_from = from;
+    }
+    let settle = 1.0 - (-dt / STEERS_BY).exp();
+    brig.steering_from = wrap_tau(brig.steering_from + wrap_pi(from - brig.steering_from) * settle);
+    let held = brig.steering_from;
+
     // The course she wants, and the course she can actually steer: a square-rigger
     // headed inside her own limit does not pinch, she falls off on to it.
     let want = {
         let off = brig.bound_for - brig.at;
         off.x.atan2(off.y)
     };
-    let twa_wanted = angle_off(want, from);
+    let twa_wanted = angle_off(want, held);
     let steer = if twa_wanted.abs() < CLOSEST {
-        // Pick whichever tack is nearer to where she is going, and lie as close as the
-        // rig allows on it.
-        let side = if twa_wanted.abs() < 1e-6 {
-            if angle_off(brig.heading, from).is_sign_negative() {
+        // Which tack to fall off onto — and it **stays** the tack she is on until the
+        // mark is clearly round the other side of the wind. A ship a hair either side of
+        // dead to windward is a ship whose better tack changes sign with the sea, and
+        // picking it afresh every frame is how she came to saw back and forth without
+        // ever going anywhere. Wearing a square-rigger round is ten minutes of work;
+        // nobody does it for two degrees.
+        let side = if brig.tack != 0.0 && twa_wanted * brig.tack > -WEARS_AT {
+            brig.tack
+        } else if twa_wanted.abs() < 1e-6 {
+            if angle_off(brig.heading, held).is_sign_negative() {
                 -1.0
             } else {
                 1.0
@@ -1192,8 +1315,13 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>, mut plac
         } else {
             twa_wanted.signum()
         };
-        course_for(from, side * CLOSEST)
+        brig.tack = side;
+        course_for(held, side * FULL_AND_BY)
     } else {
+        // On a course she can lie, the question of which tack she fell off onto is a
+        // dead one — and it has to be cleared, or the hysteresis above holds a tack she
+        // left half an hour ago.
+        brig.tack = 0.0;
         want
     };
     // She comes round at a ship's rate, not a dinghy's.
@@ -1251,7 +1379,26 @@ pub fn sail_her(sim: Res<Sim>, time: Res<Time>, mut brig: ResMut<Brig>, mut plac
     brig.way = was + (want - was) * (1.0 - (-dt / 10.0).exp());
     let run = brig.way * dt;
     brig.at += run;
+
+    // **And where she has been**, because the one question a pilot asks about the ship
+    // behind him is whether she is following — and a position is a snapshot while a
+    // track is an answer. Dropped every two cables of ground, which is a mark every
+    // couple of minutes at her speed and a line on the chart rather than a smear.
+    let last = brig.astern.last().copied();
+    let here = brig.at;
+    if last.is_none_or(|was| (here - was).length() > ASTERN_EVERY) {
+        brig.astern.push(here);
+        // A pilotage is an hour; this is three of them, and the oldest goes first.
+        if brig.astern.len() > ASTERN_KEEPS {
+            brig.astern.remove(0);
+        }
+    }
 }
+
+/// How far she runs between marks on her own track, metres.
+const ASTERN_EVERY: f64 = 60.0;
+/// And how many are kept: enough for the whole of a long pilotage.
+const ASTERN_KEEPS: usize = 300;
 
 /// Put her on the water, at the attitude the sea gives her.
 pub fn place(
@@ -1468,5 +1615,149 @@ mod how_she_lies {
             "she took {:.0}% of a swell {length:.0} m long",
             felt / steepest * 100.0
         );
+    }
+}
+
+#[cfg(test)]
+mod what_she_can_do {
+    use super::*;
+    use sail_core::units::{kn_to_ms, ms_to_kn, rad};
+
+    /// **Close hauled is her worst point of sailing and not a stop**, and the difference
+    /// between those two is a fault that was reported from the deck as *she circles and
+    /// will not sail*.
+    ///
+    /// The polar rose from nothing at the closest she can lie. A ship led inside her
+    /// limit falls off onto that angle — so she fell off onto a course the model gave
+    /// her no way at all on, lost steerage, wandered off it, and began again. What she
+    /// does now at the same angle: a little under half of her best, which is about what
+    /// a loaded brig does on the wind.
+    #[test]
+    fn she_still_goes_when_she_is_sailing_full_and_by() {
+        let breeze = kn_to_ms(18.0);
+        let on_the_wind = ms_to_kn(through_the_water(FULL_AND_BY, breeze));
+        let best = ms_to_kn(through_the_water(rad(120.0), breeze));
+        assert!(
+            on_the_wind > 2.5,
+            "full and by in a fresh breeze she makes {on_the_wind:.1} knots"
+        );
+        assert!(
+            on_the_wind < best * 0.6,
+            "close hauled came out at {on_the_wind:.1} against {best:.1} on a reach, \
+             which is not a square-rigger"
+        );
+    }
+
+    /// **And inside the limit she does stop**, which is the cliff the whole mission is
+    /// about: a square-rigger that is pinched is a square-rigger in irons, and that is
+    /// why a pilot has to lead her on courses she can lie.
+    #[test]
+    fn inside_her_limit_she_is_in_irons() {
+        let breeze = kn_to_ms(18.0);
+        let pinched = ms_to_kn(through_the_water(CLOSEST - rad(2.0), breeze));
+        assert!(pinched < 1.0, "pinched she still made {pinched:.1} knots");
+    }
+
+    /// The course she falls off onto is a touch free of her limit, because nobody sails
+    /// one on her stops — and it is the same number the chart shades to and her master
+    /// complains inside of.
+    #[test]
+    fn full_and_by_is_free_of_the_stops() {
+        let free = FULL_AND_BY - CLOSEST;
+        assert!(
+            free > 0.0 && free < rad(10.0),
+            "she falls off {:.0} degrees free of her stops",
+            free.to_degrees()
+        );
+    }
+}
+
+#[cfg(test)]
+mod what_she_has_set {
+    use super::*;
+    use sail_core::units::kn_to_ms;
+
+    /// **The order canvas comes off a brig is fixed**: topgallants, then the courses,
+    /// then the topsail is reefed. A ship that shortened down in any other order would
+    /// be a ship nobody had ever watched.
+    #[test]
+    fn she_shortens_down_from_the_top() {
+        let drifter = she_carries(kn_to_ms(8.0), 0.0);
+        assert_eq!(
+            drifter,
+            [1.0, 1.0, 1.0],
+            "she was not under everything in a drifter"
+        );
+        // A stiff six: the topgallants are in and the rest is standing.
+        let six = she_carries(kn_to_ms(27.0), 0.0);
+        assert_eq!(six[2], 0.0, "she carried her topgallants into a force six");
+        assert!(six[0] > 0.5, "and lost her courses with them");
+        // A gale: the courses are up and she is down to a reefed topsail.
+        let gale = she_carries(kn_to_ms(42.0), 0.0);
+        assert_eq!(
+            gale[0], 0.0,
+            "her courses were still set in forty-two knots"
+        );
+        assert!(
+            gale[1] > 0.3 && gale[1] < 0.9,
+            "the topsail came out at {}",
+            gale[1]
+        );
+        // And the storm canvas never goes to nothing: a ship with nothing set does not
+        // steer, which is the one thing she must keep.
+        let storm = she_carries(kn_to_ms(60.0), 0.0);
+        assert!(storm[1] > 0.3, "she was left bare in a storm");
+    }
+
+    /// **And taking sail off her is the only brake she has.** Hurrying is the ship a
+    /// cable astern of the pilot boat and still closing: the courses and the topgallants
+    /// come off her and the topsail stays, which is what gives her steerage while she
+    /// slows.
+    #[test]
+    fn the_only_brake_she_has_is_her_own_canvas() {
+        let easy = she_carries(kn_to_ms(14.0), 0.0);
+        let braking = she_carries(kn_to_ms(14.0), 1.0);
+        assert!(braking[0] < easy[0] && braking[2] < easy[2]);
+        assert_eq!(braking[1], easy[1], "she reefed the topsail to slow down");
+        assert!(braking.iter().sum::<f32>() < easy.iter().sum::<f32>() * 0.6);
+    }
+}
+
+#[cfg(test)]
+mod the_cloth_on_her_yards {
+    use super::*;
+
+    /// **A mesh with a NaN in it is a mesh nobody ever sees**, and that is not a figure
+    /// of speech: the renderer compares a mesh's bounding box with the view frustum, a
+    /// box built from a NaN compares false with everything, and the sail is skipped.
+    ///
+    /// Every square sail in the game was like this from the day the shape was written.
+    /// `sin(pi)` is minus eight hundredths of a millionth rather than nought, a negative
+    /// number to a fractional power is NaN, and the last column of every sail was one.
+    /// Both masts, every tier, in every picture ever taken of her — and it looks exactly
+    /// like a ship that is not working her sails, which is how it was reported.
+    #[test]
+    fn a_square_sail_has_no_nan_in_it() {
+        for set in [0.0, 0.3, 1.0] {
+            for aback in [false, true] {
+                let mesh = square_sail(4.6, 5.0, 9.5, set, aback);
+                let positions = mesh
+                    .attribute(Mesh::ATTRIBUTE_POSITION)
+                    .expect("a sail has vertices");
+                let bevy::mesh::VertexAttributeValues::Float32x3(points) = positions else {
+                    panic!("positions are not three floats");
+                };
+                for p in points {
+                    assert!(
+                        p.iter().all(|x| x.is_finite()),
+                        "set {set}, aback {aback}: a vertex came out {p:?}"
+                    );
+                }
+                // And it is a sail rather than a line: something across, something down.
+                let wide = points.iter().map(|p| p[0]).fold(f32::MIN, f32::max)
+                    - points.iter().map(|p| p[0]).fold(f32::MAX, f32::min);
+                assert!(wide > 1.0, "the sail came out {wide:.2} m across");
+            }
+        }
     }
 }

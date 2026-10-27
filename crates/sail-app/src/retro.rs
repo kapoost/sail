@@ -528,13 +528,6 @@ pub fn install_font(mut contexts: bevy_egui::EguiContexts) -> Result {
     Ok(())
 }
 
-/// How large the instruments are drawn, against the screen's own density.
-///
-/// Below one they shrink. The console was laid out for a window of its own and takes
-/// a good share of a cockpit view; a little under is enough to give the sea back the
-/// middle of the screen without making anything hard to hit with a mouse.
-const UI_SCALE: f32 = 0.84;
-
 /// How wide the console needs to be, in egui points, to lay itself out without the
 /// pieces touching.
 ///
@@ -545,38 +538,91 @@ const UI_SCALE: f32 = 0.84;
 /// that with a little air.
 const CONSOLE_POINTS: f32 = 1_450.0;
 
-/// And the smallest the instruments may be drawn, against the screen's own density.
+/// And how tall, measured the same way.
 ///
-/// Half size. Past that the figures stop being readable and a console you cannot read is
-/// not a smaller console, it is a decoration — better to let the last of it overlap than
-/// to shrink it into illegibility.
+/// The right-hand corner is the column that decides it: the case with the glass and the
+/// sheets in it is six hundred and fifty points, the chart folded above it will not go
+/// below a hundred and eighty before it stops being a chart at all, and the two of them
+/// keep thirty-six points between themselves and the edges. Shorter than this and the
+/// chart reaches down into the case, which is the overlap reported from the deck.
+const CONSOLE_HIGH: f32 = 870.0;
+
+/// What share of the window the console is drawn to take.
+///
+/// **Not all of it, and the number is a measurement rather than a taste.** At the size
+/// the console was laid out and looked at for a year — a window of fourteen hundred and
+/// forty points on a screen of twice that density — the strip spans about eighty-five
+/// per cent of the height it would need to fill the window edge to edge. So that is the
+/// share: it reproduces the view the whole thing was tuned in, and it leaves the middle
+/// of the screen to the water, which is the thing worth looking at.
+const SPREAD: f32 = 0.85;
+
+/// And the smallest and largest the instruments may be drawn, against the screen's own
+/// density.
+///
+/// Half size at the bottom: past that the figures stop being readable and a console you
+/// cannot read is not a smaller console, it is a decoration. Two and a half at the top
+/// is a guard against a number arriving from a settings file rather than a shape
+/// anybody's screen produces.
 const SMALLEST: f32 = 0.5;
+const BIGGEST: f32 = 2.5;
+
+/// How much a player may ask for on top of that, as a multiplier.
+///
+/// A third bigger covers the eyes this was reported for; a quarter smaller covers
+/// somebody who wants the water and not the instruments. Wider than that and the
+/// console either overlaps itself or becomes a strip of type.
+pub const ASKED_RANGE: std::ops::RangeInclusive<f32> = 0.75..=1.35;
 
 /// How large to draw the instruments on a window of this size.
 ///
-/// **The console is a fixed layout and the window is not always the one it was drawn
-/// for.** The main window is not resizable, which was supposed to settle this — but a
-/// laptop whose display is smaller than the window gets a smaller window anyway, and
-/// then the three blocks of the console are laid out from the left, the middle and the
-/// right into a space that cannot hold all three, and they overlap. Reported as the
-/// instrument row overflowing on a narrow screen.
+/// **The console used to be the same size on every screen in the world.** The rule was
+/// *the size it was drawn at, unless the window is too narrow for it* — and the size it
+/// was drawn at is a constant, so a player on a four-thousand-pixel monitor got exactly
+/// the same instruments in device pixels as a player on a laptop, which is to say a
+/// quarter of the area and type eight pixels high. Reported from the deck as the fonts
+/// being too small, and it was not a font size: it was a console that did not know how
+/// big the screen was.
 ///
-/// So the scale is the smaller of what looks right and what fits: a big window gets the
-/// size the console was drawn at, and a small one gets the instruments shrunk until the
-/// strip has room — which is the one thing a drawn panel can do that a real one cannot.
-pub fn console_scale(physical_width: f32, scale_factor: f32) -> f32 {
-    let drawn_at = scale_factor * UI_SCALE;
-    let fits = physical_width / CONSOLE_POINTS;
-    drawn_at.min(fits).max(scale_factor * SMALLEST)
+/// So the scale comes from the window and nothing else: the console is a fixed layout
+/// of a known width and a known height, and it is drawn at the size that puts it on
+/// *this* screen at the share of it the thing was tuned at. The smaller of the two fits,
+/// because a console that fits across and runs off the bottom is the same bug wearing
+/// different clothes — on a sixteen-by-nine window it is the height that binds, and that
+/// is the overlap between the chart and the case.
+///
+/// `scale_factor` is the display's own density, and it belongs here only at the ends:
+/// the result is in points per *physical* pixel, so a dense screen and a coarse one of
+/// the same size in inches get type of the same size, which is the whole point of the
+/// unit. The floor and the ceiling are the exception, because *unreadable* is a fact
+/// about a physical pixel.
+pub fn console_scale(
+    physical_width: f32,
+    physical_height: f32,
+    scale_factor: f32,
+    asked: f32,
+) -> f32 {
+    let fits = (physical_width / CONSOLE_POINTS).min(physical_height / CONSOLE_HIGH);
+    let want = fits * SPREAD * asked.clamp(*ASKED_RANGE.start(), *ASKED_RANGE.end());
+    want.clamp(scale_factor * SMALLEST, scale_factor * BIGGEST)
 }
 
 /// Set the instruments' size. Their own camera means this is independent of the
 /// picture the world is drawn in.
-pub fn scale_instruments(windows: Query<&Window>, mut contexts: bevy_egui::EguiContexts) -> Result {
+pub fn scale_instruments(
+    windows: Query<&Window>,
+    settings: Res<crate::settings::Settings>,
+    mut contexts: bevy_egui::EguiContexts,
+) -> Result {
     let Ok(window) = windows.single() else {
         return Ok(());
     };
-    let ppp = console_scale(window.physical_width() as f32, window.scale_factor());
+    let ppp = console_scale(
+        window.physical_width() as f32,
+        window.physical_height() as f32,
+        window.scale_factor(),
+        settings.ui,
+    );
     let ctx = contexts.ctx_mut()?;
     if (ctx.pixels_per_point() - ppp).abs() > 1e-4 {
         ctx.set_pixels_per_point(ppp);
@@ -588,36 +634,113 @@ pub fn scale_instruments(windows: Query<&Window>, mut contexts: bevy_egui::EguiC
 mod tests {
     use super::*;
 
-    /// **A console that does not fit is a console that overlaps**, and the one thing a
-    /// drawn panel can do about it is get smaller.
+    /// How big the type actually comes out, in device pixels, on the screens people
+    /// have — the console's smallest size, measured, and taken from the console rather
+    /// than typed here so that a change to the type scale is a change to this test.
+    fn label_px(w: f32, h: f32, sf: f32) -> f32 {
+        crate::panel::letter::UNIT * console_scale(w, h, sf, 1.0)
+    }
+
+    /// **The console used to be the same size on every screen in the world**, and that
+    /// is the fault this rule exists to fix. The old one was *the size it was drawn at,
+    /// unless the window is narrower than the strip* — and the size it was drawn at is a
+    /// constant, so a four-thousand-pixel monitor got type eight pixels high, exactly
+    /// like a laptop, in a quarter of the area. Reported from the deck as the fonts
+    /// being too small; it was not a font size, it was a console that did not know how
+    /// big the screen was.
     #[test]
-    fn the_instruments_shrink_until_the_strip_fits() {
-        // The window it was drawn for: the size it was drawn at, and no squeezing.
-        let full = console_scale(2880.0, 2.0);
-        assert!((full - 2.0 * UI_SCALE).abs() < 1e-6);
-        assert!(2880.0 / full > CONSOLE_POINTS, "it fits at full size");
-        // A laptop whose display is smaller than the window: shrunk, and shrunk by
-        // exactly enough that the strip has room.
-        for width in [1600.0_f32, 1280.0, 1024.0] {
-            let ppp = console_scale(width, 2.0);
-            assert!(ppp < 2.0 * UI_SCALE, "{width} was not squeezed at all");
-            // Either there is room now, or the squeeze has run into the floor — which
-            // is the honest statement of the rule, because past half size the figures
-            // stop being readable and overlapping beats unreadable.
-            let room = width / ppp >= CONSOLE_POINTS - 1.0;
-            let floored = (ppp - 2.0 * SMALLEST).abs() < 1e-6;
+    fn the_console_grows_with_the_screen() {
+        let laptop = label_px(1366.0, 768.0, 1.0);
+        let full_hd = label_px(1920.0, 1080.0, 1.0);
+        let quad = label_px(2560.0, 1440.0, 1.0);
+        let four_k = label_px(3840.0, 2160.0, 1.0);
+        assert!(
+            full_hd > laptop && quad > full_hd && four_k > quad,
+            "{laptop:.1}, {full_hd:.1}, {quad:.1}, {four_k:.1} device pixels — \
+             the console is not reading the screen"
+        );
+        // And by the right amount: twice the pixels is twice the type, because a
+        // four-thousand-pixel monitor is not a bigger desk, it is a finer one.
+        assert!(
+            (four_k / full_hd - 2.0).abs() < 0.05,
+            "4K gave {:.2} times the type of 1080p",
+            four_k / full_hd
+        );
+        // Nothing on an ordinary screen comes out under ten pixels, which is where
+        // small type stops being small and starts being a squint.
+        // Eleven device pixels on the commonest screen there is, and fifteen on the
+        // next one up. Under about ten, type stops being small and starts being a
+        // squint — which is the report this came from.
+        assert!(full_hd >= 11.0, "1080p got {full_hd:.1} px type");
+        assert!(quad >= 15.0, "1440p got {quad:.1} px type");
+        assert!(laptop >= 8.0, "a 1366 laptop got {laptop:.1} px type");
+    }
+
+    /// **And the view it was all tuned in does not move.** A year of looking at this
+    /// console happened at fourteen hundred and forty points on a screen of twice that
+    /// density, and every size in it was chosen by eye there. A rule that improved every
+    /// other screen by changing that one would be a rule nobody could check against
+    /// anything.
+    #[test]
+    fn the_window_it_was_drawn_in_is_the_size_it_was_drawn_at() {
+        let was = 2.0 * 0.84; // the old constant, and what the panel was laid out at
+        let now = console_scale(2880.0, 1760.0, 2.0, 1.0);
+        assert!(
+            (now - was).abs() < 0.05,
+            "the console it was drawn at moved from {was:.2} to {now:.2}"
+        );
+    }
+
+    /// **A console that fits across and runs off the bottom is the same bug wearing
+    /// different clothes.** On a sixteen-by-nine window it is the height that binds —
+    /// the chart folded in the corner reaches down into the case below it, which is the
+    /// overlap reported from the deck — so the height is in the rule.
+    #[test]
+    fn it_fits_down_the_screen_as_well_as_across() {
+        for (w, h) in [
+            (1920.0, 1080.0),
+            (1280.0, 720.0),
+            (2560.0, 1080.0),
+            (1440.0, 900.0),
+        ] {
+            let ppp = console_scale(w, h, 1.0, 1.0);
             assert!(
-                room || floored,
-                "{width} px left the console {:.0} points wide and was not at the floor",
-                width / ppp
+                w / ppp >= CONSOLE_POINTS * SPREAD - 1.0,
+                "{w}x{h} left the console {:.0} points across",
+                w / ppp
+            );
+            assert!(
+                h / ppp >= CONSOLE_HIGH * SPREAD - 1.0,
+                "{w}x{h} left the console {:.0} points down and the chart is in the case",
+                h / ppp
             );
         }
-        // The first of those three does fit: a sixteen-hundred-pixel window is squeezed
-        // and still legible, which is the case this exists for.
-        assert!(1600.0 / console_scale(1600.0, 2.0) >= CONSOLE_POINTS - 1.0);
-        // And never into illegibility: past half size the figures stop being readable,
-        // and a console you cannot read is a decoration.
-        assert!(console_scale(400.0, 2.0) >= 2.0 * SMALLEST);
+    }
+
+    /// **And the hand on top of it does what it says.** A third bigger is a third
+    /// bigger, a quarter smaller is a quarter smaller, and a number from outside the
+    /// range — a settings file edited by hand, or an older one — cannot put the console
+    /// somewhere it cannot be read or cannot be fitted.
+    #[test]
+    fn what_the_player_asks_for_is_what_the_player_gets() {
+        let plain = console_scale(1920.0, 1080.0, 1.0, 1.0);
+        let bigger = console_scale(1920.0, 1080.0, 1.0, 1.3);
+        assert!((bigger / plain - 1.3).abs() < 0.01);
+        let smaller = console_scale(1920.0, 1080.0, 1.0, 0.8);
+        assert!((smaller / plain - 0.8).abs() < 0.01);
+        // Out of range, both ways, and nothing silly comes out.
+        let silly = console_scale(1920.0, 1080.0, 1.0, 12.0);
+        assert!(silly <= plain * 1.36, "a twelve got through as {silly:.2}");
+        let tiny = console_scale(1920.0, 1080.0, 1.0, 0.0);
+        assert!(tiny >= plain * 0.74, "a zero got through as {tiny:.2}");
+    }
+
+    /// And never into illegibility: past half size the figures stop being readable, and
+    /// a console you cannot read is a decoration rather than a smaller console.
+    #[test]
+    fn it_never_shrinks_past_reading() {
+        assert!(console_scale(400.0, 300.0, 2.0, 1.0) >= 2.0 * SMALLEST);
+        assert!(console_scale(400.0, 300.0, 1.0, 0.75) >= SMALLEST);
     }
 
     /// A number asks for the width nearest it, which is what the docs have always said.

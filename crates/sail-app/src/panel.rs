@@ -92,7 +92,15 @@ pub mod letter {
     pub const VALUE: f32 = 17.0;
     /// What it is called.
     pub const LABEL: f32 = 12.0;
-    /// And what it is in. Always smaller than the figure, always dimmer.
+    /// And what it is in — the smallest size on the console, and the floor under
+    /// everything small on it.
+    ///
+    /// **Four sizes was the rule and sixteen call sites were not keeping it.** Nines and
+    /// tens had grown all over the panel — the readout labels, the names in the sail
+    /// wardrobe, the lines on the radio — each one a literal somebody typed while
+    /// looking at a screen of twice the density of an ordinary one. Nine points is seven
+    /// device pixels on a laptop. So the smallest thing on the console is this, it is
+    /// named, and a smaller number in a call site is a bug rather than a decision.
     pub const UNIT: f32 = 11.0;
 }
 
@@ -673,7 +681,12 @@ pub fn draw(
         .interactable(true)
         .show(ctx, |ui| {
             frame.show(ui, |ui| {
-                ui.set_width(172.0);
+                // **Wider than it was, because it is the one block with prose in it.**
+                // A hundred and seventy-two points held the readouts it was built for;
+                // what is in it now is a forecast and whatever the radio last said, and
+                // at the size the rest of the console is set in, that is twenty-two
+                // characters to a line. The extra twenty-four points buy three more.
+                ui.set_width(196.0);
                 // Four points between rows rather than six. Over a dozen rows that is a
                 // readout's worth of sea given back, and nothing in here is close enough
                 // to anything else to be misread for it.
@@ -772,7 +785,7 @@ pub fn draw(
                             let on = radio.channel == channel;
                             let label = egui::RichText::new(format!("{channel}"))
                                 .monospace()
-                                .size(10.0)
+                                .size(letter::UNIT)
                                 .color(if on {
                                     egui::Color32::BLACK
                                 } else {
@@ -798,7 +811,7 @@ pub fn draw(
                         let lamp = egui::Button::new(
                             egui::RichText::new("DW")
                                 .monospace()
-                                .size(10.0)
+                                .size(letter::UNIT)
                                 .color(if dual {
                                     egui::Color32::BLACK
                                 } else {
@@ -874,7 +887,7 @@ pub fn draw(
                             let button = egui::Button::new(
                                 egui::RichText::new(call.tag)
                                     .monospace()
-                                    .size(10.0)
+                                    .size(letter::UNIT)
                                     .color(if lit { paint::LIVE } else { paint::LABEL }),
                             )
                             .fill(egui::Color32::from_gray(26));
@@ -910,7 +923,24 @@ pub fn draw(
                     // allocated whether or not anything is on the air: a panel whose
                     // buttons move down the screen every time somebody transmits is a
                     // panel you cannot learn the shape of. Blank is a reading too.
-                    const COLUMNS: usize = 30;
+                    // **Measured off the column rather than counted by hand.** Thirty
+                    // was a number typed while looking at it, and thirty characters of
+                    // this font do not fit in this block — the lines ran out past the
+                    // case and egui wrapped the padding onto phantom rows underneath.
+                    // The font knows its own width, so ask it.
+                    let columns = {
+                        let wide = ui
+                            .painter()
+                            .layout_no_wrap(
+                                "0".to_string(),
+                                egui::FontId::monospace(letter::UNIT),
+                                paint::LABEL,
+                            )
+                            .size()
+                            .x
+                            .max(1.0);
+                        ((ui.available_width() / wide).floor() as usize).clamp(12, 48)
+                    };
                     const LINES: usize = 5;
                     let (head, words) = match (&radio.traffic, radio.log.last()) {
                         (Some(t), _) => (format!("{} {}", t.channel, t.from), Some(&t.words)),
@@ -935,16 +965,16 @@ pub fn draw(
                         None => (head, words),
                     };
                     ui.label(
-                        egui::RichText::new(fit(&head, COLUMNS))
+                        egui::RichText::new(fit(&head, columns))
                             .monospace()
-                            .size(10.0)
+                            .size(letter::UNIT)
                             // Lit while somebody is speaking, which is what the little
                             // lamp on a real set does and is the one thing you see from
                             // across the cockpit.
                             .color(if busy { paint::LIVE } else { paint::LABEL }),
                     );
                     let said = words
-                        .map(|w| crate::radio::across(w, COLUMNS))
+                        .map(|w| crate::radio::across(w, columns))
                         .unwrap_or_default();
                     for row in 0..LINES {
                         // The last line of a long one says where the rest of it is
@@ -956,9 +986,9 @@ pub fn draw(
                             said.get(row).cloned().unwrap_or_default()
                         };
                         ui.label(
-                            egui::RichText::new(fit(&line, COLUMNS))
+                            egui::RichText::new(fit(&line, columns))
                                 .monospace()
-                                .size(10.0)
+                                .size(letter::UNIT)
                                 .color(paint::LABEL),
                         );
                     }
@@ -985,7 +1015,7 @@ pub fn draw(
                         egui::RichText::new(warning)
                             .color(paint::BAD)
                             .monospace()
-                            .size(11.0),
+                            .size(letter::UNIT),
                     );
                 }
                 // **And the state nobody recognises from inside it.**
@@ -1015,13 +1045,13 @@ pub fn draw(
                         egui::RichText::new("IN IRONS")
                             .color(paint::BAD)
                             .monospace()
-                            .size(12.0),
+                            .size(letter::LABEL),
                     );
                     ui.label(
                         egui::RichText::new("main right out, back the headsail (G)")
                             .color(paint::LIVE)
                             .monospace()
-                            .size(10.0),
+                            .size(letter::UNIT),
                     );
                 }
 
@@ -1110,13 +1140,13 @@ pub fn draw(
                     })
                     .color(paint::LABEL)
                     .monospace()
-                    .size(9.0),
+                    .size(letter::UNIT),
                 );
                 ui.label(
                     egui::RichText::new(course.destination_name().to_uppercase())
                         .color(if overdue { paint::BAD } else { paint::LIVE })
                         .monospace()
-                        .size(13.0),
+                        .size(letter::LABEL),
                 );
                 readout_pair(
                     ui,
@@ -1169,7 +1199,7 @@ pub fn draw(
                         egui::RichText::new("IN")
                             .color(paint::LABEL)
                             .monospace()
-                            .size(9.0),
+                            .size(letter::UNIT),
                     );
                     for (_, who, seconds) in in_hand.net.finished.iter().take(4) {
                         ui.label(
@@ -1180,7 +1210,7 @@ pub fn draw(
                             ))
                             .color(paint::LIVE)
                             .monospace()
-                            .size(11.0),
+                            .size(letter::UNIT),
                         );
                     }
                 }
@@ -1411,7 +1441,7 @@ pub fn draw(
                                                         "free (F)"
                                                     })
                                                     .monospace()
-                                                    .size(10.0)
+                                                    .size(letter::UNIT)
                                                     .color(if rigged {
                                                         egui::Color32::from_rgb(20, 20, 20)
                                                     } else {
@@ -1462,7 +1492,7 @@ pub fn draw(
                                                     trysail_up,
                                                     egui::RichText::new(words)
                                                         .monospace()
-                                                        .size(10.0)
+                                                        .size(letter::UNIT)
                                                         .color(if trysail_up {
                                                             egui::Color32::from_rgb(20, 20, 20)
                                                         } else {
@@ -1525,7 +1555,7 @@ pub fn draw(
                                                                             let asked = orders.headsail == Some(sail);
                                                                             let label = egui::RichText::new(sail.name().to_uppercase())
                                                                                 .monospace()
-                                                                                .size(10.0)
+                                                                                .size(letter::UNIT)
                                                                                 .color(if up {
                                                                                     egui::Color32::BLACK
                                                                                 } else if asked {
@@ -1564,7 +1594,7 @@ pub fn draw(
                                                                         ui.label(
                                                                             egui::RichText::new(orders.doing.unwrap_or(" "))
                                                                                 .monospace()
-                                                                                .size(10.0)
+                                                                                .size(letter::UNIT)
                                                                                 .color(paint::LABEL),
                                                                         );
                                                                         // **The watch, under the wardrobe.**
@@ -1836,7 +1866,7 @@ pub fn draw(
                                     ))
                                     .color(paint::LABEL)
                                     .monospace()
-                                    .size(9.0),
+                                    .size(letter::UNIT),
                                 );
                             });
                         });
@@ -1904,7 +1934,7 @@ pub fn draw(
             screen.center() + egui::vec2(0.0, 60.0),
             egui::Align2::CENTER_CENTER,
             mishap.the_lesson(),
-            egui::FontId::monospace(11.0),
+            egui::FontId::monospace(letter::UNIT),
             egui::Color32::from_rgba_unmultiplied(120, 112, 104, (170.0 * words) as u8),
         );
         if age > 2.2 {
@@ -2023,14 +2053,14 @@ fn gauge_alarmed(
         rect.left_top() + egui::vec2(4.0, 3.0),
         egui::Align2::LEFT_TOP,
         label,
-        egui::FontId::monospace(9.0),
+        egui::FontId::monospace(letter::UNIT),
         if alarm { paint::BAD } else { paint::LABEL },
     );
     p.text(
         rect.right_top() + egui::vec2(-4.0, 2.0),
         egui::Align2::RIGHT_TOP,
         format!("{value:.1}{unit}"),
-        egui::FontId::monospace(11.0),
+        egui::FontId::monospace(letter::UNIT),
         if alarm { paint::BAD } else { paint::FACE },
     );
 }
@@ -2049,14 +2079,14 @@ fn gauge(ui: &mut egui::Ui, label: &str, value: f64, lo: f64, hi: f64, unit: &st
         rect.left_top() + egui::vec2(4.0, 3.0),
         egui::Align2::LEFT_TOP,
         label,
-        egui::FontId::monospace(9.0),
+        egui::FontId::monospace(letter::UNIT),
         paint::LABEL,
     );
     p.text(
         rect.right_top() + egui::vec2(-4.0, 2.0),
         egui::Align2::RIGHT_TOP,
         format!("{value:.1}{unit}"),
-        egui::FontId::monospace(11.0),
+        egui::FontId::monospace(letter::UNIT),
         paint::FACE,
     );
 }
@@ -2144,7 +2174,7 @@ fn readout(ui: &mut egui::Ui, label: &str, value: &str) {
             egui::RichText::new(format!("{label:<5}"))
                 .color(paint::LABEL)
                 .monospace()
-                .size(9.0),
+                .size(letter::UNIT),
         );
         ui.label(
             egui::RichText::new(value)

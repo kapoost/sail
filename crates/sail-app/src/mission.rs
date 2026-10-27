@@ -103,6 +103,8 @@ pub struct Pilotage {
     pub hail: Option<(String, f64)>,
     /// When the last one was called, so that she is not a parrot.
     hailed_at: f64,
+    /// What she had set last frame, so that a change in it is a thing she can mention.
+    canvas: [f32; 3],
     /// When she last called up on sixteen, for the same reason — and `None` until she
     /// has, because a job that begins at time zero would otherwise count the gap from
     /// the start of the world and say nothing for the first three minutes.
@@ -231,6 +233,12 @@ pub const IN_SIGHT: f64 = 1_400.0;
 /// And how far off her bow, either side, before she stops calling it *ahead*.
 pub const AHEAD: f64 = rad(70.0);
 
+/// The course her master will not be led onto — her rig's limit plus the margin a
+/// seaman keeps inside it. See [`crate::ship::FULL_AND_BY`], which is the same number
+/// because it is the same fact: the course she lies when she cannot lay the mark is the
+/// course outside which you must lead her.
+pub use crate::ship::FULL_AND_BY as WILL_NOT_LIE;
+
 /// Station: further than this and she has lost you, nearer and she is about to run you
 /// down.
 const TOO_FAR: f64 = 900.0;
@@ -260,7 +268,7 @@ pub fn remark(
     }
     // A square-rigger that is led inside her own limit does not pinch: she stops, and a
     // stopped ship in a narrow place is the whole disaster.
-    if twa_wanted.abs() < CLOSEST + rad(6.0) {
+    if twa_wanted.abs() < WILL_NOT_LIE {
         return Some("we cannot lie that close — she will not go there");
     }
     if turn > rad(55.0) {
@@ -587,19 +595,60 @@ pub fn run(
     // sight of him does not carry on into a bay she does not know — she rounds up,
     // hauls up her courses and lies there until he is ahead of her again, which is what
     // every ship waiting off a pilot station is doing.
+    //
+    // **And what she has set is what the wind and the station say**, rather than
+    // everything, always. The wind she is in — hers, at her rig's height — decides how
+    // much canvas is on her; how close she is to running the pilot boat down decides how
+    // much of it she spills. See `ship::she_carries`: topgallants first, then the
+    // courses, and the topsail reefed and reefed again.
+    let tws = crate::ship::her_wind(&sim, brig.at).length();
+    // How badly she wants to slow: nothing while the gap is comfortable, everything she
+    // can spare by the time she is a cable off and still closing.
+    let gap = (here - brig.at).length();
+    let closing = brig.speed - sim.sim.telemetry.sog;
+    let hurry = if closing > 0.0 {
+        ((TOO_NEAR * 2.4 - gap) / (TOO_NEAR * 1.4)).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let working = crate::ship::she_carries(tws, hurry);
     if !job.leading {
         if job.led_once {
+            // Hove to: her courses up and a topsail to the mast. That is a state, not a
+            // trim, so it is written rather than worked out.
             brig.set = [0.0, 0.45, 0.0];
             brig.bound_for = brig.at + DVec2::new(brig.heading.sin(), brig.heading.cos()) * 400.0;
             if was_leading {
                 job.said = Some("she is standing off, waiting for you to get ahead".into());
             }
         } else {
-            brig.set = [1.0, 1.0, 1.0];
+            brig.set = working;
             brig.bound_for = job.bound_for;
         }
     } else {
-        brig.set = [1.0, 1.0, 1.0];
+        brig.set = working;
+    }
+
+    // **And she says so**, because the deck is where this has to be visible: a ship a
+    // cable astern taking in her topgallants is a thing you can see, and a ship doing it
+    // because it is coming on to blow is a thing you want to be told. One line when the
+    // canvas changes by a step, through the same limiter as everything else she says.
+    {
+        let step = |x: f32| (x * 3.0).round() as i32;
+        let before = job.canvas.map(step);
+        let now = brig.set.map(step);
+        if before != now {
+            let words = match (before[2] > now[2], before[0] > now[0], now != [0, 0, 0]) {
+                (true, _, true) => Some("taking in the topgallants"),
+                (_, true, true) => Some("the courses are coming up"),
+                _ if now[2] > before[2] => Some("setting the topgallants again"),
+                _ => None,
+            };
+            if let Some(words) = words {
+                voice.across(&mut job, words, false);
+            }
+        }
+        job.canvas = brig.set;
     }
 
     // --- And what she has been told, which outranks all of it ----------------------
